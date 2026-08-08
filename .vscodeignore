@@ -13,6 +13,7 @@ test/**
 # Editor and repo scaffolding
 .vscode/**
 .vscode-test/**
+.claude/**
 .github/**
 .gitignore
 .gitattributes

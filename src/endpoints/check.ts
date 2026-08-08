@@ -160,19 +160,26 @@ export function summarise(rungs: Rung[], profile: EndpointProfile): CheckOutcome
   }
 
   const warned = rungs.filter((r) => r.status === "warn");
-  const answer = rungs.find((r) => r.name === "Completion")?.detail ?? "";
   if (warned.length) {
     return {
       rungs,
       ok: true,
-      summary: `Connected and the model answered, with ${warned.length} warning${
+      summary: `Connected — ${profile.model} responded, with ${warned.length} warning${
         warned.length > 1 ? "s" : ""
-      }: ${warned.map((w) => w.name.toLowerCase()).join(", ")}.`,
+      }: ${warned.map((w) => w.name.toLowerCase()).join(", ")}. Usable.`,
     };
   }
+  // A reasoning model given a 16-token probe can spend the whole budget before
+  // emitting visible text, so the completion rung's quoted answer is sometimes
+  // empty. That is a pass, not a failure — but appending an empty quote reads
+  // like the check trailed off mid-sentence.
+  const detail = rungs.find((r) => r.name === "Completion")?.detail ?? "";
+  const quoted = detail.replace(/^Model answered:\s*/, "").trim();
   return {
     rungs,
     ok: true,
-    summary: `Ready to go — ${profile.model} answered over ${profile.wire}. ${answer}`.trim(),
+    summary:
+      `Ready to go — ${profile.model} answered over the ${profile.wire} wire.` +
+      (quoted ? ` It said: "${quoted}"` : ""),
   };
 }

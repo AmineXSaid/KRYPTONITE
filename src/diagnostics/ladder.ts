@@ -251,9 +251,17 @@ export async function runLadder(
 
   // 7. Streaming
   if (profile.capabilities.streaming) {
+    // Its own prompt and a larger budget, deliberately.
+    //
+    // Reusing the 16-token `probe` produced a false "something is buffering"
+    // against any reasoning model: the budget is spent on reasoning deltas,
+    // no visible text is emitted, and a healthy endpoint gets told its proxy
+    // has no SSE passthrough. Counting a short enumeration instead forces
+    // several text deltas out of every model shape.
+    const streamProbe = [{ role: "user" as const, content: "Count from 1 to 10, separated by spaces." }];
     const [chunks, err, ms] = await timed(async () => {
       let n = 0;
-      for await (const ev of client.complete({ messages: probe, stream: true, maxTokens: 16 })) {
+      for await (const ev of client.complete({ messages: streamProbe, stream: true, maxTokens: 64 })) {
         if (ev.type === "text") n++;
       }
       return n;
@@ -266,7 +274,23 @@ export async function runLadder(
         fix: "Set capabilities.streaming: false to fall back to whole responses.",
         ms,
       });
-    } else if ((chunks ?? 0) <= 1) {
+    } else if ((chunks ?? 0) === 0) {
+      // Zero is not one. A single chunk means something buffered the stream;
+      // zero means the transport worked and the model sent no visible text at
+      // all — a reasoning model spending its budget before answering, or a
+      // router that picked one. Blaming the proxy here sends the user to
+      // inspect a network that is fine.
+      push({
+        name: "Streaming",
+        status: "warn",
+        detail:
+          "The stream opened and closed without any text. The transport is fine — the model produced no visible output.",
+        fix:
+          "Usually a reasoning model with too small a token budget, or an auto-router that picked one. " +
+          "Try a specific model id, or raise capabilities.maxOutputTokens.",
+        ms,
+      });
+    } else if (chunks === 1) {
       push({
         name: "Streaming",
         status: "warn",
