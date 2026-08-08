@@ -1,0 +1,84 @@
+{
+  "name": "kryptonite",
+  "displayName": "KRYPTONITE",
+  "description": "A coding agent for endpoints that don't behave. mTLS, corporate CAs, token exchange, air-gapped.",
+  "version": "0.4.0",
+  "publisher": "local",
+  "license": "MIT",
+  "icon": "media/logo.png",
+  "engines": { "vscode": "^1.90.0" },
+  "categories": ["AI", "Programming Languages", "Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "kryptonite", "title": "Kryptonite", "icon": "media/icon.svg" }
+      ]
+    },
+    "views": {
+      "kryptonite": [
+        { "type": "webview", "id": "kryptonite.sidebar", "name": "Kryptonite" }
+      ]
+    },
+    "commands": [
+      { "command": "kryptonite.focusSidebar", "title": "KRYPTONITE: Focus sidebar" },
+      { "command": "kryptonite.openControlCenter", "title": "KRYPTONITE: Open Control Center" },
+      { "command": "kryptonite.newChat", "title": "KRYPTONITE: New chat" },
+      { "command": "kryptonite.runDiagnostics", "title": "KRYPTONITE: Run connection diagnostics" },
+      { "command": "kryptonite.selectEndpoint", "title": "KRYPTONITE: Select active endpoint" },
+      { "command": "kryptonite.newEndpoint", "title": "KRYPTONITE: Create endpoint profile" },
+      { "command": "kryptonite.restoreCheckpoint", "title": "KRYPTONITE: Restore checkpoint" },
+      { "command": "kryptonite.exportBundle", "title": "KRYPTONITE: Export offline bundle" }
+    ],
+    "configuration": {
+      "title": "KRYPTONITE",
+      "properties": {
+        "kryptonite.profileDirectory": {
+          "type": "string",
+          "default": ".agent/endpoints",
+          "description": "Workspace-relative folder holding endpoint profiles."
+        },
+        "kryptonite.skillsDirectory": {
+          "type": "string",
+          "default": ".agent/skills",
+          "description": "Workspace-relative folder holding skills."
+        },
+        "kryptonite.activeProfile": {
+          "type": "string",
+          "default": "",
+          "description": "Name of the active endpoint profile. First valid profile is used when empty."
+        },
+        "kryptonite.approvalMode": {
+          "type": "string",
+          "enum": ["ask", "edits-auto", "full-auto"],
+          "default": "ask",
+          "description": "When tools run without confirming: ask = every side effect; edits-auto = file edits auto, shell commands ask; full-auto = never ask."
+        },
+        "kryptonite.caBundlePath": {
+          "type": "string",
+          "default": "",
+          "description": "Global fallback CA bundle merged into every profile's tls.caBundle at load time. Accepts a file path or the literal 'system'."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node18",
+    "watch": "npm run build -- --sourcemap --watch",
+    "vscode:prepublish": "npm run build",
+    "package": "vsce package --no-dependencies"
+  },
+  "dependencies": {
+    "undici": "^6.19.8",
+    "yaml": "^2.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^2.32.0",
+    "esbuild": "^0.23.0",
+    "typescript": "^5.5.0"
+  }
+}

@@ -1,0 +1,1031 @@
+/* KRYPTONITE Control Center frontend. Plain DOM, zero dependencies.
+ *
+ * Ten sections over one shared store. Only the active section is rendered, so
+ * a broadcast re-renders at most one pane. Three toggles are functional; the
+ * rest are disabled indicators that reflect the active profile or fixed engine
+ * behaviour — showing them as interactive would be a lie.
+ *
+ * crystal.js must have executed before this script runs so that
+ * `window.__kxCrystal` is available. Both scripts load via `<script src>`
+ * tags in the shell, which in a VS Code webview can race: the second tag
+ * may start parsing before the first finishes executing. The guard below
+ * polls for readiness rather than assuming sequential execution.
+ */
+(function _boot() {
+  if (!window.__kxCrystal) {
+    setTimeout(_boot, 5);
+    return;
+  }
+  _run();
+})();
+function _run() {
+(function () {
+  "use strict";
+
+  var api = window.__kx.api;
+
+  /* ─────────────────────────── artwork ─────────────────────────── */
+
+  /* The crystal artwork lives in crystal.js so both surfaces share one copy. */
+  var CRYSTAL_DEFS = window.__kxCrystal.defs;
+
+  var SW = 'stroke="currentColor" fill="none"';
+
+  var ICON_DEFS =
+    '<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 11-2.4-5.7M20 3.5V9h-5.5" ' + SW + ' stroke-width="1.6"/></symbol>' +
+    '<symbol id="i-check" viewBox="0 0 24 24"><path d="M4.5 12.5l5 5 10-11" ' + SW + ' stroke-width="2"/></symbol>' +
+    '<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" ' + SW + ' stroke-width="2"/></symbol>' +
+    '<symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 3l9.5 17H2.5z" ' + SW + ' stroke-width="1.5"/><path d="M12 9.5v5M12 17v.5" ' + SW + ' stroke-width="1.6"/></symbol>' +
+    '<symbol id="i-pencil" viewBox="0 0 24 24"><path d="M16.5 3.8l3.7 3.7L8.4 19.3l-4.7.9.9-4.7z" ' + SW + ' stroke-width="1.5"/></symbol>' +
+    '<symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 6.5h16M9.5 6.5V4h5v2.5M6.5 6.5l1 14h9l1-14" ' + SW + ' stroke-width="1.5"/></symbol>' +
+    '<symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="12" height="12" rx="1.5" ' + SW + ' stroke-width="1.5"/><path d="M15.5 8.5v-3a1.5 1.5 0 00-1.5-1.5H5a1.5 1.5 0 00-1.5 1.5v9A1.5 1.5 0 005 16h3" ' + SW + ' stroke-width="1.5"/></symbol>' +
+    '<symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3h7l5 5v13H6z" ' + SW + ' stroke-width="1.5"/><path d="M13 3v5h5" ' + SW + ' stroke-width="1.5"/></symbol>' +
+    '<symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" ' + SW + ' stroke-width="1.5"/><path d="M3.5 12h17M12 3.5c-4.5 5-4.5 12 0 17 4.5-5 4.5-12 0-17z" ' + SW + ' stroke-width="1.4"/></symbol>' +
+    '<symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="12" rx="1.5" ' + SW + ' stroke-width="1.5"/><path d="M9 20h6M12 16.5V20" ' + SW + ' stroke-width="1.5"/></symbol>' +
+    '<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6h6l2 3h10v10H3z" ' + SW + ' stroke-width="1.5"/></symbol>';
+
+  var SECTIONS = [
+    ["endpoints", "Endpoints"], ["wire", "Wire & transforms"], ["auth", "Auth & secrets"],
+    ["tls", "TLS & mTLS"], ["proxy", "Proxy & network"], ["diag", "Diagnostics"],
+    ["agent", "Agent & tools"], ["skills", "Skills"], ["checkpoints", "Checkpoints"],
+    ["logs", "Logs & export"]
+  ];
+
+  var RUNG_LABELS = {
+    "Certificates and keys": "Config", "Profile": "Config", "DNS": "DNS", "TCP": "TCP",
+    "TLS handshake": "TLS", "Authentication": "Auth", "Completion": "HTTP",
+    "Streaming": "Stream", "Tool calling": "Tools"
+  };
+
+  /* The fourteen read-only indicators, with why each is not interactive. */
+  var PROFILE_TIP = "Controlled by the active profile's YAML.";
+  var ENGINE_TIP = "Always on — engine behavior.";
+
+  var TOOLS = [
+    ["read_file", "path, start?, end?", "workspace only"],
+    ["write_file", "path, content", "workspace only · approval"],
+    ["edit_file", "path, old_text, new_text", "workspace only · approval"],
+    ["list_files", "path, depth?", "workspace only"],
+    ["search", "pattern, glob?", "workspace only"],
+    ["run_command", "command, reason", "shell · approval"],
+    ["read_skill", "name", "enabled skills only"],
+    ["update_todos", "todos[]", "no side effects"]
+  ];
+
+  var TRANSFORM_SAMPLE =
+    "exports.transformRequest = (body, profile) => {\n" +
+    "  // body is the fully-encoded wire body (openai or anthropic shape).\n" +
+    "  // The streaming decision is made BEFORE this runs — do not hide it.\n" +
+    "  return { envelope: { tenant: \"eng\", payload: body } };\n" +
+    "};\n\n" +
+    "exports.transformResponse = (json, profile) => {\n" +
+    "  // Whole response when non-streaming; each parsed SSE frame otherwise.\n" +
+    "  return json.envelope?.result ?? json;\n" +
+    "};";
+
+  /* ─────────────────────────── store ─────────────────────────── */
+
+  var S = {
+    section: "endpoints",
+    workspace: { open: false, name: null },
+    profiles: [],
+    skills: [],
+    skillWarnings: [],
+    config: {
+      approvalMode: "ask", activeProfile: "", caBundlePath: "",
+      profileDirectory: ".agent/endpoints", skillsDirectory: ".agent/skills", ui: {}
+    },
+    tlsError: null,
+    rungs: [],
+    tracing: false,
+    traceRun: false,
+    checkpoints: [],
+    logs: [],
+    epForm: null,
+    flash: {}
+  };
+
+  /* ─────────────────────────── helpers ─────────────────────────── */
+
+  function post(type, payload) {
+    var m = payload || {};
+    m.type = type;
+    api.postMessage(m);
+  }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+  function icon(id, cls) {
+    return '<svg class="ic ' + (cls || "") + '" aria-hidden="true"><use href="#' + id + '"/></svg>';
+  }
+  function crystal(h, cls) { return window.__kxCrystal.svg(h, cls); }
+  function $(id) { return document.getElementById(id); }
+
+  function readyProfiles() {
+    return S.profiles.filter(function (p) { return p.status === "ready"; });
+  }
+  function active() {
+    var ready = readyProfiles();
+    for (var i = 0; i < ready.length; i++) if (ready[i].active) return ready[i];
+    return ready[0] || null;
+  }
+  function errorCount() {
+    return S.profiles.filter(function (p) { return p.status === "error"; }).length;
+  }
+  function flash(key, label, fallback) {
+    return S.flash[key] ? label : fallback;
+  }
+  function setFlash(key, ms) {
+    S.flash[key] = true;
+    render();
+    setTimeout(function () { delete S.flash[key]; render(); }, ms || 1500);
+  }
+
+  /* Row builders shared by several sections. */
+  function kv(rows) {
+    var html = '<div class="kv">';
+    for (var i = 0; i < rows.length; i++) {
+      html += '<span class="k">' + esc(rows[i][0]) + "</span>" +
+        '<span class="v' + (rows[i][2] ? " wrap" : "") + '" title="' + esc(rows[i][1]) + '">' +
+        esc(rows[i][1]) + "</span>";
+    }
+    return html + "</div>";
+  }
+  function card(title, inner) {
+    return '<div class="card"><div class="t">' + esc(title) + "</div>" + inner + "</div>";
+  }
+  function toggle(key, label, hint, on, editable, tip, warn) {
+    return '<div class="toggle-row">' +
+      '<button class="switch" role="switch" aria-checked="' + (on ? "true" : "false") + '"' +
+      (editable ? ' data-toggle="' + esc(key) + '"' : " disabled") +
+      ' title="' + esc(editable ? "" : tip || "") + '" aria-label="' + esc(label) + '"></button>' +
+      '<span class="txt"><span class="lbl">' + esc(label) + "</span>" +
+      (hint ? '<span class="hint' + (warn ? " warn" : "") + '">' + esc(hint) + "</span>" : "") +
+      "</span></div>";
+  }
+  function optGroup(name, options, current, editable) {
+    var html = '<div class="opt-group">';
+    for (var i = 0; i < options.length; i++) {
+      var value = options[i][0], label = options[i][1];
+      html += '<button class="opt" aria-pressed="' + (value === current ? "true" : "false") + '"' +
+        (editable ? ' data-opt="' + esc(name) + '" data-value="' + esc(value) + '"' : " disabled") +
+        ">" + esc(label) + "</button>";
+    }
+    return html + "</div>";
+  }
+  function mapEntries(obj) {
+    var out = [];
+    for (var k in obj) if (Object.prototype.hasOwnProperty.call(obj, k)) {
+      out.push(k + ": " + String(obj[k]));
+    }
+    return out;
+  }
+  function rungRow(r) {
+    return '<div class="rung" data-s="' + esc(r.status) + '">' +
+      '<span class="rail"><span class="node"></span></span>' +
+      '<span class="nm">' + esc(RUNG_LABELS[r.name] || r.name) + "</span>" +
+      '<span class="body"><span class="dt">' + esc(r.detail) + "</span>" +
+      (r.fix ? '<div class="fx">' + esc(r.fix) + "</div>" : "") + "</span>" +
+      '<span class="ms">' + (r.ms ? r.ms + "ms" : "—") + "</span></div>";
+  }
+  function rungByName(name) {
+    for (var i = 0; i < S.rungs.length; i++) if (S.rungs[i].name === name) return S.rungs[i];
+    return null;
+  }
+
+  /* ─────────────────────────── shell ─────────────────────────── */
+
+  function mount() {
+    $("root").innerHTML =
+      '<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>' +
+      CRYSTAL_DEFS + ICON_DEFS + "</defs></svg>" +
+      '<div id="cc">' +
+        '<header class="cc-header">' + crystal(22) +
+          '<span class="cc-wordmark">Kryptonite</span>' +
+          '<span class="cc-sub ell">Control Center</span><span class="sp"></span>' +
+          '<span class="profile-chip ell" id="ccChip">no profile</span>' +
+          '<button class="hdr-btn" id="ccReload" title="Reload profiles" aria-label="Reload profiles">' +
+          icon("i-refresh", "ic-14") + "</button>" +
+        "</header>" +
+        '<nav class="strip" id="strip" role="tablist"></nav>' +
+        '<div id="pane" role="tabpanel"></div>' +
+      "</div>";
+  }
+
+  function authBadge(kind) {
+    return kind === "exchange" ? "OAuth2" : kind === "exec" ? "helper"
+      : kind === "bearer" ? "bearer" : kind === "header" ? "header" : "none";
+  }
+
+  function renderStrip() {
+    var a = active();
+    var counts = {
+      endpoints: String(S.profiles.length),
+      wire: a ? (a.wire === "openai" ? "OAI" : a.wire === "anthropic" ? "ANT" : "RAW") : "—",
+      auth: a ? authBadge(a.authKind) : "—",
+      tls: S.tlsError ? "1" : (a && a.tls && a.tls.ca && a.tls.ca.length ? String(a.tls.ca.length) : "—"),
+      proxy: a ? (a.proxy && a.proxy.url ? "set" : a.proxy && a.proxy.fromEnv ? "env" : "off") : "—",
+      diag: S.rungs.filter(function (r) { return r.status === "fail"; }).length || (S.traceRun ? "OK" : "—"),
+      agent: "25",
+      skills: String(S.skills.filter(function (s) { return s.enabled; }).length),
+      checkpoints: String(S.checkpoints.length),
+      logs: String(S.logs.filter(function (l) { return l.level === "error"; }).length || S.logs.length)
+    };
+    var alerts = {
+      endpoints: errorCount() > 0,
+      tls: Boolean(S.tlsError),
+      diag: S.rungs.some(function (r) { return r.status === "fail"; }),
+      logs: S.logs.some(function (l) { return l.level === "error"; })
+    };
+
+    var html = "";
+    for (var i = 0; i < SECTIONS.length; i++) {
+      var id = SECTIONS[i][0], label = SECTIONS[i][1];
+      var badge = String(counts[id]);
+      if (id === "endpoints" && errorCount()) badge = S.profiles.length + " · " + errorCount() + "!";
+      html += '<button role="tab" data-section="' + id + '" aria-selected="' +
+        (S.section === id ? "true" : "false") + '">' + esc(label) +
+        '<span class="nav-badge' + (alerts[id] ? " alert" : "") + '">' + esc(badge) + "</span></button>";
+    }
+    $("strip").innerHTML = html;
+
+    var chip = $("ccChip");
+    chip.textContent = a ? a.id : "no profile";
+    chip.title = a ? a.baseUrl : "No endpoint profile loaded.";
+  }
+
+  /* ───────────────────────── sections ───────────────────────── */
+
+  function render() {
+    renderStrip();
+    var pane = $("pane");
+    if (!S.workspace.open) {
+      pane.innerHTML = "<h3>No folder open</h3>" +
+        '<div class="explainer">Kryptonite reads endpoint profiles and skills from the folder you have open. ' +
+        "Open a folder to configure it.</div>";
+      return;
+    }
+    switch (S.section) {
+      case "endpoints": pane.innerHTML = secEndpoints(); break;
+      case "wire": pane.innerHTML = secWire(); break;
+      case "auth": pane.innerHTML = secAuth(); break;
+      case "tls": pane.innerHTML = secTls(); break;
+      case "proxy": pane.innerHTML = secProxy(); break;
+      case "diag": pane.innerHTML = secDiag(); break;
+      case "agent": pane.innerHTML = secAgent(); break;
+      case "skills": pane.innerHTML = secSkills(); break;
+      case "checkpoints": pane.innerHTML = secCheckpoints(); break;
+      case "logs": pane.innerHTML = secLogs(); break;
+    }
+  }
+
+  /* ── endpoints ── */
+  function secEndpoints() {
+    var html = "<h3>Endpoints</h3>" +
+      '<div class="explainer">Profiles are YAML files in <code>' +
+      esc(S.config.profileDirectory || ".agent/endpoints") +
+      "</code>. A file-system watcher reloads profiles and skills on change — no window restart, and the auth cache is cleared on reload.</div>";
+
+    if (!S.profiles.length) {
+      html += '<div class="empty">No profiles in ' + esc(S.config.profileDirectory || ".agent/endpoints") + "</div>" +
+        '<div class="row-actions"><button class="btn primary" data-act="newEndpoint">New profile from template</button></div>';
+    } else {
+      var rows = '<div class="tr head"><span></span><span>Profile</span><span>Model &amp; wire</span><span>Status</span><span></span></div>';
+      for (var i = 0; i < S.profiles.length; i++) {
+        var p = S.profiles[i];
+        rows += '<div class="tr" data-status="' + p.status + '">' +
+          '<span class="pdot' + (p.status === "error" ? " err" : "") + '"></span>' +
+          '<span class="ell"><span class="id ell">' + esc(p.id) + "</span>" +
+          '<span class="sub ell" title="' + esc(p.status === "error" ? p.error || "" : p.baseUrl) + '">' +
+          esc(p.status === "error" ? (p.error || "Failed to parse") : p.baseUrl) + "</span></span>" +
+          '<span class="ell"><span class="id ell">' + esc(p.model) + "</span>" +
+          '<span class="sub ell">' + esc(p.wire) + "</span></span>" +
+          '<span class="ell muted">' + (p.status === "error" ? "error" : p.active ? "active" : "ready") + "</span>" +
+          '<span class="acts">' +
+            '<button class="mini" data-ep="yaml" data-id="' + esc(p.id) + '" title="Open YAML" aria-label="Open YAML">' + icon("i-file", "ic-13") + "</button>" +
+            '<button class="mini danger" data-ep="del" data-id="' + esc(p.id) + '" title="Delete profile" aria-label="Delete profile">' + icon("i-trash", "ic-13") + "</button>" +
+          "</span></div>";
+      }
+      html += '<div class="tbl">' + rows + "</div>";
+    }
+
+    var a = active();
+    if (a) {
+      html += '<div class="grid-cards" style="margin-top:14px">';
+      html += card("Request shape", kv([
+        ["Base URL", a.baseUrl],
+        ["Chat path", a.chatPath || "(loader default)"],
+        ["Model", a.model],
+        ["Timeout", a.timeoutMs + " ms"],
+        ["Retries", String(a.retries)],
+        ["Context window", a.capabilities ? String(a.capabilities.contextWindow) : "—"],
+        ["Max output", a.capabilities ? String(a.capabilities.maxOutputTokens) : "—"]
+      ]) + '<div style="margin-top:9px">' +
+        optGroup("tokenCounting",
+          [["heuristic", "heuristic"], ["api", "api"]],
+          a.capabilities ? a.capabilities.tokenCounting : "heuristic", false) +
+        '<div class="hint muted" style="font-size:11px;margin-top:5px">' + esc(PROFILE_TIP) + "</div></div>");
+
+      html += card("Merged into every request",
+        '<div class="kv"><span class="k">Headers</span><span class="v wrap">' +
+        (mapEntries(a.headers).length ? esc(mapEntries(a.headers).join(", ")) : "—") + "</span>" +
+        '<span class="k">Query</span><span class="v wrap">' +
+        (mapEntries(a.query).length ? esc(mapEntries(a.query).join(", ")) : "—") + "</span>" +
+        '<span class="k">Extra body</span><span class="v wrap">' +
+        (mapEntries(a.extraBody).length ? esc(mapEntries(a.extraBody).join(", ")) : "—") + "</span></div>");
+      html += "</div>";
+    }
+
+    html += '<div class="row-actions">' +
+      '<span class="' + (errorCount() ? "err-line" : "empty") + '">' +
+      (errorCount()
+        ? errorCount() + " profile(s) failed to load — see Logs."
+        : readyProfiles().length + " profile(s) loaded cleanly.") + "</span>" +
+      '<span class="sp"></span>' +
+      '<button class="btn" data-act="newEndpoint">New profile from template</button>' +
+      (a ? '<button class="btn" data-ep="yaml" data-id="' + esc(a.id) + '">Open YAML</button>' : "") +
+      "</div>";
+
+    if (S.epForm) html += endpointForm();
+    return html;
+  }
+
+  function endpointForm() {
+    var f = S.epForm;
+    var types = ["anthropic", "openai-compatible", "azure", "local", "custom"], opts = "";
+    for (var i = 0; i < types.length; i++) {
+      opts += '<option value="' + types[i] + '"' + (f.type === types[i] ? " selected" : "") + ">" + types[i] + "</option>";
+    }
+    return '<div class="form"><div class="t">' + (f.isNew ? "Add endpoint" : "Edit endpoint") + "</div>" +
+      '<div class="fgrid">' +
+        '<label for="fId">ID</label><input id="fId" value="' + esc(f.id) + '" placeholder="corp-gateway">' +
+        '<label for="fName">Display Name</label><input id="fName" value="' + esc(f.name) + '" placeholder="Corp Gateway">' +
+        '<label for="fUrl">Base URL</label><input id="fUrl" value="' + esc(f.url) + '" placeholder="https://llm.corp.example/v1">' +
+        '<label for="fType">Provider Type</label><select id="fType">' + opts + "</select>" +
+      "</div>" +
+      '<div class="row"><button class="btn" data-ep="cancel">Cancel</button>' +
+      '<button class="btn primary" data-ep="save">Save</button></div></div>';
+  }
+
+  /* ── wire & transforms ── */
+  function secWire() {
+    var a = active();
+    var caps = a && a.capabilities;
+    var html = "<h3>Wire &amp; transforms</h3>" +
+      '<div class="explainer">The wire format decides how messages are encoded on the way out and decoded on the way in. ' +
+      "A transform module reshapes anything the two standard adapters cannot express.</div>";
+    if (!a) return html + '<div class="empty">No active profile.</div>';
+
+    html += '<div class="block"><h4>Wire format</h4>' +
+      optGroup("wire", [
+        ["openai", "openai-compatible"], ["anthropic", "anthropic"], ["raw", "raw + transform"]
+      ], a.wire, false) +
+      '<div class="hint muted" style="font-size:11px;margin-top:5px">' + esc(PROFILE_TIP) + "</div></div>";
+
+    html += '<div class="block"><h4>System role handling</h4>' +
+      optGroup("systemRole", [
+        ["message", "message"], ["top-level", "top-level"], ["prepend-user", "prepend-to-user"]
+      ], caps ? caps.systemRole : "message", false) +
+      '<div class="hint muted" style="font-size:11px;margin-top:5px">' + esc(PROFILE_TIP) + "</div></div>";
+
+    html += '<div class="block"><h4>Decoding</h4>' +
+      toggle("sse", "Streaming SSE parsing", caps && caps.streaming ? "Enabled for this profile." : "Disabled for this profile.", Boolean(caps && caps.streaming), false, PROFILE_TIP) +
+      toggle("crlf", "CRLF normalization", "Gateways vary on line endings.", true, false, ENGINE_TIP) +
+      toggle("reassembly", "Split tool-call reassembly", "Arguments arriving across deltas are rejoined.", true, false, ENGINE_TIP) +
+      toggle("toolBlocks", "Tool call content blocks", "", true, false, ENGINE_TIP) +
+      toggle("vision", "Vision / image blocks", "", Boolean(caps && caps.vision), false, PROFILE_TIP) +
+      toggle("parallelTools", "Parallel tool calls", "", Boolean(caps && caps.parallelToolCalls), false, PROFILE_TIP) +
+      "</div>";
+
+    html += '<div class="block"><h4>Transform module</h4>' +
+      (a.transform
+        ? '<div class="chips" style="margin-bottom:8px"><span class="chip">' + esc(a.transform) + "</span>" +
+          '<span class="ok-mark">' + icon("i-check", "ic-11") + "sandboxed · no fs, no network</span></div>"
+        : '<div class="empty" style="margin-bottom:8px">No transform module configured. ' +
+          "Set <code>transform:</code> in the profile YAML — required when <code>wire: raw</code>.</div>") +
+      '<div class="pre">' + esc(TRANSFORM_SAMPLE) + "</div>" +
+      (a.transform
+        ? '<div class="row-actions"><button class="btn sm" data-act="openTransform">Open module</button></div>'
+        : "") +
+      "</div>";
+    return html;
+  }
+
+  /* ── auth & secrets ── */
+  function secAuth() {
+    var a = active();
+    var html = "<h3>Auth &amp; secrets</h3>" +
+      '<div class="explainer">Tokens are never written to profile YAML. Values interpolate from the environment, ' +
+      "the VS Code secret store, or a file on disk at request time.</div>";
+    if (!a) return html + '<div class="empty">No active profile.</div>';
+
+    html += '<div class="block"><h4>Auth mode</h4>' +
+      optGroup("authKind", [
+        ["bearer", "Bearer"], ["header", "Custom header"], ["exchange", "OAuth2"], ["exec", "Credential helper"]
+      ], a.authKind, false) +
+      '<div class="hint muted" style="font-size:11px;margin-top:5px">' + esc(PROFILE_TIP) + "</div></div>";
+
+    var cacheLabel = "not cached";
+    if (a.authCache) {
+      var mins = Math.max(0, Math.round((a.authCache.expiresAt - Date.now()) / 60000));
+      cacheLabel = "expires in " + mins + "m";
+    }
+    html += '<div class="grid-cards">' +
+      card("Credential", kv([
+        ["Kind", a.authKind],
+        ["Summary", a.authSummary, true],
+        ["Cached token", cacheLabel]
+      ]) + '<div class="ok-mark" style="margin-top:8px">' + icon("i-check", "ic-11") +
+        "expiry-aware refresh on</div>") +
+      card("Secret resolution",
+        '<div class="tbl"><div class="tr2 head" style="font-size:10.5px;text-transform:uppercase;color:var(--vscode-descriptionForeground)">' +
+        "<span>Reference</span><span>Source</span><span>Resolved from</span></div>" +
+        secretRows(a) + "</div>") +
+      "</div>";
+
+    html += '<div class="row-actions">' +
+      '<button class="btn" data-act="clearAuth">' + flash("clearAuth", "Auth cache cleared", "Clear auth cache") + "</button>" +
+      "</div>";
+    return html;
+  }
+
+  function secretRows(p) {
+    var refs = [];
+    var json = JSON.stringify(p);
+    var re = /\$\{(env|secret|file):([^}]+)\}/g, m;
+    while ((m = re.exec(json))) {
+      refs.push([m[0], m[1], m[1] === "env" ? "process environment"
+        : m[1] === "secret" ? "SecretStorage · kryptonite." + m[2] : m[2]]);
+    }
+    if (!refs.length) {
+      return '<div class="tr2"><span class="empty">No interpolated references.</span><span></span><span></span></div>';
+    }
+    var html = "";
+    for (var i = 0; i < refs.length; i++) {
+      html += '<div class="tr2"><span class="v mono ell">' + esc(refs[i][0]) + "</span>" +
+        '<span class="muted">' + esc(refs[i][1]) + "</span>" +
+        '<span class="muted ell" title="' + esc(refs[i][2]) + '">' + esc(refs[i][2]) + "</span></div>";
+    }
+    return html;
+  }
+
+  /* ── TLS & mTLS ── */
+  function secTls() {
+    var a = active();
+    var html = "<h3>TLS &amp; mTLS</h3>" +
+      '<div class="explainer">Requests go out on an undici dispatcher rather than Node&rsquo;s global fetch, so custom CAs and ' +
+      "client certificates apply inside the extension host — including through a CONNECT tunnel, where the TLS settings " +
+      "must be applied to the tunnelled origin rather than the proxy hop.</div>";
+    if (!a) return html + '<div class="empty">No active profile.</div>';
+
+    var caRows = "";
+    for (var i = 0; i < a.tls.ca.length; i++) {
+      caRows += '<div class="ok-mark" style="margin-bottom:4px">' + icon("i-check", "ic-11") +
+        esc(a.tls.ca[i]) + "</div>";
+    }
+    html += '<div class="grid-cards">' +
+      card("CA bundles", (caRows || '<span class="empty">Node&rsquo;s bundled root store.</span>') +
+        (a.tls.ca.length > 1
+          ? '<div class="hint muted" style="font-size:11px;margin-top:5px">' + a.tls.ca.length + " bundles combined at request time.</div>"
+          : "")) +
+      card("Client certificate", a.tls.clientCert
+        ? '<div class="chips" style="margin-bottom:8px"><span class="chip on">' +
+          (/\.(pfx|p12)$/i.test(a.tls.clientCert) ? "PKCS#12" : "PEM") + "</span></div>" +
+          kv([["Certificate", a.tls.clientCert], ["Key", "(see profile YAML)"]])
+        : '<span class="empty">No client certificate configured.</span>') +
+      "</div>";
+
+    html += '<div class="block" style="margin-top:14px"><h4>Handshake</h4>' +
+      optGroup("minVersion", [["TLSv1.2", "TLS 1.2"], ["TLSv1.3", "TLS 1.3"]], a.tls.minVersion || "", false) +
+      '<div class="kv" style="margin-top:9px"><span class="k">SNI servername</span>' +
+      '<span class="v">' + esc(a.tls.servername || "(hostname)") + "</span></div>" +
+      toggle("combineCa", "Combine multiple CA bundles", "Custom roots are merged with the defaults.", true, false, ENGINE_TIP) +
+      toggle("insecure", "Insecure skip verify",
+        a.tls.insecure ? "Certificate verification is OFF for this profile." : "Certificate verification is on.",
+        a.tls.insecure, false, PROFILE_TIP, a.tls.insecure) +
+      "</div>";
+
+    html += '<div class="block"><h4>Certificate chain</h4>' + certChain(a) + "</div>";
+    return html;
+  }
+
+  function certChain(p) {
+    var rung = rungByName("TLS handshake");
+    var chain = null;
+    if (rung && rung.status === "pass") {
+      var m = rung.detail.match(/chain:\s*([^.]+)\./);
+      if (m) chain = m[1].split("\u2190").map(function (s) { return s.trim(); });
+    }
+    if (!chain) {
+      return '<div class="empty">No verified chain from the last trace. ' +
+        (S.tlsError && S.tlsError.proxied
+          ? "The failing certificate was presented inside the CONNECT tunnel."
+          : "Run diagnostics to populate this.") + "</div>" +
+        kv([["CA bundles", p.tls.ca.join(", ") || "(defaults)"],
+            ["Client cert", p.tls.clientCert || "none"],
+            ["Min version", p.tls.minVersion || "(default)"]]);
+    }
+    var expires = (rung.detail.match(/Leaf expires (.+)$/) || [])[1] || "—";
+    var rows = '<div class="tr3 head" style="font-size:10.5px;text-transform:uppercase;color:var(--vscode-descriptionForeground)">' +
+      "<span>#</span><span>Subject</span><span>Expiry</span></div>";
+    for (var i = 0; i < chain.length; i++) {
+      var isRoot = i === chain.length - 1;
+      var expiry = i === 0 ? expires : isRoot ? "in trust store" : "—";
+      var cls = S.tlsError && isRoot ? ' style="color:var(--vscode-editorError-foreground)"' : "";
+      rows += '<div class="tr3"><span class="muted">' + (i + 1) + "</span>" +
+        '<span class="ell" title="' + esc(chain[i]) + '">' + esc(chain[i]) + "</span>" +
+        "<span" + cls + ">" + esc(S.tlsError && isRoot ? "not in trust store" : expiry) + "</span></div>";
+    }
+    return '<div class="tbl">' + rows + "</div>";
+  }
+
+  /* ── proxy & network ── */
+  function secProxy() {
+    var a = active();
+    var html = "<h3>Proxy &amp; network</h3>" +
+      '<div class="explainer">Behind a CONNECT tunnel the client certificate must be presented to the tunnelled origin, ' +
+      "not to the proxy. That distinction is why mTLS-behind-proxy fails in most tooling.</div>";
+    if (!a) return html + '<div class="empty">No active profile.</div>';
+
+    html += '<div class="grid-cards">' +
+      card("Configuration", kv([
+        ["Proxy URL", a.proxy.url || "(from environment)"],
+        ["No-proxy", a.proxy.noProxy.length ? a.proxy.noProxy.join(", ") : "—", true]
+      ])) +
+      card("Behaviour",
+        toggle("envProxy", "Use proxy from environment", "HTTPS_PROXY / HTTP_PROXY are honoured.", a.proxy.fromEnv, false, PROFILE_TIP) +
+        toggle("noProxyList", "Honour no-proxy list", a.proxy.noProxy.length ? a.proxy.noProxy.join(", ") : "No entries.", a.proxy.noProxy.length > 0, false, PROFILE_TIP) +
+        toggle("tunnelMtls", "mTLS through CONNECT tunnel", "Client cert presented to the tunnelled origin.", true, false, ENGINE_TIP)) +
+      "</div>";
+
+    var tcp = rungByName("TCP");
+    html += '<div class="block" style="margin-top:14px"><h4>Detected</h4>' +
+      (tcp
+        ? '<div class="ok-mark">' + icon("i-check", "ic-11") + esc(tcp.detail) + "</div>"
+        : '<div class="empty">Run diagnostics to detect the live transport path.</div>') +
+      "</div>";
+    return html;
+  }
+
+  /* ── diagnostics ── */
+  function secDiag() {
+    var html = '<div style="display:flex;align-items:flex-start;gap:10px">' +
+      '<div style="flex:1;min-width:0"><h3>Diagnostics</h3>' +
+      '<div class="explainer">Each rung runs only if the one above it passed, so the first failure is always the real one.</div></div>' +
+      '<button class="btn primary" data-act="trace"' + (S.tracing ? " disabled" : "") + ">" +
+      (S.tracing ? "Running…" : "Re-run trace") + "</button></div>";
+
+    html += '<div class="card">';
+    if (!S.rungs.length && !S.tracing) {
+      html += '<div class="empty">No trace yet — run diagnostics to check the connection.</div>';
+    } else {
+      for (var i = 0; i < S.rungs.length; i++) html += rungRow(S.rungs[i]);
+      if (S.tracing) html += rungRow({ name: "", status: "pending", detail: "Running…", ms: 0 });
+    }
+    html += "</div>";
+
+    html += '<div class="grid-cards tight" style="margin-top:14px">' +
+      probeCard("Non-streaming test", "Completion") +
+      probeCard("Streaming test", "Streaming") +
+      probeCard("Tool-calling probe", "Tool calling") +
+      "</div>";
+
+    if (S.tlsError) {
+      html += '<div class="card" style="margin-top:14px;border-color:var(--vscode-editorError-foreground)">' +
+        '<div class="t" style="color:var(--vscode-editorError-foreground)">' + icon("i-x", "ic-13") +
+        " TLS failure at " + esc(S.tlsError.rung) + "</div>" +
+        '<div class="err-line" style="margin-bottom:8px">' + esc(S.tlsError.message) + "</div>" +
+        kv([["Endpoint", S.tlsError.endpoint],
+            ["Cert subject", S.tlsError.proxied ? "unavailable (tunnelled)" : (S.tlsError.certSubject || "—")],
+            ["Cert issuer", S.tlsError.proxied ? "unavailable (tunnelled)" : (S.tlsError.certIssuer || "—")],
+            ["TLS version", S.tlsError.proxied ? "—" : (S.tlsError.tlsVersion || "—")]]) +
+        '<div class="row-actions">' +
+          '<button class="btn" data-act="copyFix">' + flash("copyFix", "Copied", "Copy fix key") + "</button>" +
+          '<button class="btn" data-act="systemTrust">Use system trust store</button>' +
+          '<button class="btn" data-act="browseCa">Upload CA bundle…</button>' +
+        "</div></div>";
+    }
+    return html;
+  }
+
+  function probeCard(title, rungName) {
+    var r = rungByName(rungName);
+    var blocked = S.rungs.some(function (x) { return x.status === "fail"; }) &&
+      (!r || r.status === "skipped" || r.status === "fail");
+    var body;
+    if (!S.rungs.length) body = '<span class="empty">Not run.</span>';
+    else if (blocked) {
+      var failing = S.rungs.filter(function (x) { return x.status === "fail"; })[0];
+      body = '<span class="err-line">blocked — ' +
+        esc(RUNG_LABELS[failing.name] || failing.name) + " failed</span>";
+    } else if (r) {
+      body = '<span class="' + (r.status === "warn" ? "warn-line" : "ok-mark") + '">' +
+        (r.status === "warn" ? "" : icon("i-check", "ic-11")) + esc(r.detail) + "</span>";
+    } else {
+      body = '<span class="empty">Skipped.</span>';
+    }
+    return card(title, body);
+  }
+
+  /* ── agent & tools ── */
+  function secAgent() {
+    var ui = S.config.ui || {};
+    var html = "<h3>Agent &amp; tools</h3>" +
+      '<div class="explainer">The loop reads before it edits, drops the oldest turns when the window fills, and never ' +
+      "separates a tool result from the call that produced it.</div>";
+
+    html += '<div class="grid-cards">' +
+      card("Limits", kv([
+        ["Iteration cap", "25 steps"],
+        ["Tool result limit", "60,000 characters to the model"],
+        ["Context fitting", "oldest-first, call/result paired"]
+      ])) +
+      card("Approval mode",
+        optGroup("approvalMode", [
+          ["ask", "ask"], ["edits-auto", "edits-auto"], ["full-auto", "full-auto"]
+        ], S.config.approvalMode, true) +
+        '<div class="hint muted" style="font-size:11px;margin-top:6px">' +
+        "ask: every side effect · edits-auto: file edits run, commands ask · full-auto: never ask</div>") +
+      "</div>";
+
+    html += '<div class="block" style="margin-top:14px"><h4>Behaviour</h4>' +
+      toggle("dropOldest", "Drop oldest turns when full", "", true, false, ENGINE_TIP) +
+      toggle("neverOrphan", "Never orphan a tool result", "A dropped call takes its result with it.", true, false, ENGINE_TIP) +
+      toggle("droppedNotice", "Inject dropped-turns notice", "", true, false, ENGINE_TIP) +
+      toggle("openTouched", "Open edited files in the editor", "Shows each file as the agent touches it.",
+        ui.openTouched !== false, true) +
+      "</div>";
+
+    var rows = '<div class="tr3 head" style="grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) minmax(0,1fr);font-size:10.5px;text-transform:uppercase;color:var(--vscode-descriptionForeground)">' +
+      "<span>Tool</span><span>Arguments</span><span>Sandbox</span></div>";
+    for (var i = 0; i < TOOLS.length; i++) {
+      rows += '<div class="tr3" style="grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) minmax(0,1fr)">' +
+        '<span class="v mono ell">' + esc(TOOLS[i][0]) + "</span>" +
+        '<span class="muted ell">' + esc(TOOLS[i][1]) + "</span>" +
+        '<span class="muted ell">' + esc(TOOLS[i][2]) + "</span></div>";
+    }
+    html += '<div class="block"><h4>Tools</h4><div class="tbl">' + rows + "</div></div>";
+    return html;
+  }
+
+  /* ── skills ── */
+  function secSkills() {
+    var enabled = S.skills.filter(function (s) { return s.enabled; });
+    var html = "<h3>Skills</h3>" +
+      '<div class="explainer">Folders with a <code>SKILL.md</code> and YAML frontmatter. Only the one-line index enters the ' +
+      "system prompt — bodies load on demand, so forty skills cost the same as five until one is used.</div>";
+
+    if (!S.skills.length) {
+      html += '<div class="empty">No skills found in ' + esc(S.config.skillsDirectory || ".agent/skills") + "</div>";
+    } else {
+      var rows = "";
+      for (var i = 0; i < S.skills.length; i++) {
+        var s = S.skills[i];
+        rows += '<div class="tr4">' +
+          '<button class="skill-row" data-skill="' + esc(s.name) + '" role="checkbox" aria-checked="' +
+          (s.enabled ? "true" : "false") + '">' +
+          '<span class="switch" aria-hidden="true" aria-checked="' + (s.enabled ? "true" : "false") + '"></span>' +
+          '<span class="ell" style="font-weight:600;font-size:12px">' + esc(s.name) + "</span></button>" +
+          '<span class="muted" style="font-size:11px">' + esc(s.source) + "</span>" +
+          '<span class="muted ell" title="' + esc(s.description) + '">' + esc(s.description) + "</span>" +
+          '<span class="muted" style="font-size:11px">' + (s.files && s.files.length ? s.files.length + " files" : "—") + "</span>" +
+          "</div>";
+      }
+      html += '<div class="tbl">' + rows + "</div>";
+    }
+
+    var preview = enabled.length
+      ? "Skills available in this workspace. Each is a set of instructions you can read on demand.\n" +
+        "When a task matches one, call read_skill with its name before starting work.\n" +
+        enabled.map(function (s) { return "- " + s.name + ": " + s.description; }).join("\n")
+      : "(no skills enabled — nothing is injected)";
+
+    html += '<div class="block" style="margin-top:14px"><h4>Skill index preview</h4>' +
+      '<div class="explainer">This exact text is what the model receives.</div>' +
+      '<div class="pre">' + esc(preview) + "</div></div>";
+
+    html += '<div class="row-actions">' +
+      '<span class="empty">' + enabled.length + " enabled · ~" + enabled.length * 62 + " tokens · " +
+      esc(S.config.skillsDirectory || ".agent/skills") + "</span>" +
+      '<span class="sp"></span>' +
+      '<button class="btn sm" data-act="reloadSkills">' + flash("reloadSkills", "Reloaded", "Reload") + "</button>" +
+      '<button class="btn sm" data-act="openSkills">Open folder</button>' +
+      "</div>";
+
+    if (S.skillWarnings.length) {
+      html += '<div class="warn-line">' + esc(S.skillWarnings.join(" ")) + "</div>";
+    }
+    return html;
+  }
+
+  /* ── checkpoints ── */
+  function secCheckpoints() {
+    var ui = S.config.ui || {};
+    var html = "<h3>Checkpoints</h3>" +
+      '<div class="explainer">A shadow git repository snapshots the workspace before every agent turn, using a separate ' +
+      "GIT_DIR, so the real repository, index and reflog are never touched.</div>";
+
+    html += '<div class="grid-cards">' +
+      card("Shadow repository", kv([
+        ["Location", "extension storage"],
+        ["Ignore rules", "node_modules, dist, out, .venv"],
+        ["Work tree", S.workspace.name || "(workspace root)"]
+      ])) +
+      card("Behaviour",
+        toggle("snapshotTurn", "Snapshot before every turn", "When off, no snapshot and no diff cards that turn.", ui.snapshotTurn !== false, true) +
+        toggle("previewDiff", "Preview diffstat before restore", "When off, restore happens without the modal.", ui.previewDiff !== false, true)) +
+      "</div>";
+
+    if (!S.checkpoints.length) {
+      html += '<div class="empty" style="margin-top:14px">No checkpoints yet. One is taken before each agent turn.</div>';
+      return html;
+    }
+
+    var rows = '<div class="tr4 head" style="font-size:10.5px;text-transform:uppercase;color:var(--vscode-descriptionForeground)">' +
+      "<span>Label</span><span>When</span><span>Hash</span><span></span></div>";
+    for (var i = 0; i < S.checkpoints.length; i++) {
+      var c = S.checkpoints[i];
+      rows += '<div class="tr4">' +
+        '<span class="ell" title="' + esc(c.label) + '">' + esc(c.label) + "</span>" +
+        '<span class="muted">' + esc(c.when) + "</span>" +
+        '<span class="v mono ell">' + esc(c.hash.slice(0, 10)) + "</span>" +
+        '<span style="text-align:right"><button class="btn sm" data-restore="' + esc(c.hash) + '">Restore</button></span>' +
+        "</div>";
+    }
+    html += '<div class="tbl" style="margin-top:14px">' + rows + "</div>";
+    return html;
+  }
+
+  /* ── logs & export ── */
+  function secLogs() {
+    var html = "<h3>Logs &amp; export</h3>" +
+      '<div class="explainer">The last 200 lines from the KRYPTONITE output channel.</div>' +
+      '<div class="watch-mark">' + icon("i-check", "ic-11") + "watcher active on .agent/</div>";
+
+    if (!S.logs.length) {
+      html += '<div class="empty">No log lines yet.</div>';
+    } else {
+      var lines = "";
+      for (var i = S.logs.length - 1; i >= 0; i--) {
+        var l = S.logs[i];
+        lines += '<div class="logline" data-l="' + esc(l.level) + '">' +
+          '<span class="t">' + esc(new Date(l.t).toLocaleTimeString()) + "</span>" +
+          '<span class="l">' + esc(l.level) + "</span>" +
+          '<span class="m">' + esc(l.msg) + "</span></div>";
+      }
+      html += '<div class="logview">' + lines + "</div>";
+    }
+
+    html += '<div class="grid-cards" style="margin-top:14px">' +
+      card("Build", kv([
+        ["Bundle", "esbuild single file"],
+        ["Runtime deps", "undici, yaml (inlined)"],
+        ["Packaging", ".vsix with zero network access"]
+      ])) +
+      card("Offline bundle",
+        '<div class="explainer" style="margin:0 0 8px">Copies the configured profile and skills directories, plus a manifest, ' +
+        "into <code>dist/kryptonite-offline-bundle/</code>.</div>" +
+        '<button class="btn primary" data-act="export">' +
+        flash("export", "Bundle written to dist/", "Export offline bundle") + "</button>") +
+      "</div>";
+    return html;
+  }
+
+  /* ─────────────────────────── wiring ─────────────────────────── */
+
+  function wire() {
+    $("ccReload").addEventListener("click", function () {
+      post("reloadProfiles");
+      setFlash("reloadProfiles");
+    });
+
+    $("strip").addEventListener("click", function (e) {
+      var b = e.target.closest("[data-section]");
+      if (!b) return;
+      S.section = b.getAttribute("data-section");
+      render();
+      $("pane").scrollTop = 0;
+    });
+
+    $("pane").addEventListener("click", onPaneClick);
+  }
+
+  function onPaneClick(e) {
+    var t;
+
+    if ((t = e.target.closest("[data-toggle]"))) {
+      var key = t.getAttribute("data-toggle");
+      var next = t.getAttribute("aria-checked") !== "true";
+      post("setConfig", { key: key, value: next });
+      return;
+    }
+
+    if ((t = e.target.closest("[data-opt]"))) {
+      post("setConfig", { key: t.getAttribute("data-opt"), value: t.getAttribute("data-value") });
+      return;
+    }
+
+    if ((t = e.target.closest("[data-skill]"))) {
+      var name = t.getAttribute("data-skill");
+      for (var i = 0; i < S.skills.length; i++) {
+        if (S.skills[i].name === name) {
+          S.skills[i].enabled = !S.skills[i].enabled;
+          post("toggleSkill", { name: name, enabled: S.skills[i].enabled });
+        }
+      }
+      render();
+      return;
+    }
+
+    if ((t = e.target.closest("[data-restore]"))) {
+      post("restoreCheckpoint", { hash: t.getAttribute("data-restore") });
+      return;
+    }
+
+    if ((t = e.target.closest("[data-ep]"))) {
+      onEndpointAction(t.getAttribute("data-ep"), t.getAttribute("data-id"));
+      return;
+    }
+
+    if ((t = e.target.closest("[data-act]"))) {
+      onAction(t.getAttribute("data-act"));
+      return;
+    }
+  }
+
+  function onEndpointAction(action, id) {
+    if (action === "yaml") { post("openYaml", { profile: id }); return; }
+    if (action === "del") { post("deleteEndpoint", { id: id }); return; }
+    if (action === "cancel") { S.epForm = null; render(); return; }
+    if (action === "save") {
+      var form = {
+        id: $("fId").value.trim(),
+        name: $("fName").value.trim(),
+        url: $("fUrl").value.trim(),
+        type: $("fType").value
+      };
+      if (S.epForm && S.epForm.originalId) form.originalId = S.epForm.originalId;
+      S.epForm = null;
+      render();
+      if (form.id) post("saveEndpoint", { endpoint: form });
+    }
+  }
+
+  function onAction(action) {
+    switch (action) {
+      case "newEndpoint": post("newEndpoint"); break;
+      case "trace": S.tracing = true; S.rungs = []; render(); post("runTrace"); break;
+      case "reloadSkills": post("reloadSkills"); setFlash("reloadSkills"); break;
+      case "openSkills": post("openSkillsFolder"); break;
+      case "export": post("exportBundle"); break;
+      case "clearAuth": post("reloadProfiles"); setFlash("clearAuth"); break;
+      case "systemTrust": post("useSystemTrust"); break;
+      case "browseCa": post("browseCaBundle"); break;
+      case "openTransform": {
+        var a = active();
+        if (a && a.transform) post("openFile", { path: a.transform });
+        break;
+      }
+      case "copyFix":
+        if (S.tlsError) {
+          post("copyText", { text: '"' + S.tlsError.fixKey + '": "' + S.tlsError.fixValue + '"' });
+          setFlash("copyFix");
+        }
+        break;
+    }
+  }
+
+  /* ─────────────────────────── inbound ─────────────────────────── */
+
+  window.addEventListener("message", function (event) {
+    var m = event.data;
+    if (!m || !m.type) return;
+
+    switch (m.type) {
+      case "stateSync": {
+        var st = m.state;
+        S.workspace = st.workspace;
+        S.profiles = (st.profiles || []).map(function (p) {
+          /* The host always sends the full shape, but a stale stateSync from an
+             older extension version or a test harness might omit sub-objects.
+             Filling defaults here keeps every renderer crash-free. */
+          if (!p.tls) p.tls = {};
+          if (!p.tls.ca) p.tls.ca = [];
+          if (!p.proxy) p.proxy = {};
+          if (!p.proxy.noProxy) p.proxy.noProxy = [];
+          if (!p.auth) p.auth = { kind: "none" };
+          return p;
+        });
+        S.skills = st.skills || [];
+        S.skillWarnings = st.skillWarnings || [];
+        S.config = st.config;
+        S.tlsError = st.tlsError;
+        S.rungs = st.rungs || [];
+        S.tracing = st.tracing;
+        S.traceRun = S.rungs.length > 0;
+        S.checkpoints = st.checkpoints || [];
+        S.logs = st.logs || [];
+        render();
+        break;
+      }
+
+      case "profilesReloaded":
+        S.profiles = (m.profiles || []).map(function (p) {
+          if (!p.tls) p.tls = {};
+          if (!p.tls.ca) p.tls.ca = [];
+          if (!p.proxy) p.proxy = {};
+          if (!p.proxy.noProxy) p.proxy.noProxy = [];
+          if (!p.auth) p.auth = { kind: "none" };
+          return p;
+        });
+        render();
+        break;
+
+      case "skillsReloaded":
+        S.skills = m.skills || [];
+        S.skillWarnings = m.warnings || [];
+        render();
+        break;
+
+      case "configChanged":
+        S.config = m.config;
+        render();
+        break;
+
+      case "traceStarted":
+        S.tracing = true;
+        S.rungs = [];
+        render();
+        break;
+
+      case "traceUpdate":
+        S.tracing = true;
+        S.rungs = S.rungs.slice(0, m.index).concat([m.rung]);
+        render();
+        break;
+
+      case "traceDone":
+        S.tracing = false;
+        S.traceRun = true;
+        S.rungs = m.rungs || [];
+        render();
+        break;
+
+      case "tlsError":
+        S.tlsError = m.error;
+        render();
+        break;
+
+      case "checkpointsListed":
+        S.checkpoints = m.checkpoints || [];
+        render();
+        break;
+
+      case "checkpointRestored":
+        render();
+        break;
+
+      case "bundleExported":
+        setFlash("export", 2000);
+        break;
+
+      case "logLine":
+        S.logs.push(m.line);
+        if (S.logs.length > 200) S.logs.shift();
+        if (S.section === "logs") render();
+        else renderStrip();
+        break;
+
+      case "navigate":
+        S.section = m.section;
+        render();
+        $("pane").scrollTop = 0;
+        break;
+
+      case "caBundlePicked":
+        post("saveCaBundle", { path: m.path });
+        break;
+
+      case "error":
+        S.logs.push({ t: Date.now(), level: "error", msg: m.message });
+        if (S.section === "logs") render();
+        else renderStrip();
+        break;
+
+      default:
+        /* Session-only traffic: streamDelta, toolStart/End, todos, plans,
+           permissions, diffs, selection, sessions, context, status, phase. */
+        break;
+    }
+  });
+
+  /* ─────────────────────────── boot ─────────────────────────── */
+
+  mount();
+  wire();
+  render();
+  post("ready");
+})();
+} /* end _run */

@@ -1,0 +1,423 @@
+/**
+ * The wire contract between the extension host and both webview surfaces.
+ *
+ * This module is TYPE-ONLY. It must never emit runtime code: it is imported by
+ * host modules that run on Node and is the single reference the plain-DOM
+ * frontends are written against.
+ *
+ * Direction is named from the host's point of view:
+ *   Inbound  = webview -> host
+ *   Outbound = host    -> webview
+ */
+
+import type { Capabilities, Wire } from "../endpoints/profile";
+import type { Msg } from "../providers/client";
+
+/* ────────────────────────────── primitives ────────────────────────────── */
+
+export type Phase = "plan" | "act";
+export type Surface = "sidebar" | "cc";
+
+export type CcSection =
+  | "endpoints" | "wire" | "auth" | "tls" | "proxy"
+  | "diag" | "agent" | "skills" | "checkpoints" | "logs";
+
+export type ApprovalMode = "ask" | "edits-auto" | "full-auto";
+export type PermissionDecision = "allow" | "always" | "deny";
+export type DiffDecision = "accept" | "reject";
+export type TodoStatus = "pending" | "in_progress" | "completed";
+export type RungStatus = "pass" | "fail" | "skipped" | "warn";
+
+export type EndpointFormType =
+  | "anthropic" | "openai-compatible" | "azure" | "local" | "custom";
+
+export type AuthKind = "none" | "bearer" | "header" | "exchange" | "exec";
+export type StatusState = "ok" | "error" | "none";
+export type LogLevel = "info" | "warn" | "error";
+
+/**
+ * Keys accepted by `setConfig`. The first five round-trip to real VS Code
+ * settings; the last three live in workspaceState under `kryptonite.uiConfig`.
+ */
+export type ConfigKey =
+  | "profileDirectory" | "skillsDirectory" | "activeProfile"
+  | "approvalMode" | "caBundlePath"
+  | "openTouched" | "snapshotTurn" | "previewDiff";
+
+/* ───────────────────────────────── DTOs ───────────────────────────────── */
+
+/** The three functional UI preferences. Everything else is read-only. */
+export interface UiConfigDto {
+  openTouched: boolean;
+  snapshotTurn: boolean;
+  previewDiff: boolean;
+}
+
+export interface TodoDto {
+  content: string;
+  status: TodoStatus;
+}
+
+/** One rung of the connection trace, as the ladder emitted it. */
+export interface RungDto {
+  /** The ladder's own rung name, not the display label. */
+  name: string;
+  status: RungStatus;
+  detail: string;
+  /** User-facing remediation text. Rendered verbatim when present. */
+  fix?: string;
+  ms: number;
+}
+
+/**
+ * A live TLS failure. Present only when the first failing rung satisfies the
+ * v2 detection rule; other failures produce an error status with no DTO.
+ */
+export interface TlsErrorDto {
+  profile: string;
+  rung: string;
+  message: string;
+  endpoint: string;
+  /**
+   * True when traffic goes through a CONNECT tunnel. The failing certificate
+   * is then invisible to a direct probe, so the cert fields stay undefined.
+   */
+  proxied: boolean;
+  certSubject?: string;
+  certIssuer?: string;
+  tlsVersion?: string;
+  fixKey: string;
+  fixValue: string;
+}
+
+/** Everything the UI knows about one profile, resolved secrets excluded. */
+export interface ProfileDto {
+  id: string;
+  description: string;
+  wire: Wire;
+  model: string;
+  baseUrl: string;
+  chatPath: string | null;
+  status: "ready" | "error";
+  error?: string;
+  sourceFile: string | null;
+  active: boolean;
+  authKind: AuthKind;
+  /** Never contains a resolved secret — raw `${env:…}` templates only. */
+  authSummary: string;
+  /** From `authCacheReport()`. Expiry timestamp only, never a token. */
+  authCache: { expiresAt: number } | null;
+  tls: {
+    ca: string[];
+    clientCert: string | null;
+    minVersion: string | null;
+    servername: string | null;
+    insecure: boolean;
+  };
+  proxy: {
+    url: string | null;
+    fromEnv: boolean;
+    noProxy: string[];
+  };
+  /** Merged capability object. `null` for profiles that failed to parse. */
+  capabilities: Capabilities | null;
+  headers: Record<string, string>;
+  query: Record<string, string>;
+  extraBody: Record<string, unknown>;
+  timeoutMs: number;
+  retries: number;
+  transform: string | null;
+}
+
+export interface SkillDto {
+  name: string;
+  description: string;
+  source: "workspace" | "bundled";
+  enabled: boolean;
+  files: string[];
+}
+
+export interface SelectionDto {
+  /** Workspace-relative path. */
+  file: string;
+  /** 1-based, inclusive. */
+  startLine: number;
+  endLine: number;
+}
+
+export interface SessionMetaDto {
+  id: string;
+  title: string;
+  /** Pre-formatted relative time, e.g. `2h ago`. */
+  when: string;
+  /** How many messages the transcript holds. */
+  count: number;
+  /** True for the conversation the composer is currently writing into. */
+  active: boolean;
+}
+
+export interface CheckpointDto {
+  hash: string;
+  label: string;
+  when: string;
+}
+
+export interface ConfigDto {
+  approvalMode: ApprovalMode;
+  activeProfile: string;
+  caBundlePath: string;
+  /** Workspace-relative, surfaced in Control Center explainers. */
+  profileDirectory: string;
+  skillsDirectory: string;
+  ui: UiConfigDto;
+}
+
+export interface StatusDto {
+  state: StatusState;
+  /** Text after the `KRYPTONITE: ` prefix, e.g. `OK · ACT`. */
+  label: string;
+  endpoint: string | null;
+  model: string | null;
+  phase: Phase;
+}
+
+export interface LogLine {
+  /** Epoch milliseconds. */
+  t: number;
+  level: LogLevel;
+  msg: string;
+}
+
+/** One group in the model picker. One group per ready profile. */
+export interface ModelGroupDto {
+  group: string;
+  models: string[];
+}
+
+export interface FileHitDto {
+  path: string;
+  kind: "file" | "config";
+}
+
+export interface EndpointForm {
+  id: string;
+  name: string;
+  url: string;
+  type: EndpointFormType;
+  /** Set when editing; a changed `id` deletes the old file. */
+  originalId?: string;
+}
+
+/** The complete hydration payload sent on every `ready`. */
+export interface StateSync {
+  workspace: { open: boolean; name: string | null };
+  running: boolean;
+  phase: Phase;
+  status: StatusDto;
+  endpoint: string | null;
+  profiles: ProfileDto[];
+  skills: SkillDto[];
+  skillWarnings: string[];
+  config: ConfigDto;
+  tlsError: TlsErrorDto | null;
+  rungs: RungDto[];
+  tracing: boolean;
+  todos: TodoDto[];
+  checkpoints: CheckpointDto[];
+  sessions: SessionMetaDto[];
+  selection: SelectionDto | null;
+  context: { used: number; limit: number } | null;
+  models: ModelGroupDto[];
+  logs: LogLine[];
+  session: { id: string; title: string; messages: Msg[] };
+}
+
+/* ───────────────────────────── inbound messages ───────────────────────── */
+
+export interface ReadyMsg { type: "ready" }
+export interface SendMessageMsg {
+  type: "sendMessage";
+  text: string;
+  /** Base64-encoded file attachments. Vision must be enabled on the profile. */
+  attachments?: Array<{ name: string; mediaType: string; data: string }>;
+}
+export interface AttachFilesMsg { type: "attachFiles" }
+export interface InterruptMsg { type: "interrupt" }
+export interface NewChatMsg { type: "newChat" }
+export interface SetPhaseMsg { type: "setPhase"; phase: Phase }
+export interface ApprovePlanMsg { type: "approvePlan" }
+export interface ResolvePermissionMsg {
+  type: "resolvePermission";
+  id: string;
+  decision: PermissionDecision;
+}
+export interface ResolveDiffMsg {
+  type: "resolveDiff";
+  turnId: string;
+  file: string;
+  decision: DiffDecision;
+}
+export interface SelectModelMsg { type: "selectModel"; endpoint: string; model: string }
+export interface RunTraceMsg { type: "runTrace" }
+export interface SaveCaBundleMsg { type: "saveCaBundle"; path: string }
+export interface BrowseCaBundleMsg { type: "browseCaBundle" }
+export interface UseSystemTrustMsg { type: "useSystemTrust" }
+export interface CopyTextMsg { type: "copyText"; text: string }
+export interface NewEndpointMsg { type: "newEndpoint" }
+export interface SaveEndpointMsg { type: "saveEndpoint"; endpoint: EndpointForm }
+export interface DeleteEndpointMsg { type: "deleteEndpoint"; id: string }
+export interface ToggleSkillMsg { type: "toggleSkill"; name: string; enabled: boolean }
+export interface ReloadSkillsMsg { type: "reloadSkills" }
+export interface ReloadProfilesMsg { type: "reloadProfiles" }
+export interface SetConfigMsg { type: "setConfig"; key: ConfigKey; value: unknown }
+export interface RestoreCheckpointMsg { type: "restoreCheckpoint"; hash: string }
+export interface ExportBundleMsg { type: "exportBundle" }
+export interface OpenFileMsg { type: "openFile"; path: string; lines?: [number, number] }
+export interface OpenSettingsMsg { type: "openSettings" }
+export interface OpenYamlMsg { type: "openYaml"; profile: string }
+export interface OpenControlCenterMsg { type: "openControlCenter"; section?: CcSection }
+export interface OpenSkillsFolderMsg { type: "openSkillsFolder" }
+export interface ListSessionsMsg { type: "listSessions" }
+export interface LoadSessionMsg { type: "loadSession"; id: string }
+export interface DeleteSessionMsg { type: "deleteSession"; id: string }
+export interface SearchFilesMsg { type: "searchFiles"; query: string }
+
+export type InboundMessage =
+  | ReadyMsg | SendMessageMsg | AttachFilesMsg | InterruptMsg | NewChatMsg | SetPhaseMsg
+  | ApprovePlanMsg | ResolvePermissionMsg | ResolveDiffMsg | SelectModelMsg
+  | RunTraceMsg | SaveCaBundleMsg | BrowseCaBundleMsg | UseSystemTrustMsg
+  | CopyTextMsg | NewEndpointMsg | SaveEndpointMsg | DeleteEndpointMsg
+  | ToggleSkillMsg | ReloadSkillsMsg | ReloadProfilesMsg | SetConfigMsg
+  | RestoreCheckpointMsg | ExportBundleMsg | OpenFileMsg | OpenSettingsMsg
+  | OpenYamlMsg | OpenControlCenterMsg | OpenSkillsFolderMsg
+  | ListSessionsMsg | LoadSessionMsg | DeleteSessionMsg | SearchFilesMsg;
+
+export type InboundType = InboundMessage["type"];
+
+/* ──────────────────────────── outbound messages ───────────────────────── */
+
+export interface StateSyncOut { type: "stateSync"; state: StateSync }
+export interface StreamDeltaOut { type: "streamDelta"; text: string }
+export interface ToolStartOut {
+  type: "toolStart";
+  // `args` is model-authored JSON of arbitrary shape; the UI only summarises it.
+  tool: { name: string; args: unknown };
+}
+export interface ToolEndOut {
+  type: "toolEnd";
+  /** `result` is the FULL string; the frontend handles its own truncation. */
+  tool: { name: string; args: unknown; result?: string; isError?: boolean };
+}
+export interface TodosUpdatedOut { type: "todosUpdated"; todos: TodoDto[] }
+export interface PlanProposedOut { type: "planProposed"; meta: string; steps: string[] }
+export interface PermissionRequestOut {
+  type: "permissionRequest";
+  id: string;
+  summary: string;
+  detail?: string;
+}
+export interface PermissionResolvedOut {
+  type: "permissionResolved";
+  id: string;
+  decision: PermissionDecision;
+}
+export interface DiffPendingOut {
+  type: "diffPending";
+  turnId: string;
+  file: string;
+  added: number;
+  removed: number;
+  /** Raw unified patch text, capped at 30,000 chars. */
+  patch: string;
+  truncated: boolean;
+}
+export interface DiffResolvedOut {
+  type: "diffResolved";
+  turnId: string;
+  file: string;
+  decision: DiffDecision;
+}
+export interface FileTouchedOut { type: "fileTouched"; path: string }
+export interface TurnEndOut { type: "turnEnd" }
+export interface ErrorOut { type: "error"; message: string }
+export interface TraceStartedOut { type: "traceStarted" }
+export interface TraceUpdateOut { type: "traceUpdate"; rung: RungDto; index: number }
+export interface TraceDoneOut { type: "traceDone"; rungs: RungDto[]; ok: boolean }
+export interface TlsErrorOut { type: "tlsError"; error: TlsErrorDto | null }
+export interface ProfilesReloadedOut { type: "profilesReloaded"; profiles: ProfileDto[] }
+export interface SkillsReloadedOut {
+  type: "skillsReloaded";
+  skills: SkillDto[];
+  warnings: string[];
+}
+export interface ContextUsageOut { type: "contextUsage"; used: number; limit: number }
+export interface AttachmentsReadyOut {
+  type: "attachmentsReady";
+  files: Array<{ name: string; mediaType: string; data: string; size: number }>;
+}
+
+export interface SelectionChangedOut {
+  type: "selectionChanged";
+  selection: SelectionDto | null;
+}
+/**
+ * The conversation the composer writes into has changed — a new chat, a
+ * restored one, or the active one being deleted.
+ *
+ * This is the only message that replaces the transcript wholesale, and it is
+ * mandatory: `newChat` used to mutate host state and say nothing, so the
+ * webview kept rendering the previous conversation while new messages were
+ * being filed under a new id.
+ */
+export interface SessionSwitchedOut {
+  type: "sessionSwitched";
+  id: string;
+  title: string;
+  messages: Msg[];
+}
+export interface SessionsListedOut { type: "sessionsListed"; sessions: SessionMetaDto[] }
+export interface CheckpointsListedOut {
+  type: "checkpointsListed";
+  checkpoints: CheckpointDto[];
+}
+export interface CheckpointRestoredOut { type: "checkpointRestored"; hash: string }
+export interface BundleExportedOut { type: "bundleExported"; path: string }
+export interface ConfigChangedOut { type: "configChanged"; config: ConfigDto }
+export interface PhaseChangedOut { type: "phaseChanged"; phase: Phase }
+export interface EndpointChangedOut {
+  type: "endpointChanged";
+  endpoint: string | null;
+  model: string | null;
+}
+export interface StatusChangedOut { type: "statusChanged"; status: StatusDto }
+export interface LogLineOut { type: "logLine"; line: LogLine }
+export interface NavigateOut { type: "navigate"; section: CcSection }
+export interface FileResultsOut { type: "fileResults"; query: string; files: FileHitDto[] }
+export interface CaBundlePickedOut { type: "caBundlePicked"; path: string }
+
+export type OutboundMessage =
+  | StateSyncOut | StreamDeltaOut | ToolStartOut | ToolEndOut | TodosUpdatedOut
+  | PlanProposedOut | PermissionRequestOut | PermissionResolvedOut
+  | DiffPendingOut | DiffResolvedOut | FileTouchedOut | TurnEndOut | ErrorOut
+  | TraceStartedOut | TraceUpdateOut | TraceDoneOut | TlsErrorOut
+  | ProfilesReloadedOut | SkillsReloadedOut | ContextUsageOut
+  | AttachmentsReadyOut | SelectionChangedOut | SessionSwitchedOut | SessionsListedOut
+  | CheckpointsListedOut | CheckpointRestoredOut | BundleExportedOut
+  | ConfigChangedOut | PhaseChangedOut | EndpointChangedOut | StatusChangedOut
+  | LogLineOut | NavigateOut | FileResultsOut | CaBundlePickedOut;
+
+export type OutboundType = OutboundMessage["type"];
+
+/**
+ * Events buffered by the SessionController for turn replay. A webview that
+ * reloads mid-run receives `stateSync` and then these, in order.
+ */
+export type ReplayableEvent =
+  | StreamDeltaOut | ToolStartOut | ToolEndOut
+  | TodosUpdatedOut | PermissionRequestOut | ContextUsageOut;
+
+/** Narrowing helper for host-side switch statements. */
+export type InboundOf<T extends InboundType> = Extract<InboundMessage, { type: T }>;
+
+/** Narrowing helper for frontend-side switch statements. */
+export type OutboundOf<T extends OutboundType> = Extract<OutboundMessage, { type: T }>;

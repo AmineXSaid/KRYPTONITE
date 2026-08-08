@@ -1,0 +1,30 @@
+# Source and build inputs — the shipped artifact is dist/extension.js only.
+src/**
+node_modules/**
+tsconfig.json
+esbuild.config.*
+**/*.ts
+**/*.map
+**/*.tsbuildinfo
+
+# Offline verification harness — needs jsdom, never ships
+test/**
+
+# Editor and repo scaffolding
+.vscode/**
+.vscode-test/**
+.github/**
+.gitignore
+.gitattributes
+.editorconfig
+
+# Workspace fixtures that must never travel inside the extension
+.agent/**
+
+# Generated offline bundles live under dist/ but are not part of the extension
+dist/kryptonite-offline-bundle/**
+
+# NOTE: media/** is deliberately NOT ignored. media/icon.svg, media/logo.png,
+# media/webview/*.js|*.css (including crystal.js, the shared brand mark) and
+# media/fonts/* are loaded at runtime through asWebviewUri or named by the
+# manifest; excluding them breaks every webview surface.

@@ -1,0 +1,48 @@
+# An endpoint behind a corporate proxy that re-signs TLS, requiring a client
+# certificate and a token exchange. This is the hard case; it works.
+name: vw-gateway
+description: Internal gateway, mTLS + token exchange
+wire: openai
+baseUrl: https://llm.gateway.internal
+chatPath: /api/v2/chat/completions
+model: internal-gpt-4o
+
+auth:
+  kind: exchange
+  exchange:
+    url: https://sso.internal/oauth2/token
+    encoding: form
+    body:
+      grant_type: client_credentials
+      client_id: ${env:GW_CLIENT_ID}
+      client_secret: ${secret:clientSecret}
+      scope: llm.invoke
+    tokenPath: access_token
+    expiresInPath: expires_in
+    attachAs:
+      header: authorization
+      template: "Bearer {token}"
+
+tls:
+  caBundle:
+    - system
+    - ~/certs/corporate-root.pem
+  cert: ~/certs/client.crt
+  key: ~/certs/client.key
+  keyPassphrase: ${secret:keyPassphrase}
+  minVersion: TLSv1.2
+
+proxy:
+  url: http://proxy.corp:8080
+  noProxy: [".internal", "localhost"]
+
+capabilities:
+  streaming: true
+  tools: true
+  systemRole: message
+  contextWindow: 32000
+  maxOutputTokens: 4096
+  tokenCounting: heuristic
+  parallelToolCalls: false
+
+transform: .agent/transforms/vw-gateway.js
