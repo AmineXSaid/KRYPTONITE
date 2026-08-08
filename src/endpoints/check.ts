@@ -150,11 +150,24 @@ export function summarise(rungs: Rung[], profile: EndpointProfile): CheckOutcome
   const failed = rungs.find((r) => r.status === "fail");
   if (failed) {
     let summary = `${failed.name} failed — ${failed.detail.split("\n")[0]}`;
-    if (failed.name === "Completion" && /404/.test(failed.detail)) {
+    if (failed.name === "Completion") {
       const path = profile.chatPath ?? defaultChatPath(profile.baseUrl, profile.wire);
-      summary =
-        `The gateway returned 404 for ${profile.baseUrl}${path}. ` +
-        `Either the model "${profile.model}" does not exist on this endpoint, or the route is different.`;
+      if (/404/.test(failed.detail)) {
+        summary =
+          `The gateway returned 404 for ${profile.baseUrl}${path}. ` +
+          `Either the model "${profile.model}" does not exist on this endpoint, or the route is different.`;
+      } else if (/\b(400|422|50\d)\b/.test(failed.detail) && !profile.model.includes("/")) {
+        // Reaching auth and then failing on the body points at the payload,
+        // and the only part of the payload the user typed is the model id.
+        // Multi-vendor gateways namespace their models, and a bare id is
+        // usually fuzzy-matched into something that fails far downstream —
+        // OpenRouter answers `free` with a 502 "Invalid URL", which reads
+        // like the gateway is broken rather than like a typo.
+        summary =
+          `The credential was accepted but ${profile.baseUrl}${path} rejected the request. ` +
+          `The model id "${profile.model}" has no vendor prefix — gateways that serve several ` +
+          `vendors expect "vendor/model" (for example "openrouter/free"). Check that first.`;
+      }
     }
     return { rungs, ok: false, summary };
   }
