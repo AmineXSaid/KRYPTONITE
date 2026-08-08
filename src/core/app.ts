@@ -18,13 +18,17 @@ import {
   saveEndpointFile,
   deleteEndpointFile,
   createTemplateFile,
+  secretKeyFor,
   PROFILE_ID_RE,
 } from "./profileFiles";
+// Aliased: `App.checkEndpoint` is the message handler, this is the probe it runs.
+import { checkEndpoint as runEndpointCheck } from "../endpoints/check";
 import { SessionController } from "../ui/session";
 import type {
   ApprovalMode,
   CheckpointDto,
   ConfigDto,
+  EndpointForm,
   FileHitDto,
   InboundMessage,
   LogLevel,
@@ -694,6 +698,51 @@ export class App {
     );
   }
 
+  /**
+   * Probe an endpoint the user has typed but not saved.
+   *
+   * Nothing here touches disk or `this.profiles`: a check that half-saved on
+   * failure would leave a broken profile behind every time someone got a URL
+   * wrong. When no key was typed but one is already stored — the edit case —
+   * the stored value is used so "Check" works without re-pasting.
+   */
+  private async checkEndpoint(form: EndpointForm, source: Surface): Promise<void> {
+    const id = form.id || "draft";
+    const root = this.requireRoot();
+
+    let apiKey = form.apiKey?.trim() ?? "";
+    if (!apiKey) {
+      apiKey = (await this.context.secrets.get(`kryptonite.${secretKeyFor(id)}`)) ?? "";
+    }
+
+    this.postTo(source, { type: "endpointCheckStarted", id });
+    this.log("info", `Checking connection to ${form.url || "(no URL)"} as ${id}…`);
+
+    try {
+      const { rungs, ok, summary } = await runEndpointCheck(form, apiKey, root, (rung) =>
+        this.postTo(source, { type: "endpointCheckRung", id, rung })
+      );
+      this.postTo(source, { type: "endpointCheckDone", id, rungs, ok, summary });
+      this.log(ok ? "info" : "warn", `Connection check for ${id}: ${summary}`);
+    } catch (e: any) {
+      // An unexpected throw is still a check result, not a dead panel.
+      const rung = {
+        name: "Profile",
+        status: "fail" as const,
+        detail: String(e?.message ?? e),
+        ms: 0,
+      };
+      this.postTo(source, {
+        type: "endpointCheckDone",
+        id,
+        rungs: [rung],
+        ok: false,
+        summary: rung.detail,
+      });
+      this.log("error", `Connection check for ${id} threw: ${rung.detail}`);
+    }
+  }
+
   private async dispatch(msg: InboundMessage, source: Surface): Promise<void> {
     switch (msg.type) {
       case "ready": {
@@ -798,6 +847,23 @@ export class App {
             `Invalid profile id "${form.id}". Use letters, digits, dot, dash or underscore, starting with a word character.`
           );
         }
+        // The key goes to SecretStorage before the YAML is written, so a failed
+        // write can never leave a profile pointing at a secret that is absent.
+        const typedKey = form.apiKey?.trim();
+        if (typedKey) {
+          await this.context.secrets.store(`kryptonite.${secretKeyFor(form.id)}`, typedKey);
+          this.log("info", `Stored the API key for ${form.id} in SecretStorage.`);
+        }
+        // On rename the key moves with the profile, otherwise the renamed
+        // profile would resolve to an empty credential.
+        const previousId = form.originalId;
+        if (previousId && previousId !== form.id && !typedKey) {
+          const old = await this.context.secrets.get(`kryptonite.${secretKeyFor(previousId)}`);
+          if (old) {
+            await this.context.secrets.store(`kryptonite.${secretKeyFor(form.id)}`, old);
+            await this.context.secrets.delete(`kryptonite.${secretKeyFor(previousId)}`);
+          }
+        }
         const { file, removed } = saveEndpointFile(this.profileDir(), form, this.profiles);
         if (removed) this.log("info", `Renamed profile — removed ${path.basename(removed)}.`);
         this.log("info", `Saved endpoint ${form.id} to ${path.basename(file)}.`);
@@ -806,9 +872,16 @@ export class App {
         return;
       }
 
+      case "checkEndpoint":
+        await this.checkEndpoint(msg.endpoint, source);
+        return;
+
       case "deleteEndpoint": {
         const removed = deleteEndpointFile(this.profiles, msg.id);
         if (removed) this.log("info", `Deleted endpoint ${msg.id}.`);
+        // Leaving the credential behind would silently re-arm a later profile
+        // that happened to reuse the id.
+        await this.context.secrets.delete(`kryptonite.${secretKeyFor(msg.id)}`);
         clearAuthCache();
         await this.reload("endpoint deleted");
         return;

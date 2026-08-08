@@ -4,7 +4,7 @@
 // certificate support at all, which is exactly what this extension exists for.
 
 import { request, Dispatcher } from "undici";
-import type { EndpointProfile } from "../endpoints/profile";
+import type { EndpointProfile, Wire } from "../endpoints/profile";
 import { buildTransport } from "../endpoints/transport";
 import { applyAuth } from "../endpoints/auth";
 import { loadTransform, Transform } from "../endpoints/transform";
@@ -54,6 +54,29 @@ export class EndpointError extends Error {
   }
 }
 
+/**
+ * The route appended to `baseUrl` when a profile does not set `chatPath`.
+ *
+ * Gateways are split on where the version segment lives. Anthropic and OpenAI
+ * publish bare origins and expect `/v1/...`; OpenRouter, Together, Groq and
+ * most self-hosted vLLM deployments publish the origin *with* `/v1` already on
+ * it. Blindly appending `/v1/chat/completions` to the latter produces
+ * `https://openrouter.ai/api/v1/v1/chat/completions` and a 404 that reads like
+ * a credential problem — the single most common way a correct profile looks
+ * broken. So the version segment is only added when the base lacks one.
+ */
+export function defaultChatPath(baseUrl: string, wire: Wire): string {
+  const leaf = wire === "anthropic" ? "/messages" : "/chat/completions";
+  let pathname: string;
+  try {
+    pathname = new URL(baseUrl).pathname;
+  } catch {
+    pathname = baseUrl;
+  }
+  // `/v1`, `/v1beta`, `/v2` … already present means the caller versioned it.
+  return /\/v\d+[a-z]*\/?$/i.test(pathname) ? leaf : `/v1${leaf}`;
+}
+
 export class EndpointClient {
   private dispatcher: Dispatcher;
   private transform?: Transform;
@@ -79,9 +102,7 @@ export class EndpointClient {
 
   private url(): string {
     const base = this.profile.baseUrl.replace(/\/$/, "");
-    const p =
-      this.profile.chatPath ??
-      (this.profile.wire === "anthropic" ? "/v1/messages" : "/v1/chat/completions");
+    const p = this.profile.chatPath ?? defaultChatPath(base, this.profile.wire);
     const u = new URL(base + p);
     for (const [k, v] of Object.entries(this.profile.query ?? {})) u.searchParams.set(k, v);
     return u.toString();

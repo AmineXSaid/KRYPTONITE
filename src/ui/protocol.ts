@@ -204,6 +204,26 @@ export interface EndpointForm {
   name: string;
   url: string;
   type: EndpointFormType;
+  /**
+   * The model id the gateway expects. Previously hardcoded per provider type
+   * when the YAML was generated, which meant every endpoint added through the
+   * UI shipped pointing at a model its gateway had probably never heard of.
+   */
+  model?: string;
+  /**
+   * Route appended to `baseUrl`. Empty means "derive it", which handles both
+   * bare origins and origins that already carry a `/v1`.
+   */
+  chatPath?: string;
+  /**
+   * Only ever travels webview -> host, and only on `saveEndpoint` /
+   * `checkEndpoint`. It is written to SecretStorage and referenced from the
+   * YAML as `${secret:<id>/api_key}`; it is never echoed back to the UI and
+   * never appears in a `ProfileDto`.
+   */
+  apiKey?: string;
+  /** True when a key is already stored, so the field can render as "unchanged". */
+  hasStoredKey?: boolean;
   /** Set when editing; a changed `id` deletes the old file. */
   originalId?: string;
 }
@@ -281,6 +301,13 @@ export interface ListSessionsMsg { type: "listSessions" }
 export interface LoadSessionMsg { type: "loadSession"; id: string }
 export interface DeleteSessionMsg { type: "deleteSession"; id: string }
 export interface SearchFilesMsg { type: "searchFiles"; query: string }
+/**
+ * Probe an endpoint the user has typed but not saved. Carries `apiKey` in the
+ * clear across the webview boundary, which is the same trust level as the
+ * input field it came from; the host holds it in memory for the duration of
+ * the check only.
+ */
+export interface CheckEndpointMsg { type: "checkEndpoint"; endpoint: EndpointForm }
 
 export type InboundMessage =
   | ReadyMsg | SendMessageMsg | AttachFilesMsg | InterruptMsg | NewChatMsg | SetPhaseMsg
@@ -290,7 +317,8 @@ export type InboundMessage =
   | ToggleSkillMsg | ReloadSkillsMsg | ReloadProfilesMsg | SetConfigMsg
   | RestoreCheckpointMsg | ExportBundleMsg | OpenFileMsg | OpenSettingsMsg
   | OpenYamlMsg | OpenControlCenterMsg | OpenSkillsFolderMsg
-  | ListSessionsMsg | LoadSessionMsg | DeleteSessionMsg | SearchFilesMsg;
+  | ListSessionsMsg | LoadSessionMsg | DeleteSessionMsg | SearchFilesMsg
+  | CheckEndpointMsg;
 
 export type InboundType = InboundMessage["type"];
 
@@ -395,6 +423,22 @@ export interface NavigateOut { type: "navigate"; section: CcSection }
 export interface FileResultsOut { type: "fileResults"; query: string; files: FileHitDto[] }
 export interface CaBundlePickedOut { type: "caBundlePicked"; path: string }
 
+/* ── endpoint connection check ── */
+export interface EndpointCheckStartedOut { type: "endpointCheckStarted"; id: string }
+export interface EndpointCheckRungOut {
+  type: "endpointCheckRung";
+  id: string;
+  rung: RungDto;
+}
+export interface EndpointCheckDoneOut {
+  type: "endpointCheckDone";
+  id: string;
+  rungs: RungDto[];
+  ok: boolean;
+  /** The single line the banner shows above the rung list. */
+  summary: string;
+}
+
 export type OutboundMessage =
   | StateSyncOut | StreamDeltaOut | ToolStartOut | ToolEndOut | TodosUpdatedOut
   | PlanProposedOut | PermissionRequestOut | PermissionResolvedOut
@@ -404,7 +448,8 @@ export type OutboundMessage =
   | AttachmentsReadyOut | SelectionChangedOut | SessionSwitchedOut | SessionsListedOut
   | CheckpointsListedOut | CheckpointRestoredOut | BundleExportedOut
   | ConfigChangedOut | PhaseChangedOut | EndpointChangedOut | StatusChangedOut
-  | LogLineOut | NavigateOut | FileResultsOut | CaBundlePickedOut;
+  | LogLineOut | NavigateOut | FileResultsOut | CaBundlePickedOut
+  | EndpointCheckStartedOut | EndpointCheckRungOut | EndpointCheckDoneOut;
 
 export type OutboundType = OutboundMessage["type"];
 

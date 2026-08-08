@@ -14,6 +14,18 @@ import type { EndpointForm, EndpointFormType } from "../ui/protocol";
 
 export const PROFILE_ID_RE = /^[\w][\w.-]*$/;
 
+/**
+ * The SecretStorage name a profile's API key lives under.
+ *
+ * `App` prefixes every lookup with `kryptonite.`, and `interpolate()` resolves
+ * `${secret:<this>}` at request time. Keeping the derivation in one function is
+ * what lets the YAML writer, the save handler and the pre-save check agree on
+ * where the key is without passing it between them.
+ */
+export function secretKeyFor(id: string): string {
+  return `${id}/api_key`;
+}
+
 /** Form provider type onto the real wire value. */
 export function wireForType(type: EndpointFormType): "openai" | "anthropic" {
   return type === "anthropic" ? "anthropic" : "openai";
@@ -27,7 +39,12 @@ function defaultChatPath(type: EndpointFormType): string | undefined {
   return undefined;
 }
 
-function defaultModel(type: EndpointFormType): string {
+/**
+ * Fallback only. The form now carries a model field, so this is what a profile
+ * gets when the caller left it blank — a plausible id for the provider type,
+ * not a promise that the gateway serves it.
+ */
+export function defaultModel(type: EndpointFormType): string {
   switch (type) {
     case "anthropic":
       return "claude-sonnet-4-5";
@@ -55,8 +72,10 @@ function quote(v: string): string {
  */
 export function renderProfileYaml(form: EndpointForm): string {
   const wire = wireForType(form.type);
-  const chatPath = defaultChatPath(form.type);
-  const model = defaultModel(form.type);
+  // An explicit route from the form always wins; the per-type default is only
+  // a starting point for gateways that are known to prefix their routes.
+  const chatPath = form.chatPath?.trim() || defaultChatPath(form.type);
+  const model = form.model?.trim() || defaultModel(form.type);
   const local = form.type === "local";
   const displayName = form.name.trim() || form.id;
 
@@ -90,14 +109,26 @@ export function renderProfileYaml(form: EndpointForm): string {
   lines.push(`# transform: .agent/transforms/envelope-wrap.js   # required when wire: raw`);
   lines.push(``);
 
+  const storedKey = Boolean(form.apiKey?.trim() || form.hasStoredKey);
+
   lines.push(`auth:`);
   if (local) {
     lines.push(`  kind: none                      # a local model needs no credential`);
   } else {
     lines.push(`  kind: bearer                    # none | bearer | header | exchange | exec`);
-    lines.push(`  value: ` + "${env:KRYPTONITE_API_KEY}");
-    lines.push(`  # Secrets never live in this file. Use ` + "${env:VAR}, ${secret:NAME}");
-    lines.push(`  # (VS Code SecretStorage, key kryptonite.<NAME>) or ` + "${file:path}.");
+    if (storedKey) {
+      // The key the user typed went to SecretStorage; the file only ever holds
+      // the reference. This is the difference between a profile that can be
+      // committed to the repo and one that leaks a credential on first push.
+      lines.push(`  value: ` + "${secret:" + secretKeyFor(form.id) + "}");
+      lines.push(`  # The key is in VS Code SecretStorage under`);
+      lines.push(`  # kryptonite.${secretKeyFor(form.id)} — not in this file.`);
+      lines.push(`  # Swap in ` + "${env:VAR}" + ` or ` + "${file:path}" + ` if you prefer.`);
+    } else {
+      lines.push(`  value: ` + "${env:KRYPTONITE_API_KEY}");
+      lines.push(`  # Secrets never live in this file. Use ` + "${env:VAR}, ${secret:NAME}");
+      lines.push(`  # (VS Code SecretStorage, key kryptonite.<NAME>) or ` + "${file:path}.");
+    }
   }
   lines.push(`  #`);
   lines.push(`  # OAuth2 client-credentials instead:`);
