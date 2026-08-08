@@ -67,14 +67,17 @@ function _sbRun() {
     write_file: "Editing…", edit_file: "Editing…", run_command: "Running…", update_todos: "Updating todos…"
   };
 
+  /* Extension features, not skills. `/` lists the workspace's SKILL.md files
+     first and these underneath — see slashItems(). `/skill:` is gone: every
+     skill now has its own row, which is what it was a stand-in for. */
   var CMDS = [
     ["/clear", "Clear conversation history"],
     ["/doctor", "Run TLS connection diagnostics"],
     ["/endpoints", "Manage endpoint profiles"],
     ["/model", "Select a model"],
     ["/review", "Review current changes"],
-    ["/skill:", "Insert a skill into this turn"],
     ["/checkpoint", "Restore a previous checkpoint"],
+    ["/skills", "Open the skills panel"],
     ["/help", "Show available commands"]
   ];
 
@@ -118,6 +121,7 @@ function _sbRun() {
     qpIndex: 0,
     modelOpen: false,
     epForm: null,
+    epCheck: null,
     caUpload: null,
     files: [],
     fileQuery: "",
@@ -133,6 +137,8 @@ function _sbRun() {
 
   /* transcript element handles */
   var logEl, aiEl = null, streamEl = null, pendingTool = null, todoEl = null;
+  /* The open tool strip consecutive calls are appended to, or null. */
+  var toolGroup = null;
 
   /* ───────────────────────────── helpers ───────────────────────────── */
 
@@ -203,6 +209,32 @@ function _sbRun() {
     return a.path || "";
   }
 
+  /**
+   * Line delta for an edit, straight off the tool arguments.
+   *
+   * Deliberately a line count, not a real diff: the authoritative +/− lives on
+   * the diff card that follows, and running a proper LCS on every tool row
+   * would cost more than the glance it buys. Returns "" for tools that do not
+   * change a file.
+   */
+  function lineCount(s) { return s ? String(s).split("\n").length : 0; }
+  function diffStat(name, a) {
+    if (!a || typeof a !== "object") return "";
+    var add = 0, del = 0;
+    if (name === "edit_file") {
+      del = lineCount(a.old_text);
+      add = lineCount(a.new_text);
+    } else if (name === "write_file") {
+      add = lineCount(a.content);
+    } else {
+      return "";
+    }
+    var out = "";
+    if (add) out += '<span class="a">+' + add + "</span>";
+    if (del) out += (out ? " " : "") + '<span class="d">−' + del + "</span>";
+    return out;
+  }
+
   /* ─────────────────────────── shell ─────────────────────────── */
 
   function mount() {
@@ -214,6 +246,9 @@ function _sbRun() {
         '<header class="kx-header">' +
           crystal(24) +
           '<span class="kx-wordmark">Kryptonite</span><span class="sp"></span>' +
+          // Context usage belongs beside the wordmark, not in the footer: it is
+          // status, not a control, and moving it up shortens the composer.
+          '<span class="kx-ctx tnum" id="ctxHead" title="Context used"></span>' +
           '<button class="icon-btn" id="newBtn" title="New chat" aria-label="New chat">' + icon("i-plus") + '</button>' +
           '<button class="icon-btn" id="histBtn" title="History" aria-label="Chat history" aria-haspopup="menu" aria-expanded="false">' + icon("i-clock") + '</button>' +
           '<button class="icon-btn" id="moreBtn" title="More" aria-label="More actions" aria-haspopup="menu" aria-expanded="false">' + icon("i-dots") + '</button>' +
@@ -244,7 +279,7 @@ function _sbRun() {
                 '<button class="tb-btn" id="selClear" title="Dismiss selection" aria-label="Dismiss selection" style="width:18px;height:18px">' + icon("i-x", "ic-9") + '</button>' +
               '</div>' +
               '<div class="att-strip" id="attachStrip" hidden></div>' +
-              '<textarea id="draft" rows="1" aria-label="Message" placeholder="Ask Kryptonite anything…   ( / commands · @ files )"></textarea>' +
+              '<textarea id="draft" rows="1" aria-label="Message" placeholder="Ask Kryptonite anything…   ( / skills · @ files )"></textarea>' +
               '<div class="toolbar">' +
                 '<div class="seg" id="phaseSeg" role="group" aria-label="Phase">' +
                   '<button data-phase="plan" data-on="0">Plan</button>' +
@@ -368,7 +403,7 @@ function _sbRun() {
   }
   function clearTranscript() {
     logEl.innerHTML = "";
-    aiEl = null; streamEl = null; pendingTool = null; todoEl = null;
+    aiEl = null; streamEl = null; pendingTool = null; todoEl = null; toolGroup = null;
   }
 
   function renderWelcome() {
@@ -402,24 +437,35 @@ function _sbRun() {
       '</div>'));
   }
 
+  /* The rail is a ::before on .msg-user, so everything else has to sit in a
+     .u-body wrapper or it becomes a second flex child beside the rail. */
   function addUser(content) {
-    if (typeof content === "string") { add(div("msg-user", esc(content))); return; }
-    /* Content blocks: images + text */
-    if (!Array.isArray(content)) { add(div("msg-user", esc(String(content)))); return; }
+    closeToolGroup();
+    if (typeof content === "string") {
+      add(div("msg-user", '<div class="u-body">' + esc(content) + "</div>"));
+      return;
+    }
+    if (!Array.isArray(content)) {
+      add(div("msg-user", '<div class="u-body">' + esc(String(content)) + "</div>"));
+      return;
+    }
     var html = "";
     for (var i = 0; i < content.length; i++) {
       var b = content[i];
       if (b.type === "image") {
         html += '<img class="msg-img" src="data:' + esc(b.mediaType) + ';base64,' + b.data + '" alt="attached image">';
       } else if (b.type === "text") {
-        html += '<span>' + esc(b.text) + '</span>';
+        html += "<span>" + esc(b.text) + "</span>";
       }
     }
-    add(div("msg-user", html));
+    add(div("msg-user", '<div class="u-body">' + html + "</div>"));
   }
 
   function appendAi(text) {
     if (!aiEl) {
+      // Prose after a run of tools ends the strip — the model has stopped
+      // working and started explaining.
+      closeToolGroup();
       aiEl = add(div("msg-ai", ""));
       aiEl._raw = "";
     }
@@ -430,8 +476,50 @@ function _sbRun() {
 
   /* ───────────────────────── tool cards ───────────────────────── */
 
-  function toolStart(name, args) {
-    aiEl = null;
+  /**
+   * Consecutive tool calls share one strip.
+   *
+   * `toolGroup` stays open until prose, a user turn or the end of the run
+   * closes it, so a run of Read/Grep/Edit collapses into a single "3 steps"
+   * object with the total elapsed time rather than three stacked cards.
+   */
+  function openToolGroup() {
+    if (toolGroup) return toolGroup;
+    var g = div("tool-group");
+    g.setAttribute("data-open", "1");
+    g.setAttribute("data-running", "1");
+    g.setAttribute("data-error", "0");
+    g.innerHTML =
+      '<button class="tool-group-head">' + icon("i-chev", "ic-9 chev") +
+        '<span class="dot"></span><span class="n">1 step</span>' +
+        '<span class="ms"></span></button>' +
+      '<div class="tool-group-body"></div>';
+    g._count = 0;
+    g._t0 = Date.now();
+    g.querySelector(".tool-group-head").addEventListener("click", function () {
+      g.setAttribute("data-open", g.getAttribute("data-open") === "1" ? "0" : "1");
+    });
+    toolGroup = g;
+    add(g);
+    return g;
+  }
+
+  /** Freeze the group's counters. Safe to call when no group is open. */
+  function closeToolGroup() {
+    if (!toolGroup) return;
+    toolGroup.setAttribute("data-running", "0");
+    toolGroup = null;
+  }
+
+  function stampGroup(g) {
+    g.querySelector(".n").textContent = g._count + (g._count === 1 ? " step" : " steps");
+    var s = (Date.now() - g._t0) / 1000;
+    g.querySelector(".ms").textContent = s < 10 ? s.toFixed(1) + "s" : Math.round(s) + "s";
+  }
+
+  /** One collapsed tool row. Shared by the live path and session restore, so a
+   *  reloaded transcript is indistinguishable from the one that just ran. */
+  function toolCard(name, args) {
     var el = div("tool");
     el.setAttribute("data-open", "0");
     el.innerHTML =
@@ -439,17 +527,47 @@ function _sbRun() {
         icon(TOOL_ICON[name] || "i-file", "ic-14 tool-icon") +
         '<span class="tool-verb">' + esc(TOOL_VERB[name] || name) + "</span>" +
         '<span class="tool-arg ell">' + esc(argOf(name, args)) + "</span>" +
-        '<span class="sp"></span><span class="tool-meta"></span></button>' +
+        '<span class="sp"></span><span class="tool-stat"></span>' +
+        '<span class="tool-meta"></span></button>' +
       '<div class="tool-body" hidden></div>';
     el.querySelector(".tool-head").addEventListener("click", function () {
       var open = el.getAttribute("data-open") === "1";
       el.setAttribute("data-open", open ? "0" : "1");
       el.querySelector(".tool-body").hidden = open;
     });
+    var stat = diffStat(name, args);
+    if (stat) el.querySelector(".tool-stat").innerHTML = stat;
+    return el;
+  }
+
+  function toolStart(name, args) {
+    aiEl = null;
+    var g = openToolGroup();
+    var el = toolCard(name, args);
+    g.querySelector(".tool-group-body").appendChild(el);
+    g._count++;
+    stampGroup(g);
     pendingTool = el;
-    S.gerund = GERUND[name] || "Thinking…";
+    S.gerund = gerundFor(name, args);
     tickGerund();
-    return add(el);
+    if (atBottom()) scroll();
+    return el;
+  }
+
+  /**
+   * "Editing src/watcher.ts" beats "Thinking…".
+   *
+   * The aura carries the energy; the label should carry information. The
+   * argument is trimmed to its basename because a deep path pushes the elapsed
+   * counter off the end of a 340px panel.
+   */
+  function gerundFor(name, args) {
+    var base = GERUND[name] || "Thinking…";
+    var a = argOf(name, args);
+    if (!a) return base;
+    var short = String(a).split(/[\\/]/).pop();
+    if (short.length > 28) short = short.slice(0, 27) + "…";
+    return base.replace(/…$/, "") + " " + short;
   }
 
   function toolEnd(name, args, result, isError) {
@@ -460,6 +578,10 @@ function _sbRun() {
     el.querySelector(".tool-meta").innerHTML = isError
       ? '<span class="tool-fail">' + icon("i-x", "ic-13") + "</span>"
       : '<span class="tool-ok">' + icon("i-check", "ic-13") + "</span>";
+    if (toolGroup) {
+      if (isError) toolGroup.setAttribute("data-error", "1");
+      stampGroup(toolGroup);
+    }
 
     var body = el.querySelector(".tool-body");
     body.innerHTML = "";
@@ -530,6 +652,7 @@ function _sbRun() {
 
   function addDiff(m) {
     aiEl = null;
+    closeToolGroup();
     var rows = parsePatch(m.patch), body = "";
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i];
@@ -617,11 +740,13 @@ function _sbRun() {
 
     if (todoEl) { todoEl.innerHTML = html; return; }
     aiEl = null;
+    closeToolGroup();
     todoEl = add(div("card", html));
   }
 
   function addPermission(m) {
     aiEl = null;
+    closeToolGroup();
     var el = add(div("perm",
       '<div class="perm-t">' + icon("i-warn", "ic-14") + "Permission required</div>" +
       '<div class="perm-b">Kryptonite wants to:</div>' +
@@ -663,6 +788,7 @@ function _sbRun() {
 
   function addPlan(m) {
     aiEl = null;
+    closeToolGroup();
     var steps = "";
     for (var i = 0; i < m.steps.length; i++) {
       steps += '<li><span class="n">' + (i + 1) + '</span><span>' + esc(m.steps[i]) + "</span></li>";
@@ -688,12 +814,24 @@ function _sbRun() {
 
   /* ───────────────────── streaming indicator ───────────────────── */
 
+  /**
+   * The Overload aura: spinning radiation rays, three frame-swapped ki bands,
+   * a shockwave ring and three rising embers, all behind a crystal that never
+   * moves. Every layer is a bare span positioned by CSS — the markup carries
+   * no geometry so the whole composition can be retuned in sidebar.css alone.
+   */
+  function auraMarkup() {
+    return '<span class="rad">' +
+      '<span class="rays"></span>' +
+      '<span class="ki ki1"></span><span class="ki ki2"></span><span class="ki ki3"></span>' +
+      '<span class="shock"></span>' +
+      '<span class="em em1"></span><span class="em em2"></span><span class="em em3"></span>' +
+      crystal(21, "crystal") + "</span>";
+  }
+
   function startStream() {
     if (!streamEl) {
-      streamEl = add(div("stream",
-        '<span class="rad"><span class="ring"></span><span class="core"></span>' +
-        crystal(21, "crystal") + "</span>" +
-        '<span class="g"></span><span class="m"></span>'));
+      streamEl = add(div("stream", auraMarkup() + '<span class="g"></span><span class="m"></span>'));
       S.elapsed = 0;
     }
     tickGerund();
@@ -710,6 +848,38 @@ function _sbRun() {
     if (S.timer) { clearInterval(S.timer); S.timer = null; }
     if (streamEl) { streamEl.remove(); streamEl = null; }
     S.gerund = "Thinking…";
+  }
+
+  /**
+   * Close the turn: freeze the tool strip, then add the hover actions and a
+   * divider so the transcript has a pulse instead of running together.
+   *
+   * The footer is only added when the turn actually produced something —
+   * an interrupt before the first token should not leave a stray rule behind.
+   */
+  function endTurn() {
+    closeToolGroup();
+    var last = logEl.lastElementChild;
+    if (!last || last.classList.contains("turn-div") || last.classList.contains("welcome")) return;
+
+    var secs = S.elapsed;
+    var used = S.context ? S.context.used : 0;
+    var foot = div("turn-foot",
+      '<button data-turn="copy">Copy</button>' +
+      '<button data-turn="retry">Retry</button>' +
+      '<button data-turn="branch">Branch</button>' +
+      '<span class="cost">' + secs + "s" + (used ? " · " + fmtK(used) : "") + "</span>");
+    var text = aiEl && aiEl._raw ? aiEl._raw : "";
+    foot.addEventListener("click", function (e) {
+      var b = e.target.closest("[data-turn]");
+      if (!b) return;
+      var a = b.getAttribute("data-turn");
+      if (a === "copy") post("copyText", { text: text });
+      else if (a === "retry") post("sendMessage", { text: "Retry that last step." });
+      else if (a === "branch") post("newChat");
+    });
+    add(foot);
+    add(div("turn-div"));
   }
 
   /* ───────────────────────── composer ───────────────────────── */
@@ -798,11 +968,47 @@ function _sbRun() {
     }
     if (!S.qp) return [];
     var q = S.qp.q.toLowerCase();
-    if (S.qp.kind === "cmd") {
-      return CMDS.filter(function (c) { return c[0].slice(1).indexOf(q) === 0; })
-        .map(function (c) { return { cmd: c[0], desc: c[1] }; });
-    }
+    if (S.qp.kind === "cmd") return slashItems(q);
     return S.files.map(function (f) { return { file: f.path, badge: f.kind }; });
+  }
+
+  /**
+   * What `/` offers.
+   *
+   * Skills first, because that is what a slash means here: the SKILL.md files
+   * in this workspace plus the ones that ship with the extension, exactly as
+   * they appear on disk. The extension's own features are still reachable, but
+   * they are chrome — they sit in a second group under "Commands" so they
+   * cannot crowd out the thing the user is actually looking for.
+   *
+   * Disabled skills are omitted rather than greyed: an unchecked skill is not
+   * in the model's system prompt, so offering it here would invoke a name the
+   * model has never been told about.
+   */
+  function slashItems(q) {
+    var rows = [];
+    // An empty q matches every name, so this is also the "just typed /" case.
+    var skills = S.skills.filter(function (s) {
+      return s.enabled && s.name.toLowerCase().indexOf(q) === 0;
+    });
+    if (skills.length) {
+      rows.push({ group: "Skills" });
+      for (var i = 0; i < skills.length; i++) {
+        rows.push({
+          skill: skills[i].name,
+          desc: skills[i].description || "",
+          src: skills[i].source
+        });
+      }
+    }
+    var cmds = CMDS.filter(function (c) { return c[0].slice(1).indexOf(q) === 0; });
+    if (cmds.length) {
+      rows.push({ group: "Commands" });
+      for (var j = 0; j < cmds.length; j++) {
+        rows.push({ cmd: cmds[j][0], desc: cmds[j][1] });
+      }
+    }
+    return rows;
   }
 
   function renderQuickPick() {
@@ -827,7 +1033,12 @@ function _sbRun() {
       if (r.group) { html += '<div class="qp-group">' + esc(r.group) + "</div>"; continue; }
       idx++;
       var on = idx === S.qpIndex ? "1" : "0";
-      if (r.cmd) {
+      if (r.skill) {
+        html += '<button class="qp-row" role="option" data-active="' + on + '" data-i="' + idx + '">' +
+          icon("i-book", "ic-13") + '<span class="n">/' + esc(r.skill) + "</span>" +
+          '<span class="d ell" title="' + esc(r.desc) + '">' + esc(r.desc) + "</span>" +
+          '<span class="qp-src">' + esc(r.src) + "</span></button>";
+      } else if (r.cmd) {
         html += '<button class="qp-row" role="option" data-active="' + on + '" data-i="' + idx + '">' +
           icon("i-term", "ic-13") + '<span class="n">' + esc(r.cmd) + "</span>" +
           '<span class="d ell">' + esc(r.desc) + "</span></button>";
@@ -854,7 +1065,12 @@ function _sbRun() {
     if (!r) return;
     var draft = $("draft");
 
-    if (r.cmd) {
+    if (r.skill) {
+      // Leaves the turn in the composer rather than sending it: a skill is a
+      // preamble to a request ("/canvas-design a launch poster"), not a
+      // request on its own.
+      draft.value = "/" + r.skill + " ";
+    } else if (r.cmd) {
       runSlash(r.cmd, draft);
     } else if (r.file) {
       draft.value = draft.value.replace(/@([\w./-]*)$/, "@" + r.file + " ");
@@ -882,17 +1098,19 @@ function _sbRun() {
         draft.value = ""; post("openControlCenter", { section: "checkpoints" }); break;
       case "/review":
         draft.value = ""; sendText(REVIEW_PROMPT); break;
-      case "/skill:": {
-        var names = S.skills.filter(function (s) { return s.enabled; })
-          .map(function (s) { return s.name; });
-        draft.value = "/skill:" + (names[0] || "");
-        break;
-      }
+      case "/skills":
+        draft.value = ""; setTab("diagnostics"); openSection("secSk"); renderSkills(); break;
       case "/help": {
         draft.value = "";
-        var lines = CMDS.map(function (c) { return c[0] + "  —  " + c[1]; }).join("\n");
+        var skills = S.skills.filter(function (s) { return s.enabled; });
+        var text = "Skills — type / to insert one\n\n" +
+          (skills.length
+            ? skills.map(function (s) { return "/" + s.name + "  —  " + (s.description || ""); }).join("\n")
+            : "No skills enabled. Add a SKILL.md under .agent/skills/.") +
+          "\n\nCommands\n\n" +
+          CMDS.map(function (c) { return c[0] + "  —  " + c[1]; }).join("\n");
         aiEl = null;
-        add(div("note-box", esc("Available commands\n\n" + lines)));
+        add(div("note-box", esc(text)));
         break;
       }
       default:
@@ -925,6 +1143,7 @@ function _sbRun() {
 
   function addError(message) {
     aiEl = null;
+    closeToolGroup();
     add(div("err-box", esc(message)));
   }
 
@@ -935,6 +1154,8 @@ function _sbRun() {
     var limit = S.context ? S.context.limit : 0;
     $("ctxText").textContent = fmtK(used) + " / " + fmtK(limit);
     $("ctxFill").style.width = limit ? Math.min(100, (used / limit) * 100) + "%" : "0";
+    // Header carries the bare number; the footer keeps the meter it fills.
+    $("ctxHead").textContent = used ? fmtK(used) : "";
 
     var active = activeProfile();
     var name = active ? active.id : "No endpoint";
@@ -1056,17 +1277,77 @@ function _sbRun() {
       for (var t = 0; t < types.length; t++) {
         opts += '<option value="' + types[t] + '"' + (f.type === types[t] ? " selected" : "") + ">" + types[t] + "</option>";
       }
+      var needsKey = f.type !== "local";
       html += '<div class="form"><div class="t">' + (f.isNew ? "Add endpoint" : "Edit endpoint") + "</div>" +
         '<div class="fgrid">' +
-          '<label for="fId">ID</label><input id="fId" value="' + esc(f.id) + '" placeholder="corp-gateway">' +
-          '<label for="fName">Display Name</label><input id="fName" value="' + esc(f.name) + '" placeholder="Corp Gateway">' +
-          '<label for="fUrl">Base URL</label><input id="fUrl" value="' + esc(f.url) + '" placeholder="https://llm.corp.example/v1">' +
+          '<label for="fId">ID</label><input id="fId" value="' + esc(f.id) + '" placeholder="openrouter">' +
+          '<label for="fName">Display Name</label><input id="fName" value="' + esc(f.name) + '" placeholder="OpenRouter">' +
+          '<label for="fUrl">Base URL</label><input id="fUrl" value="' + esc(f.url) + '" placeholder="https://openrouter.ai/api/v1">' +
           '<label for="fType">Provider Type</label><select id="fType">' + opts + "</select>" +
+          '<label for="fModel">Model</label><input id="fModel" value="' + esc(f.model || "") + '" placeholder="openrouter/free">' +
+          (needsKey
+            ? '<label for="fKey">API Key</label><input id="fKey" type="password" autocomplete="off" spellcheck="false" value="" placeholder="' +
+              (f.hasStoredKey ? "stored — leave blank to keep" : "sk-…") + '">'
+            : "") +
+          '<label for="fPath">Route</label><input id="fPath" value="' + esc(f.chatPath || "") + '" placeholder="auto — derived from Base URL">' +
         "</div>" +
+        (needsKey
+          ? '<div class="hint2">The key is stored in VS Code SecretStorage. The YAML only holds a <code>${secret:…}</code> reference, so the profile is safe to commit.</div>'
+          : "") +
+        renderEpCheck() +
         '<div class="row"><button class="btn" data-ep="cancel">Cancel</button>' +
+        '<button class="btn" data-ep="check"' + (S.epCheck && S.epCheck.running ? " disabled" : "") + ">" +
+        (S.epCheck && S.epCheck.running ? "Checking…" : "Check connection") + "</button>" +
         '<button class="btn primary" data-ep="save">Save</button></div></div>';
     }
     $("epBody").innerHTML = html;
+    // Re-rendering replaces the whole subtree, and check rungs re-render on
+    // every arriving rung. The typed key is restored as a property rather than
+    // an attribute so it never appears in the markup string above.
+    if (S.epForm && S.epForm.apiKey && $("fKey")) $("fKey").value = S.epForm.apiKey;
+  }
+
+  /**
+   * Snapshot the form inputs into the store.
+   *
+   * Must run before anything that re-renders the panel, otherwise a check
+   * result arriving mid-edit wipes what the user has typed.
+   */
+  function readEpForm() {
+    if (!S.epForm || !$("fId")) return S.epForm;
+    var key = $("fKey") ? $("fKey").value : "";
+    S.epForm.id = $("fId").value.trim();
+    S.epForm.name = $("fName").value.trim();
+    S.epForm.url = $("fUrl").value.trim();
+    S.epForm.type = $("fType").value;
+    S.epForm.model = $("fModel") ? $("fModel").value.trim() : "";
+    S.epForm.chatPath = $("fPath") ? $("fPath").value.trim() : "";
+    if (key) S.epForm.apiKey = key;
+    return S.epForm;
+  }
+
+  /**
+   * The connection-check panel inside the endpoint form.
+   *
+   * Rungs stream in one at a time, so this renders whatever has arrived and
+   * appends a pending row while the walk is still going — the same shape the
+   * TLS trace uses, because it is literally the same ladder underneath.
+   */
+  function renderEpCheck() {
+    var c = S.epCheck;
+    if (!c) return "";
+    var out = '<div class="ep-check" data-ok="' + (c.done ? (c.ok ? "1" : "0") : "") + '">';
+    if (c.done) {
+      out += '<div class="ep-check-banner" data-ok="' + (c.ok ? "1" : "0") + '">' +
+        icon(c.ok ? "i-check" : "i-warn", "ic-13") +
+        "<span>" + esc(c.summary) + "</span></div>";
+    }
+    for (var i = 0; i < c.rungs.length; i++) {
+      var r = c.rungs[i];
+      out += rungRow(r.name, r.status, r.detail, r.fix, r.ms);
+    }
+    if (c.running) out += rungRow("", "pending", "Checking…", undefined, null);
+    return out + "</div>";
   }
 
   /* ───────────────────── diagnostics: skills ───────────────────── */
@@ -1086,7 +1367,16 @@ function _sbRun() {
         '<span class="ds ell" title="' + esc(s.description) + '">' + esc(s.description) + "</span>" +
         '<span class="src">' + esc(s.source) + "</span></button>";
     }
-    var tokens = enabled * 62;
+    // Level 1 of the disclosure only: the fixed rules block plus one
+    // "name: description" line per enabled skill, at ~4 chars a token. The
+    // bodies are not counted because they are not in the prompt until the
+    // model calls read_skill.
+    var chars = 0;
+    for (var n = 0; n < S.skills.length; n++) {
+      if (!S.skills[n].enabled) continue;
+      chars += S.skills[n].name.length + (S.skills[n].description || "").length + 4;
+    }
+    var tokens = enabled ? Math.round(chars / 4) + 140 : 0;
     $("skBody").innerHTML =
       (rows || '<div class="empty">No skills found in .agent/skills/</div>') +
       '<div class="sk-foot"><span>' + enabled + " enabled · ~" + tokens + " tokens in system prompt</span>" +
@@ -1121,27 +1411,22 @@ function _sbRun() {
       if (body) { aiEl = null; appendAi(body); aiEl = null; }
 
       var calls = msg.toolCalls || [];
+      if (!calls.length) continue;
+      // Same strip the live path builds; the elapsed stamp is meaningless on a
+      // replay, so it is cleared rather than showing time since page load.
+      var g = openToolGroup();
       for (var k = 0; k < calls.length; k++) {
         var call = calls[k];
-        var el = div("tool");
-        el.setAttribute("data-open", "0");
-        el.innerHTML =
-          '<button class="tool-head">' + icon("i-chev", "ic-9 chev") +
-            icon(TOOL_ICON[call.name] || "i-file", "ic-14 tool-icon") +
-            '<span class="tool-verb">' + esc(TOOL_VERB[call.name] || call.name) + "</span>" +
-            '<span class="tool-arg ell">' + esc(argOf(call.name, call.arguments)) + "</span>" +
-            '<span class="sp"></span></button><div class="tool-body" hidden></div>';
-        (function (element) {
-          element.querySelector(".tool-head").addEventListener("click", function () {
-            var open = element.getAttribute("data-open") === "1";
-            element.setAttribute("data-open", open ? "0" : "1");
-            element.querySelector(".tool-body").hidden = open;
-          });
-        })(el);
+        var el = toolCard(call.name, call.arguments);
         var res = resultFor[call.id];
         if (res) el.querySelector(".tool-body").appendChild(resultBlock(res));
-        add(el);
+        g.querySelector(".tool-group-body").appendChild(el);
+        g._count++;
       }
+      g.querySelector(".n").textContent = g._count + (g._count === 1 ? " step" : " steps");
+      g.querySelector(".ms").textContent = "";
+      g.setAttribute("data-open", "0");
+      closeToolGroup();
     }
     scroll();
   }
@@ -1436,10 +1721,15 @@ function _sbRun() {
     if (!b) return;
     var a = b.getAttribute("data-ep"), id = b.getAttribute("data-id");
     if (a === "add") {
-      S.epForm = { isNew: true, id: "", name: "", url: "", type: "openai-compatible" };
+      S.epForm = {
+        isNew: true, id: "", name: "", url: "", type: "openai-compatible",
+        model: "", chatPath: "", apiKey: "", hasStoredKey: false
+      };
+      S.epCheck = null;
       renderEndpoints();
     } else if (a === "cancel") {
       S.epForm = null;
+      S.epCheck = null;
       renderEndpoints();
     } else if (a === "edit") {
       for (var i = 0; i < S.profiles.length; i++) {
@@ -1449,25 +1739,45 @@ function _sbRun() {
           isNew: false, id: p.id, name: p.description || p.id,
           url: p.baseUrl === "—" ? "" : p.baseUrl,
           type: p.wire === "anthropic" ? "anthropic" : "openai-compatible",
+          model: p.model === "—" ? "" : p.model,
+          chatPath: p.chatPath || "",
+          apiKey: "",
+          // The DTO carries the raw template, never the value, so this is the
+          // only way the form can tell "a key exists" from "no key set".
+          hasStoredKey: (p.authSummary || "").indexOf("${secret:") !== -1,
           originalId: p.id
         };
+        S.epCheck = null;
         renderEndpoints();
         break;
       }
     } else if (a === "del") {
       post("deleteEndpoint", { id: id });
+    } else if (a === "check") {
+      var draft = readEpForm();
+      if (!draft) return;
+      S.epCheck = { id: draft.id || "draft", running: true, done: false, ok: false, summary: "", rungs: [] };
+      renderEndpoints();
+      post("checkEndpoint", { endpoint: epPayload(draft) });
     } else if (a === "save") {
-      var form = {
-        id: $("fId").value.trim(),
-        name: $("fName").value.trim(),
-        url: $("fUrl").value.trim(),
-        type: $("fType").value
-      };
-      if (S.epForm && S.epForm.originalId) form.originalId = S.epForm.originalId;
+      var form = epPayload(readEpForm());
       S.epForm = null;
+      S.epCheck = null;
       renderEndpoints();
       if (form.id) post("saveEndpoint", { endpoint: form });
     }
+  }
+
+  /** The wire shape of the form. `apiKey` is omitted when nothing was typed. */
+  function epPayload(f) {
+    var out = {
+      id: f.id, name: f.name, url: f.url, type: f.type,
+      model: f.model || "", chatPath: f.chatPath || "",
+      hasStoredKey: !!f.hasStoredKey
+    };
+    if (f.apiKey) out.apiKey = f.apiKey;
+    if (f.originalId) out.originalId = f.originalId;
+    return out;
   }
 
   function onSkillClick(e) {
@@ -1551,6 +1861,7 @@ function _sbRun() {
       case "turnEnd":
         S.running = false;
         endStream();
+        endTurn();
         aiEl = null;
         pendingTool = null;
         syncComposer();
@@ -1587,10 +1898,35 @@ function _sbRun() {
 
       case "profilesReloaded":
         S.profiles = m.profiles || [];
+        // A reload can land while the form is open (the file watcher fires on
+        // every save). Snapshot first so it re-renders with what was typed.
+        readEpForm();
         renderEndpoints();
         renderFooter();
         syncComposer();
         if (logEl.querySelector(".welcome")) renderWelcome();
+        break;
+
+      case "endpointCheckStarted":
+        readEpForm();
+        S.epCheck = { id: m.id, running: true, done: false, ok: false, summary: "", rungs: [] };
+        renderEndpoints();
+        break;
+
+      case "endpointCheckRung":
+        if (!S.epCheck) break;
+        readEpForm();
+        S.epCheck.rungs = S.epCheck.rungs.concat([m.rung]);
+        renderEndpoints();
+        break;
+
+      case "endpointCheckDone":
+        readEpForm();
+        S.epCheck = {
+          id: m.id, running: false, done: true,
+          ok: !!m.ok, summary: m.summary || "", rungs: m.rungs || []
+        };
+        renderEndpoints();
         break;
 
       case "skillsReloaded":

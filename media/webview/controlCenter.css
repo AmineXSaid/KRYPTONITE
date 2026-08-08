@@ -252,6 +252,22 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 }
 .fgrid input:focus, .fgrid select:focus { border-color: var(--vscode-focusBorder); }
 .form .row { display: flex; gap: 7px; justify-content: flex-end; }
+.form .hint2 { font-size: 11px; line-height: 1.5; color: var(--vscode-descriptionForeground); }
+
+/* ── connection check, inside the endpoint form ── */
+.ep-check { margin-top: 2px; padding-top: 8px; border-top: 1px solid var(--vscode-panel-border); }
+.ep-check-banner {
+  margin-bottom: 8px; padding: 7px 9px; border-radius: 5px;
+  font-size: 11.5px; line-height: 1.5; overflow-wrap: anywhere;
+}
+.ep-check-banner[data-ok="1"] {
+  color: var(--vscode-testing-iconPassed);
+  background: color-mix(in srgb, var(--vscode-testing-iconPassed) 12%, transparent);
+}
+.ep-check-banner[data-ok="0"] {
+  color: var(--vscode-editorError-foreground);
+  background: color-mix(in srgb, var(--vscode-editorError-foreground) 12%, transparent);
+}
 
 /* ── trace ladder ── */
 .rung { display: flex; align-items: flex-start; gap: 10px; font-size: 11.5px; padding: 5px 0; }

@@ -102,6 +102,7 @@ function _run() {
     checkpoints: [],
     logs: [],
     epForm: null,
+    epCheck: null,
     flash: {}
   };
 
@@ -279,6 +280,8 @@ function _run() {
       case "checkpoints": pane.innerHTML = secCheckpoints(); break;
       case "logs": pane.innerHTML = secLogs(); break;
     }
+    // Set as a property, never interpolated into the markup above.
+    if (S.epForm && S.epForm.apiKey && $("fKey")) $("fKey").value = S.epForm.apiKey;
   }
 
   /* ── endpoints ── */
@@ -358,15 +361,67 @@ function _run() {
     for (var i = 0; i < types.length; i++) {
       opts += '<option value="' + types[i] + '"' + (f.type === types[i] ? " selected" : "") + ">" + types[i] + "</option>";
     }
+    var needsKey = f.type !== "local";
     return '<div class="form"><div class="t">' + (f.isNew ? "Add endpoint" : "Edit endpoint") + "</div>" +
       '<div class="fgrid">' +
-        '<label for="fId">ID</label><input id="fId" value="' + esc(f.id) + '" placeholder="corp-gateway">' +
-        '<label for="fName">Display Name</label><input id="fName" value="' + esc(f.name) + '" placeholder="Corp Gateway">' +
-        '<label for="fUrl">Base URL</label><input id="fUrl" value="' + esc(f.url) + '" placeholder="https://llm.corp.example/v1">' +
+        '<label for="fId">ID</label><input id="fId" value="' + esc(f.id) + '" placeholder="openrouter">' +
+        '<label for="fName">Display Name</label><input id="fName" value="' + esc(f.name) + '" placeholder="OpenRouter">' +
+        '<label for="fUrl">Base URL</label><input id="fUrl" value="' + esc(f.url) + '" placeholder="https://openrouter.ai/api/v1">' +
         '<label for="fType">Provider Type</label><select id="fType">' + opts + "</select>" +
+        '<label for="fModel">Model</label><input id="fModel" value="' + esc(f.model || "") + '" placeholder="openrouter/free">' +
+        (needsKey
+          ? '<label for="fKey">API Key</label><input id="fKey" type="password" autocomplete="off" spellcheck="false" value="" placeholder="' +
+            (f.hasStoredKey ? "stored — leave blank to keep" : "sk-…") + '">'
+          : "") +
+        '<label for="fPath">Route</label><input id="fPath" value="' + esc(f.chatPath || "") + '" placeholder="auto — derived from Base URL">' +
       "</div>" +
+      (needsKey
+        ? '<div class="hint2">Stored in VS Code SecretStorage. The YAML holds only a <code>${secret:…}</code> reference.</div>'
+        : "") +
+      epCheckPanel() +
       '<div class="row"><button class="btn" data-ep="cancel">Cancel</button>' +
+      '<button class="btn" data-ep="check"' + (S.epCheck && S.epCheck.running ? " disabled" : "") + ">" +
+      (S.epCheck && S.epCheck.running ? "Checking…" : "Check connection") + "</button>" +
       '<button class="btn primary" data-ep="save">Save</button></div></div>';
+  }
+
+  /** Same ladder rows the Diagnostics section renders, scoped to the form. */
+  function epCheckPanel() {
+    var c = S.epCheck;
+    if (!c) return "";
+    var out = '<div class="ep-check">';
+    if (c.done) {
+      out += '<div class="ep-check-banner" data-ok="' + (c.ok ? "1" : "0") + '">' +
+        esc(c.summary) + "</div>";
+    }
+    for (var i = 0; i < c.rungs.length; i++) out += rungRow(c.rungs[i]);
+    if (c.running) out += rungRow({ name: "", status: "pending", detail: "Checking…", ms: 0 });
+    return out + "</div>";
+  }
+
+  /** Snapshot the inputs before any re-render, so streaming rungs don't wipe them. */
+  function readEpForm() {
+    if (!S.epForm || !$("fId")) return S.epForm;
+    var key = $("fKey") ? $("fKey").value : "";
+    S.epForm.id = $("fId").value.trim();
+    S.epForm.name = $("fName").value.trim();
+    S.epForm.url = $("fUrl").value.trim();
+    S.epForm.type = $("fType").value;
+    S.epForm.model = $("fModel") ? $("fModel").value.trim() : "";
+    S.epForm.chatPath = $("fPath") ? $("fPath").value.trim() : "";
+    if (key) S.epForm.apiKey = key;
+    return S.epForm;
+  }
+
+  function epPayload(f) {
+    var out = {
+      id: f.id, name: f.name, url: f.url, type: f.type,
+      model: f.model || "", chatPath: f.chatPath || "",
+      hasStoredKey: !!f.hasStoredKey
+    };
+    if (f.apiKey) out.apiKey = f.apiKey;
+    if (f.originalId) out.originalId = f.originalId;
+    return out;
   }
 
   /* ── wire & transforms ── */
@@ -858,16 +913,19 @@ function _run() {
   function onEndpointAction(action, id) {
     if (action === "yaml") { post("openYaml", { profile: id }); return; }
     if (action === "del") { post("deleteEndpoint", { id: id }); return; }
-    if (action === "cancel") { S.epForm = null; render(); return; }
+    if (action === "cancel") { S.epForm = null; S.epCheck = null; render(); return; }
+    if (action === "check") {
+      var draft = readEpForm();
+      if (!draft) return;
+      S.epCheck = { id: draft.id || "draft", running: true, done: false, ok: false, summary: "", rungs: [] };
+      render();
+      post("checkEndpoint", { endpoint: epPayload(draft) });
+      return;
+    }
     if (action === "save") {
-      var form = {
-        id: $("fId").value.trim(),
-        name: $("fName").value.trim(),
-        url: $("fUrl").value.trim(),
-        type: $("fType").value
-      };
-      if (S.epForm && S.epForm.originalId) form.originalId = S.epForm.originalId;
+      var form = epPayload(readEpForm());
       S.epForm = null;
+      S.epCheck = null;
       render();
       if (form.id) post("saveEndpoint", { endpoint: form });
     }
@@ -963,6 +1021,28 @@ function _run() {
       case "traceUpdate":
         S.tracing = true;
         S.rungs = S.rungs.slice(0, m.index).concat([m.rung]);
+        render();
+        break;
+
+      case "endpointCheckStarted":
+        readEpForm();
+        S.epCheck = { id: m.id, running: true, done: false, ok: false, summary: "", rungs: [] };
+        render();
+        break;
+
+      case "endpointCheckRung":
+        if (!S.epCheck) break;
+        readEpForm();
+        S.epCheck.rungs = S.epCheck.rungs.concat([m.rung]);
+        render();
+        break;
+
+      case "endpointCheckDone":
+        readEpForm();
+        S.epCheck = {
+          id: m.id, running: false, done: true,
+          ok: !!m.ok, summary: m.summary || "", rungs: m.rungs || []
+        };
         render();
         break;
 

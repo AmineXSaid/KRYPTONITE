@@ -8,13 +8,33 @@
    thinking indicator.
    ───────────────────────────────────────────────────────────────────────── */
 
+/* Four typefaces, four jobs.
+ *
+ * One font at one size band for a wordmark, a button, a paragraph of prose and
+ * a token count flattens hierarchy in a 340px panel, and hierarchy is the only
+ * thing keeping a long transcript readable. So type carries role:
+ *
+ *   --kx-brand  identity   wordmark, empty-state headline, section titles
+ *   --kx-ui     interface  buttons, tool rows, tabs, labels, the user's turn
+ *   --kx-prose  prose      assistant answers, descriptions, help text
+ *   --kx-mono   code/data  code, diffs, paths, token counts, timings
+ *
+ * The named faces are first in each stack but nothing is fetched: the CSP is
+ * `default-src 'none'` with `font-src` limited to the extension's own origin,
+ * because an air-gapped install has to render identically to a connected one.
+ * Drop the woff2 files into `media/fonts/` and `shell.ts` emits @font-face for
+ * whichever are present; otherwise each stack falls through to a system face
+ * that keeps the role distinction (a grotesque for chrome, a humanist for
+ * prose, a mono for data). */
 :root {
   --kx-accent: #4AF6A4;   /* identity & state  — never a button */
   --kx-action: #5E6AD2;   /* action            — send, primaries */
   --kx-active: #6E49CB;   /* position          — tabs, plan phase */
   --vscode-dimmerForeground: #6E7681;
-  --kx-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --kx-mono: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+  --kx-brand: 'Space Grotesk', 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --kx-ui: 'Geist', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --kx-prose: 'IBM Plex Sans', 'Segoe UI', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --kx-mono: 'Geist Mono', 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
 }
 body.vscode-light {
   --kx-accent: #0FA36B;
@@ -79,7 +99,15 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   padding: 0 10px 0 12px; position: relative;
   border-bottom: 1px solid var(--vscode-panel-border);
 }
-.kx-wordmark { font-size: 12px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+/* The wordmark is the one place the brand face is allowed to speak. */
+.kx-wordmark {
+  font-family: var(--kx-brand); font-size: 12.5px; font-weight: 700;
+  letter-spacing: .11em; text-transform: uppercase;
+}
+.kx-ctx {
+  font-family: var(--kx-mono); font-size: 10px; flex: none;
+  color: var(--vscode-dimmerForeground);
+}
 .icon-btn {
   width: 26px; height: 26px; display: grid; place-items: center; border-radius: 5px;
   color: var(--vscode-descriptionForeground);
@@ -158,10 +186,12 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   align-items: center; justify-content: center; text-align: center;
 }
 .welcome .crystal { opacity: .9; margin-bottom: 8px; }
-.welcome h2 { font-size: 16px; font-weight: 600; }
+.welcome h2 {
+  font-family: var(--kx-brand); font-size: 17px; font-weight: 700; letter-spacing: -.01em;
+}
 .welcome p {
-  font-size: 12.5px; color: var(--vscode-descriptionForeground);
-  max-width: 30ch; margin: 4px 0 12px;
+  font-family: var(--kx-prose); font-size: 12.5px; line-height: 1.6;
+  color: var(--vscode-descriptionForeground); max-width: 30ch; margin: 4px 0 12px;
 }
 .chips { display: flex; flex-direction: column; gap: 6px; width: 100%; max-width: 300px; }
 .chip-btn {
@@ -170,40 +200,121 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 }
 .chip-btn:hover { background: var(--vscode-list-hoverBackground); }
 
+/* ── the user's turn: a rail, not a card ──
+   A bordered card gives your own question more visual weight than the answer
+   to it. A 2px rail marks the turn and then steps back. */
 .msg-user {
-  background: var(--vscode-textCodeBlock-background);
-  border: 1px solid var(--vscode-panel-border); border-radius: 8px;
-  padding: 8px 12px; margin-bottom: 14px;
+  display: flex; gap: 9px; margin-bottom: 16px;
+  font-family: var(--kx-ui); font-size: 13px; line-height: 1.55;
+  color: var(--vscode-descriptionForeground);
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
-.msg-user code { font-size: 11px; }
+.msg-user::before {
+  content: ""; width: 2px; flex: none; border-radius: 1px; align-self: stretch;
+  background: var(--vscode-panel-border);
+}
+.msg-user > .u-body { min-width: 0; padding-top: 1px; }
+.msg-user code { font-family: var(--kx-mono); font-size: 11.5px; }
 .msg-img { max-width: 100%; max-height: 200px; border-radius: 5px; margin-bottom: 6px; display: block; }
-.msg-ai { margin-bottom: 14px; line-height: 1.6; overflow-wrap: anywhere; }
-.msg-ai p { margin: 0 0 7px; }
+
+/* ── the answer: prose, with room to breathe ──
+   13.5/1.72 instead of 13/1.6. In a 340px panel this is the single highest
+   leverage readability change available. */
+.msg-ai {
+  margin-bottom: 12px; overflow-wrap: anywhere;
+  font-family: var(--kx-prose); font-size: 13.5px; line-height: 1.72;
+  text-wrap: pretty;
+}
+.msg-ai p { margin: 0 0 9px; }
 .msg-ai p:last-child { margin-bottom: 0; }
+/* Inline code gets a chip so identifiers pop out of prose instead of
+   blending into it. */
+.msg-ai code {
+  font-family: var(--kx-mono); font-size: 12px;
+  color: var(--kx-accent); background: var(--vscode-textCodeBlock-background);
+  padding: 1px 5px; border-radius: 4px;
+}
 .msg-ai pre, .code-block {
   background: var(--vscode-textCodeBlock-background); border-radius: 5px;
-  padding: 8px 10px; margin: 6px 0;
+  padding: 8px 10px; margin: 7px 0;
   font-family: var(--kx-mono); font-size: 11px; line-height: 1.65;
   white-space: pre; overflow-x: auto;
 }
+/* A chip inside a code block would be noise — the whole block is already code. */
+.msg-ai pre code, .code-block code {
+  color: inherit; background: none; padding: 0; border-radius: 0; font-size: inherit;
+}
 
-/* ── tool rows ── */
-.tool { margin-bottom: 2px; }
+/* ── turn footer: hover actions + cost ──
+   Copy / Retry / Branch appear at the end of a turn with elapsed time and
+   token cost in mono, then a divider gives the transcript a pulse. */
+.turn-foot {
+  display: flex; align-items: center; gap: 12px;
+  margin: 0 0 14px; opacity: 0; transition: opacity .12s;
+}
+.turn-foot:hover, .turn-foot:focus-within { opacity: 1; }
+.turn-foot button {
+  font-family: var(--kx-ui); font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+.turn-foot button:hover { color: var(--vscode-foreground); }
+.turn-foot .cost {
+  margin-left: auto; font-family: var(--kx-mono); font-size: 10px;
+  color: var(--vscode-dimmerForeground);
+}
+.turn-div { height: 1px; background: var(--vscode-panel-border); margin: 0 0 16px; }
+@media (prefers-reduced-motion: reduce) { .turn-foot { transition: none; } }
+
+/* ── tool rows, grouped into one strip ──
+   Consecutive tool calls collapse under a single "N steps" header with the
+   total elapsed time, so a long run is one object in the transcript instead
+   of a scrolling wall. The group is a plain wrapper: each .tool inside keeps
+   its own expander and its own body. */
+.tool-group {
+  border: 1px solid var(--vscode-panel-border); border-radius: 7px;
+  margin-bottom: 12px; overflow: hidden;
+}
+.tool-group-head {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 7px 10px; background: var(--vscode-textCodeBlock-background);
+}
+.tool-group-head:hover { background: var(--vscode-list-hoverBackground); }
+.tool-group-head .dot {
+  width: 5px; height: 5px; flex: none; border-radius: 50%; background: var(--kx-accent);
+}
+.tool-group[data-running="0"] .tool-group-head .dot { background: var(--vscode-descriptionForeground); }
+.tool-group[data-error="1"] .tool-group-head .dot { background: var(--vscode-editorError-foreground); }
+.tool-group-head .n { font-family: var(--kx-ui); font-size: 11.5px; font-weight: 600; }
+.tool-group-head .ms {
+  margin-left: auto; font-family: var(--kx-mono); font-size: 10.5px;
+  color: var(--vscode-descriptionForeground);
+}
+.tool-group-body { padding: 4px 0; }
+.tool-group[data-open="0"] .tool-group-body { display: none; }
+.tool-group[data-open="1"] .tool-group-head .chev { transform: rotate(90deg); }
+
+.tool { margin-bottom: 0; }
 .tool-head {
   display: flex; align-items: center; gap: 8px; width: 100%;
-  padding: 5px 6px; border-radius: 5px;
+  padding: 4px 10px; border-radius: 0;
 }
 .tool-head:hover { background: var(--vscode-list-hoverBackground); }
 .chev { transition: transform .12s; color: var(--vscode-descriptionForeground); }
 .tool[data-open="1"] .tool-head .chev { transform: rotate(90deg); }
 .tool-icon { color: var(--vscode-descriptionForeground); }
-.tool-verb { font-size: 12.5px; font-weight: 600; flex: none; }
-.tool[data-error="1"] .tool-verb { color: var(--vscode-editorError-foreground); }
-.tool-arg {
-  font-family: var(--kx-mono); font-size: 11.5px;
+.tool-verb {
+  font-family: var(--kx-ui); font-size: 11.5px; font-weight: 600; flex: none;
   color: var(--vscode-descriptionForeground);
 }
+.tool[data-error="1"] .tool-verb { color: var(--vscode-editorError-foreground); }
+.tool-arg {
+  font-family: var(--kx-mono); font-size: 11px;
+  color: var(--vscode-foreground);
+}
+/* Diff stat on the row that produced it, so an edit is legible at a glance. */
+.tool-stat { flex: none; font-family: var(--kx-mono); font-size: 10.5px; }
+.tool-stat .a { color: var(--kx-accent); }
+.tool-stat .d { color: var(--vscode-editorError-foreground); }
 .tool-meta { display: flex; align-items: center; gap: 8px; flex: none; }
 .tool-ok { color: var(--vscode-testing-iconPassed); display: flex; }
 .tool-fail { color: var(--vscode-editorError-foreground); display: flex; }
@@ -336,55 +447,120 @@ li.doing .cbx { border-color: var(--kx-accent); }
 }
 .plan-foot { display: flex; gap: 7px; }
 
-/* ── streaming indicator — dark emerald heartbeat aura while the model is answering ── */
+/* ── streaming indicator — "Overload": cel-shaded ki aura around a still mark ──
+ *
+ * Direction C from the aura mockup. Flat colour bands with hard spiked edges,
+ * frame-swapped on a steps(1) clock so the emission reads as hand-drawn
+ * animation rather than a CSS glow that fades in and out. The crystal itself
+ * never scales or translates — the stone emits, the logo holds still.
+ *
+ * Two things are tuned away from the mockup's showcase panel:
+ *
+ *   Size. The showcase runs at a 56px mark inside a 240px stage. Here the
+ *   mark is 21px on a chat line, so every layer is expressed as a multiple of
+ *   --kx-aura (the aura's own box) instead of a fixed pixel value. The layers
+ *   reach ~2.2x the crystal — enough to read as radiation, small enough that
+ *   it never collides with the label beside it or the turn above.
+ *
+ *   Speed. The mockup's clocks (.18–.3s bands, 1.4s shock, 11s rays) flicker
+ *   hard enough to pull the eye off the transcript during a long turn. These
+ *   run roughly 1.6x slower, matching the chat-embedded aura in the Type and
+ *   Chat mockup: still emitting, no longer strobing.
+ */
 .stream { display: flex; align-items: center; gap: 10px; margin: 4px 0 16px; }
-.rad { position: relative; width: 18px; height: 21px; flex: none; display: grid; place-items: center; }
-.rad .ring, .rad .core {
-  position: absolute; pointer-events: none; left: 50%; top: 50%; border-radius: 50%;
+.rad {
+  --kx-aura: 21px;
+  position: relative; width: 18px; height: var(--kx-aura);
+  flex: none; display: grid; place-items: center;
 }
-/* One synced heartbeat, not an ambient swirl: a dark core thumps behind the
-   mark and a sharp-edged ring snaps outward on the same beat (lub-dub), then
-   both rest until the next cycle. Deep emerald/near-black throughout, with
-   only a thin bright rim at the instant of impact — a beat, not a glow. */
-.rad .ring {
-  width: 42px; height: 48px; margin: -24px 0 0 -21px;
-  background: radial-gradient(closest-side,
-    rgba(3, 21, 15, 0) 52%, rgba(23, 168, 116, .95) 63%, rgba(6, 46, 33, .3) 75%, rgba(3, 21, 15, 0) 87%);
-  animation: kxring 1.05s cubic-bezier(.19, 1, .22, 1) infinite;
+.rad > span {
+  position: absolute; left: 50%; top: 50%; pointer-events: none;
 }
-.rad .core {
-  width: 25px; height: 29px; margin: -14px 0 0 -12px;
-  background: radial-gradient(closest-side,
-    rgba(11, 91, 63, .95), rgba(3, 21, 15, .75) 58%, transparent 100%);
-  animation: kxcore 1.05s cubic-bezier(.19, 1, .22, 1) infinite;
+
+/* Radiation rays: a hard-edged conic sweep, masked to a ring so the centre
+   stays clear for the mark. Slowest layer in the composition. */
+.rad .rays {
+  width: calc(var(--kx-aura) * 2.2); height: calc(var(--kx-aura) * 2.2);
+  margin: calc(var(--kx-aura) * -1.1) 0 0 calc(var(--kx-aura) * -1.1);
+  background: repeating-conic-gradient(from 0deg,
+    rgba(11, 91, 63, .9) 0deg 3deg, rgba(3, 21, 15, 0) 3deg 10deg);
+  -webkit-mask-image: radial-gradient(closest-side, transparent 26%, #000 42%, #000 74%, transparent 96%);
+  mask-image: radial-gradient(closest-side, transparent 26%, #000 42%, #000 74%, transparent 96%);
+  animation: kxrays 16s linear infinite;
 }
-.rad .crystal { position: relative; animation: kxbeat 1.05s cubic-bezier(.19, 1, .22, 1) infinite; transform-origin: center; }
-@keyframes kxring {
-  0%, 100% { transform: scale(.55); opacity: 0; }
-  8% { transform: scale(.7); opacity: 1; }
-  30% { transform: scale(1.24); opacity: 0; }
+
+/* Three ki bands, deep -> mid -> bright, each snapping between the same three
+   spike drawings on its own clock. Offset clocks are what stop them moving as
+   one shape. */
+.rad .ki { animation: kxframes .5s steps(1) infinite; }
+.rad .ki1 {
+  width: calc(var(--kx-aura) * 1.9); height: calc(var(--kx-aura) * 2.2);
+  margin: calc(var(--kx-aura) * -1.1) 0 0 calc(var(--kx-aura) * -.95);
+  background: #0B5B3F;
 }
-@keyframes kxcore {
-  0%, 100% { transform: scale(.86); opacity: .38; }
-  8% { transform: scale(1.16); opacity: 1; }
-  20% { transform: scale(.94); opacity: .55; }
-  30% { transform: scale(1.06); opacity: .88; }
-  46% { transform: scale(.86); opacity: .38; }
+.rad .ki2 {
+  width: calc(var(--kx-aura) * 1.43); height: calc(var(--kx-aura) * 1.67);
+  margin: calc(var(--kx-aura) * -.835) 0 0 calc(var(--kx-aura) * -.715);
+  background: #17A874; animation-duration: .4s;
 }
-@keyframes kxbeat {
-  0%, 100% { opacity: .8; transform: scale(1); }
-  8% { opacity: 1; transform: scale(1.14); }
-  20% { opacity: .85; transform: scale(.96); }
-  30% { opacity: 1; transform: scale(1.07); }
-  46% { opacity: .8; transform: scale(1); }
+.rad .ki3 {
+  width: calc(var(--kx-aura) * 1.05); height: calc(var(--kx-aura) * 1.21);
+  margin: calc(var(--kx-aura) * -.605) 0 0 calc(var(--kx-aura) * -.525);
+  background: #4AF6A4; animation-duration: .32s;
 }
+
+/* White-hot shockwave, stepped so it jumps outward instead of easing. */
+.rad .shock {
+  width: calc(var(--kx-aura) * 1.62); height: calc(var(--kx-aura) * 1.62);
+  margin: calc(var(--kx-aura) * -.81) 0 0 calc(var(--kx-aura) * -.81);
+  border-radius: 50%; border: 2px solid rgba(217, 255, 238, .8);
+  animation: kxshock 2.2s steps(5) infinite;
+}
+
+/* Embers lifting off the stone. Square, rotated 45deg — diamonds, not dots. */
+.rad .em { width: 2px; height: 2px; }
+.rad .em1 { margin: 4px 0 0 -5px; background: #D9FFEE; animation: kxrise 1.8s steps(6) infinite; }
+.rad .em2 { margin: 5px 0 0 3px;  background: #7DFDC3; animation: kxrise 2.1s steps(6) .5s infinite; }
+.rad .em3 { margin: 3px 0 0 -9px; background: #4AF6A4; animation: kxrise 2.4s steps(6) 1s infinite; }
+
+.rad .crystal { position: relative; z-index: 2; }
+
+@keyframes kxframes {
+  0%, 100% {
+    clip-path: polygon(50% 0%, 59.6% 20.5%, 79.4% 9.6%, 75.1% 31.8%, 97.6% 34.5%, 81% 50%, 97.6% 65.5%, 75.1% 68.2%, 79.4% 90.4%, 59.6% 79.5%, 50% 100%, 40.4% 79.5%, 20.6% 90.4%, 24.9% 68.2%, 2.4% 65.5%, 19% 50%, 2.4% 34.5%, 24.9% 31.8%, 20.6% 9.6%, 40.4% 20.5%);
+    transform: scale(1);
+  }
+  33% {
+    clip-path: polygon(57.8% 0.6%, 64.1% 22.4%, 85.4% 14.6%, 77.6% 35.9%, 99.4% 42.2%, 80.6% 54.8%, 94.5% 72.7%, 71.9% 71.9%, 72.7% 94.5%, 54.8% 80.6%, 42.2% 99.4%, 35.9% 77.6%, 14.6% 85.4%, 22.4% 64.1%, 0.6% 57.8%, 19.4% 45.2%, 5.5% 27.3%, 28.1% 28.1%, 27.3% 5.5%, 45.2% 19.4%);
+    transform: scale(1.05);
+  }
+  66% {
+    clip-path: polygon(50% 0%, 57.4% 27.2%, 79.4% 9.6%, 69.4% 35.9%, 97.6% 34.5%, 74% 50%, 97.6% 65.5%, 69.4% 64.1%, 79.4% 90.4%, 57.4% 72.8%, 50% 100%, 42.6% 72.8%, 20.6% 90.4%, 30.6% 64.1%, 2.4% 65.5%, 26% 50%, 2.4% 34.5%, 30.6% 35.9%, 20.6% 9.6%, 42.6% 27.2%);
+    transform: scale(.96);
+  }
+}
+@keyframes kxrays { to { transform: rotate(360deg); } }
+@keyframes kxshock {
+  0% { transform: scale(.34); opacity: 0; }
+  8% { opacity: 1; }
+  100% { transform: scale(1.5); opacity: 0; }
+}
+@keyframes kxrise {
+  0% { transform: translateY(6px) rotate(45deg); opacity: 0; }
+  18% { opacity: 1; }
+  100% { transform: translateY(-22px) rotate(45deg); opacity: 0; }
+}
+/* Motion off: the aura is decoration, the mark alone still says "working". */
 @media (prefers-reduced-motion: reduce) {
-  .rad .ring, .rad .core { display: none; }
+  .rad .rays, .rad .ki, .rad .shock, .rad .em { display: none; }
   .rad .crystal { animation: none; opacity: 1; }
   .chev, #ctxFill { transition: none; }
 }
-.stream .g { font-size: 12.5px; }
-.stream .m { font-size: 11.5px; color: var(--vscode-descriptionForeground); }
+.stream .g { font-family: var(--kx-prose); font-size: 13px; }
+.stream .m {
+  font-family: var(--kx-mono); font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
 
 .err-box {
   border: 1px solid var(--vscode-editorError-foreground); border-radius: 6px;
@@ -409,14 +585,22 @@ li.doing .cbx { border-color: var(--kx-accent); }
 }
 .qp-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 9px; border-radius: 4px; }
 .qp-row[data-active="1"] { background: var(--vscode-list-hoverBackground); }
-.qp-row .n { font-size: 12px; font-weight: 600; }
+.qp-row .n { font-family: var(--kx-ui); font-size: 12px; font-weight: 600; flex: none; }
 .qp-row .d {
-  margin-left: auto; font-size: 11px; text-align: right;
+  margin-left: auto; min-width: 0; font-family: var(--kx-prose); font-size: 11px; text-align: right;
   color: var(--vscode-descriptionForeground);
 }
+/* Where a skill came from — workspace beats bundled when names collide, and
+   that is worth seeing before you pick one. */
+.qp-src {
+  flex: none; font-family: var(--kx-mono); font-size: 9.5px;
+  letter-spacing: .04em; text-transform: uppercase;
+  color: var(--vscode-dimmerForeground);
+}
 .qp-group {
-  padding: 7px 9px 3px; font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase;
-  color: var(--vscode-descriptionForeground);
+  padding: 7px 9px 3px; font-family: var(--kx-mono);
+  font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--vscode-dimmerForeground);
 }
 .qp-check { width: 13px; flex: none; display: grid; place-items: center; color: var(--kx-accent); }
 .qp-empty { padding: 8px 9px; font-size: 11.5px; color: var(--vscode-descriptionForeground); }
@@ -668,6 +852,31 @@ li.doing .cbx { border-color: var(--kx-accent); }
 }
 .fgrid input:focus, .fgrid select:focus { border-color: var(--vscode-focusBorder); }
 .form .row { display: flex; gap: 7px; justify-content: flex-end; }
+.form .hint2 { font-size: 11px; line-height: 1.5; color: var(--vscode-descriptionForeground); }
+.form .hint2 code {
+  font-family: var(--kx-mono); font-size: 10.5px;
+  background: var(--vscode-textCodeBlock-background); padding: 1px 4px; border-radius: 3px;
+}
+
+/* ── connection check, inside the endpoint form ── */
+.ep-check {
+  margin-top: 2px; padding-top: 8px;
+  border-top: 1px solid var(--vscode-panel-border);
+}
+.ep-check-banner {
+  display: flex; align-items: flex-start; gap: 7px; margin-bottom: 8px;
+  padding: 7px 9px; border-radius: 5px; font-size: 11.5px; line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.ep-check-banner .ic { flex: none; margin-top: 2px; }
+.ep-check-banner[data-ok="1"] {
+  color: var(--vscode-testing-iconPassed);
+  background: color-mix(in srgb, var(--vscode-testing-iconPassed) 12%, transparent);
+}
+.ep-check-banner[data-ok="0"] {
+  color: var(--vscode-editorError-foreground);
+  background: color-mix(in srgb, var(--vscode-editorError-foreground) 12%, transparent);
+}
 
 .skill {
   display: grid; grid-template-columns: 14px minmax(84px, 118px) minmax(0, 1fr) auto;

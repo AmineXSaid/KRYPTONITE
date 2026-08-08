@@ -41,9 +41,14 @@ function makeNonce(): string {
 /**
  * Emit `@font-face` rules only when the woff2 files actually ship.
  *
- * The design names Inter and JetBrains Mono, but nothing in the layout depends
- * on their metrics. When `media/fonts/` is absent — the default — the system
- * stacks in the CSS take over and the CSP still forbids a remote fetch.
+ * The type system names four families — Space Grotesk for identity, Geist for
+ * interface chrome, IBM Plex Sans for prose, Geist Mono for code and data —
+ * but nothing in the layout depends on their metrics. When `media/fonts/` is
+ * absent, which is the default, the stacks in the CSS fall through to system
+ * faces that preserve the same role split, and the CSP still forbids a remote
+ * fetch. Dropping any subset of these files in upgrades the panel in place;
+ * the previous Inter / JetBrains Mono pair still resolves for anyone who
+ * already shipped them.
  */
 function fontFaces(extensionUri: vscode.Uri, webview: vscode.Webview): string {
   const dir = vscode.Uri.joinPath(extensionUri, "media", "fonts");
@@ -55,6 +60,17 @@ function fontFaces(extensionUri: vscode.Uri, webview: vscode.Webview): string {
   }
 
   const wanted: { file: string; family: string; weight: string }[] = [
+    { file: "SpaceGrotesk-Medium.woff2", family: "Space Grotesk", weight: "500" },
+    { file: "SpaceGrotesk-Bold.woff2", family: "Space Grotesk", weight: "700" },
+    { file: "Geist-Regular.woff2", family: "Geist", weight: "400" },
+    { file: "Geist-Medium.woff2", family: "Geist", weight: "500" },
+    { file: "Geist-SemiBold.woff2", family: "Geist", weight: "600" },
+    { file: "Geist-Bold.woff2", family: "Geist", weight: "700" },
+    { file: "IBMPlexSans-Regular.woff2", family: "IBM Plex Sans", weight: "400" },
+    { file: "IBMPlexSans-Medium.woff2", family: "IBM Plex Sans", weight: "500" },
+    { file: "IBMPlexSans-SemiBold.woff2", family: "IBM Plex Sans", weight: "600" },
+    { file: "GeistMono-Regular.woff2", family: "Geist Mono", weight: "400" },
+    { file: "GeistMono-Medium.woff2", family: "Geist Mono", weight: "500" },
     { file: "Inter-Regular.woff2", family: "Inter", weight: "400" },
     { file: "Inter-Medium.woff2", family: "Inter", weight: "500" },
     { file: "Inter-SemiBold.woff2", family: "Inter", weight: "600" },
