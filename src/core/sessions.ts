@@ -50,6 +50,54 @@ export function titleFrom(messages: Msg[]): string {
   return flat.length > 60 ? flat.slice(0, 60) : flat;
 }
 
+/** Placeholder names, before the model has been asked for a real one. */
+export const UNTITLED_RE = /^Untitled(?: (\d+))?$/;
+
+export function isUntitled(title: string): boolean {
+  return UNTITLED_RE.test(title.trim());
+}
+
+/**
+ * Clean up whatever the model returned for a title.
+ *
+ * Small models pad ("Sure! Here's a title:"), quote, add trailing periods and
+ * occasionally answer in several lines. Anything that survives all of that and
+ * is still unusable falls back to the caller's placeholder.
+ */
+export function sanitizeTitle(raw: string, fallback: string): string {
+  let t = String(raw ?? "").split("\n").map((l) => l.trim()).filter(Boolean)[0] ?? "";
+
+  // "Sure! Here's a title: "PCAP trace analyser"" — small models stack several
+  // layers of preamble, so drop through the last colon whenever everything
+  // before it reads like chat rather than like a title. Bounded to the first
+  // 44 characters so a real title containing a colon survives.
+  const colon = t.lastIndexOf(":");
+  if (colon > 0 && colon < 44 && /\b(sure|here|this|title|name|call|conversation)\b/i.test(t.slice(0, colon))) {
+    t = t.slice(colon + 1);
+  }
+  // Then peel any remaining leading filler, repeatedly. "a" and "the" are
+  // deliberately absent: they open plenty of real titles, and the only place
+  // they read as filler ("Here's a title:") the colon rule above has already
+  // removed.
+  let prev = "";
+  while (prev !== t) {
+    prev = t;
+    t = t.replace(/^(?:sure|okay|ok|well|so|here(?:'s| is)?|title)\b[^A-Za-z0-9]*/i, "");
+  }
+  t = t
+    .replace(/^["'`*#\s]+|["'`*.\s]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (t.length > 48) {
+    // Cut on a word boundary rather than mid-word.
+    const cut = t.slice(0, 48);
+    const sp = cut.lastIndexOf(" ");
+    t = (sp > 24 ? cut.slice(0, sp) : cut).trim();
+  }
+  if (t.length < 3 || isUntitled(t)) return fallback;
+  return t;
+}
+
 export class SessionStore {
   private dir: string;
 
@@ -118,19 +166,49 @@ export class SessionStore {
   }
 
   /**
+   * The next free placeholder name: `Untitled`, then `Untitled 1`, `Untitled 2`.
+   *
+   * Numbered off the highest existing placeholder rather than a count, so
+   * deleting `Untitled 3` does not make the next new chat collide with a name
+   * that is still on screen.
+   */
+  nextUntitled(): string {
+    let highest = -1;
+    if (fs.existsSync(this.dir)) {
+      for (const name of fs.readdirSync(this.dir)) {
+        if (!name.endsWith(".json")) continue;
+        try {
+          const doc = JSON.parse(fs.readFileSync(path.join(this.dir, name), "utf8")) as StoredSession;
+          const m = UNTITLED_RE.exec(String(doc?.title ?? "").trim());
+          if (m) highest = Math.max(highest, m[1] ? Number(m[1]) : 0);
+        } catch {
+          continue;
+        }
+      }
+    }
+    if (highest < 0) return "Untitled";
+    return `Untitled ${highest + 1}`;
+  }
+
+  /**
    * Write the transcript. Empty sessions are never persisted — otherwise every
-   * window open would leave a "New chat" entry in the history popover.
+   * window open would leave an "Untitled" entry in the history popover.
    *
    * This is called as soon as the user's message is recorded rather than only
    * when the turn finishes, so a host that dies mid-stream loses the model's
    * reply but never the question.
+   *
+   * `title` is passed in rather than derived: the controller owns naming, since
+   * a model-generated title has to survive every later save of the same
+   * conversation. When it is omitted the old first-user-message behaviour still
+   * applies, which is what keeps pre-existing transcripts readable.
    */
-  save(id: string, messages: Msg[]): void {
+  save(id: string, messages: Msg[], title?: string): void {
     if (!messages.length) return;
     this.ensure();
     const doc: StoredSession = {
       id,
-      title: titleFrom(messages),
+      title: title?.trim() || titleFrom(messages),
       updatedAt: Date.now(),
       messages,
     };

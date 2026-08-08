@@ -67,6 +67,31 @@ function _sbRun() {
     write_file: "Editing…", edit_file: "Editing…", run_command: "Running…", update_todos: "Updating todos…"
   };
 
+  /* Waiting verbs.
+   *
+   * A tool call names its own work ("Editing watcher.ts") and that always wins
+   * — these only cover the stretches where the model is thinking and there is
+   * genuinely nothing to report. One is drawn per turn and held for its whole
+   * length: rotating mid-turn reads as progress that is not happening, which is
+   * worse than a flat label. Green-crystal flavour, kept short enough not to
+   * push the elapsed counter off a 340px panel.
+   */
+  var IDLE_VERBS = [
+    "Charging the crystal…", "Reticulating splines…", "Consulting the shard…",
+    "Warming the reactor…", "Bending light…", "Thinking in emerald…",
+    "Doing radiation maths…", "Aligning the lattice…", "Overloading politely…",
+    "Chasing a hunch…", "Rummaging in the toolbox…", "Turning it over…",
+    "Sharpening the answer…", "Weighing the options…", "Following the thread…"
+  ];
+  var PLAN_VERBS = [
+    "Sketching…", "Imagining…", "Shaping the idea…", "Drawing on the napkin…",
+    "Dreaming up options…", "Designing…", "Picturing it…", "Storyboarding…"
+  ];
+  function pickVerb(phase) {
+    var pool = phase === "plan" ? PLAN_VERBS : IDLE_VERBS;
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
   /* Extension features, not skills. `/` lists the workspace's SKILL.md files
      first and these underneath — see slashItems(). `/skill:` is gone: every
      skill now has its own row, which is what it was a stand-in for. */
@@ -128,11 +153,13 @@ function _sbRun() {
     copied: false,
     reloaded: false,
     gerund: "Thinking…",
+    idleVerb: null,
     elapsed: 0,
     timer: null,
     searchTimer: null,
     attachments: [],
-    sessionId: null
+    sessionId: null,
+    title: ""
   };
 
   /* transcript element handles */
@@ -179,22 +206,165 @@ function _sbRun() {
     return ready[0] || null;
   }
 
-  /* Markdown-lite: fenced code, paragraphs, inline code, bold. */
+  /* ───────────────────────── markdown ─────────────────────────
+   *
+   * Enough CommonMark + GFM to render what a coding model actually emits:
+   * fenced code with a language label, ATX headings, ordered and unordered
+   * lists, pipe tables, blockquotes, thematic breaks, and inline code, bold,
+   * italic, strikethrough and links.
+   *
+   * The previous renderer handled fences, bold and inline code only, so a
+   * reply containing "### Rust", a "---" rule or a table came out as literal
+   * punctuation — which is most replies.
+   *
+   * SECURITY: every branch escapes before it composes. `esc()` runs on raw
+   * source text first and the markup is built from the escaped result, so a
+   * model that emits `<img onerror=…>` cannot reach innerHTML as an element.
+   * Nothing here ever interpolates unescaped model output.
+   */
+
+  function inline(src) {
+    var codes = [];
+    /* esc() has already turned every < into &lt;, so a bare "<C0>" cannot occur
+       in the escaped text and is safe as a placeholder. Inline code is pulled
+       out before emphasis runs so that `a_b_c` or `**` inside a span survives
+       verbatim, then put back at the end. */
+    var s = esc(src).replace(/`([^`]+)`/g, function (_m, code) {
+      codes.push(code);
+      return "<C" + (codes.length - 1) + ">";
+    });
+
+    /* Links: [text](url). Only http/https/mailto survive — a javascript: or
+       data: href from model output collapses to its text. */
+    s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, function (_m, text, href) {
+      return /^(https?:|mailto:)/i.test(href)
+        ? '<a href="' + href + '" title="' + href + '">' + text + "</a>"
+        : text;
+    });
+
+    s = s
+      .replace(/\*\*\*([^*]+)\*\*\*/g, "<strong><em>$1</em></strong>")
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/(^|[\s(])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+      .replace(/(^|[\s(])_([^_\n]+)_/g, "$1<em>$2</em>")
+      .replace(/~~([^~]+)~~/g, "<del>$1</del>");
+
+    return s.replace(/<C(\d+)>/g, function (_m, i) {
+      return "<code>" + codes[Number(i)] + "</code>";
+    });
+  }
+
+  function isTableRule(line) {
+    return /^\s*\|?[\s:-]*-[\s:|-]*\|?\s*$/.test(line) && line.indexOf("-") !== -1;
+  }
+  function cells(line) {
+    var t = line.trim().replace(/^\|/, "").replace(/\|$/, "");
+    return t.split("|").map(function (c) { return c.trim(); });
+  }
+
   function md(t) {
-    var parts = String(t).split("```");
     var out = "";
-    for (var i = 0; i < parts.length; i++) {
-      if (i % 2) {
-        out += "<pre>" + esc(parts[i].replace(/^[a-z]*\n/i, "")) + "</pre>";
+    var chunks = String(t).split("```");
+
+    for (var c = 0; c < chunks.length; c++) {
+      /* Odd chunks are fenced code. An unterminated fence — common mid-stream —
+         still renders as code rather than dumping the source as prose. */
+      if (c % 2) {
+        var body = chunks[c];
+        var nl = body.indexOf("\n");
+        var lang = nl === -1 ? body.trim() : body.slice(0, nl).trim();
+        var code = nl === -1 ? "" : body.slice(nl + 1);
+        if (/[^\w.+#-]/.test(lang)) { code = body; lang = ""; }
+        out += '<div class="cb">' +
+          (lang ? '<div class="cb-h"><span class="cb-l">' + esc(lang) + "</span></div>" : "") +
+          "<pre>" + esc(code.replace(/\n$/, "")) + "</pre></div>";
         continue;
       }
-      var blocks = parts[i].split(/\n{2,}/);
-      for (var j = 0; j < blocks.length; j++) {
-        if (!blocks[j].trim()) continue;
-        out += "<p>" + esc(blocks[j])
-          .replace(/`([^`]+)`/g, "<code>$1</code>")
-          .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-          .replace(/\n/g, "<br>") + "</p>";
+
+      var lines = chunks[c].split("\n");
+      var i = 0;
+      while (i < lines.length) {
+        var line = lines[i];
+
+        if (!line.trim()) { i++; continue; }
+
+        /* Thematic break */
+        if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) { out += '<hr class="md-hr">'; i++; continue; }
+
+        /* ATX heading */
+        var h = line.match(/^(#{1,6})\s+(.*)$/);
+        if (h) {
+          var lvl = Math.min(6, h[1].length);
+          out += "<h" + lvl + ' class="md-h md-h' + lvl + '">' + inline(h[2].replace(/\s+#+\s*$/, "")) + "</h" + lvl + ">";
+          i++; continue;
+        }
+
+        /* Pipe table: a header row followed by a delimiter row */
+        if (line.indexOf("|") !== -1 && i + 1 < lines.length && isTableRule(lines[i + 1])) {
+          var head = cells(line);
+          i += 2;
+          var rows = [];
+          while (i < lines.length && lines[i].indexOf("|") !== -1 && lines[i].trim()) {
+            rows.push(cells(lines[i])); i++;
+          }
+          var th = head.map(function (x) { return "<th>" + inline(x) + "</th>"; }).join("");
+          var tb = rows.map(function (r) {
+            var tds = "";
+            for (var k = 0; k < head.length; k++) tds += "<td>" + inline(r[k] == null ? "" : r[k]) + "</td>";
+            return "<tr>" + tds + "</tr>";
+          }).join("");
+          out += '<div class="md-tw"><table class="md-t"><thead><tr>' + th +
+            "</tr></thead><tbody>" + tb + "</tbody></table></div>";
+          continue;
+        }
+
+        /* Blockquote */
+        if (/^\s*>/.test(line)) {
+          var q = [];
+          while (i < lines.length && /^\s*>/.test(lines[i])) {
+            q.push(lines[i].replace(/^\s*>\s?/, "")); i++;
+          }
+          out += '<blockquote class="md-q">' + inline(q.join("\n")).replace(/\n/g, "<br>") + "</blockquote>";
+          continue;
+        }
+
+        /* Lists. Nesting is by leading whitespace, two levels deep — beyond
+           that a sidebar has no horizontal room to show the difference. */
+        var li = line.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
+        if (li) {
+          var ordered = /\d/.test(li[2]);
+          var tag = ordered ? "ol" : "ul";
+          out += "<" + tag + ' class="md-l">';
+          var depth = 0;
+          while (i < lines.length) {
+            var m2 = lines[i].match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
+            if (!m2) {
+              /* A wrapped continuation line belongs to the open item. */
+              if (lines[i].trim() && /^\s{2,}/.test(lines[i]) && out.slice(-5) === "</li>") {
+                out = out.slice(0, -5) + " " + inline(lines[i].trim()) + "</li>";
+                i++; continue;
+              }
+              break;
+            }
+            var d = m2[1].length >= 2 ? 1 : 0;
+            if (d > depth) { out += "<" + tag + ' class="md-l">'; depth = d; }
+            else if (d < depth) { out += "</" + tag + ">"; depth = d; }
+            out += "<li>" + inline(m2[3]) + "</li>";
+            i++;
+          }
+          while (depth-- > 0) out += "</" + tag + ">";
+          out += "</" + tag + ">";
+          continue;
+        }
+
+        /* Paragraph: consume to the next blank line or block opener. */
+        var para = [];
+        while (i < lines.length && lines[i].trim() &&
+               !/^(#{1,6}\s|\s*>|\s*([-*_])(\s*\2){2,}\s*$)/.test(lines[i]) &&
+               !/^(\s*)([-*+]|\d+[.)])\s+/.test(lines[i])) {
+          para.push(lines[i]); i++;
+        }
+        if (para.length) out += "<p>" + inline(para.join("\n")).replace(/\n/g, "<br>") + "</p>";
       }
     }
     return out;
@@ -270,6 +440,9 @@ function _sbRun() {
           '<span class="sub">read-only tools · no edits applied</span>' +
         '</div>' +
         '<section class="view" id="viewSession" role="tabpanel" aria-labelledby="tabSession">' +
+          // The conversation's name. Placeholder until the model has been asked
+          // for a real one, so the strip never appears and disappears.
+          '<div class="convo-title" id="convoTitle" hidden></div>' +
           '<div id="log" aria-live="polite"></div>' +
           '<div class="composer-wrap">' +
             '<div class="qp" id="qp" role="listbox" hidden></div>' +
@@ -586,7 +759,7 @@ function _sbRun() {
     var body = el.querySelector(".tool-body");
     body.innerHTML = "";
     var text = result == null ? "" : String(result);
-    if (text) body.appendChild(resultBlock(text));
+    if (text) body.appendChild(resultBlock(text, name));
     if (text.length > MODEL_TRUNCATION) {
       body.appendChild(div("trunc-note",
         icon("i-warn", "ic-11") + "<span>Output truncated to 60,000 characters for the model</span>"));
@@ -595,7 +768,8 @@ function _sbRun() {
       el.setAttribute("data-open", "1");
       body.hidden = false;
     }
-    S.gerund = "Thinking…";
+    // Back to the turn's own verb, not a fresh one — the work has not changed.
+    S.gerund = S.idleVerb || "Thinking…";
     tickGerund();
   }
 
@@ -603,9 +777,10 @@ function _sbRun() {
    * Large results are assigned as a single textContent write. Splitting them
    * per line would build tens of thousands of nodes and lock the webview.
    */
-  function resultBlock(text) {
+  function resultBlock(text, name) {
     var wrap = document.createElement("div");
-    var pre = div("code-block");
+    // Shell output wraps and reads as a console; file contents stay a snippet.
+    var pre = div(name === "run_command" ? "term-block" : "code-block");
     if (text.length > INLINE_LIMIT) {
       pre.textContent = text.slice(0, INLINE_LIMIT);
       wrap.appendChild(pre);
@@ -848,6 +1023,7 @@ function _sbRun() {
     if (S.timer) { clearInterval(S.timer); S.timer = null; }
     if (streamEl) { streamEl.remove(); streamEl = null; }
     S.gerund = "Thinking…";
+    S.idleVerb = null;
   }
 
   /**
@@ -1126,7 +1302,9 @@ function _sbRun() {
     if (S.running) { addError("Already working — interrupt first."); return; }
     addUser(trimmed);
     aiEl = null;
-    S.gerund = S.phase === "plan" ? "Planning…" : "Thinking…";
+    // One verb per turn, held for its whole length.
+    S.idleVerb = pickVerb(S.phase);
+    S.gerund = S.idleVerb;
     S.running = true;
     startStream();
     syncComposer();
@@ -1145,6 +1323,23 @@ function _sbRun() {
     aiEl = null;
     closeToolGroup();
     add(div("err-box", esc(message)));
+  }
+
+  /**
+   * The conversation-title strip.
+   *
+   * Hidden while the name is still a placeholder: "Untitled 3" above every
+   * transcript is chrome that tells you nothing. Once the model has named the
+   * conversation the strip appears with something worth reading.
+   */
+  function renderTitle() {
+    var el = $("convoTitle");
+    if (!el) return;
+    var t = String(S.title || "").trim();
+    if (!t || /^Untitled( \d+)?$/.test(t)) { el.hidden = true; el.textContent = ""; return; }
+    el.textContent = t;
+    el.title = t;
+    el.hidden = false;
   }
 
   /* ───────────────────────── footer ───────────────────────── */
@@ -1419,7 +1614,7 @@ function _sbRun() {
         var call = calls[k];
         var el = toolCard(call.name, call.arguments);
         var res = resultFor[call.id];
-        if (res) el.querySelector(".tool-body").appendChild(resultBlock(res));
+        if (res) el.querySelector(".tool-body").appendChild(resultBlock(res, call.name));
         g.querySelector(".tool-group-body").appendChild(el);
         g._count++;
       }
@@ -1460,12 +1655,14 @@ function _sbRun() {
     S.models = state.models || [];
 
     S.sessionId = state.session ? state.session.id : null;
+    S.title = state.session ? state.session.title : "";
 
     applyPhase(S.phase, true);
     renderSession(state.session ? state.session.messages : []);
     todoEl = null;
     renderTodos(S.todos);
     renderSelection();
+    renderTitle();
     renderFooter();
     renderTls();
     renderEndpoints();
@@ -1955,6 +2152,7 @@ function _sbRun() {
 
       case "sessionSwitched":
         S.sessionId = m.id;
+        S.title = m.title || "";
         S.running = false;
         endStream();
         aiEl = null;
@@ -1965,8 +2163,14 @@ function _sbRun() {
         renderSession(m.messages);
         renderAttachments();
         renderTodos([]);
+        renderTitle();
         renderFooter();
         syncComposer();
+        break;
+
+      case "sessionTitled":
+        // Only the name changed — the transcript on screen must not be touched.
+        if (m.id === S.sessionId) { S.title = m.title || ""; renderTitle(); }
         break;
 
       case "sessionsListed":

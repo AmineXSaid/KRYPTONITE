@@ -3,7 +3,7 @@ import * as path from "node:path";
 import * as crypto from "node:crypto";
 import type { Msg } from "../providers/client";
 import { runAgent } from "../agent/loop";
-import { titleFrom } from "../core/sessions";
+import { isUntitled, sanitizeTitle } from "../core/sessions";
 import type { ToolContext, TodoItem } from "../agent/tools";
 import type { App } from "../core/app";
 import type {
@@ -47,13 +47,19 @@ export class SessionController {
   private replay: ReplayableEvent[] = [];
   private turnDiffs = new Map<string, TurnDiffs>();
 
+  /**
+   * The conversation's name.
+   *
+   * Starts as a placeholder and is replaced once by a model-generated title
+   * after the first exchange. It is state rather than a getter over `history`
+   * because a generated title has to survive every later save, and because a
+   * conversation needs a stable name before the model has said anything.
+   */
+  title: string;
+
   constructor(private app: App) {
     this.sessionId = app.sessions.newId();
-  }
-
-  /** Title as the history popover shows it, derived from the first user turn. */
-  get title(): string {
-    return titleFrom(this.history);
+    this.title = app.sessions.nextUntitled();
   }
 
   /** Events the current turn has produced, for a webview that reloaded. */
@@ -272,6 +278,9 @@ export class SessionController {
     this.replay = [];
     this.app.setRunning(false);
     this.app.broadcast({ type: "turnEnd" });
+    // After turnEnd, and not awaited: naming is cosmetic and must not hold the
+    // composer closed. A turn that errored keeps its placeholder.
+    if (!errored) void this.autoTitle();
     void errored;
   }
 
@@ -412,14 +421,73 @@ export class SessionController {
     if (!doc) return;
     this.sessionId = doc.id;
     this.history = doc.messages;
+    // Without this the reopened conversation would carry the placeholder minted
+    // in the constructor and autoTitle would rename an already-named chat.
+    if (doc.title) this.title = doc.title;
   }
 
   /** Persist the transcript and tell every surface the list moved. */
   private persist(): void {
     if (!this.history.length) return;
-    this.app.sessions.save(this.sessionId, this.history);
+    this.app.sessions.save(this.sessionId, this.history, this.title);
     void this.app.rememberSession(this.sessionId);
     this.app.refreshSessions();
+  }
+
+  /**
+   * Ask the model to name the conversation, once, after the first exchange.
+   *
+   * Deliberately best-effort and quiet. It runs after `turnEnd` so it never
+   * delays the reply the user is reading, it is capped at a handful of tokens,
+   * it sends no tools, and every failure path leaves the placeholder in place —
+   * a conversation with a boring name is fine, a turn that breaks because
+   * naming failed is not.
+   *
+   * Only the first user message and a trimmed slice of the first answer are
+   * sent. Feeding the whole transcript would grow this call without bound as
+   * the conversation does, for a string that is decided once.
+   */
+  private async autoTitle(): Promise<void> {
+    if (!isUntitled(this.title)) return;
+
+    const firstUser = this.history.find((m) => m.role === "user");
+    const firstReply = this.history.find((m) => m.role === "assistant");
+    if (!firstUser || !firstReply) return;
+
+    const profile = this.app.activeProfile();
+    if (!profile) return;
+
+    const placeholder = this.title;
+    try {
+      const client = this.app.clientFor(profile);
+      const ask: Msg[] = [
+        {
+          role: "user",
+          content:
+            "Name this conversation.\n\n" +
+            `Request: ${flatten(firstUser.content).slice(0, 600)}\n` +
+            `Answer: ${flatten(firstReply.content).slice(0, 600)}\n\n` +
+            "Reply with the title and nothing else: 2 to 6 words, Sentence case, " +
+            "no quotes, no trailing period, no preamble. Name the subject, not the format — " +
+            '"PCAP trace analyser desktop app", not "A conversation about a request".',
+        },
+      ];
+      let out = "";
+      for await (const ev of client.complete({ messages: ask, stream: false, maxTokens: 32 })) {
+        if (ev.type === "text") out += ev.text;
+      }
+      const title = sanitizeTitle(out, placeholder);
+      if (title === this.title) return;
+
+      this.title = title;
+      this.app.sessions.save(this.sessionId, this.history, title);
+      this.app.broadcast({ type: "sessionTitled", id: this.sessionId, title });
+      this.app.refreshSessions();
+      this.app.log("info", `Named the conversation "${title}".`);
+    } catch (e) {
+      // A gateway that rejects the naming call must not colour the turn.
+      this.app.log("warn", `Could not name the conversation: ${messageOf(e)}`);
+    }
   }
 
   /**
@@ -460,6 +528,7 @@ export class SessionController {
       this.sessionId = this.app.sessions.newId();
       this.history = [];
     }
+    this.title = title;
     this.alwaysAllowEdits = false;
     this.turnDiffs.clear();
     this.app.todos = [];
@@ -472,7 +541,12 @@ export class SessionController {
     // Pressing New chat on an untouched conversation keeps the id — rotating it
     // would orphan nothing and only churn the history list. The announcement
     // still fires either way, so the UI resets regardless.
-    this.reset(this.history.length > 0, "New chat");
+    //
+    // The placeholder is only re-drawn when the id rotates: re-numbering an
+    // untouched conversation would walk "Untitled" up to "Untitled 7" for
+    // someone who just pressed the button a few times.
+    const rotate = this.history.length > 0;
+    this.reset(rotate, rotate ? this.app.sessions.nextUntitled() : this.title);
   }
 
   load(id: string): void {
@@ -484,7 +558,7 @@ export class SessionController {
     this.interruptQuietly();
     this.history = doc.messages;
     this.sessionId = doc.id;
-    this.reset(false, doc.title);
+    this.reset(false, doc.title || this.app.sessions.nextUntitled());
   }
 
   /** Deleting the conversation in the composer drops you into a fresh one. */
@@ -494,7 +568,7 @@ export class SessionController {
       this.app.refreshSessions();
       return;
     }
-    this.reset(true, "New chat");
+    this.reset(true, this.app.sessions.nextUntitled());
   }
 
   /** Stop a run without emitting a turnEnd the caller is about to supersede. */
@@ -544,4 +618,14 @@ function firstToken(summary: string): string | undefined {
 function messageOf(e: unknown): string {
   if (e instanceof Error) return e.message;
   return String(e);
+}
+
+/** Message content as plain text. Image blocks are dropped, not described. */
+function flatten(content: Msg["content"]): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((b) => b.type === "text")
+    .map((b) => (b as { type: "text"; text: string }).text)
+    .join("\n");
 }

@@ -404,6 +404,14 @@ export interface SessionSwitchedOut {
   messages: Msg[];
 }
 export interface SessionsListedOut { type: "sessionsListed"; sessions: SessionMetaDto[] }
+/**
+ * The active conversation has been given a real name.
+ *
+ * Separate from `sessionSwitched` because nothing else about the conversation
+ * changed — replaying a whole transcript to update one string would clear the
+ * transcript the user is reading.
+ */
+export interface SessionTitledOut { type: "sessionTitled"; id: string; title: string }
 export interface CheckpointsListedOut {
   type: "checkpointsListed";
   checkpoints: CheckpointDto[];
@@ -449,7 +457,8 @@ export type OutboundMessage =
   | CheckpointsListedOut | CheckpointRestoredOut | BundleExportedOut
   | ConfigChangedOut | PhaseChangedOut | EndpointChangedOut | StatusChangedOut
   | LogLineOut | NavigateOut | FileResultsOut | CaBundlePickedOut
-  | EndpointCheckStartedOut | EndpointCheckRungOut | EndpointCheckDoneOut;
+  | EndpointCheckStartedOut | EndpointCheckRungOut | EndpointCheckDoneOut
+  | SessionTitledOut;
 
 export type OutboundType = OutboundMessage["type"];
 
