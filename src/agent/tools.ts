@@ -106,10 +106,15 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: "read_skill",
-    description: "Load the full instructions for a named skill.",
+    description:
+      "Load a skill's full instructions and the list of files bundled with it. " +
+      "Call this before starting work whenever a skill from the Skills index matches the task, " +
+      "and always when the user's message starts with /<skill-name>. Cheap and read-only.",
     parameters: {
       type: "object",
-      properties: { name: { type: "string" } },
+      properties: {
+        name: { type: "string", description: "Exact skill name from the Skills index." },
+      },
       required: ["name"],
     },
   },
@@ -288,8 +293,13 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
             isError: true,
           };
         }
+        // The folder path is workspace-relative so the model can hand it
+        // straight to read_file without guessing at the layout.
+        const rel = path.relative(ctx.root, skill.dir).split(path.sep).join("/");
         const extras = skill.files.length
-          ? `\n\nFiles in this skill's folder (${path.relative(ctx.root, skill.dir)}): ${skill.files.join(", ")}`
+          ? `\n\n---\nBundled files, relative to \`${rel}/\`. Read one with read_file only if the ` +
+            `instructions above send you to it:\n` +
+            skill.files.map((f) => `- ${rel}/${f}`).join("\n")
           : "";
         return { content: skill.body + extras };
       }
