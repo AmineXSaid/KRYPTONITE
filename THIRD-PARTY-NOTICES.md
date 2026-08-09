@@ -4,6 +4,22 @@ THE FOLLOWING SETS FORTH ATTRIBUTION NOTICES FOR THIRD PARTY SOFTWARE THAT MAY B
 
 ---
 
+## **UNRESOLVED — Anthropic Sans (bundled fonts)**
+
+`media/fonts/*.woff2` contains **Anthropic Sans**, a proprietary typeface. It is not
+published under an open licence, and the files were obtained from a third-party
+mirror, which is not a licence grant. Because the folder ships inside the packaged
+`.vsix`, the extension redistributes it.
+
+**This is not cleared for public release.** Before publishing, either obtain written
+permission from Anthropic to redistribute the binaries, or remove `media/fonts/` from
+the package — `src/ui/shell.ts` emits `@font-face` only for files that exist, so
+deleting the folder needs no code change.
+
+Full detail, provenance and the fallback path: `media/fonts/LICENSE-NOTE.md`.
+
+---
+
 ## **BSD 2-Clause License**
 
 The following components are licensed under BSD 2-Clause License reproduced below:

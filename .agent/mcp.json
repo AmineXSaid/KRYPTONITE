@@ -1,0 +1,33 @@
+{
+  "_readme": [
+    "MCP servers Kryptonite may start. Same shape as Claude Desktop and Claude Code,",
+    "so a server block can be copied between them verbatim.",
+    "",
+    "Keys per server:",
+    "  command   executable. On Windows, npx/npm/uvx shims are handled for you.",
+    "  args      argument list.",
+    "  env       merged over the extension host's environment.",
+    "  cwd       defaults to the workspace root.",
+    "  approval  'ask' (default) routes every call through the approval gate;",
+    "            'auto' does not. A tool from an MCP server is a side effect in a",
+    "            process this extension started, so 'ask' is the safe default.",
+    "  timeoutMs per-request budget. The first start of an npx-launched server",
+    "            includes a package download; the handshake allows 45s minimum.",
+    "  enabled   false keeps the block here without starting anything.",
+    "",
+    "Only stdio is implemented. A block with a url/type of http or sse is reported",
+    "as unsupported rather than silently ignored.",
+    "",
+    "Tools reach the model as mcp__<server>__<tool>. They are withheld entirely in",
+    "Plan mode, because MCP has no way to declare a tool read-only."
+  ],
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+      "approval": "ask",
+      "timeoutMs": 120000,
+      "enabled": false
+    }
+  }
+}

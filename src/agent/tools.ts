@@ -23,6 +23,19 @@ export interface ToolContext {
   // CHANGED: added. Receives the validated list from update_todos. Optional so
   // callers that do not render a todo card need no changes.
   onTodos?: (todos: TodoItem[]) => void;
+  /**
+   * MCP servers, when any are configured. Optional so every existing caller and
+   * the offline test harness keep working with no MCP at all.
+   *
+   * Typed structurally rather than importing McpRegistry, to keep this module
+   * free of the mcp/ dependency — tools.ts is the one file both the agent loop
+   * and the harness import.
+   */
+  mcp?: {
+    has(name: string): boolean;
+    needsApproval(name: string): boolean;
+    call(name: string, args: unknown): Promise<{ content: string; isError?: boolean }>;
+  };
 }
 
 export interface ToolResult {
@@ -166,6 +179,23 @@ function normaliseTodos(raw: unknown): TodoItem[] {
 
 export async function runTool(name: string, args: any, ctx: ToolContext): Promise<ToolResult> {
   try {
+    // MCP tools are namespaced (`mcp__<server>__<tool>`) so they can never
+    // collide with a built-in, and are dispatched before the switch. A server
+    // set to approval: ask goes through the same gate as a shell command —
+    // an MCP tool is a side effect in a process this extension started, and
+    // "someone else wrote the server" is not a reason to trust it more.
+    if (ctx.mcp?.has(name)) {
+      if (ctx.mcp.needsApproval(name)) {
+        const preview = JSON.stringify(args ?? {});
+        const ok = await ctx.approve(
+          `Call MCP tool ${name}`,
+          preview.length > 2000 ? preview.slice(0, 2000) + "…" : preview
+        );
+        if (!ok) return { content: "The user declined this MCP tool call.", isError: true };
+      }
+      return ctx.mcp.call(name, args);
+    }
+
     switch (name) {
       case "read_file": {
         const abs = inside(ctx.root, args.path);

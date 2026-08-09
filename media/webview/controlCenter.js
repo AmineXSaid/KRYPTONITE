@@ -47,7 +47,7 @@ function _run() {
   var SECTIONS = [
     ["endpoints", "Endpoints"], ["wire", "Wire & transforms"], ["auth", "Auth & secrets"],
     ["tls", "TLS & mTLS"], ["proxy", "Proxy & network"], ["diag", "Diagnostics"],
-    ["agent", "Agent & tools"], ["skills", "Skills"], ["checkpoints", "Checkpoints"],
+    ["agent", "Agent & tools"], ["mcp", "MCP servers"], ["skills", "Skills"], ["checkpoints", "Checkpoints"],
     ["logs", "Logs & export"]
   ];
 
@@ -103,6 +103,7 @@ function _run() {
     logs: [],
     epForm: null,
     epCheck: null,
+    mcp: { servers: [], warnings: [] },
     flash: {}
   };
 
@@ -276,6 +277,7 @@ function _run() {
       case "proxy": pane.innerHTML = secProxy(); break;
       case "diag": pane.innerHTML = secDiag(); break;
       case "agent": pane.innerHTML = secAgent(); break;
+      case "mcp": pane.innerHTML = secMcp(); break;
       case "skills": pane.innerHTML = secSkills(); break;
       case "checkpoints": pane.innerHTML = secCheckpoints(); break;
       case "logs": pane.innerHTML = secLogs(); break;
@@ -433,6 +435,71 @@ function _run() {
     if (f.apiKey) out.apiKey = f.apiKey;
     if (f.originalId) out.originalId = f.originalId;
     return out;
+  }
+
+  /* ── MCP servers ── */
+  function secMcp() {
+    var m = S.mcp || { servers: [], warnings: [] };
+    var html = "<h3>MCP servers</h3>" +
+      '<div class="explainer">Servers declared in <code>.agent/mcp.json</code>, in the same shape ' +
+      'Claude Desktop and Claude Code use. Each is a child process this extension starts over stdio; ' +
+      'its tools reach the model as <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>. Tools are withheld ' +
+      'in Plan mode, because MCP cannot declare a tool read-only.</div>';
+
+    if (m.warnings && m.warnings.length) {
+      html += '<div class="warn-line">' + esc(m.warnings.join(" ")) + "</div>";
+    }
+
+    if (!m.servers.length) {
+      html += '<div class="empty">No servers configured.</div>' +
+        '<div class="row-actions"><button class="btn" data-act="mcpReload">Reload config</button></div>';
+      return html;
+    }
+
+    var rows = '<div class="tr head"><span></span><span>Server</span><span>Transport</span><span>Tools</span><span></span></div>';
+    for (var i = 0; i < m.servers.length; i++) {
+      var sv = m.servers[i];
+      var ready = sv.state === "ready";
+      // One status signal per row: the pill carries the reason, so there is no
+      // separate dot to disagree with it.
+      var pill = ready
+        ? '<span class="pill ok">connected</span>'
+        : sv.state === "starting"
+          ? '<span class="pill">starting…</span>'
+          : '<span class="pill err" title="' + esc(sv.error || "") + '">' + esc(sv.state) + "</span>";
+      rows += '<div class="tr" data-status="' + (ready ? "ready" : "error") + '">' +
+        "<span></span>" +
+        '<span class="ell"><span class="id ell">' + esc(sv.name) + "</span>" +
+        '<span class="url ell" title="' + esc(sv.command) + '">' +
+          esc(sv.serverInfo ? sv.serverInfo.name + " " + sv.serverInfo.version : sv.command) +
+        "</span></span>" +
+        '<span class="mono" style="font-size:10.5px">stdio · ' + esc(sv.approval) + "</span>" +
+        '<span class="mono">' + (ready ? sv.toolCount : "—") + "</span>" +
+        '<span class="acts"><button class="mini" data-mcp="reconnect" data-name="' + esc(sv.name) +
+          '" title="Reconnect">' + icon("i-refresh", "ic-13") + "</button></span>" +
+        "</div>";
+      if (!ready && sv.error) {
+        rows += '<div class="tr"><span></span><span class="err-line" style="grid-column:2/6">' +
+          esc(sv.error) + "</span></div>";
+      }
+      if (ready && sv.tools.length) {
+        rows += '<div class="tr"><span></span><span style="grid-column:2/6"><span class="chips">' +
+          sv.tools.map(function (t) { return '<span class="chip">' + esc(t) + "</span>"; }).join("") +
+          "</span></span></div>";
+      }
+    }
+
+    var total = 0, down = 0;
+    for (var j = 0; j < m.servers.length; j++) {
+      if (m.servers[j].state === "ready") total += m.servers[j].toolCount;
+      else if (m.servers[j].state === "failed") down++;
+    }
+    html += '<div class="tbl">' + rows + "</div>" +
+      '<div class="row-actions"><span class="empty">' + total + ' tool(s) exposed to the model' +
+      (down ? " · " + down + " server(s) unavailable" : "") + "</span>" +
+      '<span class="sp"></span>' +
+      '<button class="btn" data-act="mcpReload">Reload config</button></div>';
+    return html;
   }
 
   /* ── wire & transforms ── */
@@ -910,6 +977,11 @@ function _run() {
       return;
     }
 
+    if ((t = e.target.closest("[data-mcp]"))) {
+      if (t.getAttribute("data-mcp") === "reconnect") post("mcpReconnect", { name: t.getAttribute("data-name") });
+      return;
+    }
+
     if ((t = e.target.closest("[data-ep]"))) {
       onEndpointAction(t.getAttribute("data-ep"), t.getAttribute("data-id"));
       return;
@@ -945,6 +1017,7 @@ function _run() {
   function onAction(action) {
     switch (action) {
       case "newEndpoint": post("newEndpoint"); break;
+      case "mcpReload": post("mcpReload"); break;
       case "trace": S.tracing = true; S.rungs = []; render(); post("runTrace"); break;
       case "reloadSkills": post("reloadSkills"); setFlash("reloadSkills"); break;
       case "openSkills": post("openSkillsFolder"); break;
@@ -989,6 +1062,7 @@ function _run() {
         });
         S.skills = st.skills || [];
         S.skillWarnings = st.skillWarnings || [];
+        S.mcp = st.mcp || { servers: [], warnings: [] };
         S.config = st.config;
         S.tlsError = st.tlsError;
         S.rungs = st.rungs || [];
@@ -999,6 +1073,11 @@ function _run() {
         render();
         break;
       }
+
+      case "mcpChanged":
+        S.mcp = { servers: m.servers || [], warnings: m.warnings || [] };
+        render();
+        break;
 
       case "profilesReloaded":
         S.profiles = (m.profiles || []).map(function (p) {

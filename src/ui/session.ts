@@ -161,6 +161,7 @@ export class SessionController {
     const ctx: ToolContext = {
       root,
       skills: this.app.enabledSkills(),
+      mcp: this.app.mcp,
       approve: (summary, detail) => this.requestApproval(summary, detail),
       onFileTouched: (abs: string) => {
         const rel = path.relative(root, abs).split(path.sep).join("/");
@@ -188,6 +189,7 @@ export class SessionController {
         userMessage: text,
         signal: this.abort.signal,
         phase,
+        mcpTools: this.app.mcp.toolDefs(),
         // Assistant replies and tool results land in the transcript as the loop
         // produces them, so tool calls survive into the next turn's context and
         // into a restored session.

@@ -261,6 +261,7 @@ export interface StateSync {
   models: ModelGroupDto[];
   logs: LogLine[];
   session: { id: string; title: string; messages: Msg[] };
+  mcp: { servers: McpServerDto[]; warnings: string[] };
 }
 
 /* ───────────────────────────── inbound messages ───────────────────────── */
@@ -319,6 +320,8 @@ export interface SearchFilesMsg { type: "searchFiles"; query: string }
  * the check only.
  */
 export interface CheckEndpointMsg { type: "checkEndpoint"; endpoint: EndpointForm }
+export interface McpReconnectMsg { type: "mcpReconnect"; name: string }
+export interface McpReloadMsg { type: "mcpReload" }
 
 export type InboundMessage =
   | ReadyMsg | SendMessageMsg | AttachFilesMsg | InterruptMsg | NewChatMsg | SetPhaseMsg
@@ -329,7 +332,7 @@ export type InboundMessage =
   | RestoreCheckpointMsg | ExportBundleMsg | OpenFileMsg | OpenSettingsMsg
   | OpenYamlMsg | OpenControlCenterMsg | OpenSkillsFolderMsg
   | ListSessionsMsg | LoadSessionMsg | DeleteSessionMsg | SearchFilesMsg
-  | CheckEndpointMsg;
+  | CheckEndpointMsg | McpReconnectMsg | McpReloadMsg;
 
 export type InboundType = InboundMessage["type"];
 
@@ -423,6 +426,25 @@ export interface SessionsListedOut { type: "sessionsListed"; sessions: SessionMe
  * transcript the user is reading.
  */
 export interface SessionTitledOut { type: "sessionTitled"; id: string; title: string }
+
+/** One configured MCP server, as the panel shows it. */
+export interface McpServerDto {
+  name: string;
+  state: "idle" | "starting" | "ready" | "failed" | "stopped";
+  /** The command line, for the row subtitle. */
+  command: string;
+  error?: string;
+  toolCount: number;
+  tools: string[];
+  approval: "ask" | "auto";
+  serverInfo?: { name: string; version: string };
+}
+/** Servers connected, failed, or reloaded. Carries config warnings too. */
+export interface McpChangedOut {
+  type: "mcpChanged";
+  servers: McpServerDto[];
+  warnings: string[];
+}
 export interface CheckpointsListedOut {
   type: "checkpointsListed";
   checkpoints: CheckpointDto[];
@@ -469,7 +491,7 @@ export type OutboundMessage =
   | ConfigChangedOut | PhaseChangedOut | EndpointChangedOut | StatusChangedOut
   | LogLineOut | NavigateOut | FileResultsOut | CaBundlePickedOut
   | EndpointCheckStartedOut | EndpointCheckRungOut | EndpointCheckDoneOut
-  | SessionTitledOut;
+  | SessionTitledOut | McpChangedOut;
 
 export type OutboundType = OutboundMessage["type"];
 

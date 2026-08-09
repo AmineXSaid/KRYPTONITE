@@ -1,0 +1,82 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   KRYPTONITE design tokens — the single definition of the palette and type.
+
+   Loaded before both surface stylesheets, for the same reason crystal.js is
+   shared: the sidebar and the Control Center are separate documents, and two
+   copies of a palette drift. Anything that needs a colour takes it from here.
+
+   The panel used to draw every structural colour from the --vscode-* variables
+   VS Code injects, which made it a chameleon — correct in any theme, and an
+   expression of none. Frame 1b of the design review replaces that with a fixed
+   warm-neutral system so the surface reads as one product.
+
+   The trade is deliberate and total: the panel looks the same in a light theme
+   as in a dark one. (Redefining the VS Code variables instead would not have
+   worked — VS Code sets them as an inline style on <html>, which beats any
+   :root rule in a stylesheet.)
+   ───────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* ── surfaces: warm near-black, ascending ── */
+  --kx-bg-deep:   #191918;  /* behind everything; code and terminal blocks   */
+  --kx-bg:        #1f1f1d;  /* the panel itself                              */
+  --kx-surface:   #262624;  /* cards, the composer, popovers                 */
+  --kx-surface-2: #2b2b29;  /* chips, inputs, inline code                    */
+  --kx-surface-3: #30302e;  /* raised: secondary buttons, badges             */
+  --kx-surface-4: #3f3f3c;  /* hover on a raised surface                     */
+
+  /* ── text: warm, descending prominence ── */
+  --kx-fg:   #faf9f5;  /* primary, active tabs, titles                       */
+  --kx-fg-2: #dedcd1;  /* body and labels — the workhorse                    */
+  --kx-fg-3: #c2c0b6;  /* inactive                                           */
+  --kx-fg-4: #9c9a92;  /* placeholder, line numbers                          */
+  --kx-fg-5: #52514d;  /* dimmest                                            */
+
+  /* ── accents ── */
+  --kx-accent: #4af6a4;    /* state & success — Act. Never a plain button.   */
+  --kx-error:  #f4767e;    /* warm coral, not the theme's cool red           */
+  --kx-warn:   #f2c14e;
+  --kx-link:   #7c88f4;    /* periwinkle: links, focus ring, send            */
+  --kx-action: #7c88f4;    /* send                                           */
+  --kx-active: #6e49cb;    /* Plan phase                                     */
+  --kx-under:  #916df6;    /* the 2px tab underline                          */
+  --kx-on-accent: #141413; /* text on mint — the deepest surface, not black  */
+
+  /* ── scrims: every one tinted from --kx-fg-2, never neutral grey. A cool
+        grey hairline on a warm surface is the most visible way this palette
+        goes wrong. ── */
+  --kx-hairline: rgba(222, 220, 209, .06);
+  --kx-divider:  rgba(222, 220, 209, .10);
+  --kx-line:     rgba(222, 220, 209, .14);
+  --kx-line-2:   rgba(222, 220, 209, .20);
+  --kx-raised:   rgba(222, 220, 209, .25);
+  --kx-hover:    rgba(222, 220, 209, .06);
+  --kx-scroll:       rgba(222, 220, 209, .13);
+  --kx-scroll-hover: rgba(222, 220, 209, .25);
+  --kx-shadow:   rgba(0, 0, 0, .6);
+  --kx-diff-add: rgba(74, 246, 164, .14);
+  --kx-diff-del: rgba(244, 118, 126, .16);
+  --kx-accent-wash: rgba(74, 246, 164, .14);
+  --kx-error-wash:  rgba(244, 118, 126, .16);
+  --kx-warn-wash:   rgba(242, 193, 78, .16);
+
+  /* ── type ──
+     Anthropic Sans in two optical sizes. --kx-ui is the Text cut and carries
+     everything at 11–13px; --kx-display is the Display cut, used only where the
+     design reaches 15px. Setting Display at 12px is the standard way to make a
+     well-drawn family look wrong, so they are separate variables and Display
+     has to be asked for.
+
+     Nothing is fetched remotely: the CSP is `default-src 'none'` with font-src
+     scoped to the extension origin. shell.ts emits @font-face for whichever
+     files are present in media/fonts/, and each stack falls through to the
+     platform sans when they are absent — see media/fonts/LICENSE-NOTE.md. */
+  --kx-ui: 'Anthropic Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --kx-display: 'Anthropic Sans Display', 'Anthropic Sans', ui-sans-serif, system-ui, 'Segoe UI', sans-serif;
+  --kx-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Monaco, Consolas, monospace;
+
+  /* The brand face is now the Display cut rather than a separate family. */
+  --kx-brand: var(--kx-display);
+  /* Prose and UI share the Text cut; the design does not split them. */
+  --kx-prose: var(--kx-ui);
+}

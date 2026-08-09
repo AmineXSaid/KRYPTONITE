@@ -11,6 +11,7 @@ import {
 import { clearAuthCache, authCacheReport } from "../endpoints/auth";
 import { EndpointClient } from "../providers/client";
 import { loadSkills, Skill, skillIndex } from "../skills/loader";
+import { McpRegistry, mcpConfigPath } from "../mcp/registry";
 import { ShadowRepo } from "../checkpoint/shadow";
 import { DiagnosticsService, rungLabel } from "../diagnostics/service";
 import { SessionStore } from "./sessions";
@@ -72,6 +73,8 @@ export class App {
   readonly output: vscode.OutputChannel;
   readonly sessions: SessionStore;
   readonly diagnostics = new DiagnosticsService();
+  /** MCP servers from .agent/mcp.json. Empty until the first reload. */
+  readonly mcp = new McpRegistry((level, msg) => this.log(level, msg));
   readonly session: SessionController;
   shadow?: ShadowRepo;
 
@@ -195,6 +198,7 @@ export class App {
 
   async dispose(): Promise<void> {
     this.session.dispose();
+    await this.mcp.stopAll();
     await this.closeClients();
     this.watcher?.dispose();
     if (this.selectionTimer) clearTimeout(this.selectionTimer);
@@ -297,6 +301,13 @@ export class App {
     for (const s of workspaceSkills.skills) merged.set(s.name, s);
     this.skills = [...merged.values()];
     this.skillWarnings = [...workspaceSkills.warnings, ...bundled.warnings];
+
+    // MCP servers are child processes, so a reload stops the old ones first.
+    // Not awaited into the critical path: a cold `npx` fetch can take seconds
+    // and the panel must not sit blank behind it.
+    void this.mcp.reload(mcpConfigPath(root), root).then(() => {
+      this.broadcast({ type: "mcpChanged", servers: this.mcp.statuses(), warnings: this.mcp.warnings });
+    });
     for (const w of this.skillWarnings) this.log("warn", `Skill: ${w}`);
 
     await this.primeSecrets();
@@ -662,6 +673,7 @@ export class App {
       context: this.lastContext,
       models: this.modelGroups(),
       logs: this.logs.slice(-100),
+      mcp: { servers: this.mcp.statuses(), warnings: this.mcp.warnings },
       session: {
         id: this.session.sessionId,
         title: this.session.title,
@@ -877,6 +889,20 @@ export class App {
       case "checkEndpoint":
         await this.checkEndpoint(msg.endpoint, source);
         return;
+
+      case "mcpReconnect": {
+        const root = this.requireRoot();
+        await this.mcp.restart(msg.name, root);
+        this.broadcast({ type: "mcpChanged", servers: this.mcp.statuses(), warnings: this.mcp.warnings });
+        return;
+      }
+
+      case "mcpReload": {
+        const root = this.requireRoot();
+        await this.mcp.reload(mcpConfigPath(root), root);
+        this.broadcast({ type: "mcpChanged", servers: this.mcp.statuses(), warnings: this.mcp.warnings });
+        return;
+      }
 
       case "deleteEndpoint": {
         const removed = deleteEndpointFile(this.profiles, msg.id);

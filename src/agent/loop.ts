@@ -110,6 +110,12 @@ export interface AgentRunOptions {
   // CHANGED: added. Defaults to "act" so existing callers are unaffected.
   phase?: "plan" | "act";
   /**
+   * Tools from connected MCP servers, already namespaced and schema-mapped.
+   * Appended to the built-ins, and withheld in plan phase along with every
+   * other tool that is not known to be read-only.
+   */
+  mcpTools?: ToolDef[];
+  /**
    * Called for every message the loop appends after the user's turn: each
    * assistant reply and each tool result, in order.
    *
@@ -134,8 +140,14 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
 
   // CHANGED: in plan phase the model is only offered the read-only tools, so a
   // write is impossible rather than merely discouraged.
+  //
+  // MCP tools are withheld entirely in plan phase. MCP has no way to declare a
+  // tool read-only, so there is nothing to check — and a plan that quietly filed
+  // a GitHub issue would break the one promise plan mode makes.
   const availableTools: ToolDef[] =
-    phase === "plan" ? TOOL_DEFS.filter((t) => READ_ONLY.has(t.name)) : TOOL_DEFS;
+    phase === "plan"
+      ? TOOL_DEFS.filter((t) => READ_ONLY.has(t.name))
+      : [...TOOL_DEFS, ...(opts.mcpTools ?? [])];
 
   const messages: Msg[] = [
     { role: "system", content: system },

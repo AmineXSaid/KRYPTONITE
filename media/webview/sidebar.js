@@ -433,7 +433,7 @@ function _sbRun() {
         '</header>' +
         '<nav class="kx-tabs" role="tablist">' +
           '<button class="kx-tab" id="tabSession" role="tab" aria-selected="true" aria-controls="viewSession">Session</button>' +
-          '<button class="kx-tab" id="tabDiag" role="tab" aria-selected="false" aria-controls="viewDiag">Diagnostics<span class="err-dot" id="tabDot" hidden></span></button>' +
+          '<button class="kx-tab" id="tabDiag" role="tab" aria-selected="false" aria-controls="viewDiag">Diagnostics<span class="tab-count" id="tabCount" hidden></span></button>' +
         '</nav>' +
         '<div class="plan-banner" id="planBanner" hidden>' +
           '<span class="dot"></span><span class="lbl">Plan phase</span>' +
@@ -454,14 +454,14 @@ function _sbRun() {
               '<div class="att-strip" id="attachStrip" hidden></div>' +
               '<textarea id="draft" rows="1" aria-label="Message" placeholder="Ask Kryptonite anything…   ( / skills · @ files )"></textarea>' +
               '<div class="toolbar">' +
-                // The keycap lives inside the toggle it describes, so it reads
-                // as "this control has a shortcut" rather than as two loose
-                // glyphs between the toggle and the model picker.
-                '<div class="seg" id="phaseSeg" role="group" aria-label="Phase — Shift+Tab to switch">' +
+                // #4 — the control row carries controls only. The keycap that
+                // used to sit here was chrome describing chrome; the shortcut
+                // lives in the group's accessible name and the tooltip, where a
+                // keyboard user finds it and everyone else is not taxed for it.
+                '<div class="seg" id="phaseSeg" role="group" title="Shift+Tab to switch phase"' +
+                  ' aria-label="Phase — press Shift+Tab to switch">' +
                   '<button data-phase="plan" data-on="0">Plan</button>' +
                   '<button data-phase="act" data-on="1">Act</button>' +
-                  '<kbd class="seg-kbd" title="Shift+Tab to switch phase" aria-hidden="true">' +
-                    '<span>&#8679;</span><span>&#8677;</span></kbd>' +
                 '</div>' +
                 '<button id="modelBtn" aria-haspopup="listbox" aria-expanded="false">' +
                   '<span class="nm ell" id="modelName">No model</span>' + icon("i-caret", "ic-9") +
@@ -1375,7 +1375,15 @@ function _sbRun() {
     var badge = $("tlsBadge");
     badge.textContent = e ? "1" : S.traceRun ? "OK" : "—";
     badge.className = e ? "badge alert" : "badge";
-    $("tabDot").hidden = !e;
+
+    // #5 — a count, not a dot and not a status word. The number is what is
+    // actionable: how many rungs are failing right now.
+    var failing = 0;
+    for (var i = 0; i < S.rungs.length; i++) if (S.rungs[i].status === "fail") failing++;
+    if (!failing && e) failing = 1;
+    var tc = $("tabCount");
+    tc.textContent = failing ? String(failing) : "";
+    tc.hidden = !failing;
 
     var html = "";
     if (!e) {

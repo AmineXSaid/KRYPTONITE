@@ -41,14 +41,17 @@ function makeNonce(): string {
 /**
  * Emit `@font-face` rules only when the woff2 files actually ship.
  *
- * The type system names four families — Space Grotesk for identity, Geist for
- * interface chrome, IBM Plex Sans for prose, Geist Mono for code and data —
- * but nothing in the layout depends on their metrics. When `media/fonts/` is
- * absent, which is the default, the stacks in the CSS fall through to system
- * faces that preserve the same role split, and the CSP still forbids a remote
- * fetch. Dropping any subset of these files in upgrades the panel in place;
- * the previous Inter / JetBrains Mono pair still resolves for anyone who
- * already shipped them.
+ * Anthropic Sans in two optical sizes. The `Text` cut is drawn for 11–13px and
+ * carries the whole interface; `Display` is tightened for 15px and above and is
+ * used only on the two panel titles that reach that size. Setting Display at
+ * 12px is the standard way to make a well-drawn family look wrong, so the two
+ * are separate CSS families rather than one — the stylesheet has to opt into
+ * Display deliberately.
+ *
+ * Absent files are skipped rather than 404'd, so a build with no `media/fonts/`
+ * still renders on the system stack in the CSS. `font-src` is scoped to the
+ * extension origin and nothing here is remote, so the CSP is unchanged. The
+ * Light and Extrabold cuts are not referenced by the design and do not ship.
  */
 function fontFaces(extensionUri: vscode.Uri, webview: vscode.Webview): string {
   const dir = vscode.Uri.joinPath(extensionUri, "media", "fonts");
@@ -59,24 +62,14 @@ function fontFaces(extensionUri: vscode.Uri, webview: vscode.Webview): string {
     return "";
   }
 
-  const wanted: { file: string; family: string; weight: string }[] = [
-    { file: "SpaceGrotesk-Medium.woff2", family: "Space Grotesk", weight: "500" },
-    { file: "SpaceGrotesk-Bold.woff2", family: "Space Grotesk", weight: "700" },
-    { file: "Geist-Regular.woff2", family: "Geist", weight: "400" },
-    { file: "Geist-Medium.woff2", family: "Geist", weight: "500" },
-    { file: "Geist-SemiBold.woff2", family: "Geist", weight: "600" },
-    { file: "Geist-Bold.woff2", family: "Geist", weight: "700" },
-    { file: "IBMPlexSans-Regular.woff2", family: "IBM Plex Sans", weight: "400" },
-    { file: "IBMPlexSans-Medium.woff2", family: "IBM Plex Sans", weight: "500" },
-    { file: "IBMPlexSans-SemiBold.woff2", family: "IBM Plex Sans", weight: "600" },
-    { file: "GeistMono-Regular.woff2", family: "Geist Mono", weight: "400" },
-    { file: "GeistMono-Medium.woff2", family: "Geist Mono", weight: "500" },
-    { file: "Inter-Regular.woff2", family: "Inter", weight: "400" },
-    { file: "Inter-Medium.woff2", family: "Inter", weight: "500" },
-    { file: "Inter-SemiBold.woff2", family: "Inter", weight: "600" },
-    { file: "Inter-Bold.woff2", family: "Inter", weight: "700" },
-    { file: "JetBrainsMono-Regular.woff2", family: "JetBrains Mono", weight: "400" },
-    { file: "JetBrainsMono-Medium.woff2", family: "JetBrains Mono", weight: "500" },
+  const wanted: { file: string; family: string; weight: string; italic?: true }[] = [
+    { file: "AnthropicSans-Text-Regular.woff2", family: "Anthropic Sans", weight: "400" },
+    { file: "AnthropicSans-Text-RegularItalic.woff2", family: "Anthropic Sans", weight: "400", italic: true },
+    { file: "AnthropicSans-Text-Medium.woff2", family: "Anthropic Sans", weight: "500" },
+    { file: "AnthropicSans-Text-Semibold.woff2", family: "Anthropic Sans", weight: "600" },
+    { file: "AnthropicSans-Text-Bold.woff2", family: "Anthropic Sans", weight: "700" },
+    { file: "AnthropicSans-Display-Semibold.woff2", family: "Anthropic Sans Display", weight: "600" },
+    { file: "AnthropicSans-Display-Bold.woff2", family: "Anthropic Sans Display", weight: "700" },
   ];
 
   const rules: string[] = [];
@@ -86,8 +79,8 @@ function fontFaces(extensionUri: vscode.Uri, webview: vscode.Webview): string {
       vscode.Uri.joinPath(extensionUri, "media", "fonts", f.file)
     );
     rules.push(
-      `@font-face{font-family:'${f.family}';font-style:normal;font-weight:${f.weight};` +
-        `font-display:swap;src:url('${uri}') format('woff2')}`
+      `@font-face{font-family:'${f.family}';font-style:${f.italic ? "italic" : "normal"};` +
+        `font-weight:${f.weight};font-display:swap;src:url('${uri}') format('woff2')}`
     );
   }
   return rules.length ? `<style>${rules.join("")}</style>` : "";
@@ -108,6 +101,11 @@ function shell(
   title: string
 ): string {
   const nonce = makeNonce();
+  // Palette and type live in one file loaded ahead of the surface stylesheet,
+  // for the same reason the crystal artwork is a shared script: two documents,
+  // one definition. A surface sheet that redefined a token would silently fork
+  // the design system.
+  const tokens = assetUri(webview, extensionUri, "media", "webview", "tokens.css");
   const css = assetUri(webview, extensionUri, "media", "webview", `${surface}.css`);
   const js = assetUri(webview, extensionUri, "media", "webview", `${surface}.js`);
   // The brand mark is shared, so it ships as its own script rather than being
@@ -122,6 +120,7 @@ function shell(
 <meta http-equiv="Content-Security-Policy" content="${csp(webview, nonce)}">
 <title>${title}</title>
 ${fontFaces(extensionUri, webview)}
+<link rel="stylesheet" href="${tokens}">
 <link rel="stylesheet" href="${css}">
 </head>
 <body>
