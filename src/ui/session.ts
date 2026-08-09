@@ -122,25 +122,64 @@ export class SessionController {
     // leading up to this message.
     const priorHistory = this.history.slice();
 
-    // Build the user message. When images are attached and the profile has
-    // vision enabled, they go in as content blocks alongside the text.
-    const imageAttachments = (attachments ?? []).filter((a) =>
-      a.mediaType.startsWith("image/")
-    );
+    // Build the user message from the text and whatever was attached.
+    //
+    // This used to keep `image/*` and drop everything else on the floor: a
+    // .txt, .md, .json or .log went through the picker, showed a pill in the
+    // composer, and then never reached the model at all. Silently — the send
+    // looked like it worked.
+    //
+    // Text-bearing files are now inlined as fenced blocks, which is the only
+    // shape that works on every wire. Images stay as content blocks, and are
+    // only attached when the profile actually declares vision: a gateway
+    // without it answers a base64 blob with a 400, so sending one is a worse
+    // failure than saying it was skipped.
+    const all = attachments ?? [];
+    const vision = profile.capabilities.vision === true;
+    const images = all.filter((a) => a.mediaType.startsWith("image/"));
+    const textual = all.filter((a) => !a.mediaType.startsWith("image/"));
+
+    const notes: string[] = [];
+    const parts: string[] = [];
+
+    for (const a of textual) {
+      const decoded = decodeTextAttachment(a.data);
+      if (decoded === undefined) {
+        notes.push(`${a.name} was not attached — it is not a text file (${a.mediaType}).`);
+        continue;
+      }
+      // A very large paste would evict the conversation from the window on the
+      // next turn, so it is capped here with the truncation stated in-band.
+      const CAP = 60_000;
+      const body = decoded.length > CAP ? decoded.slice(0, CAP) : decoded;
+      const cut = decoded.length > CAP ? `\n… truncated at ${CAP} of ${decoded.length} characters` : "";
+      parts.push(`Attached file \`${a.name}\`:\n\n\`\`\`\n${body}${cut}\n\`\`\``);
+    }
+
+    if (images.length && !vision) {
+      notes.push(
+        `${images.length} image(s) were not attached — ${profile.name} does not declare vision. ` +
+          `Set capabilities.vision: true in the profile if the gateway supports it.`
+      );
+    }
+    for (const n of notes) this.app.broadcast({ type: "error", message: n });
+
+    const composed = [text, ...parts].filter(Boolean).join("\n\n");
+    const attachImages = vision ? images : [];
     const userMsg: Msg =
-      imageAttachments.length > 0
+      attachImages.length > 0
         ? {
             role: "user",
             content: [
-              ...imageAttachments.map((a) => ({
+              ...attachImages.map((a) => ({
                 type: "image" as const,
                 mediaType: a.mediaType,
                 data: a.data,
               })),
-              { type: "text" as const, text },
+              { type: "text" as const, text: composed },
             ],
           }
-        : { role: "user", content: text };
+        : { role: "user", content: composed };
     this.history.push(userMsg);
     this.persist();
 
@@ -235,8 +274,9 @@ export class SessionController {
           case "context": {
             const used = ev.context!.used;
             const limit = ev.context!.limit;
-            this.app.lastContext = { used, limit };
-            const out: ReplayableEvent = { type: "contextUsage", used, limit };
+            const exact = ev.context!.exact;
+            this.app.lastContext = { used, limit, exact };
+            const out: ReplayableEvent = { type: "contextUsage", used, limit, exact };
             this.buffer(out);
             this.app.broadcast(out);
             break;
@@ -506,6 +546,7 @@ export class SessionController {
       type: "contextUsage",
       used: 0,
       limit: this.app.activeProfile()?.capabilities.contextWindow ?? 0,
+      exact: false,
     });
     this.app.broadcast({
       type: "sessionSwitched",
@@ -620,6 +661,27 @@ function firstToken(summary: string): string | undefined {
 function messageOf(e: unknown): string {
   if (e instanceof Error) return e.message;
   return String(e);
+}
+
+/**
+ * Base64 attachment -> text, or `undefined` when it is not text at all.
+ *
+ * The picker allows "All files", so a PDF or a zip can arrive here. Decoding one
+ * as UTF-8 produces replacement characters and NULs, which would be pasted into
+ * the prompt as noise; a NUL byte or a high proportion of U+FFFD is the cheap
+ * reliable signal that this is binary and should be reported rather than sent.
+ */
+export function decodeTextAttachment(base64: string): string | undefined {
+  let text: string;
+  try {
+    text = Buffer.from(base64, "base64").toString("utf8");
+  } catch {
+    return undefined;
+  }
+  if (text.indexOf(String.fromCharCode(0)) !== -1) return undefined;
+  const bad = (text.match(/�/g) ?? []).length;
+  if (bad > 0 && bad / text.length > 0.01) return undefined;
+  return text;
 }
 
 /** Message content as plain text. Image blocks are dropped, not described. */

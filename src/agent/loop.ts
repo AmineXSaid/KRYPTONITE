@@ -7,7 +7,8 @@ export interface AgentEvent {
   text?: string;
   tool?: { name: string; args: any; result?: string; isError?: boolean };
   error?: string;
-  context?: { used: number; limit: number };
+  /** `exact` is true only when the endpoint reported real token usage. */
+  context?: { used: number; limit: number; exact: boolean };
 }
 
 const SYSTEM = `You are a coding agent working inside a VS Code workspace.
@@ -155,14 +156,25 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
     { role: "user", content: opts.userMessage },
   ];
 
+  /** Last real figure the endpoint reported, so later turns keep using it. */
+  let reported = 0;
+
   const maxIter = opts.maxIterations ?? 25;
   for (let i = 0; i < maxIter; i++) {
     if (opts.signal?.aborted) return;
 
     const fitted = fitToWindow(messages, caps.contextWindow, caps.maxOutputTokens + 512);
+    // The pre-flight number is an estimate — chars/3.6 — and it is emitted only
+    // so the meter is not blank on the first turn. `exact: false` says so, and
+    // the panel refuses to print an estimated figure. As soon as the endpoint
+    // reports real usage below, that replaces it.
     yield {
       type: "context",
-      context: { used: fitted.reduce((n, m) => n + messageTokens(m), 0), limit: caps.contextWindow },
+      context: {
+        used: reported || fitted.reduce((n, m) => n + messageTokens(m), 0),
+        limit: caps.contextWindow,
+        exact: reported > 0,
+      },
     };
 
     let text = "";
@@ -178,6 +190,20 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
           yield { type: "text", text: ev.text };
         }
         if (ev.type === "tool_call") calls.push(ev.toolCall!);
+        // Real counts from the gateway. These were being discarded: the client
+        // has always decoded `usage` for both wires, nothing consumed it, and
+        // the panel showed a character-count estimate instead of the number the
+        // endpoint had just handed us.
+        if (ev.type === "usage" && ev.usage) {
+          const total = (ev.usage.input ?? 0) + (ev.usage.output ?? 0);
+          if (total > 0) {
+            reported = total;
+            yield {
+              type: "context",
+              context: { used: total, limit: caps.contextWindow, exact: true },
+            };
+          }
+        }
       }
     } catch (e: any) {
       yield { type: "error", error: [e.message, e.detail].filter(Boolean).join("\n") };

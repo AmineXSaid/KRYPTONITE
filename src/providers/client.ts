@@ -143,6 +143,18 @@ export class EndpointClient {
       body = {
         model: this.profile.model,
         stream,
+        // Ask for the final usage frame. An OpenAI-compatible gateway sends
+        // token counts on a non-streaming reply unprompted, but on a stream it
+        // stays silent unless this is set — which left the panel with only a
+        // character-count estimate for every streamed turn. Measured against
+        // OpenRouter, that estimate read 5 tokens where the truth was 95,
+        // because it cannot see the system prompt or the tool schemas.
+        //
+        // Standard since mid-2024 and ignored by gateways that predate it. It
+        // rides alongside `parallel_tool_calls` below, which is the same class
+        // of optional field, so a gateway strict enough to reject one already
+        // rejects the other.
+        ...(stream ? { stream_options: { include_usage: true } } : {}),
         max_tokens: req.maxTokens ?? caps.maxOutputTokens,
         ...(req.temperature != null ? { temperature: req.temperature } : {}),
         messages: msgs.map(toOpenAiMessage),
@@ -335,11 +347,31 @@ function safeJson(s: string): any {
 function openAiStream() {
   const pending = new Map<number, { id: string; name: string; args: string }>();
   return function* (json: any): Generator<CompletionEvent> {
-    const d = json.choices?.[0]?.delta;
-    if (!d) {
-      if (json.usage) yield { type: "usage", usage: { input: json.usage.prompt_tokens, output: json.usage.completion_tokens } };
-      return;
+    // Usage is checked before the delta branch and independently of it.
+    //
+    // The spec-shaped final frame carries `usage` with an empty `choices`, and
+    // the old `if (!d)` guard handled that. OpenRouter instead attaches usage to
+    // the *last content frame*, which still has a delta — so the delta branch
+    // ran, returned, and the token counts were dropped on the floor for every
+    // streamed turn. Reading it unconditionally covers both shapes.
+    if (json.usage) {
+      const u = json.usage;
+      const input = u.prompt_tokens ?? 0;
+      const output = u.completion_tokens ?? 0;
+      // `total_tokens` is authoritative where a gateway reports it, since it can
+      // include reasoning or cached tokens the two components leave out.
+      if (input || output || u.total_tokens) {
+        yield {
+          type: "usage",
+          usage: {
+            input,
+            output: u.total_tokens ? Math.max(0, u.total_tokens - input) : output,
+          },
+        };
+      }
     }
+    const d = json.choices?.[0]?.delta;
+    if (!d) return;
     if (d.content) yield { type: "text", text: d.content };
     for (const tc of d.tool_calls ?? []) {
       const slot = pending.get(tc.index) ?? { id: "", name: "", args: "" };

@@ -90,7 +90,7 @@ export class App {
   tlsError: TlsErrorDto | null = null;
   todos: TodoDto[] = [];
   selection: SelectionDto | null = null;
-  lastContext: { used: number; limit: number } | null = null;
+  lastContext: { used: number; limit: number; exact: boolean } | null = null;
 
   uiConfig: UiConfigDto = { ...UI_DEFAULTS };
   disabledSkills: string[] = [];

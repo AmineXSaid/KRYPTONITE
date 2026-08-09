@@ -1068,11 +1068,15 @@ function _sbRun() {
     var draft = $("draft");
     var blocked = !S.workspace.open || !hasEndpoint();
     draft.disabled = blocked;
+    // syncComposer runs on every render and overwrites the placeholder set at
+    // mount, so this is the string that actually shows. It said "/ commands"
+    // after `/` was changed to list skills — the mount was updated and this was
+    // not, which is why the panel disagreed with the palette.
     draft.placeholder = blocked
       ? "Configure an endpoint first…"
       : S.phase === "plan"
-        ? "Describe what to plan…   ( / commands · @ files )"
-        : "Ask Kryptonite anything…   ( / commands · @ files )";
+        ? "Describe what to plan…   ( / skills · @ files )"
+        : "Ask Kryptonite anything…   ( / skills · @ files )";
 
     var send = $("sendBtn");
     if (S.running) {
@@ -1356,10 +1360,17 @@ function _sbRun() {
   function renderFooter() {
     var used = S.context ? S.context.used : 0;
     var limit = S.context ? S.context.limit : 0;
-    $("ctxText").textContent = fmtK(used) + " / " + fmtK(limit);
+    // A figure is printed only when the gateway reported real token usage.
+    // The fallback is a chars/3.6 estimate that drifts about a tenth of a k
+    // per message, and a number that is quietly wrong is worse than the meter
+    // alone — so when it is not exact, only the meter speaks.
+    var exact = S.context ? S.context.exact === true : false;
+    $("ctxText").textContent = exact ? fmtK(used) + " / " + fmtK(limit) : "";
+    $("ctxText").title = exact ? "Reported by the endpoint" : "";
     $("ctxFill").style.width = limit ? Math.min(100, (used / limit) * 100) + "%" : "0";
     // Header carries the bare number; the footer keeps the meter it fills.
-    $("ctxHead").textContent = used ? fmtK(used) : "";
+    // Same rule in the header.
+    $("ctxHead").textContent = exact && used ? fmtK(used) : "";
 
     var active = activeProfile();
     var name = active ? active.id : "No endpoint";
@@ -2169,7 +2180,7 @@ function _sbRun() {
         break;
 
       case "contextUsage":
-        S.context = { used: m.used, limit: m.limit };
+        S.context = { used: m.used, limit: m.limit, exact: m.exact === true };
         renderFooter();
         break;
 

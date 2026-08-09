@@ -257,7 +257,7 @@ export interface StateSync {
   checkpoints: CheckpointDto[];
   sessions: SessionMetaDto[];
   selection: SelectionDto | null;
-  context: { used: number; limit: number } | null;
+  context: { used: number; limit: number; exact: boolean } | null;
   models: ModelGroupDto[];
   logs: LogLine[];
   session: { id: string; title: string; messages: Msg[] };
@@ -392,7 +392,17 @@ export interface SkillsReloadedOut {
   skills: SkillDto[];
   warnings: string[];
 }
-export interface ContextUsageOut { type: "contextUsage"; used: number; limit: number }
+/**
+ * Context usage.  is true only when the gateway reported real token
+ * counts; the panel prints a figure only in that case, because an estimate that
+ * drifts by a tenth of a k per message is worse than no number at all.
+ */
+export interface ContextUsageOut {
+  type: "contextUsage";
+  used: number;
+  limit: number;
+  exact: boolean;
+}
 export interface AttachmentsReadyOut {
   type: "attachmentsReady";
   files: Array<{ name: string; mediaType: string; data: string; size: number }>;
