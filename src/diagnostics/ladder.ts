@@ -19,6 +19,42 @@ export interface Rung {
 
 type Emit = (r: Rung) => void;
 
+/**
+ * Local TLS-inspecting software, recognised from the root it re-signs with.
+ *
+ * This matters far beyond a cosmetic label. Antivirus and corporate inspection
+ * proxies terminate TLS and re-emit it, and several of them buffer a response
+ * until it is complete instead of forwarding it as it arrives. The visible
+ * symptom is a request that works in curl (short, GET) and stalls in the
+ * extension (long-lived POST, or SSE), which reads as "the endpoint is down"
+ * when the endpoint is fine. Naming the culprit in the timeout advice is the
+ * difference between the user editing a profile that was never wrong and the
+ * user adding an exclusion.
+ */
+const INSPECTORS: [RegExp, string][] = [
+  [/avast/i, "Avast Web/Mail Shield"],
+  [/avg\b/i, "AVG Web Shield"],
+  [/kaspersky/i, "Kaspersky"],
+  [/eset/i, "ESET SSL filtering"],
+  [/bitdefender/i, "Bitdefender"],
+  [/\besmtp|dr\.?web/i, "Dr.Web"],
+  [/sophos/i, "Sophos"],
+  [/zscaler/i, "Zscaler"],
+  [/fortinet|fortigate/i, "FortiGate"],
+  [/bluecoat|blue coat|symantec web/i, "Blue Coat"],
+  [/mcafee/i, "McAfee Web Gateway"],
+  [/palo alto|paloalto/i, "Palo Alto"],
+  [/netskope/i, "Netskope"],
+  [/charles proxy|fiddler|mitmproxy|burp/i, "a local debugging proxy"],
+];
+
+export function inspectorIn(chain: string[]): string | undefined {
+  for (const name of chain) {
+    for (const [re, label] of INSPECTORS) if (re.test(name)) return label;
+  }
+  return undefined;
+}
+
 async function timed<T>(fn: () => Promise<T>): Promise<[T | undefined, any, number]> {
   const t0 = Date.now();
   try {
@@ -56,6 +92,16 @@ export async function runLadder(
     return rungs;
   }
   const port = Number(url.port) || (url.protocol === "https:" ? 443 : 80);
+  /** Set by the TLS rung when the chain shows local interception. */
+  let inspector: string | undefined;
+  /** Appended to every timeout remedy below, once we know who is in the path. */
+  const inspectorNote = () =>
+    inspector
+      ? ` ${inspector} is terminating TLS on this machine and is the most likely cause: ` +
+        `inspection proxies routinely hold a response until it is complete, which stalls ` +
+        `long POSTs and SSE while leaving short GETs — curl's usual test — working. ` +
+        `Add ${url.hostname} to its HTTPS-scanning exclusions and check again.`
+      : "";
 
   // 1. Local material — fails fast and offline, before touching the network.
   {
@@ -188,10 +234,13 @@ export async function runLadder(
         ["Authentication", "Completion", "Streaming", "Tool calling"].forEach(skipRest);
         return rungs;
       }
+      inspector = inspectorIn(info!.chain);
       push({
         name: "TLS handshake",
         status: "pass",
-        detail: `${info.protocol}, chain: ${info.chain.join(" ← ")}. Leaf expires ${info.expires}.`,
+        detail:
+          `${info!.protocol}, chain: ${info!.chain.join(" ← ")}. Leaf expires ${info!.expires}.` +
+          (inspector ? ` Traffic is being inspected by ${inspector}.` : ""),
         ms,
       });
     }
@@ -229,24 +278,71 @@ export async function runLadder(
     });
     if (err) {
       const e = err as any;
-      push({
-        name: "Completion",
-        status: "fail",
-        detail: `${e.message}${e.detail ? "\n" + e.detail : ""}`,
-        fix:
-          e.status === 401 || e.status === 403
-            ? "The credential was rejected. Check scopes, audience, and whether the token has expired."
-            : e.status === 404
-            ? "Path is wrong. Set chatPath explicitly — many gateways prefix their routes."
-            : e.status === 400
-            ? "The body shape was rejected. A transform module can reshape it."
-            : "See the raw response above.",
-        ms,
-      });
-      ["Streaming", "Tool calling"].forEach(skipRest);
-      return rungs;
+
+      // A failed non-streaming probe is not proof the endpoint is unusable.
+      //
+      // NVIDIA NIM (integrate.api.nvidia.com) answers GET and answers a
+      // streaming POST in under half a second, but hangs forever on a
+      // non-streaming POST over HTTP/1.1 — it only replies to that shape over
+      // HTTP/2. Condemning the profile there tells the user their gateway is
+      // unreachable while the agent, which streams, would have worked fine. So
+      // before failing, ask the same question the way the agent actually asks
+      // it. Only if that fails too is the endpoint really broken.
+      let streamedOk = false;
+      let streamMs = 0;
+      if (profile.capabilities.streaming) {
+        const [got, serr, sms] = await timed(async () => {
+          let out = "";
+          for await (const ev of client.complete({ messages: probe, stream: true, maxTokens: 16 })) {
+            if (ev.type === "text") out += ev.text;
+          }
+          return out;
+        });
+        streamMs = sms;
+        streamedOk = !serr && got !== undefined;
+      }
+
+      if (streamedOk) {
+        push({
+          name: "Completion",
+          status: "warn",
+          detail:
+            `This gateway did not answer a non-streaming request (${e.message}), ` +
+            `but answered the same request when streaming, in ${streamMs}ms.`,
+          fix:
+            "Usable as-is — the agent streams by default, so keep capabilities.streaming: true. " +
+            "Non-streaming calls (conversation naming) will be slow or fail on this endpoint. " +
+            "Raising the timeout usually fixes it; http2: true makes the non-streaming shape " +
+            "work on some gateways but measurably degrades streaming, so try the timeout first.",
+          ms,
+        });
+        // Deliberately does not return: the remaining rungs are meaningful and
+        // are what tell the user the profile is actually fit to use.
+      } else {
+        push({
+          name: "Completion",
+          status: "fail",
+          detail: `${e.message}${e.detail ? "\n" + e.detail : ""}`,
+          fix:
+            e.status === 401 || e.status === 403
+              ? "The credential was rejected. Check scopes, audience, and whether the token has expired."
+              : e.status === 404
+              ? "Path is wrong. Set chatPath explicitly — many gateways prefix their routes."
+              : e.status === 400
+              ? "The body shape was rejected. A transform module can reshape it."
+              : /TIMEOUT/i.test(String(e.detail ?? e.message))
+              ? `Nothing came back within ${profile.timeoutMs}ms, streaming or not.` +
+                inspectorNote() +
+                " Otherwise raise timeoutMs; http2: true helps on a few gateways but slows streaming."
+              : "See the raw response above.",
+          ms,
+        });
+        ["Streaming", "Tool calling"].forEach(skipRest);
+        return rungs;
+      }
+    } else {
+      push({ name: "Completion", status: "pass", detail: `Model answered: ${(text ?? "").trim().slice(0, 60)}`, ms });
     }
-    push({ name: "Completion", status: "pass", detail: `Model answered: ${(text ?? "").trim().slice(0, 60)}`, ms });
   }
 
   // 7. Streaming
@@ -267,11 +363,21 @@ export async function runLadder(
       return n;
     });
     if (err) {
+      // A timeout here is a slow endpoint, not a broken one. Telling the user
+      // to turn streaming off would trade the fast path for the slow one — on
+      // gateways like NVIDIA NIM the non-streaming shape is the one that
+      // stalls, so that advice makes the profile worse.
+      const timedOut = /TIMEOUT|timeout/i.test(String((err as any).message));
       push({
         name: "Streaming",
         status: "fail",
         detail: String((err as any).message),
-        fix: "Set capabilities.streaming: false to fall back to whole responses.",
+        fix: timedOut
+          ? `The stream did not finish within ${profile.timeoutMs}ms.` +
+            inspectorNote() +
+            " Otherwise the endpoint is slow rather than unreachable — raise the timeout. Only set " +
+            "capabilities.streaming: false if it still fails with a generous budget."
+          : "Set capabilities.streaming: false to fall back to whole responses.",
         ms,
       });
     } else if ((chunks ?? 0) === 0) {
@@ -329,11 +435,16 @@ export async function runLadder(
       return got;
     });
     if (err) {
+      const timedOut = /TIMEOUT|timeout/i.test(String((err as any).message));
       push({
         name: "Tool calling",
         status: "fail",
         detail: String((err as any).message),
-        fix: "Set capabilities.tools: false. The agent will fall back to a text protocol for tools.",
+        fix: timedOut
+          ? `Nothing finished within ${profile.timeoutMs}ms. A tool call is the largest request the ` +
+            "ladder makes, so a tight timeout kills it first — raise it and check again." +
+            inspectorNote()
+          : "Set capabilities.tools: false. The agent will fall back to a text protocol for tools.",
         ms,
       });
     } else if (!called) {

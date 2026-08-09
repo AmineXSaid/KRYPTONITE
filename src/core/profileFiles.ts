@@ -96,8 +96,13 @@ export function renderProfileYaml(form: EndpointForm): string {
   } else {
     lines.push(`# chatPath: /v1/chat/completions   # only when the gateway prefixes its routes`);
   }
-  lines.push(`timeoutMs: 120000`);
+  lines.push(`timeoutMs: ${form.timeoutMs && form.timeoutMs > 0 ? Math.round(form.timeoutMs) : 120000}`);
   lines.push(`retries: 2`);
+  if (form.http2) {
+    lines.push(`http2: true                       # this gateway needs HTTP/2`);
+  } else {
+    lines.push(`# http2: true                      # some gateways stall on HTTP/1.1 POSTs`);
+  }
   lines.push(``);
 
   lines.push(`# headers:                          # merged into every request`);

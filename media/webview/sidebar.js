@@ -454,11 +454,15 @@ function _sbRun() {
               '<div class="att-strip" id="attachStrip" hidden></div>' +
               '<textarea id="draft" rows="1" aria-label="Message" placeholder="Ask Kryptonite anything…   ( / skills · @ files )"></textarea>' +
               '<div class="toolbar">' +
-                '<div class="seg" id="phaseSeg" role="group" aria-label="Phase">' +
+                // The keycap lives inside the toggle it describes, so it reads
+                // as "this control has a shortcut" rather than as two loose
+                // glyphs between the toggle and the model picker.
+                '<div class="seg" id="phaseSeg" role="group" aria-label="Phase — Shift+Tab to switch">' +
                   '<button data-phase="plan" data-on="0">Plan</button>' +
                   '<button data-phase="act" data-on="1">Act</button>' +
+                  '<kbd class="seg-kbd" title="Shift+Tab to switch phase" aria-hidden="true">' +
+                    '<span>&#8679;</span><span>&#8677;</span></kbd>' +
                 '</div>' +
-                '<span class="hint" title="Shift+Tab to switch phase">&#8679;&#8677;</span>' +
                 '<button id="modelBtn" aria-haspopup="listbox" aria-expanded="false">' +
                   '<span class="nm ell" id="modelName">No model</span>' + icon("i-caret", "ic-9") +
                 '</button>' +
@@ -1219,8 +1223,10 @@ function _sbRun() {
           icon("i-term", "ic-13") + '<span class="n">' + esc(r.cmd) + "</span>" +
           '<span class="d ell">' + esc(r.desc) + "</span></button>";
       } else if (r.file) {
+        var isDir = r.badge === "folder";
         html += '<button class="qp-row" role="option" data-active="' + on + '" data-i="' + idx + '">' +
-          icon("i-file", "ic-13") + '<span class="n ell">@' + esc(r.file) + "</span>" +
+          icon(isDir ? "i-folder" : "i-file", "ic-13") +
+          '<span class="n ell">@' + esc(r.file) + (isDir ? "/" : "") + "</span>" +
           '<span class="d">' + esc(r.badge) + "</span></button>";
       } else {
         html += '<button class="qp-row" role="option" data-active="' + on + '" data-i="' + idx + '">' +
@@ -1249,7 +1255,10 @@ function _sbRun() {
     } else if (r.cmd) {
       runSlash(r.cmd, draft);
     } else if (r.file) {
-      draft.value = draft.value.replace(/@([\w./-]*)$/, "@" + r.file + " ");
+      // A folder keeps its trailing slash so the model can tell "this
+      // directory" from "a file with no extension".
+      var suffix = r.badge === "folder" ? "/ " : " ";
+      draft.value = draft.value.replace(/@([\w./-]*)$/, "@" + r.file + suffix);
     } else {
       post("selectModel", { endpoint: r.endpoint, model: r.model });
       S.modelOpen = false;
@@ -1485,6 +1494,16 @@ function _sbRun() {
               (f.hasStoredKey ? "stored — leave blank to keep" : "sk-…") + '">'
             : "") +
           '<label for="fPath">Route</label><input id="fPath" value="' + esc(f.chatPath || "") + '" placeholder="auto — derived from Base URL">' +
+          '<label for="fTimeout">Timeout</label>' +
+          '<div class="fsplit">' +
+            '<input id="fTimeout" type="number" min="1" max="600" step="1" value="' +
+              esc(f.timeoutMs ? Math.round(f.timeoutMs / 1000) : "") + '" placeholder="30"><span class="unit">seconds</span>' +
+          "</div>" +
+          '<label for="fHttp2">HTTP/2</label>' +
+          '<div class="fsplit">' +
+            '<input id="fHttp2" type="checkbox"' + (f.http2 ? " checked" : "") + '>' +
+            '<span class="unit">last resort — slows streaming badly</span>' +
+          "</div>" +
         "</div>" +
         (needsKey
           ? '<div class="hint2">The key is stored in VS Code SecretStorage. The YAML only holds a <code>${secret:…}</code> reference, so the profile is safe to commit.</div>'
@@ -1517,6 +1536,11 @@ function _sbRun() {
     S.epForm.type = $("fType").value;
     S.epForm.model = $("fModel") ? $("fModel").value.trim() : "";
     S.epForm.chatPath = $("fPath") ? $("fPath").value.trim() : "";
+    // Entered in seconds because nobody thinks in milliseconds; stored in ms
+    // because that is what the profile and undici take.
+    var secs = $("fTimeout") ? parseFloat($("fTimeout").value) : NaN;
+    S.epForm.timeoutMs = isFinite(secs) && secs > 0 ? Math.round(secs * 1000) : 0;
+    S.epForm.http2 = $("fHttp2") ? $("fHttp2").checked : false;
     if (key) S.epForm.apiKey = key;
     return S.epForm;
   }
@@ -1920,7 +1944,8 @@ function _sbRun() {
     if (a === "add") {
       S.epForm = {
         isNew: true, id: "", name: "", url: "", type: "openai-compatible",
-        model: "", chatPath: "", apiKey: "", hasStoredKey: false
+        model: "", chatPath: "", apiKey: "", hasStoredKey: false,
+        timeoutMs: 0, http2: false
       };
       S.epCheck = null;
       renderEndpoints();
@@ -1938,6 +1963,8 @@ function _sbRun() {
           type: p.wire === "anthropic" ? "anthropic" : "openai-compatible",
           model: p.model === "—" ? "" : p.model,
           chatPath: p.chatPath || "",
+          timeoutMs: p.timeoutMs || 0,
+          http2: !!p.http2,
           apiKey: "",
           // The DTO carries the raw template, never the value, so this is the
           // only way the form can tell "a key exists" from "no key set".
@@ -1970,8 +1997,9 @@ function _sbRun() {
     var out = {
       id: f.id, name: f.name, url: f.url, type: f.type,
       model: f.model || "", chatPath: f.chatPath || "",
-      hasStoredKey: !!f.hasStoredKey
+      http2: !!f.http2, hasStoredKey: !!f.hasStoredKey
     };
+    if (f.timeoutMs) out.timeoutMs = f.timeoutMs;
     if (f.apiKey) out.apiKey = f.apiKey;
     if (f.originalId) out.originalId = f.originalId;
     return out;

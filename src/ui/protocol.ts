@@ -127,6 +127,8 @@ export interface ProfileDto {
   timeoutMs: number;
   retries: number;
   transform: string | null;
+  /** True when the profile opts into HTTP/2. */
+  http2: boolean;
 }
 
 export interface SkillDto {
@@ -196,7 +198,8 @@ export interface ModelGroupDto {
 
 export interface FileHitDto {
   path: string;
-  kind: "file" | "config";
+  /** `folder` entries are directories the user can mention wholesale. */
+  kind: "file" | "config" | "folder";
 }
 
 export interface EndpointForm {
@@ -224,6 +227,14 @@ export interface EndpointForm {
   apiKey?: string;
   /** True when a key is already stored, so the field can render as "unchanged". */
   hasStoredKey?: boolean;
+  /**
+   * Per-request timeout in milliseconds. Also bounds each rung of the
+   * connection check, so a gateway that stalls fails fast instead of holding
+   * the form open for a minute.
+   */
+  timeoutMs?: number;
+  /** Negotiate HTTP/2. Needed by gateways that stall on HTTP/1.1 POSTs. */
+  http2?: boolean;
   /** Set when editing; a changed `id` deletes the old file. */
   originalId?: string;
 }

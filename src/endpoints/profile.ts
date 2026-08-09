@@ -85,6 +85,17 @@ export interface EndpointProfile {
   capabilities: Capabilities;
   /** Relative path to a .js/.ts module exporting transformRequest/transformResponse. */
   transform?: string;
+  /**
+   * Negotiate HTTP/2 with the origin.
+   *
+   * A last resort, and measured rather than assumed. Against NVIDIA NIM it does
+   * fix the non-streaming POST that stalls over HTTP/1.1 — but the same switch
+   * took a streaming completion from under a second to just over five minutes,
+   * because undici's h2 support is experimental and its streaming path is where
+   * that shows. Since the agent streams, enabling this usually trades a fast
+   * common path for a slow one. Raise `timeoutMs` first.
+   */
+  http2?: boolean;
   timeoutMs?: number;
   retries?: number;
   /** Free-form defaults merged into every request body. */

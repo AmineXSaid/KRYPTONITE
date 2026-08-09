@@ -374,6 +374,12 @@ function _run() {
             (f.hasStoredKey ? "stored — leave blank to keep" : "sk-…") + '">'
           : "") +
         '<label for="fPath">Route</label><input id="fPath" value="' + esc(f.chatPath || "") + '" placeholder="auto — derived from Base URL">' +
+        '<label for="fTimeout">Timeout</label>' +
+        '<div class="fsplit"><input id="fTimeout" type="number" min="1" max="600" step="1" value="' +
+          esc(f.timeoutMs ? Math.round(f.timeoutMs / 1000) : "") + '" placeholder="30"><span class="unit">seconds</span></div>' +
+        '<label for="fHttp2">HTTP/2</label>' +
+        '<div class="fsplit"><input id="fHttp2" type="checkbox"' + (f.http2 ? " checked" : "") +
+          '><span class="unit">last resort — slows streaming badly</span></div>' +
       "</div>" +
       (needsKey
         ? '<div class="hint2">Stored in VS Code SecretStorage. The YAML holds only a <code>${secret:…}</code> reference.</div>'
@@ -409,6 +415,10 @@ function _run() {
     S.epForm.type = $("fType").value;
     S.epForm.model = $("fModel") ? $("fModel").value.trim() : "";
     S.epForm.chatPath = $("fPath") ? $("fPath").value.trim() : "";
+    // Seconds in the field, milliseconds in the profile.
+    var secs = $("fTimeout") ? parseFloat($("fTimeout").value) : NaN;
+    S.epForm.timeoutMs = isFinite(secs) && secs > 0 ? Math.round(secs * 1000) : 0;
+    S.epForm.http2 = $("fHttp2") ? $("fHttp2").checked : false;
     if (key) S.epForm.apiKey = key;
     return S.epForm;
   }
@@ -417,8 +427,9 @@ function _run() {
     var out = {
       id: f.id, name: f.name, url: f.url, type: f.type,
       model: f.model || "", chatPath: f.chatPath || "",
-      hasStoredKey: !!f.hasStoredKey
+      http2: !!f.http2, hasStoredKey: !!f.hasStoredKey
     };
+    if (f.timeoutMs) out.timeoutMs = f.timeoutMs;
     if (f.apiKey) out.apiKey = f.apiKey;
     if (f.originalId) out.originalId = f.originalId;
     return out;

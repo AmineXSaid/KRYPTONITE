@@ -752,6 +752,29 @@ li.doing .cbx { border-color: var(--kx-accent); }
 .seg button[data-on="1"] { font-weight: 600; }
 .seg button[data-phase="plan"][data-on="1"] { background: var(--kx-active); color: #fff; }
 .seg button[data-phase="act"][data-on="1"] { background: var(--kx-accent); color: #0C1512; }
+
+/* The Shift+Tab keycap, inside the toggle it belongs to.
+ *
+ * It used to sit loose between the toggle and the model picker as two bare
+ * glyphs, which read as decoration rather than as a shortcut. Two small caps
+ * inside the group say "this control has a keyboard shortcut" without needing
+ * a hover. Hidden below 260px, where the composer needs the width more than
+ * the reminder. */
+.seg-kbd {
+  display: flex; align-items: center; gap: 2px;
+  padding: 0 6px 0 7px; align-self: stretch;
+  border-left: 1px solid var(--vscode-panel-border);
+  font: inherit; cursor: default;
+}
+.seg-kbd span {
+  display: grid; place-items: center;
+  min-width: 13px; height: 13px; padding: 0 2px;
+  border: 1px solid var(--vscode-panel-border); border-radius: 3px;
+  background: var(--vscode-keybindingLabel-background, var(--vscode-editorWidget-background));
+  color: var(--vscode-keybindingLabel-foreground, var(--vscode-descriptionForeground));
+  font-family: var(--kx-ui); font-size: 9px; line-height: 1;
+}
+@media (max-width: 260px) { .seg-kbd { display: none; } }
 .hint { font-size: 10px; flex: none; color: var(--vscode-dimmerForeground); }
 #modelBtn {
   display: flex; align-items: center; gap: 5px; min-width: 0; padding: 2px 4px; border-radius: 4px;
@@ -947,6 +970,14 @@ li.doing .cbx { border-color: var(--kx-accent); }
   border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
 }
 .fgrid input:focus, .fgrid select:focus { border-color: var(--vscode-focusBorder); }
+/* A field with a unit or an explanation beside it. */
+.fsplit { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.fsplit input[type="number"] { width: 68px; flex: none; }
+.fsplit input[type="checkbox"] { width: 14px; height: 14px; flex: none; accent-color: var(--kx-accent); }
+.fsplit .unit {
+  font-size: 10.5px; color: var(--vscode-descriptionForeground);
+  min-width: 0; overflow: hidden; text-overflow: ellipsis;
+}
 .form .row { display: flex; gap: 7px; justify-content: flex-end; }
 .form .hint2 { font-size: 11px; line-height: 1.5; color: var(--vscode-descriptionForeground); }
 .form .hint2 code {

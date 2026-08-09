@@ -513,6 +513,7 @@ export class App {
         timeoutMs: p.timeoutMs ?? 120000,
         retries: p.retries ?? 2,
         transform: p.transform ?? null,
+        http2: p.http2 === true,
       };
     });
 
@@ -541,6 +542,7 @@ export class App {
       timeoutMs: 0,
       retries: 0,
       transform: null,
+      http2: false,
     }));
 
     return [...ready, ...broken];
@@ -986,22 +988,58 @@ export class App {
 
   /* ───────────────────────── inbound helpers ───────────────────────── */
 
+  /**
+   * Candidates for an `@` mention: files and folders.
+   *
+   * `findFiles` cannot return directories, so folders are derived from the
+   * paths of the files inside them — which also means a folder only appears
+   * when it actually holds something the picker would offer. Folders are listed
+   * first: mentioning `src/agent` is a coarser, more common intent than
+   * reaching for one file in it, and it is the harder thing to type.
+   *
+   * The file budget is raised above the number shown so that a query matching
+   * many files deep in one tree still yields the folders above them.
+   */
   private async searchFiles(query: string): Promise<FileHitDto[]> {
     if (!this.root) return [];
-    const glob = query ? `**/*${query}*` : "**/*";
-    const found = await vscode.workspace.findFiles(
-      glob,
-      "**/{node_modules,.git,dist,out}/**",
-      20
-    );
     const root = this.root;
-    return found.map((u) => {
-      const rel = path.relative(root, u.fsPath).split(path.sep).join("/");
-      return {
+    const exclude = "**/{node_modules,.git,dist,out,.vscode-test,coverage}/**";
+
+    const files = await vscode.workspace.findFiles(
+      query ? `**/*${query}*` : "**/*",
+      exclude,
+      200
+    );
+    const rels = files.map((u) => path.relative(root, u.fsPath).split(path.sep).join("/"));
+
+    // Every ancestor directory of every hit, plus — when there is a query —
+    // directories whose own name matches even if no child matched the text.
+    const dirs = new Set<string>();
+    const q = query.toLowerCase();
+    for (const rel of rels) {
+      const parts = rel.split("/");
+      for (let i = 1; i < parts.length; i++) {
+        const dir = parts.slice(0, i).join("/");
+        if (!q || parts[i - 1].toLowerCase().includes(q)) dirs.add(dir);
+      }
+    }
+    if (!q) {
+      // With no query, offer the top level rather than every nested folder.
+      for (const dir of [...dirs]) if (dir.includes("/")) dirs.delete(dir);
+    }
+
+    const out: FileHitDto[] = [...dirs]
+      .sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b))
+      .slice(0, 10)
+      .map((p) => ({ path: p, kind: "folder" as const }));
+
+    for (const rel of rels.slice(0, 20)) {
+      out.push({
         path: rel,
         kind: /\.(ya?ml|json|toml|ini|env|cfg)$/i.test(rel) ? "config" : "file",
-      };
-    });
+      });
+    }
+    return out;
   }
 
   async runTrace(): Promise<void> {

@@ -251,6 +251,10 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
   border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
 }
 .fgrid input:focus, .fgrid select:focus { border-color: var(--vscode-focusBorder); }
+.fsplit { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.fsplit input[type="number"] { width: 68px; flex: none; }
+.fsplit input[type="checkbox"] { width: 14px; height: 14px; flex: none; accent-color: var(--kx-accent); }
+.fsplit .unit { font-size: 10.5px; color: var(--vscode-descriptionForeground); }
 .form .row { display: flex; gap: 7px; justify-content: flex-end; }
 .form .hint2 { font-size: 11px; line-height: 1.5; color: var(--vscode-descriptionForeground); }
 

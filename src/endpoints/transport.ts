@@ -142,6 +142,9 @@ export function buildTransport(profile: EndpointProfile): BuiltTransport {
   };
 
   const proxy = proxyUrlFor(profile.baseUrl, profile.proxy);
+  const allowH2 = profile.http2 === true;
+  if (allowH2) report.push("HTTP/2 enabled for this profile.");
+
   let dispatcher: Dispatcher;
   if (proxy) {
     report.push(`Tunnelling through proxy ${proxy}.`);
@@ -156,10 +159,16 @@ export function buildTransport(profile: EndpointProfile): BuiltTransport {
       // extension forgets, which is why mTLS-behind-proxy never works.
       requestTls: connect as any,
       connectTimeout: 15_000,
+      allowH2,
     });
   } else {
     report.push("Connecting directly, no proxy.");
-    dispatcher = new Agent({ connect, connectTimeout: 15_000, headersTimeout: profile.timeoutMs });
+    dispatcher = new Agent({
+      connect,
+      connectTimeout: 15_000,
+      headersTimeout: profile.timeoutMs,
+      allowH2,
+    });
   }
   return { dispatcher, material, proxy, report };
 }

@@ -39,11 +39,18 @@ const DRAFT_CAPS: Capabilities = {
  * Kept deliberately close to the generated YAML: if this drifts, the check
  * stops describing the file the user is about to save.
  */
+/** Fallback when the form leaves the timeout blank. */
+export const DEFAULT_CHECK_TIMEOUT_MS = 30_000;
+
 export function draftProfile(form: EndpointForm): EndpointProfile {
   const wire = wireForType(form.type);
   const local = form.type === "local";
   const baseUrl = form.url.trim().replace(/\/$/, "");
   const chatPath = form.chatPath?.trim() || undefined;
+  const timeoutMs =
+    Number.isFinite(form.timeoutMs) && (form.timeoutMs as number) > 0
+      ? Math.min(600_000, Math.max(1_000, Number(form.timeoutMs)))
+      : DEFAULT_CHECK_TIMEOUT_MS;
 
   return {
     name: form.id || "draft",
@@ -58,7 +65,8 @@ export function draftProfile(form: EndpointForm): EndpointProfile {
     tls: local ? {} : { caBundle: ["system"] },
     proxy: { useEnvironment: !local },
     capabilities: DRAFT_CAPS,
-    timeoutMs: 60_000,
+    http2: form.http2 === true,
+    timeoutMs,
     retries: 0,
   };
 }
