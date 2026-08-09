@@ -767,6 +767,89 @@ li.doing .cbx { border-color: var(--kx-accent); }
 .ep[data-err="1"] { color: var(--kx-error); }
 .ep[data-err="1"] .dot { display: none; }
 
+/* ───────────────────────────── MCP ─────────────────────────────
+ *
+ * Geometry from frame 1b: a 3px status rail, then name + pill over a mono
+ * transport line, with the tool count right-aligned. Rows are separated by the
+ * .06 hairline rather than boxed, so a list of servers reads as one object.
+ */
+.mcp-wrap { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+.mcp-head {
+  display: flex; align-items: center; gap: 8px; padding: 12px 16px 10px; flex: none;
+}
+.mcp-head .l {
+  font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--kx-fg-3);
+}
+.mcp-head .when { font-family: var(--kx-mono); font-size: 11px; color: var(--kx-fg-3); }
+
+.mcp-row {
+  display: grid; grid-template-columns: 3px minmax(0, 1fr) auto;
+  align-items: center; gap: 10px; padding: 10px 16px;
+  border-top: 1px solid var(--kx-hairline);
+}
+/* The rail and the pill read the same field, so they cannot disagree. */
+.mcp-row .rail { align-self: stretch; border-radius: 2px; background: var(--kx-fg-5); }
+.mcp-row[data-state="ready"] .rail { background: var(--kx-accent); }
+.mcp-row[data-state="failed"] .rail { background: var(--kx-error); }
+.mcp-row[data-state="starting"] .rail { background: var(--kx-warn); }
+.mcp-row .mid { min-width: 0; }
+.mcp-row .top { display: flex; align-items: center; gap: 8px; }
+.mcp-row .nm { font-size: 12px; font-weight: 600; color: var(--kx-fg); }
+.mcp-row .sub {
+  display: block; margin-top: 2px;
+  font-family: var(--kx-mono); font-size: 11px; color: var(--kx-fg-3);
+}
+.mcp-row .count {
+  font-family: var(--kx-mono); font-size: 11px; color: var(--kx-fg-2); white-space: nowrap;
+}
+
+.mcp-pill {
+  display: inline-flex; align-items: center; gap: 5px; flex: none;
+  padding: 3px 9px; border-radius: 999px;
+  font-size: 10.5px; font-weight: 600; letter-spacing: .02em;
+  background: var(--kx-surface-3); color: var(--kx-fg-2);
+}
+.mcp-pill.ok { background: var(--kx-accent-wash); color: var(--kx-accent); }
+.mcp-pill.err { background: var(--kx-error-wash); color: var(--kx-error); }
+
+/* Chips are capped in the renderer; the tail carries the rest in its tooltip. */
+.mcp-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 16px 12px 29px; }
+.mcp-chip {
+  display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 4px;
+  background: var(--kx-surface-3);
+  font-family: var(--kx-mono); font-size: 11px; color: var(--kx-fg-2);
+}
+.mcp-more {
+  display: inline-flex; align-items: center; padding: 3px 8px;
+  font-family: var(--kx-mono); font-size: 11px; color: var(--kx-fg-3); cursor: default;
+}
+
+/* A failure is an object with actions, not a red line of text. */
+.mcp-err {
+  margin: 0 16px 12px 29px; padding: 10px 12px;
+  border-left: 2px solid var(--kx-error);
+  background: var(--kx-surface); border-radius: 0 6px 6px 0;
+}
+.mcp-err .t { font-size: 12px; line-height: 1.55; color: var(--kx-fg-2); text-wrap: pretty; }
+.mcp-err .acts { display: flex; gap: 8px; margin-top: 10px; }
+
+.mcp-foot {
+  margin-top: auto; flex: none;
+  display: flex; align-items: center; gap: 8px; padding: 10px 16px;
+  border-top: 1px solid var(--kx-hairline);
+  font-family: var(--kx-mono); font-size: 11px; color: var(--kx-fg-2);
+}
+.mcp-foot .bad { display: flex; align-items: center; gap: 5px; color: var(--kx-error); }
+
+.mcp-empty { padding: 4px 16px 16px; }
+.mcp-empty p { font-size: 12.5px; line-height: 1.6; color: var(--kx-fg-2); margin-bottom: 8px; }
+.mcp-empty p.s { font-size: 11.5px; color: var(--kx-fg-3); }
+.mcp-empty code {
+  font-family: var(--kx-mono); font-size: 11px; color: var(--kx-accent);
+  background: var(--kx-surface-2); padding: 1px 5px; border-radius: 4px;
+}
+
 /* ───────────────────────── diagnostics ───────────────────────── */
 
 #viewDiag { display: block; overflow-y: auto; }

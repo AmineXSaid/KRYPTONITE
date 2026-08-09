@@ -130,6 +130,7 @@ function _sbRun() {
     profiles: [],
     skills: [],
     skillWarnings: [],
+    mcp: { servers: [], warnings: [] },
     config: { approvalMode: "ask", activeProfile: "", caBundlePath: "", ui: {} },
     tlsError: null,
     rungs: [],
@@ -433,6 +434,9 @@ function _sbRun() {
         '</header>' +
         '<nav class="kx-tabs" role="tablist">' +
           '<button class="kx-tab" id="tabSession" role="tab" aria-selected="true" aria-controls="viewSession">Session</button>' +
+          // MCP earns a tab now that it is real. 1a had a "SOON" placeholder,
+          // which the review deleted; 1b replaces it with the live surface.
+          '<button class="kx-tab" id="tabMcp" role="tab" aria-selected="false" aria-controls="viewMcp">MCP<span class="tab-count" id="mcpCount" hidden></span></button>' +
           '<button class="kx-tab" id="tabDiag" role="tab" aria-selected="false" aria-controls="viewDiag">Diagnostics<span class="tab-count" id="tabCount" hidden></span></button>' +
         '</nav>' +
         '<div class="plan-banner" id="planBanner" hidden>' +
@@ -478,6 +482,9 @@ function _sbRun() {
               '<span class="ep" id="epInd" data-err="0"><span class="dot"></span><span class="nm ell" id="epName">No endpoint</span></span>' +
             '</div>' +
           '</div>' +
+        '</section>' +
+        '<section class="view" id="viewMcp" role="tabpanel" aria-labelledby="tabMcp" hidden>' +
+          '<div class="mcp-wrap" id="mcpBody"></div>' +
         '</section>' +
         '<section class="view" id="viewDiag" role="tabpanel" aria-labelledby="tabDiag" hidden>' +
           '<button class="cc-card" id="ccBtn">' + crystal(19) +
@@ -535,13 +542,21 @@ function _sbRun() {
 
   /* ─────────────────────────── tabs ─────────────────────────── */
 
+  /* Three tabs now, so the two-way boolean became a table. */
+  var TABS = [
+    ["session", "tabSession", "viewSession"],
+    ["mcp", "tabMcp", "viewMcp"],
+    ["diagnostics", "tabDiag", "viewDiag"]
+  ];
+
   function setTab(tab) {
     S.tab = tab;
-    var session = tab === "session";
-    $("tabSession").setAttribute("aria-selected", session ? "true" : "false");
-    $("tabDiag").setAttribute("aria-selected", session ? "false" : "true");
-    $("viewSession").hidden = !session;
-    $("viewDiag").hidden = session;
+    for (var i = 0; i < TABS.length; i++) {
+      var on = TABS[i][0] === tab;
+      $(TABS[i][1]).setAttribute("aria-selected", on ? "true" : "false");
+      $(TABS[i][2]).hidden = !on;
+    }
+    if (tab === "mcp") renderMcp();
   }
 
   function openSection(secId) {
@@ -1588,6 +1603,130 @@ function _sbRun() {
     return out + "</div>";
   }
 
+  /* ─────────────────────────── MCP ───────────────────────────
+   *
+   * One row per configured server: a 3px status rail, the name with a pill, the
+   * transport line, and the tool count. Ready servers list their tools as chips
+   * (capped, with a "+N more" tail — a 14-tool server would otherwise push the
+   * next row off the panel); a failed one gets a card with the reason and the
+   * two actions that can do something about it.
+   *
+   * One status signal per row, as the review asked: the rail and the pill agree
+   * because they read the same field, and there is no third indicator to drift.
+   */
+  var MCP_CHIP_CAP = 5;
+
+  function mcpPill(state) {
+    if (state === "ready") return '<span class="mcp-pill ok">' + icon("i-check", "ic-9") + "connected</span>";
+    if (state === "starting") return '<span class="mcp-pill">starting…</span>';
+    if (state === "stopped") return '<span class="mcp-pill">stopped</span>';
+    return '<span class="mcp-pill err">' + icon("i-x", "ic-9") + "unavailable</span>";
+  }
+
+  function renderMcp() {
+    var body = $("mcpBody");
+    if (!body) return;
+    var m = S.mcp || { servers: [], warnings: [] };
+    var servers = m.servers || [];
+
+    var head = '<div class="mcp-head">' +
+      "<span class=\"l\">Servers</span>" +
+      '<span class="when">' + (servers.length ? "· " + servers.length + " configured" : "") + "</span>" +
+      '<span class="sp"></span>' +
+      '<button class="btn sm" data-mcp="reload">' + icon("i-refresh", "ic-13") + "<span>Reload</span></button>" +
+      '<button class="btn sm" data-mcp="open">Edit config</button>' +
+      "</div>";
+
+    if (m.warnings && m.warnings.length) {
+      head += '<div class="warn-line" style="padding:0 16px 10px">' + esc(m.warnings.join(" ")) + "</div>";
+    }
+
+    if (!servers.length) {
+      body.innerHTML = head +
+        '<div class="mcp-empty">' +
+        "<p>No MCP servers configured.</p>" +
+        '<p class="s">Declare them in <code>.agent/mcp.json</code>, in the same shape Claude Desktop uses. ' +
+        "Their tools reach the model as <code>mcp__server__tool</code>, and are withheld in Plan mode.</p>" +
+        '<div><button class="btn sm primary" data-mcp="open">Create config</button></div>' +
+        "</div>";
+      return;
+    }
+
+    var rows = "", tools = 0, down = 0;
+    for (var i = 0; i < servers.length; i++) {
+      var sv = servers[i];
+      var ready = sv.state === "ready";
+      // Defaulted rather than trusted. The host always sends both fields, but a
+      // stateSync from an older build — or a server that answered the handshake
+      // and nothing else — renders "undefined tools" without this.
+      var n = typeof sv.toolCount === "number" ? sv.toolCount : 0;
+      var list = Array.isArray(sv.tools) ? sv.tools : [];
+      if (ready) tools += n;
+      else if (sv.state === "failed") down++;
+
+      rows += '<div class="mcp-row" data-state="' + esc(sv.state) + '">' +
+        '<span class="rail"></span>' +
+        '<span class="mid">' +
+          '<span class="top"><span class="nm">' + esc(sv.name) + "</span>" + mcpPill(sv.state) + "</span>" +
+          '<span class="sub ell" title="' + esc(sv.command) + '">stdio · ' +
+            esc(sv.serverInfo ? sv.serverInfo.name + " " + sv.serverInfo.version : sv.command) +
+          "</span>" +
+        "</span>" +
+        '<span class="count">' + (ready ? n + (n === 1 ? " tool" : " tools") : "no tools") + "</span>" +
+        "</div>";
+
+      if (ready && list.length) {
+        var shown = list.slice(0, MCP_CHIP_CAP);
+        var chips = shown.map(function (t) { return '<span class="mcp-chip">' + esc(t) + "</span>"; }).join("");
+        if (list.length > shown.length) {
+          chips += '<span class="mcp-more" title="' + esc(list.join(", ")) + '">+' +
+            (list.length - shown.length) + " more</span>";
+        }
+        rows += '<div class="mcp-chips">' + chips + "</div>";
+      }
+
+      if (!ready && sv.error) {
+        rows += '<div class="mcp-err">' +
+          "<div class=\"t\">" + esc(sv.error) + "</div>" +
+          '<div class="acts">' +
+            '<button class="btn sm primary" data-mcp="reconnect" data-name="' + esc(sv.name) + '">Reconnect</button>' +
+            '<button class="btn sm" data-mcp="log" data-name="' + esc(sv.name) + '">View log</button>' +
+          "</div></div>";
+      }
+    }
+
+    var foot = '<div class="mcp-foot">' +
+      "<span>" + tools + (tools === 1 ? " tool" : " tools") + " exposed to the model</span>" +
+      '<span class="sp"></span>' +
+      (down
+        ? '<span class="bad">' + icon("i-x", "ic-9") + down + (down === 1 ? " server" : " servers") + " unavailable</span>"
+        : "") +
+      "</div>";
+
+    body.innerHTML = head + rows + foot;
+  }
+
+  function renderMcpCount() {
+    var el = $("mcpCount");
+    if (!el) return;
+    var servers = (S.mcp && S.mcp.servers) || [];
+    var down = 0;
+    for (var i = 0; i < servers.length; i++) if (servers[i].state === "failed") down++;
+    // Same rule as Diagnostics: a count, and only when something is wrong.
+    el.textContent = down ? String(down) : "";
+    el.hidden = !down;
+  }
+
+  function onMcpClick(e) {
+    var b = e.target.closest("[data-mcp]");
+    if (!b) return;
+    var a = b.getAttribute("data-mcp");
+    if (a === "reload") post("mcpReload");
+    else if (a === "open") post("openFile", { path: ".agent/mcp.json" });
+    else if (a === "reconnect") post("mcpReconnect", { name: b.getAttribute("data-name") });
+    else if (a === "log") post("copyText", { text: b.getAttribute("data-name") || "" });
+  }
+
   /* ───────────────────── diagnostics: skills ───────────────────── */
 
   function renderSkills() {
@@ -1686,6 +1825,7 @@ function _sbRun() {
     S.profiles = state.profiles || [];
     S.skills = state.skills || [];
     S.skillWarnings = state.skillWarnings || [];
+    S.mcp = state.mcp || { servers: [], warnings: [] };
     S.config = state.config;
     S.tlsError = state.tlsError;
     S.rungs = state.rungs || [];
@@ -1710,6 +1850,10 @@ function _sbRun() {
     renderTls();
     renderEndpoints();
     renderSkills();
+  renderMcp();
+  renderMcpCount();
+    renderMcp();
+    renderMcpCount();
     renderHistory();
     syncComposer();
     if (S.running) startStream();
@@ -1904,6 +2048,8 @@ function _sbRun() {
     $("tlsBody").addEventListener("click", onTlsClick);
     $("epBody").addEventListener("click", onEpClick);
     $("skBody").addEventListener("click", onSkillClick);
+    $("mcpBody").addEventListener("click", onMcpClick);
+    $("tabMcp").addEventListener("click", function () { setTab("mcp"); });
   }
 
   function onDraftKey(e) {
@@ -2171,6 +2317,12 @@ function _sbRun() {
           ok: !!m.ok, summary: m.summary || "", rungs: m.rungs || []
         };
         renderEndpoints();
+        break;
+
+      case "mcpChanged":
+        S.mcp = { servers: m.servers || [], warnings: m.warnings || [] };
+        renderMcp();
+        renderMcpCount();
         break;
 
       case "skillsReloaded":
