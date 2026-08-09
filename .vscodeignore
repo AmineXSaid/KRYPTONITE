@@ -28,6 +28,9 @@ dist/kryptonite-offline-bundle/**
 # dist/ too, and shipping one would put a harness in front of users.
 dist/*.cjs
 dist/*.mjs
+# The render harness mounts the real webview outside VS Code for visual checks.
+# Development only.
+dist/harness/**
 
 # NOTE: media/** is deliberately NOT ignored. media/icon.svg, media/logo.png,
 # media/webview/*.js|*.css (including crystal.js, the shared brand mark) and

@@ -416,9 +416,13 @@ function _sbRun() {
       '<div id="app">' +
         '<header class="kx-header">' +
           crystal(24) +
-          '<span class="kx-wordmark">Kryptonite</span><span class="sp"></span>' +
-          // Context usage belongs beside the wordmark, not in the footer: it is
-          // status, not a control, and moving it up shortens the composer.
+          // No wordmark here. VS Code already titles the panel "KRYPTONITE"
+          // directly above, and printing it again a few pixels lower was the
+          // same word twice. The crystal keeps the identity; the space goes to
+          // the conversation name, which is the thing that actually changes.
+          '<span class="kx-head-title ell" id="headTitle"></span><span class="sp"></span>' +
+          // Context usage belongs up here, not in the footer: it is status, not
+          // a control, and moving it up shortens the composer.
           '<span class="kx-ctx tnum" id="ctxHead" title="Context used"></span>' +
           '<button class="icon-btn" id="newBtn" title="New chat" aria-label="New chat">' + icon("i-plus") + '</button>' +
           '<button class="icon-btn" id="histBtn" title="History" aria-label="Chat history" aria-haspopup="menu" aria-expanded="false">' + icon("i-clock") + '</button>' +
@@ -631,14 +635,37 @@ function _sbRun() {
 
   /* The rail is a ::before on .msg-user, so everything else has to sit in a
      .u-body wrapper or it becomes a second flex child beside the rail. */
-  function addUser(content) {
+  /**
+   * One chip per attached file, rendered inside the user's turn.
+   *
+   * Before this the composer pills cleared on send and the transcript showed
+   * only the text, which is indistinguishable from the file being dropped —
+   * exactly what it looked like back when it actually was. The turn now carries
+   * its own evidence.
+   */
+  function attChips(files) {
+    if (!files || !files.length) return "";
+    var out = '<span class="u-att">';
+    for (var i = 0; i < files.length; i++) {
+      var f = files[i];
+      var kb = f.size
+        ? " · " + (f.size < 1024 ? f.size + " B" : (f.size / 1024).toFixed(0) + " KB")
+        : "";
+      out += '<span class="u-att-chip">' + icon("i-file", "ic-11") +
+        "<span>" + esc(f.name) + '</span><span class="sz">' + esc(kb) + "</span></span>";
+    }
+    return out + "</span>";
+  }
+
+  function addUser(content, files) {
     closeToolGroup();
+    var att = attChips(files);
     if (typeof content === "string") {
-      add(div("msg-user", '<div class="u-body">' + esc(content) + "</div>"));
+      add(div("msg-user", '<div class="u-body">' + esc(content) + att + "</div>"));
       return;
     }
     if (!Array.isArray(content)) {
-      add(div("msg-user", '<div class="u-body">' + esc(String(content)) + "</div>"));
+      add(div("msg-user", '<div class="u-body">' + esc(String(content)) + att + "</div>"));
       return;
     }
     var html = "";
@@ -650,7 +677,7 @@ function _sbRun() {
         html += "<span>" + esc(b.text) + "</span>";
       }
     }
-    add(div("msg-user", '<div class="u-body">' + html + "</div>"));
+    add(div("msg-user", '<div class="u-body">' + html + att + "</div>"));
   }
 
   function appendAi(text) {
@@ -1328,7 +1355,7 @@ function _sbRun() {
     if (!S.workspace.open) { addError("Open a folder first."); return; }
     if (!hasEndpoint()) { addError("Select an endpoint profile first."); return; }
     if (S.running) { addError("Already working — interrupt first."); return; }
-    addUser(trimmed);
+    addUser(trimmed, S.attachments);
     aiEl = null;
     // One verb per turn, held for its whole length.
     S.idleVerb = pickVerb(S.phase);
@@ -1361,13 +1388,24 @@ function _sbRun() {
    * conversation the strip appears with something worth reading.
    */
   function renderTitle() {
+    var t = String(S.title || "").trim();
+    var real = t && !/^Untitled( \d+)?$/.test(t);
+
+    // The header carries it now, in the display cut. The old strip under the
+    // tabs is kept for the case where the header is too narrow to show it.
+    var head = $("headTitle");
+    if (head) {
+      head.textContent = real ? t : "Kryptonite";
+      head.title = real ? t : "";
+      head.setAttribute("data-named", real ? "1" : "0");
+    }
+
     var el = $("convoTitle");
     if (!el) return;
-    var t = String(S.title || "").trim();
-    if (!t || /^Untitled( \d+)?$/.test(t)) { el.hidden = true; el.textContent = ""; return; }
-    el.textContent = t;
-    el.title = t;
-    el.hidden = false;
+    // Never both: a name in the header and the same name again below it would
+    // repeat exactly the mistake removing the wordmark fixed.
+    el.hidden = true;
+    el.textContent = "";
   }
 
   /* ───────────────────────── footer ───────────────────────── */

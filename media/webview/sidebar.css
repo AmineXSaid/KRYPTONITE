@@ -70,9 +70,14 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   border-bottom: 1px solid var(--kx-line);
 }
 /* The wordmark is the one place the brand face is allowed to speak. */
-.kx-wordmark {
-  font-family: var(--kx-brand); font-size: 12.5px; font-weight: 700;
-  letter-spacing: .11em; text-transform: uppercase;
+/* The panel's one title, in the display cut. Reads as the conversation's name
+   once the model has supplied one, and as the product name until then. */
+.kx-head-title {
+  font-family: var(--kx-display); font-size: 13px; font-weight: 700;
+  letter-spacing: -.005em; color: var(--kx-fg); min-width: 0;
+}
+.kx-head-title[data-named="0"] {
+  letter-spacing: .11em; text-transform: uppercase; font-size: 12.5px;
 }
 .kx-ctx {
   font-family: var(--kx-mono); font-size: 10px; flex: none;
@@ -126,12 +131,15 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 }
 .kx-tab {
   height: 32px; display: flex; align-items: center; gap: 6px;
-  font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
-  color: var(--kx-fg-2);
+  font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--kx-fg-3);
 }
+.kx-tab:hover { color: var(--kx-fg-2); }
 .kx-tab[aria-selected="true"] {
   color: var(--kx-fg);
-  box-shadow: inset 0 -2px 0 var(--kx-active);
+  /* Its own violet, not the Plan-phase one: a selected tab and an active phase
+     are different meanings and must not share a colour. */
+  box-shadow: inset 0 -2px 0 var(--kx-under);
 }
 .tab-count {
   font-family: var(--kx-mono); font-size: 11px; font-weight: 500;
@@ -153,9 +161,11 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 .view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
 /* The conversation's name, once the model has supplied one. */
+/* Retained but unused: the header carries the name now. Kept so a narrow
+   panel has somewhere to fall back to rather than losing the title entirely. */
 .convo-title {
   flex: none; padding: 8px 14px 0;
-  font-family: var(--kx-brand); font-size: 12.5px; font-weight: 700;
+  font-family: var(--kx-ui); font-size: 12.5px; font-weight: 600;
   letter-spacing: -.005em; color: var(--kx-fg);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -169,8 +179,9 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   align-items: center; justify-content: center; text-align: center;
 }
 .welcome .crystal { opacity: .9; margin-bottom: 8px; }
+/* 17px clears the 15px bar, so the display cut is correct here. */
 .welcome h2 {
-  font-family: var(--kx-brand); font-size: 17px; font-weight: 700; letter-spacing: -.01em;
+  font-family: var(--kx-display); font-size: 17px; font-weight: 700; letter-spacing: -.01em;
 }
 .welcome p {
   font-family: var(--kx-prose); font-size: 12.5px; line-height: 1.6;
@@ -183,21 +194,43 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 }
 .chip-btn:hover { background: var(--kx-hover); }
 
-/* ── the user's turn: a rail, not a card ──
-   A bordered card gives your own question more visual weight than the answer
-   to it. A 2px rail marks the turn and then steps back. */
+/* ── the two voices ──
+ *
+ * A transcript is a conversation between two parties and it has to read that
+ * way at a glance, without labels. Four things separate them at once, so the
+ * distinction survives even in a dense scroll:
+ *
+ *   the question   a mint rail, 12.5px, medium weight, muted warm grey, tight
+ *                  leading — it is a quotation of something you already know
+ *   the answer     no rail, 13px, regular weight, full-strength warm white,
+ *                  1.6 leading — the thing you are actually reading
+ *
+ * The rail takes the accent rather than a neutral line: it is the only mark in
+ * the transcript that says "you", and a grey hairline said nothing.
+ */
 .msg-user {
-  display: flex; gap: 9px; margin-bottom: 16px;
-  font-family: var(--kx-ui); font-size: 13px; line-height: 1.55;
-  color: var(--kx-fg-2);
+  display: flex; gap: 10px; margin-bottom: 16px;
+  font-family: var(--kx-ui); font-size: 12.5px; font-weight: 500; line-height: 1.5;
+  color: var(--kx-fg-3);
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .msg-user::before {
   content: ""; width: 2px; flex: none; border-radius: 1px; align-self: stretch;
-  background: var(--kx-line);
+  background: var(--kx-accent); opacity: .55;
 }
 .msg-user > .u-body { min-width: 0; padding-top: 1px; }
 .msg-user code { font-family: var(--kx-mono); font-size: 11.5px; }
+
+/* Attached files, inside the turn that sent them. */
+.u-att { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+.u-att-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 8px; border-radius: 4px;
+  background: var(--kx-surface-2); color: var(--kx-fg-2);
+  font-family: var(--kx-ui); font-size: 11px; font-weight: 400;
+  white-space: nowrap;
+}
+.u-att-chip .sz { font-family: var(--kx-mono); font-size: 10px; color: var(--kx-fg-4); }
 .msg-img { max-width: 100%; max-height: 200px; border-radius: 5px; margin-bottom: 6px; display: block; }
 
 /* ── the answer: prose, with room to breathe ──
@@ -205,7 +238,8 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
    leverage readability change available. */
 .msg-ai {
   margin-bottom: 12px; overflow-wrap: anywhere;
-  font-family: var(--kx-prose); font-size: 13.5px; line-height: 1.72;
+  font-family: var(--kx-prose); font-size: 13px; line-height: 1.6;
+  color: var(--kx-fg);
   text-wrap: pretty;
 }
 .msg-ai p { margin: 0 0 9px; }
@@ -249,9 +283,9 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 }
 .cb pre { margin: 0; border-radius: 0; background: none; }
 
-.md-h { font-family: var(--kx-brand); line-height: 1.3; margin: 14px 0 6px; }
+.md-h { font-family: var(--kx-ui); line-height: 1.3; margin: 14px 0 6px; }
 .md-h:first-child { margin-top: 0; }
-.md-h1 { font-size: 16px; font-weight: 700; letter-spacing: -.01em; }
+.md-h1 { font-family: var(--kx-display); font-size: 16px; font-weight: 700; letter-spacing: -.01em; }
 .md-h2 { font-size: 14.5px; font-weight: 700; letter-spacing: -.005em; }
 .md-h3 { font-size: 13.5px; font-weight: 700; }
 .md-h4, .md-h5, .md-h6 {
