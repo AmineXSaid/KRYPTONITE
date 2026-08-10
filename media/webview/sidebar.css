@@ -278,6 +278,17 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   text-transform: uppercase; color: var(--kx-fg-2);
 }
 .cb pre { margin: 0; border-radius: 0; background: none; }
+/* Copy sits in the header rather than floating over the code, so it can never
+   cover the first line — which is exactly the line worth reading. */
+.cb-copy {
+  display: flex; align-items: center; justify-content: center;
+  width: 20px; height: 18px; padding: 0; flex: none;
+  background: none; border: none; border-radius: 3px;
+  color: var(--kx-fg-3); cursor: pointer;
+}
+.cb-copy:hover { background: var(--kx-line); color: var(--kx-fg); }
+.cb-copy:focus-visible { outline: 1px solid var(--kx-link); outline-offset: 1px; }
+.cb-copy[data-done="1"] { color: var(--kx-accent); }
 
 .md-h { font-family: var(--kx-ui); line-height: 1.3; margin: 14px 0 6px; }
 .md-h:first-child { margin-top: 0; }
@@ -298,7 +309,43 @@ ul.md-l ul.md-l { list-style: circle; }
 ol.md-l { list-style: decimal; }
 .md-l li::marker { color: var(--kx-fg-2); }
 
+/* A checklist reads as boxes, not bullets: no marker, a box in its place. */
+ul.md-l li.md-task, ol.md-l li.md-task {
+  display: flex; align-items: flex-start; gap: 7px;
+  list-style: none; margin-left: -18px;
+}
+.md-task .md-box {
+  flex: none; width: 13px; height: 13px; margin-top: 2px;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--kx-line-2); border-radius: 3px;
+  color: var(--kx-bg-deep);
+}
+.md-task[data-done="1"] .md-box { background: var(--kx-accent); border-color: var(--kx-accent); }
+.md-task[data-done="1"] > span:last-child { color: var(--kx-fg-3); text-decoration: line-through; }
+
 .md-hr { border: none; height: 1px; background: var(--kx-line); margin: 14px 0; }
+
+/* Callouts. A tinted rail plus a small kind label — enough to be spotted while
+   scanning, not so much that three in a row shout over the prose. */
+.md-call {
+  margin: 9px 0; padding: 7px 10px 8px;
+  border-left: 2px solid var(--kx-line-2);
+  background: var(--kx-surface); border-radius: 0 6px 6px 0;
+}
+.md-call-h {
+  display: flex; align-items: center; gap: 5px; margin-bottom: 3px;
+  font-family: var(--kx-ui); font-size: 10px; font-weight: 600;
+  letter-spacing: .09em; text-transform: uppercase;
+  color: var(--kx-line-2);
+}
+.md-call-b { color: var(--kx-fg-2); }
+.md-call-b > :first-child { margin-top: 0; }
+.md-call[data-kind="note"], .md-call[data-kind="tip"] { border-left-color: var(--kx-link); }
+.md-call[data-kind="note"] .md-call-h, .md-call[data-kind="tip"] .md-call-h { color: var(--kx-link); }
+.md-call[data-kind="important"] { border-left-color: var(--kx-under); }
+.md-call[data-kind="important"] .md-call-h { color: var(--kx-under); }
+.md-call[data-kind="warning"], .md-call[data-kind="caution"] { border-left-color: var(--kx-warn); }
+.md-call[data-kind="warning"] .md-call-h, .md-call[data-kind="caution"] .md-call-h { color: var(--kx-warn); }
 
 .md-q {
   margin: 8px 0; padding: 2px 0 2px 10px;
@@ -665,12 +712,24 @@ li.doing .cbx { border-color: var(--kx-accent); }
   color: var(--kx-fg-2);
 }
 
+/* A failure is a card with a coral rail, not a red box.
+ *
+ * The old treatment outlined the whole thing in coral and set the message in
+ * red monospace, which shouted, was harder to read than the prose around it,
+ * and looked like a stack trace even when the text was a plain sentence. Same
+ * shape as the MCP failure card: the rail carries the state, the text stays
+ * legible, and coral is spent on one 2px edge and the label. */
 .err-box {
-  border: 1px solid var(--kx-error); border-radius: 6px;
-  padding: 8px 10px; margin-bottom: 14px;
-  font-family: var(--kx-mono); font-size: 11.5px;
-  color: var(--kx-error); white-space: pre-wrap;
+  display: flex; gap: 9px; align-items: flex-start;
+  margin-bottom: 14px; padding: 9px 11px;
+  border-left: 2px solid var(--kx-error);
+  background: var(--kx-surface); border-radius: 0 6px 6px 0;
+  font-family: var(--kx-ui); font-size: 12.5px; line-height: 1.55;
+  color: var(--kx-fg-2); white-space: pre-wrap; overflow-wrap: anywhere;
+  text-wrap: pretty;
 }
+.err-box .ic { flex: none; margin-top: 1px; color: var(--kx-error); }
+.err-box > span { min-width: 0; }
 .note-box {
   font-size: 11.5px; color: var(--kx-fg-2);
   margin-bottom: 14px; white-space: pre-wrap;

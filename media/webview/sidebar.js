@@ -36,6 +36,7 @@ function _sbRun() {
     '<symbol id="i-check" viewBox="0 0 24 24"><path d="M4.5 12.5l5 5 10-11" ' + S6 + ' stroke-width="2"/></symbol>' +
     '<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" ' + S6 + ' stroke-width="2"/></symbol>' +
     '<symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 3l9.5 17H2.5z" ' + S6 + ' stroke-width="1.5"/><path d="M12 9.5v5M12 17v.5" ' + S6 + ' stroke-width="1.6"/></symbol>' +
+    '<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" ' + S6 + ' stroke-width="1.5"/><path d="M12 11v5.5M12 7.5v.5" ' + S6 + ' stroke-width="1.7"/></symbol>' +
     '<symbol id="i-clip" viewBox="0 0 24 24"><path d="M17.5 10.5l-6.8 6.8a3 3 0 01-4.2-4.2l7.5-7.5a4.5 4.5 0 016.4 6.4l-7.5 7.5" ' + S6 + ' stroke-width="1.5"/></symbol>' +
     '<symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6" ' + S6 + ' stroke-width="1.7"/></symbol>' +
     '<symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor"/></symbol>' +
@@ -44,6 +45,12 @@ function _sbRun() {
     '<symbol id="i-pencil" viewBox="0 0 24 24"><path d="M16.5 3.8l3.7 3.7L8.4 19.3l-4.7.9.9-4.7z" ' + S6 + ' stroke-width="1.5"/></symbol>' +
     '<symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 6.5h16M9.5 6.5V4h5v2.5M6.5 6.5l1 14h9l1-14" ' + S6 + ' stroke-width="1.5"/></symbol>' +
     '<symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="12" height="12" rx="1.5" ' + S6 + ' stroke-width="1.5"/><path d="M15.5 8.5v-3a1.5 1.5 0 00-1.5-1.5H5a1.5 1.5 0 00-1.5 1.5v9A1.5 1.5 0 005 16h3" ' + S6 + ' stroke-width="1.5"/></symbol>' +
+    /* Branch: two nodes on a trunk with a limb leaving it — the git-branch
+       shape, which is what "branch this conversation" means here. */
+    '<symbol id="i-branch" viewBox="0 0 24 24"><circle cx="7" cy="5.5" r="2.4" ' + S6 + ' stroke-width="1.6"/>' +
+      '<circle cx="7" cy="18.5" r="2.4" ' + S6 + ' stroke-width="1.6"/>' +
+      '<circle cx="17.5" cy="8.5" r="2.4" ' + S6 + ' stroke-width="1.6"/>' +
+      '<path d="M7 8v8M17.5 11v1.2a4 4 0 01-4 4H9.4" ' + S6 + ' stroke-width="1.6"/></symbol>' +
     '<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 11-2.4-5.7M20 3.5V9h-5.5" ' + S6 + ' stroke-width="1.6"/></symbol>' +
     '<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6h6l2 3h10v10H3z" ' + S6 + ' stroke-width="1.5"/></symbol>';
 
@@ -52,6 +59,12 @@ function _sbRun() {
     "Certificates and keys": "Config", "Profile": "Config", "DNS": "DNS", "TCP": "TCP",
     "TLS handshake": "TLS", "Authentication": "Auth", "Completion": "HTTP",
     "Streaming": "Stream", "Tool calling": "Tools"
+  };
+
+  /* GitHub-flavoured callout kinds -> the glyph each one wears. */
+  var CALLOUT_ICON = {
+    note: "i-info", tip: "i-info", important: "i-info",
+    warning: "i-warn", caution: "i-warn"
   };
 
   var TOOL_ICON = {
@@ -282,8 +295,15 @@ function _sbRun() {
         var lang = nl === -1 ? body.trim() : body.slice(0, nl).trim();
         var code = nl === -1 ? "" : body.slice(nl + 1);
         if (/[^\w.+#-]/.test(lang)) { code = body; lang = ""; }
+        // Every fenced block gets a header, labelled or not, because the header
+        // is what carries Copy — and code the model wrote is the single thing in
+        // a transcript most likely to be wanted verbatim. Selecting it by hand
+        // in a 340px panel is miserable.
         out += '<div class="cb">' +
-          (lang ? '<div class="cb-h"><span class="cb-l">' + esc(lang) + "</span></div>" : "") +
+          '<div class="cb-h"><span class="cb-l">' + esc(lang || "text") + "</span>" +
+          '<span class="sp"></span>' +
+          '<button class="cb-copy" data-cb-copy title="Copy code" aria-label="Copy code">' +
+            icon("i-copy", "ic-11") + "</button></div>" +
           "<pre>" + esc(code.replace(/\n$/, "")) + "</pre></div>";
         continue;
       }
@@ -325,11 +345,26 @@ function _sbRun() {
           continue;
         }
 
-        /* Blockquote */
+        /* Blockquote — and callouts, which are a quote whose first line is a
+           `[!NOTE]`-style marker. Models reach for these whenever they want to
+           flag a caveat, and as a plain quote the marker showed up as literal
+           `[!WARNING]` text: the one shape whose whole purpose is to be seen at
+           a glance was the one rendering as punctuation. */
         if (/^\s*>/.test(line)) {
           var q = [];
           while (i < lines.length && /^\s*>/.test(lines[i])) {
             q.push(lines[i].replace(/^\s*>\s?/, "")); i++;
+          }
+          var call = q[0] && q[0].match(/^\s*\[!(note|tip|important|warning|caution)\]\s*(.*)$/i);
+          if (call) {
+            var kind = call[1].toLowerCase();
+            var rest = q.slice(1);
+            if (call[2].trim()) rest.unshift(call[2]);
+            out += '<div class="md-call" data-kind="' + kind + '">' +
+              '<div class="md-call-h">' + icon(CALLOUT_ICON[kind], "ic-11") +
+                "<span>" + kind + "</span></div>" +
+              '<div class="md-call-b">' + inline(rest.join("\n")).replace(/\n/g, "<br>") + "</div></div>";
+            continue;
           }
           out += '<blockquote class="md-q">' + inline(q.join("\n")).replace(/\n/g, "<br>") + "</blockquote>";
           continue;
@@ -341,7 +376,12 @@ function _sbRun() {
         if (li) {
           var ordered = /\d/.test(li[2]);
           var tag = ordered ? "ol" : "ul";
-          out += "<" + tag + ' class="md-l">';
+          // An ordered list that starts at 3 must show 3. A model numbering the
+          // steps of a plan across paragraphs restarted at 1 in every fragment.
+          var startAt = ordered ? parseInt(li[2], 10) : 1;
+          var open = "<" + tag + ' class="md-l"' +
+            (ordered && startAt > 1 ? ' start="' + startAt + '"' : "") + ">";
+          out += open;
           var depth = 0;
           while (i < lines.length) {
             var m2 = lines[i].match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
@@ -356,7 +396,19 @@ function _sbRun() {
             var d = m2[1].length >= 2 ? 1 : 0;
             if (d > depth) { out += "<" + tag + ' class="md-l">'; depth = d; }
             else if (d < depth) { out += "</" + tag + ">"; depth = d; }
-            out += "<li>" + inline(m2[3]) + "</li>";
+            // A checklist is not a bullet list. `- [x] ship it` was rendering as
+            // a bullet with literal square brackets, which is the shape models
+            // use for plans and progress — the exact case worth seeing at a
+            // glance. Give it a box and drop the marker.
+            var task = m2[3].match(/^\[([ xX])\]\s+(.*)$/);
+            if (task) {
+              var done = task[1] !== " ";
+              out += '<li class="md-task"' + (done ? ' data-done="1"' : "") + ">" +
+                '<span class="md-box">' + (done ? icon("i-check", "ic-9") : "") + "</span>" +
+                "<span>" + inline(task[2]) + "</span></li>";
+            } else {
+              out += "<li>" + inline(m2[3]) + "</li>";
+            }
             i++;
           }
           while (depth-- > 0) out += "</" + tag + ">";
@@ -1125,18 +1177,29 @@ function _sbRun() {
 
     var secs = S.elapsed;
     var used = S.context ? S.context.used : 0;
+    // Icons, not words. Three labels under every turn read as a toolbar the eye
+    // has to parse each time; the glyphs are recognisable and let the row shrink
+    // to something that sits under the answer rather than competing with it.
+    // Each keeps its name for the tooltip and for a screen reader.
     var foot = div("turn-foot",
-      '<button data-turn="copy">Copy</button>' +
-      '<button data-turn="retry">Retry</button>' +
-      '<button data-turn="branch">Branch</button>' +
+      '<button data-turn="copy" title="Copy answer" aria-label="Copy answer">' + icon("i-copy", "ic-13") + "</button>" +
+      '<button data-turn="retry" title="Retry" aria-label="Retry">' + icon("i-refresh", "ic-13") + "</button>" +
+      '<button data-turn="branch" title="Branch into a new chat" aria-label="Branch into a new chat">' +
+        icon("i-branch", "ic-13") + "</button>" +
       '<span class="cost">' + secs + "s" + (used ? " · " + fmtK(used) : "") + "</span>");
     var text = aiEl && aiEl._raw ? aiEl._raw : "";
     foot.addEventListener("click", function (e) {
       var b = e.target.closest("[data-turn]");
       if (!b) return;
       var a = b.getAttribute("data-turn");
-      if (a === "copy") post("copyText", { text: text });
-      else if (a === "retry") post("sendMessage", { text: "Retry that last step." });
+      if (a === "copy") {
+        post("copyText", { text: text });
+        // An icon gives no feedback on its own, so confirm the copy happened.
+        var prev = b.innerHTML;
+        b.innerHTML = icon("i-check", "ic-13");
+        b.setAttribute("data-done", "1");
+        setTimeout(function () { b.innerHTML = prev; b.removeAttribute("data-done"); }, 1200);
+      } else if (a === "retry") post("sendMessage", { text: "Retry that last step." });
       else if (a === "branch") post("newChat");
     });
     add(foot);
@@ -1416,8 +1479,10 @@ function _sbRun() {
   function addError(message) {
     aiEl = null;
     closeToolGroup();
-    add(div("err-box", esc(message)));
+    add(div("err-box", icon("i-warn", "ic-13") + "<span>" + esc(message) + "</span>"));
+    return;
   }
+
 
   /**
    * The conversation-title strip.
@@ -2063,6 +2128,20 @@ function _sbRun() {
     });
 
     logEl.addEventListener("click", function (e) {
+      // Code-block copy is delegated because md() writes blocks as innerHTML on
+      // every repaint — a listener bound per block would be lost each flush.
+      var cbc = e.target.closest("[data-cb-copy]");
+      if (cbc) {
+        var pre = cbc.closest(".cb") && cbc.closest(".cb").querySelector("pre");
+        if (pre) {
+          post("copyText", { text: pre.textContent });
+          var was = cbc.innerHTML;
+          cbc.innerHTML = icon("i-check", "ic-11");
+          cbc.setAttribute("data-done", "1");
+          setTimeout(function () { cbc.innerHTML = was; cbc.removeAttribute("data-done"); }, 1200);
+        }
+        return;
+      }
       var sug = e.target.closest("[data-sug]");
       if (sug) { sendText(sug.getAttribute("data-sug")); return; }
       var act = e.target.closest("[data-act]");
