@@ -2101,6 +2101,19 @@ function _sbRun() {
 
   function onDraftKey(e) {
     var draft = $("draft");
+
+    /* An IME composition owns Enter.
+     *
+     * Typing Japanese, Chinese or Korean means typing latin keys, then pressing
+     * Enter to commit the candidate the IME is offering. Treating that Enter as
+     * "send" fires the message mid-word and leaves the composition unfinished —
+     * the panel was unusable for anyone typing a CJK language. The same applies
+     * to the quick-picker below, so this returns before any key handling.
+     *
+     * `isComposing` is the modern signal; keyCode 229 is what older IMEs on
+     * Windows report, and costs one comparison to cover. */
+    if (e.isComposing || e.keyCode === 229) return;
+
     var pickerOpen = !$("qp").hidden;
     if (pickerOpen) {
       var n = qpItems().filter(function (r) { return !r.group; }).length;
