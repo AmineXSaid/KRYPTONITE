@@ -326,12 +326,33 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
         // The folder path is workspace-relative so the model can hand it
         // straight to read_file without guessing at the layout.
         const rel = path.relative(ctx.root, skill.dir).split(path.sep).join("/");
+
+        // Bounded. The bundled `claude-api` SKILL.md is 72,000 characters —
+        // roughly 20k tokens — and returning it whole did two kinds of damage:
+        // it consumed most of a small model's context in one tool call, and it
+        // put a wall of documentation in the transcript. The loader already
+        // warns when a SKILL.md is this large; handing it over intact anyway
+        // made the warning pointless.
+        //
+        // The head of a SKILL.md is its routing section, which is the part that
+        // tells the model where to go next. That is what is worth spending
+        // context on; the rest is reachable with read_file, and the truncation
+        // says so in-band so the model knows there is more.
+        const CAP = 12_000;
+        const truncated = skill.body.length > CAP;
+        const body = truncated ? skill.body.slice(0, CAP) : skill.body;
+        const cut = truncated
+          ? `\n\n---\n[Truncated: showing the first ${CAP.toLocaleString()} of ` +
+            `${skill.body.length.toLocaleString()} characters. Read ` +
+            `\`${rel}/SKILL.md\` with read_file for a specific later section.]`
+          : "";
+
         const extras = skill.files.length
           ? `\n\n---\nBundled files, relative to \`${rel}/\`. Read one with read_file only if the ` +
             `instructions above send you to it:\n` +
             skill.files.map((f) => `- ${rel}/${f}`).join("\n")
           : "";
-        return { content: skill.body + extras };
+        return { content: body + cut + extras };
       }
 
       // CHANGED: added. No approval gate — this touches no files and runs no

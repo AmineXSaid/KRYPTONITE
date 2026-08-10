@@ -60,12 +60,21 @@ async function main() {
   const profile = draftProfile({ id:"openrouter", name:"OpenRouter", url:"https://openrouter.ai/api/v1",
     type:"openai-compatible", model:"openrouter/free", timeoutMs: 90000 } as any);
   const client = new EndpointClient(profile, (k)=> k==="openrouter/api_key" ? KEY : undefined, process.cwd());
+  // 64 tokens was too tight: openrouter/free routes to whatever is available,
+  // and a reasoning model can spend a small budget entirely on reasoning and
+  // return empty visible text. That made the assertion flaky without telling us
+  // anything about the attachment path. Bigger budget, and one retry.
   let out = "";
-  try {
-    for await (const ev of client.complete({ messages:[{ role:"user", content: composed }], stream:false, maxTokens:64 })) {
-      if (ev.type === "text") out += ev.text;
+  for (let attempt = 0; attempt < 3 && !out.trim(); attempt++) {
+    try {
+      for await (const ev of client.complete({ messages:[{ role:"user", content: composed }], stream:false, maxTokens:512 })) {
+        if (ev.type === "text") out += ev.text;
+      }
+    } catch (e:any) {
+      if (attempt === 2) { ck(false, "live call", e.message); await client.close(); return done(); }
+      await new Promise(r => setTimeout(r, 4000));
     }
-  } catch (e:any) { ck(false, "live call", e.message); await client.close(); return done(); }
+  }
   console.log(`   model said: ${JSON.stringify(out.trim().slice(0,120))}`);
   ck(/47\.219|47,219/.test(out), "the model answered from the file's contents");
   await client.close();

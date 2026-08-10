@@ -115,8 +115,14 @@ function _sbRun() {
     local: "i-monitor", custom: "i-globe", raw: "i-globe", openai: "i-globe"
   };
 
-  var INLINE_LIMIT = 100000;    /* chars rendered before the Show-more expander */
-  var MODEL_TRUNCATION = 60000; /* what loop.ts hands the model                */
+  /* Chars of a tool result rendered before the Show-more expander.
+   *
+   * Was 100,000, which is not a limit — it is larger than almost every result,
+   * so a 72,000-character skill body rendered in full and buried the
+   * conversation under a wall of documentation. 3,000 shows enough to tell what
+   * came back, and the expander is one click away. */
+  var INLINE_LIMIT = 3000;
+  var MODEL_TRUNCATION = 60000; /* what loop.ts hands the model */
   var MAX_DIFF_ROWS = 600;
 
   /* ───────────────────────────── store ───────────────────────────── */
