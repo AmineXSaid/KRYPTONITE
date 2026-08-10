@@ -595,6 +595,11 @@ function _sbRun() {
   }
   function scroll() { logEl.scrollTop = logEl.scrollHeight; }
   function add(el) {
+    // Anything appended after a streaming answer must not appear before the
+    // last unpainted deltas of it. Flushing here covers every insertion point —
+    // tool cards, errors, diffs, permissions — without each having to remember.
+    // Safe during aiEl's own creation: aiEl is still null at that moment.
+    flushAi();
     var stick = atBottom();
     var welcome = logEl.querySelector(".welcome");
     if (welcome) welcome.remove();
@@ -603,6 +608,7 @@ function _sbRun() {
     return el;
   }
   function clearTranscript() {
+    if (aiPaint) { clearTimeout(aiPaint); aiPaint = null; }
     logEl.innerHTML = "";
     aiEl = null; streamEl = null; pendingTool = null; todoEl = null; toolGroup = null;
   }
@@ -685,6 +691,33 @@ function _sbRun() {
     add(div("msg-user", '<div class="u-body">' + html + att + "</div>"));
   }
 
+  /* Re-rendering the answer is throttled, because it costs the whole message.
+   *
+   * `md()` parses from scratch and innerHTML replaces the subtree, so doing it
+   * per delta is O(n²) in the number of deltas. Measured in the harness at a
+   * constant payload: 50 deltas took 8ms, 100 took 436ms, 200 took 2.4s and 400
+   * took 10s — each doubling roughly quadrupling. Real streaming arrives token
+   * by token, so a long reply meant thousands of deltas and a locked panel.
+   *
+   * Text still accumulates on every delta; only the paint is coalesced. At 50ms
+   * that is twenty repaints a second, which reads as continuous, and the cost
+   * becomes a function of elapsed time rather than of delta count. */
+  var aiPaint = null;
+
+  function flushAi() {
+    if (aiPaint) { clearTimeout(aiPaint); aiPaint = null; }
+    if (!aiEl || aiEl._painted === aiEl._raw) return;
+    // Measured before the content grows, not after. Per-delta painting could
+    // get away with checking afterwards because each step was a line or two
+    // inside atBottom()'s tolerance; a coalesced paint adds a screenful at
+    // once, so checking after always reads as "the user has scrolled up" and
+    // autoscroll silently stops following the answer.
+    var stick = atBottom();
+    aiEl._painted = aiEl._raw;
+    aiEl.innerHTML = md(aiEl._raw);
+    if (stick) scroll();
+  }
+
   function appendAi(text) {
     if (!aiEl) {
       // Prose after a run of tools ends the strip — the model has stopped
@@ -692,10 +725,10 @@ function _sbRun() {
       closeToolGroup();
       aiEl = add(div("msg-ai", ""));
       aiEl._raw = "";
+      aiEl._painted = null;
     }
     aiEl._raw += text;
-    aiEl.innerHTML = md(aiEl._raw);
-    if (atBottom()) scroll();
+    if (!aiPaint) aiPaint = setTimeout(function () { aiPaint = null; flushAi(); }, 50);
   }
 
   /* ───────────────────────── tool cards ───────────────────────── */
@@ -1071,6 +1104,7 @@ function _sbRun() {
     streamEl.querySelector(".m").textContent = "(esc to interrupt · " + S.elapsed + "s)";
   }
   function endStream() {
+    flushAi();
     if (S.timer) { clearInterval(S.timer); S.timer = null; }
     if (streamEl) { streamEl.remove(); streamEl = null; }
     S.gerund = "Thinking…";
