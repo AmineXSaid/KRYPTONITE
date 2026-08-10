@@ -32,15 +32,34 @@
   --kx-fg-4: #9c9a92;  /* placeholder, line numbers                          */
   --kx-fg-5: #52514d;  /* dimmest                                            */
 
-  /* ── accents ── */
-  --kx-accent: #4af6a4;    /* state & success — Act. Never a plain button.   */
+  /* ── accents ──
+   *
+   * Each colour has exactly one job, and nothing may borrow one for decoration.
+   * Mint and violet were previously doing double duty — mint tinted inline code
+   * in every answer, the user's rail, history dots and picker ticks; violet
+   * tinted selected chips and the profile label — which left the panel reading
+   * green-and-purple rather than warm. A colour that appears everywhere stops
+   * meaning anything, and the surface it sits on stops being the subject.
+   *
+   *   mint        success and health, and nothing else: a passing rung, a
+   *               connected server, an added line, a finished todo, Act.
+   *   coral       failure. Only failure.
+   *   amber       warning — the state between the two.
+   *   periwinkle  interaction: send, links, focus, selection, and the mark that
+   *               means "you". This is the colour that carries the UI now.
+   *   violet      the Plan phase, and the tab underline that shows position.
+   *
+   * Everything else is a warm neutral. If something needs to stand out and is
+   * not one of the five meanings above, it wants a surface or a weight — not a
+   * hue. */
+  --kx-accent: #4af6a4;    /* success & health only                          */
   --kx-error:  #f4767e;    /* warm coral, not the theme's cool red           */
   --kx-warn:   #f2c14e;
-  --kx-link:   #7c88f4;    /* periwinkle: links, focus ring, send            */
+  --kx-link:   #7c88f4;    /* periwinkle: interaction, selection, "you"      */
   --kx-action: #7c88f4;    /* send                                           */
   --kx-active: #6e49cb;    /* Plan phase                                     */
-  --kx-under:  #916df6;    /* the 2px tab underline                          */
-  --kx-on-accent: #141413; /* text on mint — the deepest surface, not black  */
+  --kx-under:  #916df6;    /* position: the 2px tab underline                */
+  --kx-on-accent: #141413; /* text on a filled accent — deepest surface      */
 
   /* ── scrims: every one tinted from --kx-fg-2, never neutral grey. A cool
         grey hairline on a warm surface is the most visible way this palette

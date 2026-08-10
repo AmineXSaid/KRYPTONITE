@@ -108,7 +108,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   width: 5px; height: 5px; flex: none; border-radius: 50%;
   background: transparent;
 }
-.hist-row[data-on="1"] .hist-dot { background: var(--kx-accent); }
+.hist-row[data-on="1"] .hist-dot { background: var(--kx-link); }
 .hist-row[data-on="1"] .pop-row .t { font-weight: 600; }
 .hist-del {
   position: absolute; right: 6px; top: 50%; margin-top: -11px;
@@ -212,7 +212,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 }
 .msg-user::before {
   content: ""; width: 2px; flex: none; border-radius: 1px; align-self: stretch;
-  background: var(--kx-accent); opacity: .55;
+  background: var(--kx-link); opacity: .7;
 }
 .msg-user > .u-body { min-width: 0; padding-top: 1px; }
 .msg-user code { font-family: var(--kx-mono); font-size: 11.5px; }
@@ -244,7 +244,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
    blending into it. */
 .msg-ai code {
   font-family: var(--kx-mono); font-size: 12px;
-  color: var(--kx-accent); background: var(--kx-surface-2);
+  color: var(--kx-fg); background: var(--kx-surface-2);
   padding: 1px 5px; border-radius: 4px;
 }
 .msg-ai pre, .code-block {
@@ -302,7 +302,7 @@ ol.md-l { list-style: decimal; }
 
 .md-q {
   margin: 8px 0; padding: 2px 0 2px 10px;
-  border-left: 2px solid var(--kx-accent);
+  border-left: 2px solid var(--kx-line-2);
   color: var(--kx-fg-2);
 }
 
@@ -379,7 +379,7 @@ ol.md-l { list-style: decimal; }
 }
 .tool-group-head:hover { background: var(--kx-hover); }
 .tool-group-head .dot {
-  width: 5px; height: 5px; flex: none; border-radius: 50%; background: var(--kx-accent);
+  width: 5px; height: 5px; flex: none; border-radius: 50%; background: var(--kx-fg-4);
 }
 .tool-group[data-running="0"] .tool-group-head .dot { background: var(--kx-fg-2); }
 .tool-group[data-error="1"] .tool-group-head .dot { background: var(--kx-error); }
@@ -705,7 +705,7 @@ li.doing .cbx { border-color: var(--kx-accent); }
   font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
   color: var(--kx-fg-3);
 }
-.qp-check { width: 13px; flex: none; display: grid; place-items: center; color: var(--kx-accent); }
+.qp-check { width: 13px; flex: none; display: grid; place-items: center; color: var(--kx-link); }
 .qp-empty { padding: 8px 9px; font-size: 11.5px; color: var(--kx-fg-2); }
 
 /* #4 — one card, one control row. */
@@ -758,9 +758,19 @@ li.doing .cbx { border-color: var(--kx-accent); }
 .seg button { font-size: 12px; padding: 4px 9px; text-align: center; color: var(--kx-fg-2); }
 .seg button + button { border-left: 1px solid var(--kx-line); }
 .seg button[data-on="1"] { font-weight: 600; }
-.seg button[data-phase="plan"][data-on="1"] { background: var(--kx-active); color: var(--kx-fg); font-weight: 600; }
-/* 700, not 600: dark-on-mint reads optically lighter than white-on-violet. */
-.seg button[data-phase="act"][data-on="1"] { background: var(--kx-accent); color: var(--kx-on-accent); font-weight: 700; }
+/* The active phase is carried by the label, not by a filled block.
+ *
+ * Two solid swatches — mint and violet — sat permanently in the composer and
+ * were the loudest colour in the panel, which made the whole surface read
+ * green-and-purple rather than warm. A raised segment plus coloured text says
+ * the same thing in about a tenth of the painted area, and the hue still maps:
+ * violet is Plan, mint is Act.
+ *
+ * Plan takes the lighter violet, not --kx-active: the darker one is drawn for
+ * a white foreground and has too little contrast as text on a raised surface. */
+.seg button[data-on="1"] { background: var(--kx-surface-3); }
+.seg button[data-phase="plan"][data-on="1"] { color: var(--kx-under); font-weight: 700; }
+.seg button[data-phase="act"][data-on="1"] { color: var(--kx-accent); font-weight: 700; }
 
 
 .hint { font-size: 10px; flex: none; color: var(--kx-fg-3); }
@@ -876,7 +886,7 @@ li.doing .cbx { border-color: var(--kx-accent); }
 .mcp-empty p { font-size: 12.5px; line-height: 1.6; color: var(--kx-fg-2); margin-bottom: 8px; }
 .mcp-empty p.s { font-size: 11.5px; color: var(--kx-fg-3); }
 .mcp-empty code {
-  font-family: var(--kx-mono); font-size: 11px; color: var(--kx-accent);
+  font-family: var(--kx-mono); font-size: 11px; color: var(--kx-fg-2);
   background: var(--kx-surface-2); padding: 1px 5px; border-radius: 4px;
 }
 
