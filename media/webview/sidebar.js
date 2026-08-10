@@ -416,11 +416,10 @@ function _sbRun() {
       '<div id="app">' +
         '<header class="kx-header">' +
           crystal(24) +
-          // No wordmark here. VS Code already titles the panel "KRYPTONITE"
-          // directly above, and printing it again a few pixels lower was the
-          // same word twice. The crystal keeps the identity; the space goes to
-          // the conversation name, which is the thing that actually changes.
-          '<span class="kx-head-title ell" id="headTitle"></span><span class="sp"></span>' +
+          // Static, always. This is the product's one wordmark; the duplicate
+          // that used to sit above it is VS Code's view header, blanked in
+          // package.json rather than competing with this.
+          '<span class="kx-wordmark">Kryptonite</span><span class="sp"></span>' +
           // Context usage belongs up here, not in the footer: it is status, not
           // a control, and moving it up shortens the composer.
           '<span class="kx-ctx tnum" id="ctxHead" title="Context used"></span>' +
@@ -1387,25 +1386,29 @@ function _sbRun() {
    * transcript is chrome that tells you nothing. Once the model has named the
    * conversation the strip appears with something worth reading.
    */
+  /**
+   * The conversation's name, in the strip under the tabs.
+   *
+   * Not in the header: the header holds the wordmark, which is static. This sits
+   * where the transcript begins, which is what it labels.
+   *
+   * It is derived from the first thing the user said, so it appears immediately
+   * and never changes underneath them. Several conversations called "Hi" is the
+   * accepted cost of that — a name that arrives late and rewrites itself is
+   * worse than a dull one that was right from the first frame.
+   */
   function renderTitle() {
-    var t = String(S.title || "").trim();
-    var real = t && !/^Untitled( \d+)?$/.test(t);
-
-    // The header carries it now, in the display cut. The old strip under the
-    // tabs is kept for the case where the header is too narrow to show it.
-    var head = $("headTitle");
-    if (head) {
-      head.textContent = real ? t : "Kryptonite";
-      head.title = real ? t : "";
-      head.setAttribute("data-named", real ? "1" : "0");
-    }
-
     var el = $("convoTitle");
     if (!el) return;
-    // Never both: a name in the header and the same name again below it would
-    // repeat exactly the mistake removing the wordmark fixed.
-    el.hidden = true;
-    el.textContent = "";
+    var t = String(S.title || "").trim();
+    if (!t || /^Untitled( \d+)?$/.test(t)) {
+      el.hidden = true;
+      el.textContent = "";
+      return;
+    }
+    el.textContent = t;
+    el.title = t;
+    el.hidden = false;
   }
 
   /* ───────────────────────── footer ───────────────────────── */

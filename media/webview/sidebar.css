@@ -69,15 +69,12 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   padding: 0 10px 0 12px; position: relative;
   border-bottom: 1px solid var(--kx-line);
 }
-/* The wordmark is the one place the brand face is allowed to speak. */
-/* The panel's one title, in the display cut. Reads as the conversation's name
-   once the model has supplied one, and as the product name until then. */
-.kx-head-title {
-  font-family: var(--kx-display); font-size: 13px; font-weight: 700;
-  letter-spacing: -.005em; color: var(--kx-fg); min-width: 0;
-}
-.kx-head-title[data-named="0"] {
-  letter-spacing: .11em; text-transform: uppercase; font-size: 12.5px;
+/* The wordmark: static, and the one place the display cut is allowed to speak.
+   VS Code's own view header above it is blanked in package.json, so this is the
+   only KRYPTONITE on screen. */
+.kx-wordmark {
+  font-family: var(--kx-display); font-size: 12.5px; font-weight: 700;
+  letter-spacing: .11em; text-transform: uppercase; color: var(--kx-fg);
 }
 .kx-ctx {
   font-family: var(--kx-mono); font-size: 10px; flex: none;
@@ -160,11 +157,10 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 
 .view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
-/* The conversation's name, once the model has supplied one. */
-/* Retained but unused: the header carries the name now. Kept so a narrow
-   panel has somewhere to fall back to rather than losing the title entirely. */
+/* The conversation's name, under the tabs and above the transcript it labels.
+   Text cut, not display: the display cut belongs to the wordmark alone. */
 .convo-title {
-  flex: none; padding: 8px 14px 0;
+  flex: none; padding: 10px 14px 2px;
   font-family: var(--kx-ui); font-size: 12.5px; font-weight: 600;
   letter-spacing: -.005em; color: var(--kx-fg);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

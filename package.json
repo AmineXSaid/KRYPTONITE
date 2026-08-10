@@ -18,7 +18,11 @@
     },
     "views": {
       "kryptonite": [
-        { "type": "webview", "id": "kryptonite.sidebar", "name": "Kryptonite" }
+        {
+          "type": "webview",
+          "id": "kryptonite.sidebar",
+          "name": ""
+        }
       ]
     },
     "commands": [

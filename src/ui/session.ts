@@ -3,7 +3,7 @@ import * as path from "node:path";
 import * as crypto from "node:crypto";
 import type { Msg } from "../providers/client";
 import { runAgent } from "../agent/loop";
-import { isUntitled, sanitizeTitle } from "../core/sessions";
+import { isUntitled, titleFrom } from "../core/sessions";
 import type { ToolContext, TodoItem } from "../agent/tools";
 import type { App } from "../core/app";
 import type {
@@ -50,10 +50,10 @@ export class SessionController {
   /**
    * The conversation's name.
    *
-   * Starts as a placeholder and is replaced once by a model-generated title
-   * after the first exchange. It is state rather than a getter over `history`
-   * because a generated title has to survive every later save, and because a
-   * conversation needs a stable name before the model has said anything.
+   * Starts as a placeholder and is replaced once, from the user's first message,
+   * the moment that message is recorded. State rather than a getter over
+   * `history` because the name must survive every later save and must not change
+   * when earlier turns are evicted from the context window.
    */
   title: string;
 
@@ -181,6 +181,9 @@ export class SessionController {
           }
         : { role: "user", content: composed };
     this.history.push(userMsg);
+    // Named before the model is even called, so the strip is correct on the
+    // first frame rather than filling in later.
+    this.nameFromFirstMessage();
     this.persist();
 
     const turnId = crypto.randomUUID();
@@ -320,9 +323,6 @@ export class SessionController {
     this.replay = [];
     this.app.setRunning(false);
     this.app.broadcast({ type: "turnEnd" });
-    // After turnEnd, and not awaited: naming is cosmetic and must not hold the
-    // composer closed. A turn that errored keeps its placeholder.
-    if (!errored) void this.autoTitle();
     void errored;
   }
 
@@ -464,7 +464,7 @@ export class SessionController {
     this.sessionId = doc.id;
     this.history = doc.messages;
     // Without this the reopened conversation would carry the placeholder minted
-    // in the constructor and autoTitle would rename an already-named chat.
+    // in the constructor and the naming pass would rename an already-named chat.
     if (doc.title) this.title = doc.title;
   }
 
@@ -477,59 +477,35 @@ export class SessionController {
   }
 
   /**
-   * Ask the model to name the conversation, once, after the first exchange.
+   * Name the conversation from the first thing the user said.
    *
-   * Deliberately best-effort and quiet. It runs after `turnEnd` so it never
-   * delays the reply the user is reading, it is capped at a handful of tokens,
-   * it sends no tools, and every failure path leaves the placeholder in place —
-   * a conversation with a boring name is fine, a turn that breaks because
-   * naming failed is not.
+   * This used to ask the model, after the first exchange, in a separate request.
+   * Three things were wrong with that. It spent a request and tokens on a string
+   * decided once — visible on a rate-limited endpoint, where it was the call that
+   * tipped into 429. It arrived late, so the title appeared and then rewrote
+   * itself under the reader. And it could fail, leaving "Untitled 3" on a
+   * conversation that plainly had a subject.
    *
-   * Only the first user message and a trimmed slice of the first answer are
-   * sent. Feeding the whole transcript would grow this call without bound as
-   * the conversation does, for a string that is decided once.
+   * The first message is already the best short label available, and it is there
+   * before the model answers. Several conversations called "Hi" is the accepted
+   * cost: a dull name that was correct from the first frame beats a clever one
+   * that changed after the fact.
    */
-  private async autoTitle(): Promise<void> {
+  private nameFromFirstMessage(): void {
     if (!isUntitled(this.title)) return;
 
-    const firstUser = this.history.find((m) => m.role === "user");
-    const firstReply = this.history.find((m) => m.role === "assistant");
-    if (!firstUser || !firstReply) return;
+    // `titleFrom` is the existing helper the store has always used for this:
+    // first user turn, whitespace collapsed, capped. Deliberately NOT
+    // `sanitizeTitle`, which is tuned for model output — it strips a leading
+    // "ok" or "so" (wrong for a person's own words) and rejects anything under
+    // three characters, which would turn "Hi" into "Untitled".
+    const title = titleFrom(this.history);
+    if (!title || title === "New chat" || title === this.title) return;
 
-    const profile = this.app.activeProfile();
-    if (!profile) return;
-
-    const placeholder = this.title;
-    try {
-      const client = this.app.clientFor(profile);
-      const ask: Msg[] = [
-        {
-          role: "user",
-          content:
-            "Name this conversation.\n\n" +
-            `Request: ${flatten(firstUser.content).slice(0, 600)}\n` +
-            `Answer: ${flatten(firstReply.content).slice(0, 600)}\n\n` +
-            "Reply with the title and nothing else: 2 to 6 words, Sentence case, " +
-            "no quotes, no trailing period, no preamble. Name the subject, not the format — " +
-            '"PCAP trace analyser desktop app", not "A conversation about a request".',
-        },
-      ];
-      let out = "";
-      for await (const ev of client.complete({ messages: ask, stream: false, maxTokens: 32 })) {
-        if (ev.type === "text") out += ev.text;
-      }
-      const title = sanitizeTitle(out, placeholder);
-      if (title === this.title) return;
-
-      this.title = title;
-      this.app.sessions.save(this.sessionId, this.history, title);
-      this.app.broadcast({ type: "sessionTitled", id: this.sessionId, title });
-      this.app.refreshSessions();
-      this.app.log("info", `Named the conversation "${title}".`);
-    } catch (e) {
-      // A gateway that rejects the naming call must not colour the turn.
-      this.app.log("warn", `Could not name the conversation: ${messageOf(e)}`);
-    }
+    this.title = title;
+    this.app.sessions.save(this.sessionId, this.history, title);
+    this.app.broadcast({ type: "sessionTitled", id: this.sessionId, title });
+    this.app.refreshSessions();
   }
 
   /**

@@ -65,6 +65,121 @@ End your reply with a fenced block exactly like:
 \`\`\`
 Those steps are the build order for Act — outcomes, not keystrokes. "Ship the capture screen with a live packet list" beats "create src/capture.ts".`;
 
+/**
+ * Recover a tool call a model emitted as plain text.
+ *
+ * Small instruct models — `llama-3.2-3b`, most 7B-and-under chat tunes — accept
+ * a `tools` array and then answer with the JSON *as prose* instead of filling in
+ * `tool_calls`. Nothing consumed that, so the raw object went straight into the
+ * transcript and the product looked broken:
+ *
+ *     ')}}">
+ *     { "type": "function", "function": "read_skill", "parameters": { … } }
+ *
+ * The diagnostics ladder has always told users the agent "will fall back to a
+ * text protocol for tools". It did not. This is that fallback.
+ *
+ * Shapes accepted, because there is no standard and every model picks its own:
+ *   {"type":"function","function":{"name":N,"arguments":A}}   OpenAI-ish
+ *   {"type":"function","function":N,"parameters":A}           flattened
+ *   {"name":N,"arguments":A} / {"name":N,"parameters":A}      bare
+ *   {"tool":N,"input":A} / {"tool_name":N,"tool_input":A}     Anthropic-ish
+ * optionally wrapped in a ```json fence, and preceded by junk the model leaked.
+ *
+ * Returns `undefined` unless the text is *essentially nothing but* the call —
+ * a reply that merely mentions JSON must never be swallowed. `known` gates it to
+ * tools that actually exist, so prose containing a stray object cannot invent a
+ * tool name.
+ */
+export function parseTextToolCall(
+  text: string,
+  known: ReadonlySet<string>
+): { name: string; arguments: any; consumed: string } | undefined {
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.length > 4000) return undefined;
+
+  // Strip one fence if the whole reply is fenced.
+  let body = trimmed;
+  const fence = body.match(/^```(?:json|tool_call|tool|python)?\s*\n([\s\S]*?)\n?```$/i);
+  if (fence) body = fence[1].trim();
+
+  // Some models prefix garbage from their own template ( ')}}">  and similar ).
+  // Take the first balanced {...} run and require the rest to be trivial.
+  const start = body.indexOf("{");
+  if (start === -1) return undefined;
+  let depth = 0;
+  let end = -1;
+  let inStr = false;
+  let esc = false;
+  for (let i = start; i < body.length; i++) {
+    const ch = body[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === "{") depth++;
+    else if (ch === "}" && --depth === 0) {
+      end = i;
+      break;
+    }
+  }
+  if (end === -1) return undefined;
+
+  // The prefix may be template junk, but never a sentence — if the model wrote
+  // prose and then some JSON, that is a reply, not a call.
+  const prefix = body.slice(0, start);
+  if (/[A-Za-z]{4,}/.test(prefix)) return undefined;
+  const suffix = body.slice(end + 1).trim();
+  if (suffix && /[A-Za-z]{4,}/.test(suffix)) return undefined;
+
+  let obj: any;
+  try {
+    obj = JSON.parse(body.slice(start, end + 1));
+  } catch {
+    return undefined;
+  }
+  if (!obj || typeof obj !== "object") return undefined;
+
+  // `fn` is either the nested {name, arguments} object or a bare name string.
+  // Narrowed once here rather than re-tested inline: mixing `&&` guards with
+  // `??` defaults silently yields `false` for the bare shapes, because `??`
+  // only falls through on null and undefined.
+  const fn = obj.function;
+  const fnObj: any = fn && typeof fn === "object" ? fn : undefined;
+
+  const name =
+    (fnObj && typeof fnObj.name === "string" ? fnObj.name : undefined) ??
+    (typeof fn === "string" ? fn : undefined) ??
+    (typeof obj.name === "string" ? obj.name : undefined) ??
+    (typeof obj.tool === "string" ? obj.tool : undefined) ??
+    (typeof obj.tool_name === "string" ? obj.tool_name : undefined);
+  if (!name || !known.has(name)) return undefined;
+
+  let args =
+    fnObj?.arguments ??
+    fnObj?.parameters ??
+    fnObj?.input ??
+    obj.arguments ??
+    obj.parameters ??
+    obj.input ??
+    obj.tool_input ??
+    {};
+  // Some models double-encode the argument object as a string.
+  if (typeof args === "string") {
+    try {
+      args = JSON.parse(args);
+    } catch {
+      args = {};
+    }
+  }
+  if (!args || typeof args !== "object") args = {};
+
+  return { name, arguments: args, consumed: text };
+}
+
 /** No tokenizer, no network. Deliberately conservative so air-gapped setups work. */
 export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 3.6);
@@ -179,6 +294,15 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
 
     let text = "";
     const calls: ToolCall[] = [];
+
+    /* A reply that opens with `{` or a fence might be a tool call the model
+       wrote as prose. It is withheld until we know, because once a delta has
+       been yielded the JSON is on screen and cannot be taken back. Ordinary
+       replies are decided within the first few characters and stream normally. */
+    let decided = false;
+    let holding = false;
+    let pending = "";
+
     try {
       for await (const ev of client.complete({
         messages: fitted,
@@ -187,7 +311,21 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
         if (opts.signal?.aborted) return;
         if (ev.type === "text") {
           text += ev.text;
-          yield { type: "text", text: ev.text };
+          if (!decided) {
+            pending += ev.text;
+            const t = pending.trimStart();
+            // Wait for enough to judge, but never past the first newline.
+            if (t.length >= 8 || t.includes("\n")) {
+              holding = /^(```|[^A-Za-z\s]{0,12}\{)/.test(t);
+              decided = true;
+              if (!holding) {
+                yield { type: "text", text: pending };
+                pending = "";
+              }
+            }
+          } else if (!holding) {
+            yield { type: "text", text: ev.text };
+          }
         }
         if (ev.type === "tool_call") calls.push(ev.toolCall!);
         // Real counts from the gateway. These were being discarded: the client
@@ -208,6 +346,40 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
     } catch (e: any) {
       yield { type: "error", error: [e.message, e.detail].filter(Boolean).join("\n") };
       return;
+    }
+
+    /* A reply short enough to end before the hold decision was made still has
+       everything sitting in `pending`. Decide now, or it is dropped. */
+    if (!decided && pending) {
+      holding = /^(```|[^A-Za-z\s]{0,12}\{)/.test(pending.trimStart());
+      decided = true;
+      if (!holding) {
+        yield { type: "text", text: pending };
+        pending = "";
+      }
+    }
+
+    /* Resolve anything withheld above.
+       When the model produced no native tool call but wrote one as text, adopt
+       it and drop the JSON from the transcript entirely — the tool card that
+       follows is the honest rendering of what happened. Otherwise release the
+       buffered text unchanged. */
+    if (holding) {
+      const recovered = calls.length
+        ? undefined
+        : parseTextToolCall(text, new Set(availableTools.map((t) => t.name)));
+      if (recovered) {
+        calls.push({
+          id: `text_${i}_${Date.now().toString(36)}`,
+          name: recovered.name,
+          arguments: recovered.arguments,
+        });
+        // The assistant turn keeps no visible content: the call *was* the reply.
+        text = "";
+      } else if (pending) {
+        yield { type: "text", text: pending };
+      }
+      pending = "";
     }
 
     if (!calls.length) {
