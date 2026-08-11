@@ -301,6 +301,38 @@ function _sbRun() {
   var KW_C = "auto|break|case|char|const|continue|default|do|double|else|enum|extern|float|for|goto|if|inline|int|long|register|restrict|return|short|signed|sizeof|static|struct|switch|typedef|union|unsigned|void|volatile|while|bool|true|false|NULL|nullptr|class|public|private|protected|virtual|override|template|typename|namespace|using|new|delete|this|try|catch|throw|fn|let|mut|impl|trait|pub|crate|mod|match|move|ref|where|async|await|dyn|unsafe|as|in|loop|Some|None|Ok|Err|self|Self|function|var|const|export|import|from|interface|type|extends|implements|readonly";
   var KW_PY = "and|as|assert|async|await|break|class|continue|def|del|elif|else|except|finally|for|from|global|if|import|in|is|lambda|nonlocal|not|or|pass|raise|return|try|while|with|yield|True|False|None|self|cls|match|case";
 
+  /* PowerShell and SQL are written in mixed case by convention - `param` and
+     `Param`, `select` and `SELECT` - and a rule cannot carry its own /i here
+     because every rule is fused into one alternation that keeps only its own
+     flags. Those two families get the flag applied to the whole alternation
+     instead; see GRAMMAR_FLAGS. */
+  var KW_PS =
+    "param|function|filter|begin|process|end|dynamicparam|if|elseif|else|switch|" +
+    "foreach|for|while|do|until|break|continue|return|throw|try|catch|finally|trap|" +
+    "class|enum|using|namespace|in|exit|hidden|static|data|inlinescript|workflow|" +
+    "parallel|sequence|configuration";
+  var KW_SQL =
+    "select|from|where|insert|into|values|update|set|delete|create|alter|drop|table|" +
+    "view|index|join|inner|left|right|full|outer|cross|on|as|and|or|not|null|is|in|" +
+    "between|like|order|by|group|having|limit|offset|union|all|distinct|case|when|" +
+    "then|else|end|primary|foreign|key|references|default|unique|constraint|cascade|" +
+    "begin|commit|rollback|transaction|with|exists|any|asc|desc|count|sum|avg|min|max";
+  var KW_SH =
+    "if|then|elif|else|fi|for|while|until|do|done|case|esac|in|function|return|local|" +
+    "export|source|alias|shift|exit|break|continue|set|unset|readonly|declare|eval|" +
+    "trap|echo|cd|test|printf|read|shopt";
+
+  var KW_BAT =
+    "set|setlocal|endlocal|echo|if|else|for|in|do|goto|call|exit|pause|shift|" +
+    "cd|chdir|md|mkdir|rd|rmdir|del|erase|copy|xcopy|move|ren|rename|type|find|" +
+    "findstr|start|title|color|cls|pushd|popd|not|exist|defined|errorlevel|equ|" +
+    "neq|lss|leq|gtr|geq|on|off";
+
+  /* Whole-alternation flags, per family. Batch and SQL are conventionally
+     written in several cases, and PowerShell keywords genuinely are
+     case-insensitive to the interpreter. */
+  var GRAMMAR_FLAGS = { ps: "i", sql: "i", bat: "i" };
+
   var GRAMMAR = {
     c: [
       ["cm", /\/\*[\s\S]*?\*\/|\/\/[^\n]*/],
@@ -338,29 +370,162 @@ function _sbRun() {
       ["nu", /\b\d+(?:\.\d+)?\b/],
       ["pu", /[=&;]/],
     ],
+    /* PowerShell. Here-strings come before ordinary quotes because @" … "@ can
+       contain both kinds and would otherwise be shredded by the string rule.
+       The backtick is PowerShell's escape character, not the backslash. */
+    ps: [
+      ["cm", /<#[\s\S]*?#>|#[^\n]*/],
+      ["st", /@"[\s\S]*?"@|@'[\s\S]*?'@|"(?:`[\s\S]|[^"`])*"|'(?:''|[^'])*'/],
+      ["ty", /\[[A-Za-z_][\w.]*(?:\[\])?\]/],             // [string], [int[]]
+      ["va", /\$(?:\{[^}\n]*\}|[\w:]+)/],                 // $x, ${x}, $env:PATH
+      ["at", /(?<=\s)--?[A-Za-z][\w-]*/],                 // -Recurse, --flag
+      ["nu", /\b0x[0-9a-fA-F]+\b|\b\d+(?:\.\d+)?(?:[kmgt]b)?\b/],
+      ["kw", new RegExp("\\b(?:" + KW_PS + ")\\b")],
+      ["fn", /\b[A-Za-z]+-[A-Za-z]\w*/],                  // Verb-Noun cmdlets
+      ["pu", /[{}()[\];,.|&<>+\-*/%=!@]/],
+    ],
+    /* POSIX shell. Was previously routed to the Python grammar, which shares
+       the # comment but knows nothing about $expansion - the single most
+       common thing in a shell script. */
+    sh: [
+      ["cm", /#[^\n]*/],
+      ["st", /"(?:\\[\s\S]|[^"\\])*"|'[^']*'/],
+      ["va", /\$(?:\{[^}\n]*\}|\(\(?|[\w]+|[@*#?$!0-9-])/],
+      ["kw", new RegExp("\\b(?:" + KW_SH + ")\\b")],
+      ["at", /(?<=\s)--?[A-Za-z][\w-]*/],
+      ["nu", /\b\d+\b/],
+      ["pu", /[{}()[\];|&<>=!`]/],
+    ],
+    /* Windows batch. It borrowed the PowerShell grammar, which shares almost
+       nothing with it: REM is not a comment there, %VAR% is not a variable,
+       and SET is not a keyword, so a .bat file came out nearly bare. */
+    bat: [
+      ["cm", /(?:^|\n)\s*(?:rem\b|::)[^\n]*/],
+      ["st", /"[^"\n]*"/],
+      ["va", /%[\w~$#*]+%?|![\w]+!|%%?[\w~]/],            // %PATH%, !delayed!, %%i
+      ["ty", /(?:^|\n)\s*:[\w.-]+/],                      // a label
+      ["at", /(?<=\s)\/[A-Za-z?][\w]*/],                  // /f /i switches
+      ["kw", new RegExp("\\b(?:" + KW_BAT + ")\\b")],
+      ["nu", /\b\d+\b/],
+      ["pu", /[@()[\];,|&<>=+]/],
+    ],
+    yaml: [
+      ["cm", /#[^\n]*/],
+      ["st", /"(?:\\[\s\S]|[^"\\])*"|'(?:''|[^'])*'/],
+      ["at", /[\w.\/-]+(?=\s*:(?:\s|$))/],                // a key
+      ["kw", /\b(?:true|false|null|yes|no|on|off|True|False|None)\b/],
+      ["nu", /\b\d+(?:\.\d+)?\b/],
+      ["ty", /(?:[&*]|!!?)[\w:/.-]+/],                    // anchors, aliases, tags
+      ["pu", /[:[\]{},>|]|(?:^|\n)\s*-(?=\s)/],
+    ],
+    ini: [
+      ["cm", /[#;][^\n]*/],
+      ["ty", /\[[^\]\n]*\]/],                             // [section]
+      ["at", /[\w.-]+(?=\s*=)/],
+      ["st", /"(?:\\[\s\S]|[^"\\])*"|'[^']*'/],
+      ["kw", /\b(?:true|false)\b/],
+      ["nu", /\b\d+(?:\.\d+)?\b/],
+      ["pu", /[=,]/],
+    ],
+    sql: [
+      ["cm", /--[^\n]*|\/\*[\s\S]*?\*\//],
+      ["st", /'(?:''|[^'])*'/],
+      ["at", /"(?:[^"])*"|`(?:[^`])*`|\[[^\]\n]*\]/],     // quoted identifiers
+      ["kw", new RegExp("\\b(?:" + KW_SQL + ")\\b")],
+      ["nu", /\b\d+(?:\.\d+)?\b/],
+      ["fn", /\b[A-Za-z_]\w*(?=\s*\()/],
+      ["pu", /[(),;.*=<>+\-/|]/],
+    ],
+    css: [
+      ["cm", /\/\*[\s\S]*?\*\//],
+      ["st", /"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'/],
+      ["at", /@[\w-]+|--[\w-]+/],                         // at-rules, custom props
+      ["nu", /#[0-9a-fA-F]{3,8}\b|\b-?\d+(?:\.\d+)?(?:px|em|rem|ex|ch|vh|vw|vmin|vmax|%|s|ms|deg|turn|fr|pt)?\b/],
+      ["fn", /[\w-]+(?=\s*\()/],
+      ["ty", /[.#][A-Za-z_][\w-]*|::?[a-z-]+(?![\w(])/],  // selectors, pseudo
+      ["kw", /[a-z-]+(?=\s*:)/],                          // property names
+      ["pu", /[{}();,:>~+*]/],
+    ],
+    /* Diff is line-oriented, so each rule claims a whole line. `^` is written
+       as (?:^|\n) because the fused alternation carries no /m flag. */
+    diff: [
+      ["cm", /(?:^|\n)@@[^\n]*/],
+      ["kw", /(?:^|\n)(?:diff |index |--- |\+\+\+ )[^\n]*/],
+      ["ad", /(?:^|\n)\+[^\n]*/],
+      ["de", /(?:^|\n)-[^\n]*/],
+    ],
   };
 
   /* Which family a fence label belongs to. Unknown labels render unhighlighted
      rather than guessing - a wrong grammar is more distracting than none. */
   var LANG_FAMILY = {
-    c: "c", h: "c", cpp: "c", "c++": "c", cc: "c", hpp: "c", cs: "c", java: "c",
-    rs: "c", rust: "c", go: "c", js: "c", jsx: "c", ts: "c", tsx: "c",
-    javascript: "c", typescript: "c", swift: "c", kt: "c", kotlin: "c", php: "c",
-    py: "py", python: "py", rb: "py", ruby: "py", sh: "py", bash: "py", zsh: "py",
-    yml: "py", yaml: "py", toml: "py", ini: "py", conf: "py", dockerfile: "py",
-    json: "json", jsonc: "json", json5: "json",
-    xml: "xml", arxml: "xml", html: "xml", htm: "xml", svg: "xml", xsd: "xml",
-    xsl: "xml", plist: "xml", vue: "xml",
+    // C-like: braces, // comments, capitalised types
+    c: "c", h: "c", cpp: "c", "c++": "c", cc: "c", cxx: "c", hpp: "c", hxx: "c",
+    cs: "c", csharp: "c", java: "c", rs: "c", rust: "c", go: "c", golang: "c",
+    js: "c", jsx: "c", mjs: "c", cjs: "c", ts: "c", tsx: "c", mts: "c",
+    javascript: "c", typescript: "c", node: "c", swift: "c", kt: "c", kotlin: "c",
+    php: "c", scala: "c", groovy: "c", dart: "c", zig: "c", d: "c", v: "c",
+    verilog: "c", sv: "c", systemverilog: "c", glsl: "c", hlsl: "c", wgsl: "c",
+    proto: "c", protobuf: "c", thrift: "c", graphql: "c", gql: "c", solidity: "c",
+    sol: "c", hcl: "c", terraform: "c", tf: "c", jsonnet: "c", pde: "c",
+    objc: "c", "objective-c": "c", m: "c", mm: "c", awk: "c", pas: "c", pascal: "c",
+
+    // Hash comments, indentation-led
+    py: "py", python: "py", python3: "py", rb: "py", ruby: "py", pl: "py",
+    perl: "py", r: "py", jl: "py", julia: "py", lua: "py", nim: "py", cr: "py",
+    crystal: "py", ex: "py", exs: "py", elixir: "py", erl: "py", erlang: "py",
+    coffee: "py", tcl: "py", cmake: "py", make: "py", makefile: "py", mk: "py",
+    gradle: "py", nix: "py", elm: "py", hs: "py", haskell: "py", clj: "py",
+    clojure: "py", vim: "py", vimscript: "py", asm: "py", s: "py", nasm: "py",
+    gitignore: "py", editorconfig: "py", properties: "py", env: "py",
+    dotenv: "py", dockerfile: "py", containerfile: "py", requirements: "py",
+
+    // Shell: $expansion is the whole point, and the py grammar has none
+    sh: "sh", bash: "sh", zsh: "sh", shell: "sh", ksh: "sh", fish: "sh",
+    console: "sh", shellsession: "sh", terminal: "sh",
+
+    // PowerShell: <# #> comments, $vars, -Parameters, Verb-Noun cmdlets
+    ps: "ps", ps1: "ps", psm1: "ps", psd1: "ps", powershell: "ps", pwsh: "ps",
+    posh: "ps",
+
+    // Windows batch, which shares almost nothing with PowerShell
+    bat: "bat", cmd: "bat", batch: "bat", dosbatch: "bat", btm: "bat",
+
+    yml: "yaml", yaml: "yaml",
+    toml: "ini", ini: "ini", conf: "ini", cfg: "ini", desktop: "ini",
+
+    json: "json", jsonc: "json", json5: "json", geojson: "json",
+    ipynb: "json", webmanifest: "json",
+
+    xml: "xml", arxml: "xml", html: "xml", htm: "xml", xhtml: "xml", svg: "xml",
+    xsd: "xml", xsl: "xml", xslt: "xml", plist: "xml", vue: "xml", svelte: "xml",
+    jsp: "xml", aspx: "xml", ejs: "xml", handlebars: "xml", hbs: "xml",
+    razor: "xml", wsdl: "xml", rss: "xml", atom: "xml", pom: "xml", csproj: "xml",
+    axaml: "xml", xaml: "xml", ui: "xml", kml: "xml", gpx: "xml", odx: "xml",
+
+    sql: "sql", mysql: "sql", pgsql: "sql", postgres: "sql", postgresql: "sql",
+    sqlite: "sql", plsql: "sql", tsql: "sql", hive: "sql", ddl: "sql",
+
+    css: "css", scss: "css", sass: "css", less: "css", styl: "css", stylus: "css",
+    postcss: "css",
+
+    diff: "diff", patch: "diff", udiff: "diff",
   };
 
   function highlight(code, lang) {
-    var rules = GRAMMAR[LANG_FAMILY[String(lang || "").toLowerCase()]];
+    // A label may arrive as "ps1", "PowerShell" or "generate.ps1"; take the
+    // extension when it looks like a filename, since fences are often labelled
+    // with the file they came from.
+    var raw = String(lang || "").toLowerCase().trim();
+    var fam = LANG_FAMILY[raw];
+    if (!fam && raw.indexOf(".") !== -1) fam = LANG_FAMILY[raw.slice(raw.lastIndexOf(".") + 1)];
+    var rules = GRAMMAR[fam];
     if (!rules) return esc(code);
 
     // One alternation, so the leftmost match always wins and a keyword can
     // never be found inside a string that started earlier.
     var src = rules.map(function (r) { return "(" + r[1].source + ")"; }).join("|");
-    var re = new RegExp(src, "g");
+    var re = new RegExp(src, "g" + (GRAMMAR_FLAGS[fam] || ""));
     var out = "";
     var last = 0;
     var m;

@@ -118,9 +118,93 @@ console.log("\n──── syntax highlighting ────");
   ck(has(x, "at", "id"), "arxml: attribute");
   ck(has(x, "st", '"1"'), "arxml: attribute value");
 
+  // PowerShell. A .ps1 block rendered as flat monochrome text next to a
+  // coloured XML block, because no label in the family map pointed at it.
+  const ps = tk(
+    '<#\n.SYNOPSIS\n  Generate files.\n#>\nparam(\n  [switch]$BuildDocker\n)\n' +
+      '$ErrorActionPreference = "Stop"\n$Root = Split-Path -Parent $PSScriptRoot\n' +
+      "Set-Location $Root\n",
+    "powershell"
+  );
+  ck(has(ps, "cm", "<#\n.SYNOPSIS\n  Generate files.\n#>"), "ps: block comment");
+  ck(has(ps, "kw", "param"), "ps: keyword");
+  ck(has(ps, "ty", "[switch]"), "ps: type accelerator");
+  ck(has(ps, "va", "$BuildDocker"), "ps: variable");
+  ck(has(ps, "va", "$ErrorActionPreference"), "ps: variable with a long name");
+  ck(has(ps, "st", '"Stop"'), "ps: string");
+  ck(has(ps, "fn", "Split-Path"), "ps: Verb-Noun cmdlet");
+  ck(has(ps, "at", "-Parent"), "ps: parameter flag");
+  ck(has(ps, "fn", "Set-Location"), "ps: another cmdlet");
+  // Every spelling of the label has to land on the same grammar.
+  for (const label of ["ps1", "PowerShell", "pwsh", "psm1", "PS1"]) {
+    ck(tk("param()", label).includes('tk-kw">param'), "ps: label " + label);
+  }
+  // Fences are often labelled with the file they came from.
+  ck(tk("param()", "generate_files.ps1").includes('tk-kw">param'),
+    "ps: a filename label falls back to its extension");
+  // PowerShell keywords are written in any case; the fused alternation
+  // carries the family's own flags so /i survives.
+  ck(tk("Param()", "ps1").includes('tk-kw">Param'), "ps: keywords are case-insensitive");
+  // A here-string may contain quotes; the string rule must not shred it.
+  const herest = tk("$x = @\"\nhe said \"hi\"\n\"@\n", "ps1");
+  ck(herest.includes('tk-st">@&quot;\nhe said &quot;hi&quot;\n&quot;@'), "ps: here-string is one token");
+
+  // Shell. Was routed to the Python grammar, which knows nothing about $VAR.
+  const sh = tk("#!/bin/bash\nif [ -f $HOME/.bashrc ]; then\n  echo ${USER}\nfi\n", "bash");
+  ck(has(sh, "va", "$HOME"), "sh: variable");
+  ck(has(sh, "va", "${USER}"), "sh: braced variable");
+  ck(has(sh, "kw", "if"), "sh: keyword");
+  ck(has(sh, "kw", "echo"), "sh: builtin");
+  // One alternation scanned left to right means the earliest rule to claim a
+  // span keeps it, so a variable written inside a double-quoted string is part
+  // of the string. Nested highlighting would need a second pass; colouring the
+  // string as one unit is the honest outcome of this design, not an accident.
+  ck(has(tk('echo "$HOME/x"', "bash"), "st", '"$HOME/x"'),
+    "sh: a variable inside a quoted string stays part of the string");
+
+  // Windows batch has its own grammar. It briefly borrowed PowerShell's, which
+  // shares almost nothing with it, so a .bat file came out nearly bare.
+  const bt = tk("@echo off\nREM note\nSET PATH=%PATH%;C:\\tools\nif exist %1 goto :done\n:done\n", "bat");
+  ck(has(bt, "va", "%PATH%"), "bat: variable");
+  ck(has(bt, "kw", "SET"), "bat: keyword in upper case");
+  ck(has(bt, "kw", "echo"), "bat: keyword in lower case");
+  ck(bt.includes('tk-cm">\nREM note'), "bat: REM comment");
+  ck(bt.includes('tk-ty">\n:done'), "bat: label");
+  ck(tk("::note\n", "cmd").includes('tk-cm">::note'), "bat: :: comment");
+
+  const y = tk("# c\nname: kryptonite\nlist:\n  - one\nflag: true\n", "yaml");
+  ck(has(y, "at", "name"), "yaml: key");
+  ck(has(y, "kw", "true"), "yaml: boolean");
+  ck(has(y, "cm", "# c"), "yaml: comment");
+
+  const ini = tk("; note\n[server]\nport = 8080\n", "toml");
+  ck(has(ini, "ty", "[server]"), "toml: section");
+  ck(has(ini, "at", "port"), "toml: key");
+  ck(has(ini, "nu", "8080"), "toml: number");
+
+  const sq = tk("-- note\nSELECT id FROM users WHERE name = 'ann';", "sql");
+  ck(has(sq, "kw", "SELECT"), "sql: upper-case keyword");
+  ck(has(sq, "st", "'ann'"), "sql: string");
+  ck(has(sq, "cm", "-- note"), "sql: comment");
+  ck(tk("select 1", "sql").includes('tk-kw">select'), "sql: lower-case keyword too");
+
+  const cs = tk(".btn { color: #22c9d6; padding: 4px }", "css");
+  ck(has(cs, "ty", ".btn"), "css: selector");
+  ck(has(cs, "nu", "#22c9d6"), "css: hex colour");
+  ck(has(cs, "nu", "4px"), "css: dimension");
+
+  const df = tk("@@ -1,2 +1,3 @@\n-old line\n+new line\n context", "diff");
+  ck(df.includes('tk-ad">\n+new line'), "diff: an added line");
+  ck(df.includes('tk-de">\n-old line'), "diff: a removed line");
+  ck(has(df, "cm", "@@ -1,2 +1,3 @@"), "diff: a hunk header");
+
   // Escaping is the security property: markup inside code must never survive
-  // as markup, highlighted or not.
+  // as markup, highlighted or not. It has to hold for every new family too.
   ck(!/<img/.test(tk('x = "<img src=x onerror=alert(1)>"', "py")), "markup inside code stays escaped");
+  for (const lang of ["ps1", "bash", "yaml", "toml", "sql", "css", "diff"]) {
+    const out = tk('<img src=x onerror=alert(1)> "<b>"', lang);
+    ck(!/<img/.test(out) && !/<b>/.test(out), "markup stays escaped in " + lang);
+  }
   ck(tk("<script>", "xml").indexOf("<script>") === -1, "a script tag cannot survive the tokeniser");
   // An unknown label must not be guessed at — a wrong grammar is worse than none.
   ck(tk("let x = 1;", "cobol") === "let x = 1;", "an unknown language is left alone");

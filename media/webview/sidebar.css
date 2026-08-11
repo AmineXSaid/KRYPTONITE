@@ -928,6 +928,13 @@ li.doing .cbx { border-color: var(--kx-accent); }
 .tk-nu { color: var(--kx-info); }                   /* numbers: measurement */
 .tk-at { color: var(--kx-warn); }                   /* keys, attributes, decorators */
 .tk-pu { color: var(--kx-fg-3); }                   /* punctuation stays quiet */
+.tk-va { color: var(--kx-mcp); }                    /* $variables: shell and PowerShell */
+/* A diff's added and removed lines. Not --kx-diff-add/--kx-diff-del: those are
+   translucent washes meant to sit behind a row, and at 14% and 30% alpha they
+   are close to invisible as text. These two are the same hues at full strength,
+   already measured as readable by the contrast suite. */
+.tk-ad { color: var(--kx-accent); }
+.tk-de { color: var(--kx-error); }
 
 /* Acknowledges a message taken mid-turn. Without it the composer clears and
    nothing visibly happens, which reads as the message having been lost. */
