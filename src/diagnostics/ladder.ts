@@ -315,16 +315,44 @@ export async function runLadder(
       // it. Only if that fails too is the endpoint really broken.
       let streamedOk = false;
       let streamMs = 0;
+      let streamErr = "";
       if (profile.capabilities.streaming) {
+        // Bounded like the probe above. An unbounded fallback meant a genuinely
+        // unreachable endpoint cost 20s here and then the full 120s again,
+        // with the panel frozen for both.
+        const sBail = new AbortController();
         const [got, serr, sms] = await timed(async () => {
-          let out = "";
-          for await (const ev of client.complete({ messages: probe, stream: true, maxTokens: 16 })) {
-            if (ev.type === "text") out += ev.text;
+          const timer = setTimeout(() => sBail.abort(), PROBE_MS);
+          try {
+            let out = "";
+            for await (const ev of client.complete({
+              messages: probe,
+              stream: true,
+              maxTokens: 16,
+              signal: sBail.signal,
+            })) {
+              if (ev.type === "text") out += ev.text;
+            }
+            return out;
+          } catch (se: any) {
+            if (sBail.signal.aborted) {
+              throw new Error(`no reply to a streaming request within ${PROBE_MS}ms`);
+            }
+            throw se;
+          } finally {
+            clearTimeout(timer);
           }
-          return out;
         });
         streamMs = sms;
         streamedOk = !serr && got !== undefined;
+        // Kept, because when both shapes fail this is the more useful of the
+        // two errors: it is the one describing how the agent actually talks.
+        // It used to be discarded, so the panel reported the non-streaming
+        // timeout and the real reason never reached the user at all.
+        if (serr) {
+          const s: any = serr;
+          streamErr = [s.message, s.detail].filter(Boolean).join(" — ").slice(0, 400);
+        }
       }
 
       if (streamedOk) {
@@ -347,7 +375,11 @@ export async function runLadder(
         push({
           name: "Completion",
           status: "fail",
-          detail: `${e.message}${e.detail ? "\n" + e.detail : ""}`,
+          detail:
+            `${e.message}${e.detail ? "\n" + e.detail : ""}` +
+            // Both shapes were tried; report both outcomes. Showing only the
+            // non-streaming one hid the failure that actually stops the agent.
+            (streamErr ? `\nStreaming was tried too and also failed: ${streamErr}` : ""),
           fix:
             e.status === 401 || e.status === 403
               ? "The credential was rejected. Check scopes, audience, and whether the token has expired."
@@ -356,7 +388,11 @@ export async function runLadder(
               : e.status === 400
               ? "The body shape was rejected. A transform module can reshape it."
               : /TIMEOUT/i.test(String(e.detail ?? e.message))
-              ? `Nothing came back within ${profile.timeoutMs}ms, streaming or not.` +
+              ? // The probes are bounded well below profile.timeoutMs, so
+                // quoting the profile's figure here named a number no probe
+                // ever waited and sent people off to raise a timeout that was
+                // not the limit they hit.
+                `Nothing came back within ${PROBE_MS}ms on either shape.` +
                 inspectorNote() +
                 " Otherwise raise timeoutMs; http2: true helps on a few gateways but slows streaming."
               : "See the raw response above.",
