@@ -443,9 +443,33 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
     messages.push(step);
     opts.onMessage?.(step);
 
-    for (const call of calls) {
+    // When every call in the batch is read-only, start them all at once.
+    //
+    // Events are still emitted strictly in call order, one start/end pair at a
+    // time, so the transcript and the UI see exactly the shape they saw
+    // before - only the waiting overlaps. Five file reads become one wait
+    // rather than five. A batch containing anything that can touch the
+    // workspace stays sequential, because order is part of what the model
+    // asked for and a write racing a read is a bug nobody would find.
+    const canParallel =
+      caps.parallelToolExecution && calls.length > 1 && calls.every((c) => READ_ONLY.has(c.name));
+    const running = canParallel
+      ? calls.map((c) =>
+          // runTool converts its own failures into results; this is belt and
+          // braces so a rejection cannot escape as an unhandled one while it
+          // sits in the array waiting to be awaited.
+          runTool(c.name, c.arguments, ctx).catch((e: any) => ({
+            content: String(e?.message ?? e),
+            isError: true,
+          }))
+        )
+      : null;
+
+    for (let ci = 0; ci < calls.length; ci++) {
+      const call = calls[ci];
+      if (opts.signal?.aborted) return;
       yield { type: "tool_start", tool: { name: call.name, args: call.arguments } };
-      const result = await runTool(call.name, call.arguments, ctx);
+      const result = running ? await running[ci] : await runTool(call.name, call.arguments, ctx);
       yield {
         type: "tool_end",
         tool: { name: call.name, args: call.arguments, result: result.content, isError: result.isError },

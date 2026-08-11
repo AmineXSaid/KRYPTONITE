@@ -5,7 +5,7 @@
  * Run: npx esbuild test/text-tool-protocol.ts --bundle --outfile=dist/ttp.cjs \
  *        --format=cjs --platform=node --target=node20 && node dist/ttp.cjs
  */
-import { parseTextToolCall } from "../src/agent/loop";
+import { parseTextToolCall, READ_ONLY } from "../src/agent/loop";
 import { __openAiStreamForTest } from "../src/providers/client";
 
 const KNOWN = new Set([
@@ -134,6 +134,24 @@ console.log("\n──── reasoning_content ────");
     drain(__openAiStreamForTest(), [delta({ content: "hello" }), delta({}, "stop")]) === "hello",
     "a model with no reasoning field behaves exactly as before"
   );
+}
+
+/* ── the read-only set that gates parallel tool execution ───────────── */
+console.log("\n──── parallel-safe tool set ────");
+{
+  // A batch runs concurrently only when every call in it is read-only. The
+  // membership of that set is the whole safety argument, so it is asserted
+  // rather than assumed: adding a mutating tool to it would let a write race
+  // a read, which is the kind of bug nobody reproduces.
+  const MUTATES = ["write_file", "edit_file", "run_command"];
+  for (const name of MUTATES) {
+    ck(!READ_ONLY.has(name), `${name} is never parallel-safe`);
+  }
+  for (const name of ["read_file", "list_files", "search", "read_skill"]) {
+    ck(READ_ONLY.has(name), `${name} is parallel-safe`);
+  }
+  // MCP tools carry no read-only declaration, so they can never qualify.
+  ck(!READ_ONLY.has("mcp__fs__read_file"), "an MCP tool is never assumed read-only");
 }
 
 console.log(`\n──── ${pass} passed, ${fail} failed ────`);
