@@ -99,6 +99,36 @@ function _run() {
   var FAST = 400;
   var OK = 1200;
 
+  /* Column heads, each with the sentence that makes it readable to someone who
+     did not write it. These are the hover text and, expanded, the legend. */
+  var COLS = [
+    ["Profile",
+      "One endpoint you can chat with. The name comes from its YAML file in " +
+      ".agent/endpoints, and the grey line underneath is the base URL it calls."],
+    ["Model & wire",
+      "Top line: the model id sent in every request. Bottom line: the wire " +
+      "format, meaning which API dialect the request is written in - openai or " +
+      "anthropic. The wire is about request shape, not about who sells the model: " +
+      "most gateways, NVIDIA included, speak openai."],
+    ["Health",
+      "How long the endpoint took to answer a bare handshake. It measures the " +
+      "network path, TLS and your API key - everything that breaks between turns - " +
+      "and never runs the model, so it costs no tokens."],
+    ["Status",
+      "ready: loaded and usable. active: the profile the chat is using right now. " +
+      "error: the YAML could not be read, and the reason is printed under the name."]
+  ];
+
+  var STATUS_TIP = {
+    ready: "Loaded and usable. Pick it in the chat header to make it active.",
+    active: "The profile the chat is using for every message right now.",
+    error: "This YAML could not be read, so the profile cannot be used. The reason is under the name."
+  };
+
+  /* Off by default: a panel that explains itself permanently is a panel that
+     shouts at people who already know. Opt-in, and it stays open. */
+  var LEGEND = false;
+
   /**
    * The waiting mark: three arcs from the palette on their own periods.
    *
@@ -364,6 +394,49 @@ function _run() {
     if (S.epForm && S.epForm.apiKey && $("fKey")) $("fKey").value = S.epForm.apiKey;
   }
 
+  /**
+   * The panel behind "What am I looking at?".
+   *
+   * It reuses the exact sentences from COLS rather than writing a second set,
+   * because two wordings for one fact is how a UI starts contradicting itself.
+   * The health key shows real chips instead of describing them, so what is
+   * being explained and what is on screen are the same object.
+   */
+  function legendPanel() {
+    var out = '<div class="legend">';
+    for (var i = 0; i < COLS.length; i++) {
+      out += '<div class="lg-row"><span class="lg-k">' + esc(COLS[i][0]) + "</span>" +
+        '<span class="lg-v">' + esc(COLS[i][1]) + "</span></div>";
+    }
+
+    var bands = [
+      ["fast", "≤ " + FAST + "ms", "warm connection, nothing to do"],
+      ["ok", "≤ " + OK + "ms", "normal for a first call or a distant region"],
+      ["slow", "> " + OK + "ms", "reachable but sluggish, worth checking the proxy or region"],
+      ["down", "down", "no answer at all; hover the row for the exact error"]
+    ];
+    var key = "";
+    for (var b = 0; b < bands.length; b++) {
+      key += '<span class="lg-band"><span class="hp" data-band="' + bands[b][0] + '">' +
+        '<span class="spark" style="--w:' + (b === 3 ? 0 : (b + 1) * 28) + '%"></span>' +
+        "<span>" + esc(bands[b][1]) + "</span></span>" +
+        '<span class="lg-band-t">' + esc(bands[b][2]) + "</span></span>";
+    }
+    out += '<div class="lg-row"><span class="lg-k">Reading Health</span>' +
+      '<span class="lg-v"><span class="lg-bands">' + key + "</span></span></div>";
+
+    out += '<div class="lg-row"><span class="lg-k">Sync</span><span class="lg-v">' +
+      "A sweep runs by itself the moment this panel opens, then on the period lit " +
+      "under Auto. Sync now repeats it immediately; Off stops the timer without " +
+      "clearing what is already measured.</span></div>";
+
+    out += '<div class="lg-row"><span class="lg-k">Row actions</span><span class="lg-v">' +
+      "The file icon opens that profile's YAML, which is where every setting " +
+      "actually lives. The bin deletes the file.</span></div>";
+
+    return out + "</div>";
+  }
+
   /* ── endpoints ── */
   function secEndpoints() {
     var html = "<h3>Endpoints</h3>" +
@@ -375,19 +448,33 @@ function _run() {
       html += '<div class="empty">No profiles in ' + esc(S.config.profileDirectory || ".agent/endpoints") + "</div>" +
         '<div class="row-actions"><button class="btn primary" data-act="newEndpoint">New profile from template</button></div>';
     } else {
-      var rows = '<div class="tr head"><span></span><span>Profile</span><span>Model &amp; wire</span>' +
-        '<span>Health</span><span>Status</span><span></span></div>';
+      /* Every header carries its own explanation. A column head that is a bare
+         noun ("Health", "wire") is only legible to whoever wrote it, and this
+         panel is the one place a person goes precisely because they do not yet
+         know how the thing is wired. */
+      var rows = '<div class="tr head">';
+      for (var ci = 0; ci < COLS.length; ci++) {
+        rows += '<span title="' + esc(COLS[ci][1]) + '">' + esc(COLS[ci][0]) + "</span>";
+      }
+      rows += "<span></span></div>";
+
       for (var i = 0; i < S.profiles.length; i++) {
         var p = S.profiles[i];
         rows += '<div class="tr" data-status="' + p.status + '">' +
-          '<span class="pdot' + (p.status === "error" ? " err" : "") + '"></span>' +
           '<span class="ell"><span class="id ell">' + esc(p.id) + "</span>" +
           '<span class="sub ell" title="' + esc(p.status === "error" ? p.error || "" : p.baseUrl) + '">' +
           esc(p.status === "error" ? (p.error || "Failed to parse") : p.baseUrl) + "</span></span>" +
           '<span class="ell"><span class="id ell">' + esc(p.model) + "</span>" +
           '<span class="sub ell">' + esc(p.wire) + "</span></span>" +
           healthCell(p.id) +
-          '<span class="ell muted">' + (p.status === "error" ? "error" : p.active ? "active" : "ready") + "</span>" +
+          /* The dot used to be a column of its own, to the left of the name,
+             saying exactly what this one says. Two columns for one fact reads
+             as two facts, and the reader spends time looking for the
+             difference. One state, one place. */
+          '<span class="st" data-st="' + (p.status === "error" ? "error" : p.active ? "active" : "ready") +
+            '" title="' + esc(STATUS_TIP[p.status === "error" ? "error" : p.active ? "active" : "ready"]) + '">' +
+            '<span class="pdot"></span><span>' +
+            (p.status === "error" ? "error" : p.active ? "active" : "ready") + "</span></span>" +
           '<span class="acts">' +
             '<button class="mini" data-ep="yaml" data-id="' + esc(p.id) + '" title="Open YAML" aria-label="Open YAML">' + icon("i-file", "ic-13") + "</button>" +
             '<button class="mini danger" data-ep="del" data-id="' + esc(p.id) + '" title="Delete profile" aria-label="Delete profile">' + icon("i-trash", "ic-13") + "</button>" +
@@ -417,9 +504,11 @@ function _run() {
             '<span class="seg-l">Auto</span>' + segs +
           "</div>" +
           '<span class="sp"></span>' +
-          '<span class="muted tiny bar-note">Times the path to the gateway, not the model. ' +
-            "No tokens are spent.</span>" +
+          '<button class="btn sm help" data-act="legend" aria-expanded="' + (LEGEND ? "true" : "false") +
+            '" title="Explain each column">' + icon("i-info", "ic-13") +
+            "<span>What am I looking at?</span></button>" +
         "</div>" +
+        (LEGEND ? legendPanel() : "") +
         '<div class="tbl">' + rows + "</div>";
     }
 
@@ -1136,6 +1225,7 @@ function _run() {
     switch (action) {
       case "newEndpoint": post("newEndpoint"); break;
       case "health": post("healthCheck"); break;
+      case "legend": LEGEND = !LEGEND; render(); break;
       case "mcpReload": post("mcpReload"); break;
       case "trace": S.tracing = true; S.rungs = []; render(); post("runTrace"); break;
       case "reloadSkills": post("reloadSkills"); setFlash("reloadSkills"); break;

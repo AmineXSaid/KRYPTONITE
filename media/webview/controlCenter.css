@@ -166,10 +166,13 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 
 /* ── tables ── */
 .tbl { border: 1px solid var(--kx-line); border-radius: 6px; overflow: hidden; }
+/* Five columns, not six: the status dot used to occupy a column of its own on
+   the left, repeating what the Status column already said. */
 .tr {
   display: grid; align-items: center; gap: 10px; padding: 8px 10px;
-  grid-template-columns: 26px minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 96px) minmax(0, 76px) 54px;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 100px) minmax(0, 84px) 54px;
 }
+.tr.head span[title] { cursor: help; }
 .tr + .tr { border-top: 1px solid var(--kx-line); }
 .tr.head {
   font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase;
@@ -180,9 +183,35 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 .tr .id { font-size: 12px; font-weight: 500; display: block; }
 .tr .sub { font-family: var(--kx-mono); font-size: 10.5px; color: var(--kx-fg-2); display: block; }
 .tr .acts { display: flex; gap: 2px; justify-content: flex-end; }
-.pdot { width: 7px; height: 7px; border-radius: 50%; background: var(--kx-accent); margin: 0 auto; }
-.pdot.err { background: var(--kx-error); }
+/* Status: the dot and the word are one cell, so there is one thing to read. */
+.st { display: inline-flex; align-items: center; gap: 6px; color: var(--kx-fg-2); cursor: help; }
+.pdot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--kx-fg-4); }
+.st[data-st="active"] .pdot { background: var(--kx-accent); }
+.st[data-st="ready"] .pdot { background: var(--kx-fg-4); }
+.st[data-st="error"] .pdot { background: var(--kx-error); }
+.st[data-st="error"] { color: var(--kx-error); }
 .tr[data-status="error"] .id { color: var(--kx-error); }
+
+/* ── legend ──
+   Opt-in, because a panel that explains itself permanently shouts at the
+   people who already know. Same sentences as the header tooltips. */
+.btn.help { display: inline-flex; align-items: center; gap: 6px; }
+.legend {
+  border: 1px solid var(--kx-line); border-radius: 6px;
+  background: var(--kx-surface-2);
+  padding: 4px 12px; margin-bottom: 8px;
+}
+.lg-row {
+  display: grid; grid-template-columns: 108px minmax(0, 1fr); gap: 12px;
+  padding: 8px 0; font-size: 11.5px; line-height: 1.55;
+}
+.lg-row + .lg-row { border-top: 1px solid var(--kx-hairline); }
+.lg-k { color: var(--kx-fg); font-weight: 600; }
+.lg-v { color: var(--kx-fg-2); }
+.lg-bands { display: flex; flex-direction: column; gap: 5px; }
+.lg-band { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.lg-band .hp { width: 96px; flex: none; }
+.lg-band-t { color: var(--kx-fg-2); }
 
 /* ── health column ──
    A figure alone says nothing without a scale, so the colour does the reading
