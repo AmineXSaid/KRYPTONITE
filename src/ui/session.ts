@@ -80,12 +80,45 @@ export class SessionController {
     this.replay.push(ev);
   }
 
+  /**
+   * Typed while a turn is running, waiting to be dealt with.
+   *
+   * `queued` is sent as its own turn once the current one finishes. `steer` is
+   * injected into the running turn at the next boundary between model calls.
+   * Which one a message lands in is the `inputWhileRunning` preference, and
+   * the difference is real: queuing never disturbs work in progress, steering
+   * can change its direction but spends the tokens to do it.
+   */
+  private queued: Array<{
+    text: string;
+    attachments?: Array<{ name: string; mediaType: string; data: string }>;
+  }> = [];
+  private steer: Msg[] = [];
+
+  /** Drained by the agent loop between model calls. */
+  private takeSteer = (): Msg[] => {
+    if (!this.steer.length) return [];
+    const out = this.steer;
+    this.steer = [];
+    return out;
+  };
+
   async send(
     text: string,
     attachments?: Array<{ name: string; mediaType: string; data: string }>,
   ): Promise<void> {
     if (this.running) {
-      this.app.broadcast({ type: "error", message: "Already working — interrupt first." });
+      // Refusing was the old behaviour and it made the composer feel broken:
+      // a thought had to be held until the model happened to stop.
+      if (!text.trim() && !(attachments ?? []).length) return;
+      if (this.app.inputWhileRunning() === "steer") {
+        const msg: Msg = { role: "user", content: text };
+        this.steer.push(msg);
+        this.app.broadcast({ type: "inputAccepted", mode: "steer", text, depth: this.steer.length });
+      } else {
+        this.queued.push({ text, attachments });
+        this.app.broadcast({ type: "inputAccepted", mode: "queue", text, depth: this.queued.length });
+      }
       return;
     }
     const root = this.app.root;
@@ -241,6 +274,7 @@ export class SessionController {
         // produces them, so tool calls survive into the next turn's context and
         // into a restored session.
         onMessage: (m) => this.history.push(m),
+        takeSteer: this.takeSteer,
       })) {
         switch (ev.type) {
           case "text": {
@@ -295,6 +329,14 @@ export class SessionController {
             this.app.broadcast({ type: "error", message: ev.error ?? "Unknown error." });
             break;
           }
+          case "steer": {
+            // Rendered as a user turn in the transcript, because that is
+            // exactly what it is — the reply after it was written knowing it.
+            const out: ReplayableEvent = { type: "steerAccepted", text: ev.text ?? "" };
+            this.buffer(out);
+            this.app.broadcast(out);
+            break;
+          }
           case "turn_end":
             break;
         }
@@ -329,6 +371,16 @@ export class SessionController {
     this.replay = [];
     this.app.setRunning(false);
     this.app.broadcast({ type: "turnEnd" });
+
+    // Anything typed while this turn ran, and not steered into it, becomes the
+    // next turn. Taken one at a time so a burst of messages produces a normal
+    // conversation rather than one concatenated wall, and so an interrupt
+    // between them still lands.
+    const next = this.queued.shift();
+    if (next) {
+      this.app.broadcast({ type: "inputAccepted", mode: "queue", text: next.text, depth: this.queued.length });
+      await this.send(next.text, next.attachments);
+    }
     void errored;
   }
 

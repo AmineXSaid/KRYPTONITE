@@ -3,7 +3,7 @@ import { TOOL_DEFS, runTool, ToolContext } from "./tools";
 import { skillIndex, Skill } from "../skills/loader";
 
 export interface AgentEvent {
-  type: "text" | "tool_start" | "tool_end" | "turn_end" | "error" | "context";
+  type: "text" | "tool_start" | "tool_end" | "turn_end" | "error" | "context" | "steer";
   text?: string;
   tool?: { name: string; args: any; result?: string; isError?: boolean };
   error?: string;
@@ -256,6 +256,13 @@ export interface AgentRunOptions {
    * could not render its tool cards.
    */
   onMessage?: (msg: Msg) => void;
+  /**
+   * Drain anything the user typed while this turn was running.
+   *
+   * Called once per iteration, before the model is asked again. Returning an
+   * empty array — the default — is the old behaviour exactly.
+   */
+  takeSteer?: () => Msg[];
 }
 
 /**
@@ -301,6 +308,20 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
   const maxIter = opts.maxIterations ?? 25;
   for (let i = 0; i < maxIter; i++) {
     if (opts.signal?.aborted) return;
+
+    // Anything typed while this turn was running joins the conversation here,
+    // at the boundary between two model calls.
+    //
+    // This is the only safe seam. Injecting mid-stream would mean editing a
+    // request already in flight, and injecting between a tool call and its
+    // result would orphan the result from the call that produced it. Here the
+    // transcript is complete and the next request simply carries one more user
+    // turn — which is exactly what the model needs in order to change course.
+    for (const steer of opts.takeSteer?.() ?? []) {
+      messages.push(steer);
+      opts.onMessage?.(steer);
+      yield { type: "steer", text: typeof steer.content === "string" ? steer.content : "" };
+    }
 
     const fitted = fitToWindow(messages, caps.contextWindow, caps.maxOutputTokens + 512);
     // The pre-flight number is an estimate — chars/3.6 — and it is emitted only

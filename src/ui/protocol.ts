@@ -42,7 +42,7 @@ export type LogLevel = "info" | "warn" | "error";
 export type ConfigKey =
   | "profileDirectory" | "skillsDirectory" | "activeProfile"
   | "approvalMode" | "caBundlePath"
-  | "openTouched" | "snapshotTurn" | "previewDiff";
+  | "openTouched" | "snapshotTurn" | "previewDiff" | "inputWhileRunning";
 
 /* ───────────────────────────────── DTOs ───────────────────────────────── */
 
@@ -51,6 +51,17 @@ export interface UiConfigDto {
   openTouched: boolean;
   snapshotTurn: boolean;
   previewDiff: boolean;
+  /**
+   * What happens to a message typed while the model is still working.
+   *
+   * "queue" holds it and sends it as its own turn once the current one
+   * finishes — the default, because it never disturbs work in progress.
+   * "steer" injects it into the running turn at the next boundary between
+   * model calls, so the model reads it while still working. Steering can
+   * change the course of a turn, and pays for it in tokens: the conversation
+   * so far is re-sent with the new instruction appended.
+   */
+  inputWhileRunning: "queue" | "steer";
 }
 
 export interface TodoDto {
@@ -492,6 +503,18 @@ export interface NavigateOut { type: "navigate"; section: CcSection }
 export interface FileResultsOut { type: "fileResults"; query: string; files: FileHitDto[] }
 export interface CaBundlePickedOut { type: "caBundlePicked"; path: string }
 /**
+ * A message typed while a turn was running was accepted rather than refused.
+ * `depth` is how many are now waiting, so the composer can say so.
+ */
+export interface InputAcceptedOut {
+  type: "inputAccepted";
+  mode: "queue" | "steer";
+  text: string;
+  depth: number;
+}
+/** A steered message reached the model and is now part of the transcript. */
+export interface SteerAcceptedOut { type: "steerAccepted"; text: string }
+/**
  * Models the gateway will actually serve, and how many it merely listed.
  *
  * The two numbers are different often enough to be worth showing: a gateway
@@ -532,7 +555,8 @@ export type OutboundMessage =
   | ConfigChangedOut | PhaseChangedOut | EndpointChangedOut | StatusChangedOut
   | LogLineOut | NavigateOut | FileResultsOut | CaBundlePickedOut
   | EndpointCheckStartedOut | EndpointCheckRungOut | EndpointCheckDoneOut
-  | SessionTitledOut | McpChangedOut | ModelsListedOut;
+  | SessionTitledOut | McpChangedOut | ModelsListedOut
+  | InputAcceptedOut | SteerAcceptedOut;
 
 export type OutboundType = OutboundMessage["type"];
 
@@ -542,7 +566,7 @@ export type OutboundType = OutboundMessage["type"];
  */
 export type ReplayableEvent =
   | StreamDeltaOut | ToolStartOut | ToolEndOut
-  | TodosUpdatedOut | PermissionRequestOut | ContextUsageOut;
+  | TodosUpdatedOut | PermissionRequestOut | ContextUsageOut | SteerAcceptedOut;
 
 /** Narrowing helper for host-side switch statements. */
 export type InboundOf<T extends InboundType> = Extract<InboundMessage, { type: T }>;

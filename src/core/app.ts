@@ -94,7 +94,14 @@ const MCP_CONFIG_TEMPLATE = `{
 }
 `;
 
-const UI_DEFAULTS: UiConfigDto = { openTouched: true, snapshotTurn: true, previewDiff: true };
+const UI_DEFAULTS: UiConfigDto = {
+  openTouched: true,
+  snapshotTurn: true,
+  previewDiff: true,
+  // Queue by default: holding a message never disturbs work in progress,
+  // whereas steering re-sends the conversation to change its course.
+  inputWhileRunning: "queue",
+};
 const LOG_RING = 200;
 const REAL_CONFIG_KEYS = new Set([
   "profileDirectory",
@@ -437,6 +444,11 @@ export class App {
   activeProfile(): EndpointProfile | undefined {
     const name = this.cfg().get<string>("activeProfile", "");
     return this.profiles.find((p) => p.name === name) ?? this.profiles[0];
+  }
+
+  /** What to do with a message typed while a turn is running. */
+  inputWhileRunning(): "queue" | "steer" {
+    return this.uiConfig.inputWhileRunning === "steer" ? "steer" : "queue";
   }
 
   approvalMode(): ApprovalMode {
@@ -1312,7 +1324,11 @@ export class App {
         await this.reload("setConfig activeProfile");
       }
     } else {
-      this.uiConfig = { ...this.uiConfig, [key]: Boolean(value) };
+      // The UI preferences are booleans apart from this one, which is a mode.
+      // Coercing it with Boolean() would have stored `true` and silently
+      // broken the setting the moment it was toggled.
+      const coerced = key === "inputWhileRunning" ? (value === "steer" ? "steer" : "queue") : Boolean(value);
+      this.uiConfig = { ...this.uiConfig, [key]: coerced };
       await this.context.workspaceState.update("kryptonite.uiConfig", this.uiConfig);
     }
     this.broadcast({ type: "configChanged", config: this.configDto() });

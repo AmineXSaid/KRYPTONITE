@@ -446,13 +446,52 @@ function composer(over) {
   ok("2.7 markdown/HTML/emoji/RTL/CJK survive", c.msgs()[0].text === nasty);
 }
 
-/* 2.8 — while a turn runs, the button interrupts instead of sending */
+/* 2.8 — during a run the button reads the draft
+ *
+ * An empty draft means "stop". A draft with something in it means the user
+ * wants to say something, not to cancel — so it is sent, and the host decides
+ * whether that queues or steers. Refusing it, as this used to, made the
+ * composer feel broken: a thought had to be held until the model happened to
+ * stop. */
 {
   const c = composer({ running: true });
-  c.type("queued");
   c.d.getElementById("sendBtn").click();
-  ok("2.8 no second turn is started", c.msgs().length === 0);
-  ok("2.8 the click interrupts instead", c.sent.some((m) => m.type === "interrupt"));
+  ok("2.8 an empty draft interrupts", c.sent.some((m) => m.type === "interrupt"));
+  ok("2.8 and sends nothing", c.msgs().length === 0);
+}
+{
+  const c = composer({ running: true });
+  c.type("mid-turn thought");
+  // Checked while the draft still has text: once it is sent and cleared the
+  // button correctly goes back to offering Stop.
+  ok("2.8 the button offers send while typing mid-turn",
+    c.d.getElementById("sendBtn").getAttribute("data-mode") === "send");
+  c.d.getElementById("sendBtn").click();
+  ok("2.8 a typed draft is sent, not dropped", c.msgs().length === 1);
+  ok("2.8 the text survives", c.msgs()[0].text === "mid-turn thought");
+  ok("2.8 and it does not interrupt the run", !c.sent.some((m) => m.type === "interrupt"));
+  ok("2.8 the button returns to stop once the draft is empty",
+    c.d.getElementById("sendBtn").getAttribute("data-mode") === "stop");
+}
+
+/* 2.9 — the host confirms what happened to a mid-turn message */
+{
+  const c = composer({ running: true });
+  c.inbound({ type: "inputAccepted", mode: "queue", text: "later", depth: 2 });
+  const note = c.d.querySelector("#log .queued-note");
+  ok("2.9 a queued message is acknowledged", !!note);
+  ok("2.9 it says how many are waiting", /2 messages queued/.test(note.textContent));
+
+  c.inbound({ type: "inputAccepted", mode: "steer", text: "now", depth: 1 });
+  ok("2.9 a steered message says the model will read it",
+    /read this before its next step/i.test(c.d.querySelector("#log").textContent));
+
+  // A steered message reaches the model, so it belongs in the transcript as
+  // the user turn it is.
+  c.inbound({ type: "steerAccepted", text: "actually use tabs" });
+  ok("2.9 a steered message renders as a user turn",
+    /actually use tabs/.test(c.d.querySelector("#log").textContent));
+  ok("2.9 in a user bubble", c.d.querySelectorAll("#log .msg-user").length >= 1);
 }
 
 /* ══ Endpoint form: model picker and its waiting state ═════════════════ */

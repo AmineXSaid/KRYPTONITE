@@ -1293,12 +1293,24 @@ function _sbRun() {
         : "Ask Kryptonite anything…   ( / skills · @ files )";
 
     var send = $("sendBtn");
-    if (S.running) {
+    var typing = draft.value.trim() || (S.attachments && S.attachments.length);
+    if (S.running && !typing) {
       send.setAttribute("data-mode", "stop");
       send.setAttribute("data-ready", "0");
       send.title = "Interrupt";
       send.setAttribute("aria-label", "Interrupt");
       send.innerHTML = icon("i-stop", "ic-13");
+      send.disabled = false;
+    } else if (S.running) {
+      // Typing during a run means the user wants to say something, not to
+      // stop the model. The button says so, and names which mode is armed so
+      // the outcome is not a surprise.
+      var steering = S.config && S.config.ui && S.config.ui.inputWhileRunning === "steer";
+      send.setAttribute("data-mode", "send");
+      send.setAttribute("data-ready", "1");
+      send.title = steering ? "Send now — the model reads it before its next step" : "Queue for when this turn finishes";
+      send.setAttribute("aria-label", send.title);
+      send.innerHTML = icon("i-up", "ic-13");
       send.disabled = false;
     } else {
       send.setAttribute("data-mode", "send");
@@ -1526,7 +1538,23 @@ function _sbRun() {
     if (!trimmed) return;
     if (!S.workspace.open) { addError("Open a folder first."); return; }
     if (!hasEndpoint()) { addError("Select an endpoint profile first."); return; }
-    if (S.running) { addError("Already working — interrupt first."); return; }
+    if (S.running) {
+      // Mid-turn: hand it to the host and stop there. None of the turn setup
+      // below applies — no second aura, no second running flag, and the
+      // message is not painted yet because it has not been accepted. The host
+      // answers with inputAccepted, and with steerAccepted once the model has
+      // actually been given it.
+      var mid = { text: trimmed };
+      if (S.attachments && S.attachments.length) {
+        mid.attachments = S.attachments.map(function (a) {
+          return { name: a.name, mediaType: a.mediaType, data: a.data };
+        });
+      }
+      post("sendMessage", mid);
+      S.attachments = [];
+      renderAttachments();
+      return;
+    }
     addUser(trimmed, S.attachments);
     aiEl = null;
     // One verb per turn, held for its whole length.
@@ -2321,7 +2349,11 @@ function _sbRun() {
       renderSelection();
     });
     $("sendBtn").addEventListener("click", function () {
-      if (S.running) { post("interrupt"); return; }
+      // While a turn runs the button interrupts, but a draft with text in it
+      // means the user wants to say something, not to stop the model. Sending
+      // it is what they asked for; the host decides whether that queues or
+      // steers. Stop is still available on an empty draft, and on Escape.
+      if (S.running && !draft.value.trim() && !(S.attachments || []).length) { post("interrupt"); return; }
       sendText(draft.value);
       draft.value = "";
       S.attachments = [];
@@ -2622,6 +2654,27 @@ function _sbRun() {
         readEpForm();
         S.epCheck.rungs = S.epCheck.rungs.concat([m.rung]);
         renderEndpoints();
+        break;
+
+      case "inputAccepted": {
+        // Confirms the message was taken rather than swallowed. Without this
+        // the composer clears and nothing visibly happens, which reads as the
+        // message having been lost.
+        S.pending = m.depth;
+        var word = m.mode === "steer"
+          ? "Sent to the model — it will read this before its next step."
+          : m.depth > 1
+            ? m.depth + " messages queued for when this turn finishes."
+            : "Queued — it will be sent when this turn finishes.";
+        var note = div("queued-note", icon(m.mode === "steer" ? "i-up" : "i-clock", "ic-11") +
+          "<span>" + esc(word) + "</span>");
+        add(note);
+        break;
+      }
+
+      case "steerAccepted":
+        // It is a user turn: the reply after it was written knowing it.
+        addUser(m.text);
         break;
 
       case "modelsListed": {

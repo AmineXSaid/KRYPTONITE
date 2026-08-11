@@ -92,13 +92,33 @@ async function main() {
   {
     const { app, out } = await boot(workspace({ "gw.yaml": GOOD }));
     // Simulate a turn in flight without touching the network.
+    // Refusing was the old behaviour and it made the composer feel broken: a
+    // thought had to be held until the model happened to stop. It is taken
+    // now, and what happens to it is the inputWhileRunning preference.
     app.session.running = true;
-    const before = out.length;
-    await app.session.send("second message");
-    const msgs = errors(out.slice(before));
-    ck(msgs.length > 0, "the second send is refused");
-    ck(/already working|interrupt/i.test(msgs.join(" ")), "it says to interrupt first", msgs[0]);
-    ck(app.session.running === true, "the first turn is left alone");
+
+    let before = out.length;
+    app.uiConfig = { ...app.uiConfig, inputWhileRunning: "queue" };
+    await app.session.send("later please");
+    let fresh = out.slice(before);
+    ck(errors(fresh).length === 0, "queued: not reported as an error");
+    const q: any = fresh.find((m) => m.type === "inputAccepted");
+    ck(!!q, "queued: acknowledged");
+    ck(q?.mode === "queue", "queued: in queue mode", String(q?.mode));
+    ck(q?.depth === 1, "queued: reports how many are waiting", String(q?.depth));
+
+    before = out.length;
+    app.uiConfig = { ...app.uiConfig, inputWhileRunning: "steer" };
+    await app.session.send("actually, use tabs");
+    const s: any = out.slice(before).find((m) => m.type === "inputAccepted");
+    ck(s?.mode === "steer", "steered: in steer mode", String(s?.mode));
+
+    ck(app.session.running === true, "the running turn is left alone either way");
+
+    before = out.length;
+    await app.session.send("   ");
+    ck(out.slice(before).length === 0, "whitespace mid-turn is not queued");
+
     app.session.running = false;
     await app.dispose();
   }
