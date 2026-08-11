@@ -1847,6 +1847,27 @@ function _sbRun() {
    */
   var MCP_CHIP_CAP = 5;
 
+  /**
+   * The waiting mark: three arcs from the palette, each on its own period.
+   *
+   * A single rotating ring reads as a stalled GIF; three arcs at 1.1s, 1.7s
+   * and 2.6s never repeat the same figure, so the eye keeps reading it as
+   * work in progress. Colours are the wall, the shadow and the frame, so it
+   * belongs to this app rather than to the operating system.
+   */
+  function spinner(size) {
+    var s = size || 13;
+    return '<svg class="kx-spin" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" ' +
+      'fill="none" aria-hidden="true">' +
+      '<circle class="a1" cx="12" cy="12" r="10" stroke="var(--kx-accent)" stroke-width="2.5" ' +
+        'stroke-linecap="round" stroke-dasharray="16 47"/>' +
+      '<circle class="a2" cx="12" cy="12" r="6.5" stroke="var(--kx-mcp)" stroke-width="2.5" ' +
+        'stroke-linecap="round" stroke-dasharray="10 31"/>' +
+      '<circle class="a3" cx="12" cy="12" r="3" stroke="var(--kx-active)" stroke-width="2.5" ' +
+        'stroke-linecap="round" stroke-dasharray="5 14"/>' +
+      "</svg>";
+  }
+
   function mcpPill(state) {
     if (state === "ready") return '<span class="mcp-pill ok">' + icon("i-check", "ic-9") + "connected</span>";
     if (state === "starting") return '<span class="mcp-pill">starting…</span>';
@@ -2426,7 +2447,14 @@ function _sbRun() {
       var mDraft = readEpForm();
       if (!mDraft) return;
       var hint = $("fModelHint");
-      if (hint) { hint.textContent = "Asking the gateway…"; hint.removeAttribute("data-err"); }
+      // Says what it is doing, because it is trying every id the gateway lists
+      // and that takes a few seconds — silence would read as a hung button.
+      if (hint) {
+        hint.innerHTML = spinner() +
+          "<span>Asking the gateway, then checking which ids actually answer…</span>";
+        hint.removeAttribute("data-err");
+      }
+      if (b) b.setAttribute("data-busy", "1");
       post("listModels", { endpoint: epPayload(mDraft) });
     } else if (a === "check") {
       var draft = readEpForm();
@@ -2599,12 +2627,16 @@ function _sbRun() {
       case "modelsListed": {
         var dl = $("fModelList");
         var mh = $("fModelHint");
+        var lb = document.querySelector('[data-ep="models"]');
+        if (lb) lb.removeAttribute("data-busy");
         if (dl) {
           dl.innerHTML = (m.models || [])
             .map(function (id) { return '<option value="' + esc(id) + '"></option>'; })
             .join("");
         }
         if (mh) {
+          // Assigning textContent replaces the spinner node as well as the
+          // message, so the busy state clears itself here.
           if (m.error) {
             // Not a failure of the endpoint — plenty of gateways serve no
             // /models route — so it reads as information, not an error state.
@@ -2612,9 +2644,16 @@ function _sbRun() {
             mh.setAttribute("data-err", "1");
           } else {
             var n = (m.models || []).length;
+            var listed = m.listed || 0;
+            // Both numbers, because they differ a lot and the gap is the point:
+            // a listed id is not a servable one, and that is what makes a model
+            // hang instead of failing cleanly.
             mh.textContent = n
-              ? n + " model" + (n === 1 ? "" : "s") + " offered — start typing to filter."
-              : "The gateway listed no models. Type the id instead.";
+              ? n + " of " + listed + " listed model" + (listed === 1 ? "" : "s") +
+                " answered — start typing to filter. The rest 404 or never reply."
+              : listed
+                ? "None of the " + listed + " listed models answered. Check the key and the base URL."
+                : "The gateway listed no models. Type the id instead.";
             mh.removeAttribute("data-err");
           }
         }

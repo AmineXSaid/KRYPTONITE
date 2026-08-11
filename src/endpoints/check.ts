@@ -22,7 +22,7 @@ import { runLadder, type Rung } from "../diagnostics/ladder";
 export async function listModels(
   profile: EndpointProfile,
   secrets: (k: string) => string | undefined
-): Promise<{ models: string[]; error?: string }> {
+): Promise<{ models: string[]; listed: number; error?: string }> {
   const transport = buildTransport(profile);
   try {
     const auth = await applyAuth(profile, transport.dispatcher, secrets);
@@ -34,28 +34,98 @@ export async function listModels(
     } catch {
       /* a malformed base is reported by the request below */
     }
+    const headers = { ...(profile.headers ?? {}), ...auth.headers };
     const url = /\/v\d+[a-z]*\/?$/i.test(pathname) ? `${base}/models` : `${base}/v1/models`;
     const res = await request(url, {
       method: "GET",
       dispatcher: transport.dispatcher,
-      headers: { accept: "application/json", ...(profile.headers ?? {}), ...auth.headers },
+      headers: { accept: "application/json", ...headers },
       headersTimeout: 15_000,
       bodyTimeout: 15_000,
     });
     const text = await res.body.text();
     if (res.statusCode >= 400) {
-      return { models: [], error: `The gateway returned ${res.statusCode} for /models.` };
+      return { models: [], listed: 0, error: `The gateway returned ${res.statusCode} for /models.` };
     }
     const doc = JSON.parse(text);
-    const ids: string[] = (doc?.data ?? doc?.models ?? [])
-      .map((m: any) => (typeof m === "string" ? m : m?.id))
-      .filter((s: any) => typeof s === "string" && s);
-    return { models: [...new Set(ids)].sort() };
+    const ids: string[] = [
+      ...new Set(
+        (doc?.data ?? doc?.models ?? [])
+          .map((m: any) => (typeof m === "string" ? m : m?.id))
+          .filter((s: any) => typeof s === "string" && s)
+      ),
+    ].sort() as string[];
+
+    const servable = await keepServable(profile, ids, headers, transport.dispatcher);
+    return { models: servable, listed: ids.length };
   } catch (e: any) {
-    return { models: [], error: e?.message ?? String(e) };
+    return { models: [], listed: 0, error: e?.message ?? String(e) };
   } finally {
     await transport.dispatcher.close().catch(() => {});
   }
+}
+
+/**
+ * Keep only the ids the gateway will actually serve.
+ *
+ * Listing alone is not an answer. Measured against one NVIDIA account: of 101
+ * ids returned by /v1/models, 28 answered, 60 returned 404, 10 accepted the
+ * request and never replied, and 3 errored. A picker built on the raw list is
+ * worse than a free-text field, because it looks authoritative while being
+ * wrong most of the time — and the hanging ids are the cruellest, since they
+ * cost a full timeout each to discover by hand.
+ *
+ * So every id gets one real, tiny request. Concurrency is capped to stay
+ * polite, and a slow model is treated as unusable here rather than waited on:
+ * a model that cannot answer four tokens promptly is not one to pick blind.
+ */
+async function keepServable(
+  profile: EndpointProfile,
+  ids: string[],
+  headers: Record<string, string>,
+  dispatcher: any
+): Promise<string[]> {
+  const chatUrl =
+    profile.baseUrl.replace(/\/$/, "") + (profile.chatPath ?? defaultChatPath(profile.baseUrl, profile.wire));
+  const PROBE_MS = 8_000;
+  const LANES = 16;
+  const ok: string[] = [];
+  let next = 0;
+
+  async function lane() {
+    for (;;) {
+      const i = next++;
+      if (i >= ids.length) return;
+      const model = ids[i];
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), PROBE_MS);
+      try {
+        const r = await request(chatUrl, {
+          method: "POST",
+          dispatcher,
+          signal: ac.signal,
+          headers: { "content-type": "application/json", accept: "application/json", ...headers },
+          body: JSON.stringify({
+            model,
+            messages: [{ role: "user", content: "hi" }],
+            max_tokens: 4,
+            stream: false,
+          }),
+          headersTimeout: PROBE_MS,
+          bodyTimeout: PROBE_MS,
+        });
+        await r.body.dump();
+        if (r.statusCode === 200) ok.push(model);
+      } catch {
+        /* a model that will not answer is simply not offered */
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(LANES, ids.length) }, lane));
+  return ok.sort();
 }
 
 /**

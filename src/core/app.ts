@@ -871,12 +871,12 @@ export class App {
       apiKey = (await this.context.secrets.get(`kryptonite.${secretKeyFor(id)}`)) ?? "";
     }
     const profile = draftProfile(form);
-    const { models, error } = await listModels(profile, (k) =>
+    const { models, listed, error } = await listModels(profile, (k) =>
       k === secretKeyFor(id) ? apiKey : this.secrets(k)
     );
     if (error) this.log("warn", `Could not list models for ${id}: ${error}`);
-    else this.log("info", `${form.url}: ${models.length} model(s) offered.`);
-    this.postTo(source, { type: "modelsListed", models, error });
+    else this.log("info", `${form.url}: ${models.length} of ${listed} listed model(s) answered.`);
+    this.postTo(source, { type: "modelsListed", models, listed, error });
   }
 
   private async checkEndpoint(form: EndpointForm, source: Surface): Promise<void> {

@@ -491,8 +491,19 @@ export interface LogLineOut { type: "logLine"; line: LogLine }
 export interface NavigateOut { type: "navigate"; section: CcSection }
 export interface FileResultsOut { type: "fileResults"; query: string; files: FileHitDto[] }
 export interface CaBundlePickedOut { type: "caBundlePicked"; path: string }
-/** The gateway's own model list, or why it could not be read. */
-export interface ModelsListedOut { type: "modelsListed"; models: string[]; error?: string }
+/**
+ * Models the gateway will actually serve, and how many it merely listed.
+ *
+ * The two numbers are different often enough to be worth showing: a gateway
+ * that lists 101 and serves 28 is normal, and a picker that hid that would be
+ * handing out ids that 404 or hang.
+ */
+export interface ModelsListedOut {
+  type: "modelsListed";
+  models: string[];
+  listed: number;
+  error?: string;
+}
 
 /* ── endpoint connection check ── */
 export interface EndpointCheckStartedOut { type: "endpointCheckStarted"; id: string }

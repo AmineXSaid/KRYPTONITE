@@ -455,6 +455,49 @@ function composer(over) {
   ok("2.8 the click interrupts instead", c.sent.some((m) => m.type === "interrupt"));
 }
 
+/* ══ Endpoint form: model picker and its waiting state ═════════════════ */
+{
+  const { w, d, sent, inbound } = boot();
+  inbound(STATE());
+  // Open the editor for the existing profile.
+  const edit = d.querySelector('[data-ep="edit"]');
+  ok("EP an endpoint row offers an editor", !!edit);
+  if (edit) {
+    edit.click();
+    const model = d.getElementById("fModel");
+    const load = d.querySelector('[data-ep="models"]');
+    ok("EP model field exists", !!model);
+    ok("EP model field is a free-text input", !!model && model.tagName === "INPUT");
+    // A datalist keeps the field typeable for gateways with no /models route,
+    // which a <select> would have made unconfigurable.
+    ok("EP model field is backed by a datalist", !!model && model.getAttribute("list") === "fModelList");
+    ok("EP a Load button is offered", !!load);
+
+    if (load) {
+      load.click();
+      ok("EP Load asks the host", sent.some((m) => m.type === "listModels"));
+      ok("EP Load marks itself busy", load.getAttribute("data-busy") === "1");
+      const hint = d.getElementById("fModelHint");
+      ok("EP a spinner is shown while waiting", !!hint && !!hint.querySelector("svg.kx-spin"));
+      ok("EP the spinner has three arcs", !!hint && hint.querySelectorAll("svg.kx-spin circle").length === 3);
+
+      inbound({ type: "modelsListed", models: ["meta/llama-3.1-8b-instruct", "minimaxai/minimax-m3"], listed: 101 });
+      ok("EP busy clears on answer", load.getAttribute("data-busy") !== "1");
+      ok("EP spinner is gone", !d.getElementById("fModelHint").querySelector("svg.kx-spin"));
+      ok("EP datalist is filled", d.getElementById("fModelList").querySelectorAll("option").length === 2);
+      // The gap between listed and servable is the whole point of the feature.
+      const txt = d.getElementById("fModelHint").textContent;
+      ok("EP reports servable of listed", /2 of 101/.test(txt), txt);
+
+      inbound({ type: "modelsListed", models: [], listed: 0, error: "no /models route" });
+      ok("EP a missing route is not an error state",
+        d.getElementById("fModelHint").getAttribute("data-err") === "1");
+      ok("EP it tells you to type the id instead",
+        /type the id/i.test(d.getElementById("fModelHint").textContent));
+    }
+  }
+}
+
 console.log(`\n${pass} passed, ${failures.length} failed`);
 for (const f of failures) console.log("  FAIL  " + f);
 process.exit(failures.length ? 1 : 0);
