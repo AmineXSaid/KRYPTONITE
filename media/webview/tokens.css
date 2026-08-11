@@ -41,37 +41,46 @@
    * green-and-purple rather than warm. A colour that appears everywhere stops
    * meaning anything, and the surface it sits on stops being the subject.
    *
-   *   mint        success and health, and nothing else: a passing rung, a
-   *               connected server, an added line, a finished todo, Act.
-   *   coral       failure. Only failure.
-   *   amber       warning — the state between the two.
-   *   periwinkle  interaction: send, links, focus, selection, and the mark that
-   *               means "you". This is the colour that carries the UI now.
-   *   violet      the Plan phase, and the tab underline that shows position.
-   *   turquoise   capability that came from outside this extension: MCP
-   *               servers and the tools they expose. Deliberately not mint —
-   *               a connected MCP server and a passing TLS rung are different
-   *               claims, and sharing one colour made the panel say "healthy"
-   *               twice instead of "reachable" and "extended".
-   *   sky         measurement rather than state: the context meter, and counts
-   *               the endpoint reported rather than ones we estimated.
+   * The palette is a painted doorway: turquoise wall, teal shadow, pink frame,
+   * burgundy recess, blue door, warm grey stone. Six colours, and every role
+   * below is drawn from them rather than invented.
    *
-   * Everything else is a warm neutral. If something needs to stand out and is
-   * not one of the seven meanings above, it wants a surface or a weight — not
-   * a hue. An eighth has to pass the same test these did: name the claim it
-   * makes that no existing colour already makes. */
-  --kx-accent: #4af6a4;    /* success & health only                          */
-  --kx-error:  #f4767e;    /* warm coral, not the theme's cool red           */
-  --kx-warn:   #f2c14e;
-  --kx-link:   #7c88f4;    /* periwinkle: interaction, selection, "you"      */
-  --kx-action: #7c88f4;    /* send                                           */
-  --kx-active: #6e49cb;    /* Plan phase                                     */
-  --kx-under:  #916df6;    /* position: the 2px tab underline                */
-  --kx-mcp:    #3ed6cf;    /* turquoise: MCP servers and the tools they add  */
-  --kx-info:   #5cc8f5;    /* sky: measured figures, meters, reported counts */
+   *   turquoise   success and health: a passing rung, an added line, a
+   *               finished todo, Act.
+   *   teal        capability from outside this extension — MCP servers and
+   *               the tools they expose. Adjacent to turquoise on purpose:
+   *               related claims, not identical ones.
+   *   pink        the Plan phase, and the tab underline that shows position.
+   *   blue        interaction: send, links, focus, selection, and the mark
+   *               that means "you".
+   *   burgundy    failure. Only failure.
+   *   rose        warning — the state between success and failure, mixed from
+   *               the pink and the burgundy so it stays inside the palette.
+   *   warm grey   every neutral: text, hairlines, disabled.
+   *
+   * Two adjustments the source swatches needed, both about legibility on a
+   * #1f1f1d panel rather than taste:
+   *
+   *   The burgundy is ~2:1 against the panel — fine as a fill, invisible as
+   *   text. It keeps its full strength in `--kx-error-deep` for fills and
+   *   washes, and `--kx-error` is the same hue lifted until it can be read.
+   *
+   *   The blue is likewise dark for small text, so `--kx-link` is lifted while
+   *   `--kx-action` keeps more of the door's depth for filled buttons, which
+   *   carry light text on top and want the darker ground. */
+  --kx-accent: #22c9d6;    /* turquoise wall: success & health only          */
+  --kx-mcp:    #17a9b8;    /* teal shadow: MCP servers and their tools       */
+  --kx-active: #d98cbe;    /* pink frame: Plan phase                         */
+  --kx-under:  #d98cbe;    /* position: the 2px tab underline                */
+  --kx-link:   #4a92d8;    /* blue door, lifted for text: links, "you"       */
+  --kx-action: #1a6fb5;    /* blue door: send — a fill, so it stays deep     */
+  --kx-error:  #d1476b;    /* burgundy, lifted until it can be read          */
+  --kx-error-deep: #78122f;/* the recess itself: fills and washes            */
+  --kx-warn:   #c96f92;    /* rose: between the pink and the burgundy        */
+  --kx-info:   #4a92d8;    /* measured figures, meters, reported counts      */
   --kx-on-accent: #141413; /* text on a filled accent — deepest surface      */
-  --kx-mcp-wash:  rgba(62, 214, 207, .14);
-  --kx-info-wash: rgba(92, 200, 245, .14);
+  --kx-mcp-wash:  rgba(23, 169, 184, .16);
+  --kx-info-wash: rgba(74, 146, 216, .16);
 
   /* ── scrims: every one tinted from --kx-fg-2, never neutral grey. A cool
         grey hairline on a warm surface is the most visible way this palette
@@ -85,11 +94,15 @@
   --kx-scroll:       rgba(222, 220, 209, .13);
   --kx-scroll-hover: rgba(222, 220, 209, .25);
   --kx-shadow:   rgba(0, 0, 0, .6);
-  --kx-diff-add: rgba(74, 246, 164, .14);
-  --kx-diff-del: rgba(244, 118, 126, .16);
-  --kx-accent-wash: rgba(74, 246, 164, .14);
-  --kx-error-wash:  rgba(244, 118, 126, .16);
-  --kx-warn-wash:   rgba(242, 193, 78, .16);
+  /* Derived from the palette above, so a hue change here cannot leave a wash
+     pointing at the colour it replaced. The deletion wash uses the burgundy at
+     full strength — as a ground behind text it is doing the job the swatch is
+     actually good at. */
+  --kx-diff-add: rgba(34, 201, 214, .14);
+  --kx-diff-del: rgba(120, 18, 47, .30);
+  --kx-accent-wash: rgba(34, 201, 214, .14);
+  --kx-error-wash:  rgba(120, 18, 47, .32);
+  --kx-warn-wash:   rgba(201, 111, 146, .16);
 
   /* ── type ──
      Anthropic Sans in two optical sizes. --kx-ui is the Text cut and carries

@@ -1,4 +1,4 @@
-/* ─────────────────────────────────────────────────────────────────────────
+﻿/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
    KRYPTONITE sidebar.
 
    The panel owns its palette. It used to draw every structural colour from the
@@ -9,12 +9,12 @@
 
    The trade is deliberate and total: the panel now looks the same in a light
    theme as in a dark one. Nothing below reads a --vscode-* colour. (Redefining
-   those variables here would not have worked anyway — VS Code sets them as an
+   those variables here would not have worked anyway â€” VS Code sets them as an
    inline style on <html>, which beats any :root rule in a stylesheet.)
 
    No glows, no text-shadows, no gradient fills. The only glow in the product
    lives inside the crystal artwork and the thinking aura.
-   ───────────────────────────────────────────────────────────────────────── */
+   â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -62,7 +62,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 .tnum { font-variant-numeric: tabular-nums; }
 .ell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* ───────────────────────────── header ───────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .kx-header {
   height: 40px; flex: none; display: flex; align-items: center; gap: 9px;
@@ -118,9 +118,9 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 .hist-row:hover .hist-del, .hist-del:focus-visible { opacity: 1; }
 .hist-del:hover { color: var(--kx-error); background: var(--kx-hover); }
 
-/* ───────────────────────────── tabs ───────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ tabs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
-/* #5 — two tabs, 700 weight, violet underline. A failure shows a red count
+/* #5 â€” two tabs, 700 weight, violet underline. A failure shows a red count
    and no status word: 'Diagnostics 1' says more than 'Diagnostics ERROR'. */
 .kx-tabs {
   height: 32px; flex: none; display: flex; align-items: center; gap: 16px; padding: 0 14px;
@@ -166,7 +166,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
-/* ───────────────────────── transcript ───────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ transcript â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 #log { flex: 1; overflow-y: auto; padding: 14px 14px 4px; }
 
@@ -190,16 +190,16 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 }
 .chip-btn:hover { background: var(--kx-hover); }
 
-/* ── the two voices ──
+/* â”€â”€ the two voices â”€â”€
  *
  * A transcript is a conversation between two parties and it has to read that
  * way at a glance, without labels. Four things separate them at once, so the
  * distinction survives even in a dense scroll:
  *
  *   the question   a mint rail, 12.5px, medium weight, muted warm grey, tight
- *                  leading — it is a quotation of something you already know
+ *                  leading â€” it is a quotation of something you already know
  *   the answer     no rail, 13px, regular weight, full-strength warm white,
- *                  1.6 leading — the thing you are actually reading
+ *                  1.6 leading â€” the thing you are actually reading
  *
  * The rail takes the accent rather than a neutral line: it is the only mark in
  * the transcript that says "you", and a grey hairline said nothing.
@@ -229,7 +229,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 .u-att-chip .sz { font-family: var(--kx-mono); font-size: 10px; color: var(--kx-fg-4); }
 .msg-img { max-width: 100%; max-height: 200px; border-radius: 5px; margin-bottom: 6px; display: block; }
 
-/* ── the answer: prose, with room to breathe ──
+/* â”€â”€ the answer: prose, with room to breathe â”€â”€
    13.5/1.72 instead of 13/1.6. In a 340px panel this is the single highest
    leverage readability change available. */
 .msg-ai {
@@ -253,12 +253,12 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   font-family: var(--kx-mono); font-size: 11px; line-height: 1.65;
   white-space: pre; overflow-x: auto;
 }
-/* A chip inside a code block would be noise — the whole block is already code. */
+/* A chip inside a code block would be noise â€” the whole block is already code. */
 .msg-ai pre code, .code-block code {
   color: inherit; background: none; padding: 0; border-radius: 0; font-size: inherit;
 }
 
-/* ── markdown blocks ──
+/* â”€â”€ markdown blocks â”€â”€
    The renderer emits these; every one of them used to arrive as literal
    punctuation in the transcript. */
 
@@ -279,7 +279,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 }
 .cb pre { margin: 0; border-radius: 0; background: none; }
 /* Copy sits in the header rather than floating over the code, so it can never
-   cover the first line — which is exactly the line worth reading. */
+   cover the first line â€” which is exactly the line worth reading. */
 .cb-copy {
   display: flex; align-items: center; justify-content: center;
   width: 20px; height: 18px; padding: 0; flex: none;
@@ -325,7 +325,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 
 .md-hr { border: none; height: 1px; background: var(--kx-line); margin: 14px 0; }
 
-/* Callouts. A tinted rail plus a small kind label — enough to be spotted while
+/* Callouts. A tinted rail plus a small kind label â€” enough to be spotted while
    scanning, not so much that three in a row shout over the prose. */
 .md-call {
   margin: 9px 0; padding: 7px 10px 8px;
@@ -353,7 +353,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   color: var(--kx-fg-2);
 }
 
-/* Tables scroll inside their own box — a wide one must never make the whole
+/* Tables scroll inside their own box â€” a wide one must never make the whole
    panel scroll sideways. */
 .md-tw { margin: 8px 0; overflow-x: auto; border-radius: 6px; border: 1px solid var(--kx-line); }
 .md-t { border-collapse: collapse; width: 100%; font-size: 12px; }
@@ -375,7 +375,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .msg-ai a:hover { text-decoration: underline; }
 .msg-ai del { opacity: .6; }
 
-/* ── command output ──
+/* â”€â”€ command output â”€â”€
    Shell output is not source: it wraps, it can be long, and it deserves to
    look like a console rather than like a snippet the model wrote. */
 .term-block {
@@ -389,10 +389,10 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 .tool[data-error="1"] .term-block { border-left-color: var(--kx-error); }
 
-/* ── turn footer: hover actions + cost ──
+/* â”€â”€ turn footer: hover actions + cost â”€â”€
    Copy / Retry / Branch appear at the end of a turn with elapsed time and
    token cost in mono, then a divider gives the transcript a pulse. */
-/* #13 — always visible. These were opacity:0 until hover, which hid Copy,
+/* #13 â€” always visible. These were opacity:0 until hover, which hid Copy,
    Retry and Branch behind a gesture nobody performs on a turn they have
    finished reading. */
 .turn-foot {
@@ -411,7 +411,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 .turn-div { height: 1px; background: var(--kx-line); margin: 0 0 16px; }
 
-/* ── tool rows, grouped into one strip ──
+/* â”€â”€ tool rows, grouped into one strip â”€â”€
    Consecutive tool calls collapse under a single "N steps" header with the
    total elapsed time, so a long run is one object in the transcript instead
    of a scrolling wall. The group is a plain wrapper: each .tool inside keeps
@@ -477,7 +477,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 .show-more:hover { text-decoration: underline; }
 
-/* ── unified diff ── */
+/* â”€â”€ unified diff â”€â”€ */
 .diff-card {
   border: 1px solid var(--kx-line); border-radius: 6px;
   background: var(--kx-bg-deep); overflow: hidden; margin: 6px 0 14px;
@@ -519,7 +519,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   background: var(--kx-surface);
 }
 
-/* ── buttons ── */
+/* â”€â”€ buttons â”€â”€ */
 .btn {
   font-size: 12px; padding: 5px 11px; border-radius: 4px; text-align: center;
   background: var(--kx-surface-3);
@@ -531,7 +531,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .btn.sm { font-size: 11.5px; padding: 4px 9px; }
 .btn:disabled { color: var(--kx-fg-3); background: var(--kx-surface-3); }
 
-/* ── todo card ── */
+/* â”€â”€ todo card â”€â”€ */
 .card { border: 1px solid var(--kx-line); border-radius: 6px; padding: 10px 11px; margin-bottom: 14px; }
 .todo-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .todo-head .t { font-size: 12px; font-weight: 600; }
@@ -555,7 +555,7 @@ li.done .cbx { background: var(--kx-accent); border-color: var(--kx-accent); col
 li.done .tx { color: var(--kx-fg-2); text-decoration: line-through; }
 li.doing .cbx { border-color: var(--kx-accent); }
 
-/* ── permission card ── */
+/* â”€â”€ permission card â”€â”€ */
 .perm {
   background: var(--kx-surface);
   border: 1px solid var(--kx-line); border-radius: 8px;
@@ -575,7 +575,7 @@ li.doing .cbx { border-color: var(--kx-accent); }
   font-size: 11.5px; color: var(--kx-fg-2);
 }
 
-/* ── plan card ── */
+/* â”€â”€ plan card â”€â”€ */
 .plan-card {
   background: var(--kx-surface);
   border: 1px solid var(--kx-line); border-radius: 8px;
@@ -593,22 +593,22 @@ li.doing .cbx { border-color: var(--kx-accent); }
 }
 .plan-foot { display: flex; gap: 7px; }
 
-/* ── streaming indicator — "Overload": cel-shaded ki aura around a still mark ──
+/* â”€â”€ streaming indicator â€” "Overload": cel-shaded ki aura around a still mark â”€â”€
  *
  * Direction C from the aura mockup. Flat colour bands with hard spiked edges,
  * frame-swapped on a steps(1) clock so the emission reads as hand-drawn
  * animation rather than a CSS glow that fades in and out. The crystal itself
- * never scales or translates — the stone emits, the logo holds still.
+ * never scales or translates â€” the stone emits, the logo holds still.
  *
  * Two things are tuned away from the mockup's showcase panel:
  *
  *   Size. The showcase runs at a 56px mark inside a 240px stage. Here the
  *   mark is 21px on a chat line, so every layer is expressed as a multiple of
  *   --kx-aura (the aura's own box) instead of a fixed pixel value. The layers
- *   reach ~2.2x the crystal — enough to read as radiation, small enough that
+ *   reach ~2.2x the crystal â€” enough to read as radiation, small enough that
  *   it never collides with the label beside it or the turn above.
  *
- *   Speed. The mockup's clocks (.18–.3s bands, 1.4s shock, 11s rays) flicker
+ *   Speed. The mockup's clocks (.18â€“.3s bands, 1.4s shock, 11s rays) flicker
  *   hard enough to pull the eye off the transcript during a long turn. These
  *   run roughly 1.6x slower, matching the chat-embedded aura in the Type and
  *   Chat mockup: still emitting, no longer strobing.
@@ -616,7 +616,7 @@ li.doing .cbx { border-color: var(--kx-accent); }
 .stream { display: flex; align-items: center; gap: 12px; margin: 4px 0 16px; }
 /* --kx-aura drives every layer below. The mark stays 21px; this is the box the
    emission is measured against, and at 13px the furthest layer lands around
-   29px — an accent beside the label rather than a second focal point competing
+   29px â€” an accent beside the label rather than a second focal point competing
    with the transcript. Raise it if the aura should read louder. */
 .rad {
   --kx-aura: 13px;
@@ -656,7 +656,7 @@ li.doing .cbx { border-color: var(--kx-accent); }
 .rad .ki3 {
   width: calc(var(--kx-aura) * 1.05); height: calc(var(--kx-aura) * 1.21);
   margin: calc(var(--kx-aura) * -.605) 0 0 calc(var(--kx-aura) * -.525);
-  background: #4AF6A4; animation-duration: .32s;
+  background: var(--kx-accent); animation-duration: .32s;
 }
 
 /* White-hot shockwave, stepped so it jumps outward instead of easing. */
@@ -667,11 +667,11 @@ li.doing .cbx { border-color: var(--kx-accent); }
   animation: kxshock 2.2s steps(5) infinite;
 }
 
-/* Embers lifting off the stone. Square, rotated 45deg — diamonds, not dots. */
+/* Embers lifting off the stone. Square, rotated 45deg â€” diamonds, not dots. */
 .rad .em { width: 2px; height: 2px; }
 .rad .em1 { margin: 3px 0 0 -4px; background: #D9FFEE; animation: kxrise 1.8s steps(6) infinite; }
 .rad .em2 { margin: 4px 0 0 2px;  background: #7DFDC3; animation: kxrise 2.1s steps(6) .5s infinite; }
-.rad .em3 { margin: 2px 0 0 -7px; background: #4AF6A4; animation: kxrise 2.4s steps(6) 1s infinite; }
+.rad .em3 { margin: 2px 0 0 -7px; background: var(--kx-accent); animation: kxrise 2.4s steps(6) 1s infinite; }
 
 .rad .crystal { position: relative; z-index: 2; }
 
@@ -735,7 +735,7 @@ li.doing .cbx { border-color: var(--kx-accent); }
   margin-bottom: 14px; white-space: pre-wrap;
 }
 
-/* ───────────────────────────── composer ───────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ composer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .composer-wrap { flex: none; padding: 8px 16px 12px; position: relative; }
 .qp {
@@ -752,7 +752,7 @@ li.doing .cbx { border-color: var(--kx-accent); }
   margin-left: auto; min-width: 0; font-family: var(--kx-prose); font-size: 11px; text-align: right;
   color: var(--kx-fg-2);
 }
-/* Where a skill came from — workspace beats bundled when names collide, and
+/* Where a skill came from â€” workspace beats bundled when names collide, and
    that is worth seeing before you pick one. */
 .qp-src {
   flex: none; font-family: var(--kx-mono); font-size: 9.5px;
@@ -767,7 +767,7 @@ li.doing .cbx { border-color: var(--kx-accent); }
 .qp-check { width: 13px; flex: none; display: grid; place-items: center; color: var(--kx-link); }
 .qp-empty { padding: 8px 9px; font-size: 11.5px; color: var(--kx-fg-2); }
 
-/* #4 — one card, one control row. */
+/* #4 â€” one card, one control row. */
 .composer {
   background: var(--kx-surface); border-radius: 10px; overflow: hidden;
   border: 1px solid rgba(222, 220, 209, .15);
@@ -790,7 +790,7 @@ li.doing .cbx { border-color: var(--kx-accent); }
 #draft::placeholder { color: var(--kx-fg-4); }
 #draft:disabled { color: var(--kx-fg-3); }
 
-/* ── attachment pills ── */
+/* â”€â”€ attachment pills â”€â”€ */
 .att-strip {
   display: flex; flex-wrap: wrap; gap: 5px; padding: 6px 10px 2px;
   border-bottom: 1px solid var(--kx-line);
@@ -819,7 +819,7 @@ li.doing .cbx { border-color: var(--kx-accent); }
 .seg button[data-on="1"] { font-weight: 600; }
 /* The active phase is carried by the label, not by a filled block.
  *
- * Two solid swatches — mint and violet — sat permanently in the composer and
+ * Two solid swatches â€” mint and violet â€” sat permanently in the composer and
  * were the loudest colour in the panel, which made the whole surface read
  * green-and-purple rather than warm. A raised segment plus coloured text says
  * the same thing in about a tenth of the painted area, and the hue still maps:
@@ -871,7 +871,7 @@ li.doing .cbx { border-color: var(--kx-accent); }
 .ep[data-err="1"] { color: var(--kx-error); }
 .ep[data-err="1"] .dot { display: none; }
 
-/* ───────────────────────────── MCP ─────────────────────────────
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ MCP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *
  * Geometry from frame 1b: a 3px status rail, then name + pill over a mono
  * transport line, with the tool count right-aligned. Rows are separated by the
@@ -889,7 +889,7 @@ li.doing .cbx { border-color: var(--kx-accent); }
 /* The two header actions were a bare icon+label pair and a plain box, at
    different visual weights, so the row read as two unrelated controls. They
    are one pair: same height, same padding, icon locked to the cap height, and
-   periwinkle on hover — the palette's one interaction colour. */
+   periwinkle on hover â€” the palette's one interaction colour. */
 .mcp-head .btn {
   display: inline-flex; align-items: center; gap: 6px;
   height: 24px; padding: 0 10px; white-space: nowrap;
@@ -910,7 +910,7 @@ li.doing .cbx { border-color: var(--kx-accent); }
 /* The rail and the pill read the same field, so they cannot disagree. */
 .mcp-row .rail { align-self: stretch; border-radius: 2px; background: var(--kx-fg-5); }
 /* Turquoise, not mint. A connected MCP server is not the same claim as a
-   passing health check — it says the agent gained tools it did not ship with,
+   passing health check â€” it says the agent gained tools it did not ship with,
    so it earns its own colour and the two cannot be misread for each other. */
 .mcp-row[data-state="ready"] .rail { background: var(--kx-mcp); }
 .mcp-row[data-state="failed"] .rail { background: var(--kx-error); }
@@ -943,7 +943,7 @@ li.doing .cbx { border-color: var(--kx-accent); }
 /* Chips are capped in the renderer; the tail carries the rest in its tooltip. */
 .mcp-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 16px 12px 29px; }
 /* A chip is a tool the model gained from a server, so it carries the server's
-   colour at wash strength — related to the rail above it, not competing. */
+   colour at wash strength â€” related to the rail above it, not competing. */
 .mcp-chip {
   display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 4px;
   background: var(--kx-mcp-wash);
@@ -979,7 +979,7 @@ li.doing .cbx { border-color: var(--kx-accent); }
   background: var(--kx-surface-2); padding: 1px 5px; border-radius: 4px;
 }
 
-/* ───────────────────────── diagnostics ───────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ diagnostics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 #viewDiag { display: block; overflow-y: auto; }
 .cc-card {
@@ -1156,7 +1156,7 @@ li.doing .cbx { border-color: var(--kx-accent); }
   background: var(--kx-surface-2); padding: 1px 4px; border-radius: 3px;
 }
 
-/* ── connection check, inside the endpoint form ── */
+/* â”€â”€ connection check, inside the endpoint form â”€â”€ */
 .ep-check {
   margin-top: 2px; padding-top: 8px;
   border-top: 1px solid var(--kx-line);

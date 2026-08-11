@@ -44,7 +44,9 @@ const STATE = (over = {}) => ({ type: "stateSync", state: {
   const { w, d } = boot();
   const defs = w.__kxCrystal.defs;
   ok("crystal symbol is portrait 42:48", /viewBox="0 0 42 48"/.test(defs));
-  ok("crystal has dark silhouette", defs.includes('fill="#03150F"'));
+  // Pinned so a palette change cannot silently wash out the silhouette, which
+  // is what gives the mark its shape against the panel.
+  ok("crystal has dark silhouette", defs.includes('fill="#03151A"'));
   ok("crystal has four gradients",
     ["kx-f1", "kx-f2", "kx-f3", "kx-f4"].every(g => defs.includes(`id="${g}"`)));
   ok("crystal halo present", defs.includes('id="kx-halo"'));
