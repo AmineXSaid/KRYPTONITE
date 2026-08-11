@@ -550,6 +550,9 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
 .btn.sm { font-size: 11.5px; padding: 4px 9px; }
 .btn:disabled { color: var(--kx-fg-3); background: var(--kx-surface-3); }
+/* Any button that swaps its glyph for the spinner keeps its box steady. */
+.btn.wait { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.rung .ms .kx-spin { vertical-align: -2px; }
 
 /* â”€â”€ todo card â”€â”€ */
 .card { border: 1px solid var(--kx-line); border-radius: 6px; padding: 10px 11px; margin-bottom: 14px; }

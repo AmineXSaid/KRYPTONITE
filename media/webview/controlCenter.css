@@ -215,15 +215,46 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
   .kx-spin .a1, .kx-spin .a2, .kx-spin .a3 { animation: none; }
 }
 
-.tbl-foot {
-  display: flex; align-items: center; gap: 12px;
-  padding: 8px 10px; margin-top: 6px;
-  border-top: 1px solid var(--kx-hairline);
-  font-size: 11px;
+/* Sync bar. It sits above the table because it governs the Health column the
+   eye lands on, and a control placed under the rows reads as a footnote to
+   them rather than the thing that fills them. */
+.tbl-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 0 2px 8px; font-size: 11px;
 }
-.tbl-foot .btn { display: inline-flex; align-items: center; gap: 6px; }
-.auto-sync { display: inline-flex; align-items: center; gap: 6px; color: var(--kx-fg-2); cursor: pointer; }
+.tbl-bar .btn { display: inline-flex; align-items: center; gap: 6px; }
+.tbl-bar .btn.sync:disabled { opacity: 1; color: var(--kx-fg-3); }
+.bar-note { flex: none; }
+
+/* Period picker. The lit segment is the whole state, which is what a checkbox
+   labelled "Check every 10 min" could not do: there the on/off lived in the
+   box and the period lived in the text, so reading it meant reading both and
+   changing it meant finding a setting. Here it is one glance and one click. */
+.seg {
+  display: inline-flex; align-items: center; gap: 1px;
+  padding: 2px; border-radius: 5px;
+  background: var(--kx-surface-2);
+  border: 1px solid var(--kx-line);
+}
+.seg-l {
+  padding: 0 6px 0 5px; color: var(--kx-fg-3);
+  font-size: 10px; letter-spacing: .05em; text-transform: uppercase;
+}
+.seg-b {
+  min-width: 32px; min-height: 24px; padding: 0 8px;
+  border: 0; border-radius: 4px; background: none; cursor: pointer;
+  font: inherit; font-size: 11px; font-variant-numeric: tabular-nums;
+  color: var(--kx-fg-2);
+}
+.seg-b:hover { background: var(--kx-hover); color: var(--kx-fg); }
+.seg-b[aria-pressed="true"] {
+  background: var(--kx-accent); color: var(--kx-on-accent); font-weight: 600;
+}
 .tiny { font-size: 10.5px; }
+
+/* Any button that swaps its glyph for the spinner keeps its box steady. */
+.btn.wait { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.rung .ms .kx-spin { vertical-align: -2px; }
 
 .tr2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); gap: 10px; padding: 8px 10px; }
 .tr2 + .tr2 { border-top: 1px solid var(--kx-line); }
@@ -249,7 +280,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
   color: var(--kx-fg-2);
 }
 .btn:hover:not(:disabled) { background: var(--kx-surface-4); }
-.btn.primary { background: var(--kx-action); color: var(--kx-bg); }
+.btn.primary { background: var(--kx-action); color: var(--kx-on-action); }
 .btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
 .btn.sm { font-size: 11.5px; padding: 4px 9px; }
 .btn:disabled { color: var(--kx-fg-3); background: var(--kx-surface-3); }

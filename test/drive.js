@@ -140,6 +140,37 @@ const STATE = (over = {}) => ({ type: "stateSync", state: {
   ] } }));
   ok("restored user renders", d.querySelectorAll("#log .msg-user").length === 1);
   ok("restored tool card renders", d.querySelectorAll("#log .tool").length === 1);
+
+  /* Live cards are built carrying a running spinner and settled by toolEnd,
+     which replay never calls. Nothing on a restored transcript is still in
+     flight, so a spinner surviving here would claim work was ongoing for as
+     long as the session stayed open. The replay path has now silently
+     diverged from the live one twice, so it is pinned. */
+  const card = d.querySelector("#log .tool");
+  ok("restored tool card is not left spinning",
+    !card.querySelector(".tool-meta svg.kx-spin"));
+  ok("restored tool card shows a settled mark",
+    !!card.querySelector(".tool-meta .tool-ok"));
+}
+
+/* ── 6b. a live tool card spins while it runs, and stops when it lands ── */
+{
+  const { d, inbound } = boot();
+  const tool = { name: "read_file", args: { path: "a.yaml" } };
+
+  inbound({ type: "toolStart", tool });
+  const live = d.querySelector("#log .tool");
+  ok("running tool card spins", !!live.querySelector(".tool-meta svg.kx-spin"));
+
+  inbound({ type: "toolEnd", tool: { ...tool, result: "name: gw", isError: false } });
+  ok("finished tool card stops spinning", !d.querySelector("#log .tool-meta svg.kx-spin"));
+  ok("finished tool card shows the pass mark", !!d.querySelector("#log .tool-meta .tool-ok"));
+
+  // A failure must be legible as a failure, not just as "no longer spinning".
+  inbound({ type: "toolStart", tool });
+  inbound({ type: "toolEnd", tool: { ...tool, result: "ENOENT", isError: true } });
+  ok("failed tool card stops spinning", !d.querySelector("#log .tool-meta svg.kx-spin"));
+  ok("failed tool card shows the fail mark", !!d.querySelector("#log .tool-meta .tool-fail"));
 }
 
 /* ── 7. /clear goes through newChat ────────────────────────────────── */

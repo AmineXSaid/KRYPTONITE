@@ -1004,7 +1004,11 @@ function _sbRun() {
         '<span class="tool-verb">' + esc(TOOL_VERB[name] || name) + "</span>" +
         '<span class="tool-arg ell">' + esc(argOf(name, args)) + "</span>" +
         '<span class="sp"></span><span class="tool-stat"></span>' +
-        '<span class="tool-meta"></span></button>' +
+        /* Running is the state this card spends most of its life in, and it
+           was the one state with no mark at all: the slot sat empty until a
+           check or a cross replaced it. On a slow read that is indistinguish-
+           able from a card that has stalled. toolEnd overwrites this. */
+        '<span class="tool-meta">' + spinner(12) + "</span></button>" +
       '<div class="tool-body" hidden></div>';
     el.querySelector(".tool-head").addEventListener("click", function () {
       var open = el.getAttribute("data-open") === "1";
@@ -1803,8 +1807,9 @@ function _sbRun() {
     }
 
     html += '<div class="trace-h"><span class="l">Connection trace</span><span class="sp"></span>' +
-      '<button class="btn sm" data-tls="trace"' + (S.tracing ? " disabled" : "") + ">" +
-      icon("i-refresh", "ic-13") + "<span>" + (S.tracing ? "Running…" : "Re-run trace") + "</span></button></div>";
+      '<button class="btn sm wait" data-tls="trace"' + (S.tracing ? " disabled" : "") + ">" +
+      (S.tracing ? spinner(13) : icon("i-refresh", "ic-13")) +
+      "<span>" + (S.tracing ? "Running…" : "Re-run trace") + "</span></button></div>";
 
     if (!S.rungs.length && !S.tracing) {
       html += '<div class="empty">No trace yet.</div>';
@@ -1824,7 +1829,11 @@ function _sbRun() {
       '<span class="nm">' + esc(RUNG_LABELS[name] || name || "") + "</span>" +
       '<span class="body"><span class="dt">' + esc(detail) + "</span>" +
       (fix ? '<div class="fx">' + esc(fix) + "</div>" : "") + "</span>" +
-      '<span class="ms">' + (status === "pass" || status === "fail" || status === "warn"
+      /* A rung still running has no time to report yet, and a bare "-" there
+         is indistinguishable from one that finished without a measurement.
+         The spinner says which of the two this is. */
+      '<span class="ms">' + (status === "pending" ? spinner(12)
+        : status === "pass" || status === "fail" || status === "warn"
         ? (ms ? ms + "ms" : "-") : "-") + "</span></div>";
   }
 
@@ -1912,8 +1921,9 @@ function _sbRun() {
           : "") +
         renderEpCheck() +
         '<div class="row"><button class="btn" data-ep="cancel">Cancel</button>' +
-        '<button class="btn" data-ep="check"' + (S.epCheck && S.epCheck.running ? " disabled" : "") + ">" +
-        (S.epCheck && S.epCheck.running ? "Checking…" : "Check connection") + "</button>" +
+        '<button class="btn wait" data-ep="check"' + (S.epCheck && S.epCheck.running ? " disabled" : "") + ">" +
+        (S.epCheck && S.epCheck.running ? spinner(13) + "<span>Checking…</span>" : "<span>Check connection</span>") +
+        "</button>" +
         '<button class="btn primary" data-ep="save">Save</button></div></div>';
     }
     $("epBody").innerHTML = html;
@@ -2202,6 +2212,13 @@ function _sbRun() {
       for (var k = 0; k < calls.length; k++) {
         var call = calls[k];
         var el = toolCard(call.name, call.arguments);
+        /* Replay never runs toolEnd, so the running spinner the card is built
+           with has to be settled here by hand. Nothing on a restored
+           transcript is still in flight, and a card left spinning would claim
+           otherwise for as long as the session stayed open. */
+        el.querySelector(".tool-meta").innerHTML =
+          '<span class="tool-ok">' + icon("i-check", "ic-13") + "</span>";
+        el.setAttribute("data-error", "0");
         var res = resultFor[call.id];
         if (res) el.querySelector(".tool-body").appendChild(resultBlock(res, call.name));
         g.querySelector(".tool-group-body").appendChild(el);

@@ -93,6 +93,43 @@ for (const [ink, fill] of [["kx-on-action", "kx-action"], ["kx-on-accent", "kx-a
   ck(ink + " over " + fill, r, 4.5);
 }
 
+/* Correct tokens are not enough: they have to be paired correctly at the point
+   of use. The Control Center shipped `.btn.primary { background: var(--kx-action);
+   color: var(--kx-bg) }` - dark panel ink on the deep blue fill, 3.13:1 - purely
+   because the ink/fill split landed in sidebar.css and was missed here. Every
+   check above passed while a real button was unreadable, so the stylesheets
+   themselves are read: any rule that sets both a background and a colour from
+   the palette has to clear 4.5:1. */
+console.log("\n──── ink and fill paired in the stylesheets ────");
+{
+  const SHEETS = ["sidebar.css", "controlCenter.css"];
+  const hex = (v) => {
+    const m = /^var\(\s*--(kx-[a-z0-9-]+)\s*\)$/.exec(v.trim());
+    if (!m) return null;
+    let t;
+    try { t = token(m[1]); } catch { return null; }
+    return /^#[0-9a-fA-F]{3,8}$/.test(t) ? t : null;   // skip rgba()/gradients
+  };
+
+  for (const sheet of SHEETS) {
+    const css = fs.readFileSync(path.join(__dirname, "..", "media", "webview", sheet), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "");
+    // Innermost blocks only, which is what this regex settles on inside @media.
+    for (const [, sel, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const bg = /(?:^|;)\s*background(?:-color)?:\s*([^;]+)/.exec(body);
+      const fg = /(?:^|;)\s*color:\s*([^;]+)/.exec(body);
+      if (!bg || !fg) continue;
+      const b = hex(bg[1]);
+      const f = hex(fg[1]);
+      if (!b || !f) continue;
+      const r = ratio(f, b);
+      const where = sheet + "  " + sel.trim().replace(/\s+/g, " ").slice(0, 44);
+      console.log(`  ${r >= 4.5 ? "PASS" : "FAIL"}  ${where.padEnd(60)} ${r.toFixed(2)}:1`);
+      ck(where, r, 4.5);
+    }
+  }
+}
+
 console.log(`\n──── ${pass} passed, ${fails.length} failed ────`);
 for (const f of fails) console.log("  FAIL  " + f);
 process.exit(fails.length ? 1 : 0);

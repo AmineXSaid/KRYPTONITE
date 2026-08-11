@@ -61,16 +61,38 @@ function _run() {
   /* Latest health probe per profile id, and whether one is in flight. */
   var HEALTH = {};
   var HEALTH_BUSY = {};
-  /* On by default: a stale "active" row that has been unreachable for an hour
-     is worse than no row. Ten minutes is well inside the socket keep-alive, so
-     a check usually reuses a warm connection and costs a single round trip. */
-  var AUTO_SYNC = true;
-  var AUTO_MS = 10 * 60 * 1000;
+  /* Auto-sync period in minutes, 0 being off. A single number drives both the
+     timer and the control, so the two can never disagree about the state.
+     Ten is the default: a stale "active" row that has been unreachable for an
+     hour is worse than no row, and ten minutes sits well inside the socket
+     keep-alive, so a check usually reuses a warm connection for one round trip. */
+  var SYNC_MIN = 10;
+  var SYNC_STEPS = [0, 1, 5, 10, 30];
   var autoTimer = null;
+  var syncedOnce = false;
+  var healthWatchdog = null;
 
   function armAutoSync() {
     if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
-    if (AUTO_SYNC) autoTimer = setInterval(function () { post("healthCheck"); }, AUTO_MS);
+    if (SYNC_MIN > 0) autoTimer = setInterval(function () { post("healthCheck"); }, SYNC_MIN * 60000);
+  }
+
+  /* The first sync is the one that matters. A panel whose Health column reads
+     "-" on every row until a timer fires ten minutes from now is a panel that
+     is wrong exactly when it is being looked at, so opening the view is itself
+     the trigger. Once per webview, as soon as there is a profile to probe. */
+  function syncOnOpen() {
+    if (syncedOnce || !S.profiles.length) return;
+    syncedOnce = true;
+    post("healthCheck");
+    armAutoSync();
+  }
+
+  /* True while any profile is mid-probe, which is what the Sync button reads
+     to swap its glyph for the spinner and refuse a second overlapping sweep. */
+  function healthBusy() {
+    for (var k in HEALTH_BUSY) if (HEALTH_BUSY[k]) return true;
+    return false;
   }
   /* Bands, in ms. A number alone tells you nothing without a scale, so the
      colour does the reading and the figure confirms it. */
@@ -242,7 +264,11 @@ function _run() {
       '<span class="nm">' + esc(RUNG_LABELS[r.name] || r.name) + "</span>" +
       '<span class="body"><span class="dt">' + esc(r.detail) + "</span>" +
       (r.fix ? '<div class="fx">' + esc(r.fix) + "</div>" : "") + "</span>" +
-      '<span class="ms">' + (r.ms ? r.ms + "ms" : "-") + "</span></div>";
+      /* A rung still running has no time to report yet, and a bare "-" there
+         is indistinguishable from one that finished without a measurement.
+         The spinner says which of the two this is. */
+      '<span class="ms">' + (r.status === "pending" ? spinner(12) : r.ms ? r.ms + "ms" : "-") +
+      "</span></div>";
   }
   function rungByName(name) {
     for (var i = 0; i < S.rungs.length; i++) if (S.rungs[i].name === name) return S.rungs[i];
@@ -367,15 +393,34 @@ function _run() {
             '<button class="mini danger" data-ep="del" data-id="' + esc(p.id) + '" title="Delete profile" aria-label="Delete profile">' + icon("i-trash", "ic-13") + "</button>" +
           "</span></div>";
       }
-      html += '<div class="tbl">' + rows + "</div>" +
-        '<div class="tbl-foot">' +
-          '<button class="btn sm" data-act="health" title="Time a round trip to every profile now">' +
-            icon("i-refresh", "ic-12") + "<span>Sync now</span></button>" +
-          '<label class="auto-sync"><input type="checkbox" id="ccAutoSync"' +
-            (AUTO_SYNC ? " checked" : "") + '><span>Check every ' + (AUTO_MS / 60000) + " min</span></label>" +
+      /* One segment per period, current one pressed. This replaces a checkbox
+         reading "Check every 10 min", which could only be understood by
+         reading the label and then looking at the box: the state and the
+         period were in two places. Here the lit segment is the whole answer,
+         and changing the period is one click rather than a setting hunt. */
+      var segs = "";
+      for (var si = 0; si < SYNC_STEPS.length; si++) {
+        var v = SYNC_STEPS[si];
+        segs += '<button class="seg-b" data-sync="' + v + '" aria-pressed="' +
+          (v === SYNC_MIN ? "true" : "false") + '" title="' +
+          (v === 0 ? "Never check on a timer" : "Check every " + v + " min") + '">' +
+          (v === 0 ? "Off" : v + "m") + "</button>";
+      }
+
+      var busy = healthBusy();
+      html += '<div class="tbl-bar">' +
+          '<button class="btn sm sync" data-act="health"' + (busy ? " disabled" : "") +
+            ' title="Time a round trip to every profile now">' +
+            (busy ? spinner(13) : icon("i-refresh", "ic-13")) +
+            "<span>" + (busy ? "Syncing…" : "Sync now") + "</span></button>" +
+          '<div class="seg" role="group" aria-label="Auto-sync period">' +
+            '<span class="seg-l">Auto</span>' + segs +
+          "</div>" +
           '<span class="sp"></span>' +
-          '<span class="muted tiny">Times the path to the gateway, not the model. No tokens are spent.</span>' +
-        "</div>";
+          '<span class="muted tiny bar-note">Times the path to the gateway, not the model. ' +
+            "No tokens are spent.</span>" +
+        "</div>" +
+        '<div class="tbl">' + rows + "</div>";
     }
 
     var a = active();
@@ -450,8 +495,9 @@ function _run() {
         : "") +
       epCheckPanel() +
       '<div class="row"><button class="btn" data-ep="cancel">Cancel</button>' +
-      '<button class="btn" data-ep="check"' + (S.epCheck && S.epCheck.running ? " disabled" : "") + ">" +
-      (S.epCheck && S.epCheck.running ? "Checking…" : "Check connection") + "</button>" +
+      '<button class="btn wait" data-ep="check"' + (S.epCheck && S.epCheck.running ? " disabled" : "") + ">" +
+      (S.epCheck && S.epCheck.running ? spinner(13) + "<span>Checking…</span>" : "<span>Check connection</span>") +
+      "</button>" +
       '<button class="btn primary" data-ep="save">Save</button></div></div>';
   }
 
@@ -769,8 +815,9 @@ function _run() {
     var html = '<div style="display:flex;align-items:flex-start;gap:10px">' +
       '<div style="flex:1;min-width:0"><h3>Diagnostics</h3>' +
       '<div class="explainer">Each rung runs only if the one above it passed, so the first failure is always the real one.</div></div>' +
-      '<button class="btn primary" data-act="trace"' + (S.tracing ? " disabled" : "") + ">" +
-      (S.tracing ? "Running…" : "Re-run trace") + "</button></div>";
+      '<button class="btn primary wait" data-act="trace"' + (S.tracing ? " disabled" : "") + ">" +
+      (S.tracing ? spinner(13) + "<span>Running…</span>" : "<span>Re-run trace</span>") +
+      "</button></div>";
 
     html += '<div class="card">';
     if (!S.rungs.length && !S.tracing) {
@@ -1049,9 +1096,13 @@ function _run() {
       return;
     }
 
-    if (e.target && e.target.id === "ccAutoSync") {
-      AUTO_SYNC = e.target.checked;
+    if ((t = e.target.closest("[data-sync]"))) {
+      SYNC_MIN = Number(t.getAttribute("data-sync")) || 0;
       armAutoSync();
+      /* Picking a period is a statement that the numbers on screen are stale,
+         so honour it now rather than at the end of the first interval. */
+      if (SYNC_MIN > 0) post("healthCheck");
+      render();
       return;
     }
     if ((t = e.target.closest("[data-act]"))) {
@@ -1139,6 +1190,7 @@ function _run() {
         S.checkpoints = st.checkpoints || [];
         S.logs = st.logs || [];
         render();
+        syncOnOpen();
         break;
       }
 
@@ -1150,6 +1202,16 @@ function _run() {
       case "healthStarted":
         for (var hi = 0; hi < (m.ids || []).length; hi++) HEALTH_BUSY[m.ids[hi]] = true;
         render();
+        /* The host bounds every probe at roughly 25s and always answers with a
+           result, so this only fires if the extension host itself went away
+           mid-sweep. Without it the Sync button would stay disabled and the
+           spinners would turn forever, with no way back short of reopening. */
+        clearTimeout(healthWatchdog);
+        healthWatchdog = setTimeout(function () {
+          if (!healthBusy()) return;
+          for (var k in HEALTH_BUSY) HEALTH_BUSY[k] = false;
+          render();
+        }, 40000);
         break;
 
       case "healthResult":
@@ -1168,6 +1230,9 @@ function _run() {
           return p;
         });
         render();
+        /* A workspace that opened with no profiles still deserves its first
+           sweep the moment one appears. */
+        syncOnOpen();
         break;
 
       case "skillsReloaded":
