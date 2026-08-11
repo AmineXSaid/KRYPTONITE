@@ -619,8 +619,14 @@ function openAiUsage(u: any): TokenUsage {
 }
 
 /** Streaming decoders accumulate partial tool-call arguments across deltas. */
+/** Exposed for tests; the decoder is otherwise private to `complete()`. */
+export const __openAiStreamForTest = () => openAiStream();
+
 function openAiStream() {
   const pending = new Map<number, { id: string; name: string; args: string }>();
+  // Held so a reasoning-only turn can fall back to showing its working.
+  let reasoning = "";
+  let sawContent = false;
   return function* (json: any): Generator<CompletionEvent> {
     // Usage is checked before the delta branch and independently of it.
     //
@@ -648,7 +654,18 @@ function openAiStream() {
     }
     const d = json.choices?.[0]?.delta;
     if (!d) return;
-    if (d.content) yield { type: "text", text: d.content };
+    if (d.content) {
+      sawContent = true;
+      yield { type: "text", text: d.content };
+    }
+    // Reasoning models stream their thinking on a separate field and only then
+    // — if the budget lasts — produce content. Dropping it meant a turn that
+    // spent its whole budget reasoning rendered as an empty reply, and the
+    // streaming probe reported "the model produced no visible output" against
+    // a model that was working perfectly.
+    if (typeof d.reasoning_content === "string" && d.reasoning_content) {
+      reasoning += d.reasoning_content;
+    }
     for (const tc of d.tool_calls ?? []) {
       const slot = pending.get(tc.index) ?? { id: "", name: "", args: "" };
       if (tc.id) slot.id = tc.id;
@@ -662,6 +679,14 @@ function openAiStream() {
         yield { type: "tool_call", toolCall: { id: slot.id, name: slot.name, arguments: safeJson(slot.args) } };
       }
       pending.clear();
+      // Only as a fallback. A model that produced an answer keeps its answer;
+      // one that produced nothing else shows its working rather than a blank
+      // bubble, which is indistinguishable from a broken endpoint.
+      if (!sawContent && reasoning.trim()) {
+        yield { type: "text", text: reasoning.trim() };
+        sawContent = true;
+      }
+      reasoning = "";
     }
   };
 }

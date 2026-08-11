@@ -6,6 +6,7 @@
  *        --format=cjs --platform=node --target=node20 && node dist/ttp.cjs
  */
 import { parseTextToolCall } from "../src/agent/loop";
+import { __openAiStreamForTest } from "../src/providers/client";
 
 const KNOWN = new Set([
   "read_file", "write_file", "edit_file", "list_files", "search",
@@ -95,6 +96,44 @@ console.log("\n──── gating on the available tool set ────");
     "a tool that is available still is");
   ck(parseTextToolCall('{"name":"read_file","arguments":{}}', new Set()) === undefined,
     "an empty tool set recovers nothing");
+}
+
+/* ── reasoning models stream on a different field ────────────────────── */
+console.log("\n──── reasoning_content ────");
+{
+  const drain = (parser: any, frames: any[]) => {
+    const out: string[] = [];
+    for (const f of frames) for (const ev of parser(f)) if (ev.type === "text") out.push(ev.text);
+    return out.join("");
+  };
+  const delta = (d: any, finish?: string) => ({ choices: [{ delta: d, finish_reason: finish ?? null }] });
+
+  // Spent its whole budget thinking. Dropping this rendered a blank bubble,
+  // which is indistinguishable from a broken endpoint.
+  ck(
+    drain(__openAiStreamForTest(), [
+      delta({ reasoning_content: "weighing " }),
+      delta({ reasoning_content: "the options" }),
+      delta({}, "length"),
+    ]) === "weighing the options",
+    "a reasoning-only turn shows its working rather than nothing"
+  );
+
+  // Produced a real answer: the answer stands alone, thinking is not appended.
+  ck(
+    drain(__openAiStreamForTest(), [
+      delta({ reasoning_content: "hmm" }),
+      delta({ content: "42" }),
+      delta({}, "stop"),
+    ]) === "42",
+    "an answered turn keeps only its answer"
+  );
+
+  // Ordinary models are untouched.
+  ck(
+    drain(__openAiStreamForTest(), [delta({ content: "hello" }), delta({}, "stop")]) === "hello",
+    "a model with no reasoning field behaves exactly as before"
+  );
 }
 
 console.log(`\n──── ${pass} passed, ${fail} failed ────`);
