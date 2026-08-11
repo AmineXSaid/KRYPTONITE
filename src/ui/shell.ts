@@ -19,7 +19,7 @@ import * as path from "node:path";
 /**
  * `script-src 'nonce-…'` is the only script permission granted. `style-src`
  * keeps `'unsafe-inline'` because VS Code itself injects the theme variable
- * block inline into every webview — removing it would strip the theme.
+ * block inline into every webview - removing it would strip the theme.
  */
 function csp(webview: vscode.Webview, nonce: string): string {
   return [
@@ -45,7 +45,7 @@ function makeNonce(): string {
  * carries the whole interface; `Display` is tightened for 15px and above and is
  * used only on the two panel titles that reach that size. Setting Display at
  * 12px is the standard way to make a well-drawn family look wrong, so the two
- * are separate CSS families rather than one — the stylesheet has to opt into
+ * are separate CSS families rather than one - the stylesheet has to opt into
  * Display deliberately.
  *
  * Absent files are skipped rather than 404'd, so a build with no `media/fonts/`

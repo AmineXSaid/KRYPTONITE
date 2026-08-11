@@ -55,7 +55,7 @@ export interface UiConfigDto {
    * What happens to a message typed while the model is still working.
    *
    * "queue" holds it and sends it as its own turn once the current one
-   * finishes — the default, because it never disturbs work in progress.
+   * finishes - the default, because it never disturbs work in progress.
    * "steer" injects it into the running turn at the next boundary between
    * model calls, so the model reads it while still working. Steering can
    * change the course of a turn, and pays for it in tokens: the conversation
@@ -114,7 +114,7 @@ export interface ProfileDto {
   sourceFile: string | null;
   active: boolean;
   authKind: AuthKind;
-  /** Never contains a resolved secret — raw `${env:…}` templates only. */
+  /** Never contains a resolved secret - raw `${env:…}` templates only. */
   authSummary: string;
   /** From `authCacheReport()`. Expiry timestamp only, never a token. */
   authCache: { expiresAt: number } | null;
@@ -289,14 +289,14 @@ export interface AttachFilesMsg { type: "attachFiles" }
  * Open `.agent/mcp.json`, writing a commented starter if it is not there yet.
  *
  * "Create config" used to post `openFile`, which asked VS Code to open a path
- * that by definition did not exist — the button's whole purpose is the case
- * where it is missing — and the user got "Unable to resolve nonexistent file".
+ * that by definition did not exist - the button's whole purpose is the case
+ * where it is missing - and the user got "Unable to resolve nonexistent file".
  */
 export interface McpOpenConfigMsg { type: "mcpOpenConfig" }
 /** Ask the gateway in the draft form which models it actually serves. */
 export interface ListModelsMsg { type: "listModels"; endpoint: EndpointForm }
 /**
- * The composer took focus. Nothing is being sent yet — this is the cue to pay
+ * The composer took focus. Nothing is being sent yet - this is the cue to pay
  * the connection, credential, and prompt-cache costs of the next turn while
  * the user is still typing, rather than after they press Enter.
  */
@@ -441,7 +441,7 @@ export interface SelectionChangedOut {
   selection: SelectionDto | null;
 }
 /**
- * The conversation the composer writes into has changed — a new chat, a
+ * The conversation the composer writes into has changed - a new chat, a
  * restored one, or the active one being deleted.
  *
  * This is the only message that replaces the transcript wholesale, and it is
@@ -460,7 +460,7 @@ export interface SessionsListedOut { type: "sessionsListed"; sessions: SessionMe
  * The active conversation has been given a real name.
  *
  * Separate from `sessionSwitched` because nothing else about the conversation
- * changed — replaying a whole transcript to update one string would clear the
+ * changed - replaying a whole transcript to update one string would clear the
  * transcript the user is reading.
  */
 export interface SessionTitledOut { type: "sessionTitled"; id: string; title: string }
@@ -468,7 +468,7 @@ export interface SessionTitledOut { type: "sessionTitled"; id: string; title: st
 /** One configured MCP server, as the panel shows it. */
 export interface McpServerDto {
   name: string;
-  /** `disabled` is declared in mcp.json with `enabled: false` — shown, not hidden. */
+  /** `disabled` is declared in mcp.json with `enabled: false` - shown, not hidden. */
   state: "idle" | "starting" | "ready" | "failed" | "stopped" | "disabled";
   /** The command line, for the row subtitle. */
   command: string;

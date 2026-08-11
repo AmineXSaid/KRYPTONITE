@@ -7,10 +7,10 @@ import * as path from "node:path";
  * A skill is a folder with a SKILL.md carrying YAML frontmatter, plus whatever
  * supporting files it needs. Three levels, each paid for only when reached:
  *
- *   1. name + description   — in the system prompt, always. ~2 lines per skill.
- *   2. SKILL.md body        — fetched by `read_skill` when the model decides
+ *   1. name + description   - in the system prompt, always. ~2 lines per skill.
+ *   2. SKILL.md body        - fetched by `read_skill` when the model decides
  *                             the skill is relevant.
- *   3. bundled files        — listed by `read_skill`, read individually with
+ *   3. bundled files        - listed by `read_skill`, read individually with
  *                             `read_file` only if the body points at them.
  *
  * On a 32k gateway that staging is the whole ballgame: seventeen bundled
@@ -44,7 +44,7 @@ const MAX_BODY_CHARS = 24_000;
  * Deliberately not a YAML parser: frontmatter here is flat scalars, and
  * pulling the `yaml` dependency into the skill path would mean a malformed
  * SKILL.md could throw where it currently degrades. It understands the two
- * forms that appear in practice — `key: value` and a folded/literal block
+ * forms that appear in practice - `key: value` and a folded/literal block
  * (`key: >-`) whose continuation lines are indented.
  */
 function parseFrontmatter(raw: string): { meta: Record<string, string>; body: string } {
@@ -131,7 +131,7 @@ export function loadSkills(root: string): { skills: Skill[]; warnings: string[] 
     }
     if (body.length > MAX_BODY_CHARS) {
       warnings.push(
-        `${name}'s SKILL.md is ${Math.round(body.length / 1000)}k characters — it will crowd a small context. ` +
+        `${name}'s SKILL.md is ${Math.round(body.length / 1000)}k characters - it will crowd a small context. ` +
           `Move the detail into a reference file and point at it from the body.`
       );
     }
@@ -143,7 +143,7 @@ export function loadSkills(root: string): { skills: Skill[]; warnings: string[] 
 }
 
 /**
- * The index that goes into the system prompt — level 1 of the disclosure.
+ * The index that goes into the system prompt - level 1 of the disclosure.
  *
  * Wording matters more than it looks. The model decides whether to spend a
  * turn on `read_skill` purely from these lines, so the block states the
@@ -161,7 +161,7 @@ export function skillIndex(skills: Skill[]): string {
     "## Skills",
     "",
     "Instruction sets available in this workspace. Only the names and descriptions",
-    "are loaded — the instructions themselves are not in your context yet.",
+    "are loaded - the instructions themselves are not in your context yet.",
     "",
     ...lines,
     "",

@@ -3,7 +3,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 /**
  * A Model Context Protocol client over stdio.
  *
- * MCP's stdio transport is newline-delimited JSON-RPC 2.0 — one complete message
+ * MCP's stdio transport is newline-delimited JSON-RPC 2.0 - one complete message
  * per line on stdin and stdout. It is deliberately *not* LSP's `Content-Length`
  * framing, which is the single most common thing to get wrong when writing this
  * from memory: a client that sends headers gets silence, because the server is
@@ -14,7 +14,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
  * the registry's job.
  *
  * A server is a child process this extension starts, so it is trusted exactly as
- * much as the workspace that configured it — the same trust level as a task
+ * much as the workspace that configured it - the same trust level as a task
  * definition. Nothing is fetched or executed that the config did not name.
  */
 
@@ -60,7 +60,7 @@ function quoteWin(s: string): string {
  *
  * On POSIX this is the command and its args, unchanged.
  *
- * On Windows the common MCP commands — `npx`, `npm`, `uvx` — are `.cmd` shims,
+ * On Windows the common MCP commands - `npx`, `npm`, `uvx` - are `.cmd` shims,
  * which cannot be executed directly; they need a command interpreter. Node's
  * `shell: true` would do it, but it has two problems that cost real debugging
  * time here: it concatenates arguments without escaping (Node deprecated it as
@@ -68,7 +68,7 @@ function quoteWin(s: string): string {
  * whatever sits in `HKCU\\Software\\Microsoft\\Command Processor\\AutoRun` runs
  * first and prints into the child's stdout. On this machine that key is
  * unparseable, and its error message landed in the middle of the JSON-RPC
- * stream — the handshake simply timed out with no useful signal.
+ * stream - the handshake simply timed out with no useful signal.
  *
  * So the interpreter is invoked explicitly with the flags that fix both:
  *   /d  skip AutoRun entirely
@@ -99,7 +99,7 @@ const DEFAULT_TIMEOUT_MS = 60_000;
  * start of an `npx`-launched server includes a package download. Measured here:
  * `npx -y @modelcontextprotocol/server-filesystem` needed ~23s of fetching
  * before it printed a byte, which a 20s budget turned into a bare "initialize
- * timed out" with nothing to act on. A configured `timeoutMs` above this wins —
+ * timed out" with nothing to act on. A configured `timeoutMs` above this wins -
  * on a slow link even 45s is optimistic.
  */
 const HANDSHAKE_FLOOR_MS = 45_000;
@@ -210,7 +210,7 @@ export class McpClient {
       this.state = "ready";
       this.log(
         "info",
-        `MCP ${this.spec.name}: ready — ${this.tools.length} tool(s) from ` +
+        `MCP ${this.spec.name}: ready - ${this.tools.length} tool(s) from ` +
           `${this.serverInfo?.name ?? this.spec.command}.`
       );
     } catch (e: any) {

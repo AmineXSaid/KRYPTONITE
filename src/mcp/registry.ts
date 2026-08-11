@@ -85,7 +85,7 @@ export function loadMcpConfig(file: string): { specs: McpServerSpec[]; warnings:
 
   for (const [name, raw] of Object.entries<any>(servers)) {
     if (!ID_RE.test(name) || name.includes("__")) {
-      warnings.push(`Server id "${name}" is not usable — letters, digits, dot, dash, underscore, and no "__".`);
+      warnings.push(`Server id "${name}" is not usable - letters, digits, dot, dash, underscore, and no "__".`);
       continue;
     }
     if (!raw || typeof raw !== "object") {
@@ -95,7 +95,7 @@ export function loadMcpConfig(file: string): { specs: McpServerSpec[]; warnings:
     // Only stdio is implemented. Saying so is better than starting nothing and
     // leaving the user to guess why their URL server never appears.
     if (raw.url || raw.type === "http" || raw.type === "sse") {
-      warnings.push(`Server "${name}" uses an HTTP/SSE transport, which is not implemented yet — only stdio.`);
+      warnings.push(`Server "${name}" uses an HTTP/SSE transport, which is not implemented yet - only stdio.`);
       continue;
     }
     if (typeof raw.command !== "string" || !raw.command.trim()) {
@@ -103,7 +103,7 @@ export function loadMcpConfig(file: string): { specs: McpServerSpec[]; warnings:
       continue;
     }
     if (raw.approval && raw.approval !== "ask" && raw.approval !== "auto") {
-      warnings.push(`Server "${name}": approval must be "ask" or "auto" — got "${raw.approval}".`);
+      warnings.push(`Server "${name}": approval must be "ask" or "auto" - got "${raw.approval}".`);
     }
     specs.push({
       name,

@@ -3,7 +3,7 @@
  * Ten sections over one shared store. Only the active section is rendered, so
  * a broadcast re-renders at most one pane. Three toggles are functional; the
  * rest are disabled indicators that reflect the active profile or fixed engine
- * behaviour — showing them as interactive would be a lie.
+ * behaviour - showing them as interactive would be a lie.
  *
  * crystal.js must have executed before this script runs so that
  * `window.__kxCrystal` is available. Both scripts load via `<script src>`
@@ -59,7 +59,7 @@ function _run() {
 
   /* The fourteen read-only indicators, with why each is not interactive. */
   var PROFILE_TIP = "Controlled by the active profile's YAML.";
-  var ENGINE_TIP = "Always on — engine behavior.";
+  var ENGINE_TIP = "Always on - engine behavior.";
 
   var TOOLS = [
     ["read_file", "path, start?, end?", "workspace only"],
@@ -75,7 +75,7 @@ function _run() {
   var TRANSFORM_SAMPLE =
     "exports.transformRequest = (body, profile) => {\n" +
     "  // body is the fully-encoded wire body (openai or anthropic shape).\n" +
-    "  // The streaming decision is made BEFORE this runs — do not hide it.\n" +
+    "  // The streaming decision is made BEFORE this runs - do not hide it.\n" +
     "  return { envelope: { tenant: \"eng\", payload: body } };\n" +
     "};\n\n" +
     "exports.transformResponse = (json, profile) => {\n" +
@@ -190,7 +190,7 @@ function _run() {
       '<span class="nm">' + esc(RUNG_LABELS[r.name] || r.name) + "</span>" +
       '<span class="body"><span class="dt">' + esc(r.detail) + "</span>" +
       (r.fix ? '<div class="fx">' + esc(r.fix) + "</div>" : "") + "</span>" +
-      '<span class="ms">' + (r.ms ? r.ms + "ms" : "—") + "</span></div>";
+      '<span class="ms">' + (r.ms ? r.ms + "ms" : "-") + "</span></div>";
   }
   function rungByName(name) {
     for (var i = 0; i < S.rungs.length; i++) if (S.rungs[i].name === name) return S.rungs[i];
@@ -225,11 +225,11 @@ function _run() {
     var a = active();
     var counts = {
       endpoints: String(S.profiles.length),
-      wire: a ? (a.wire === "openai" ? "OAI" : a.wire === "anthropic" ? "ANT" : "RAW") : "—",
-      auth: a ? authBadge(a.authKind) : "—",
-      tls: S.tlsError ? "1" : (a && a.tls && a.tls.ca && a.tls.ca.length ? String(a.tls.ca.length) : "—"),
-      proxy: a ? (a.proxy && a.proxy.url ? "set" : a.proxy && a.proxy.fromEnv ? "env" : "off") : "—",
-      diag: S.rungs.filter(function (r) { return r.status === "fail"; }).length || (S.traceRun ? "OK" : "—"),
+      wire: a ? (a.wire === "openai" ? "OAI" : a.wire === "anthropic" ? "ANT" : "RAW") : "-",
+      auth: a ? authBadge(a.authKind) : "-",
+      tls: S.tlsError ? "1" : (a && a.tls && a.tls.ca && a.tls.ca.length ? String(a.tls.ca.length) : "-"),
+      proxy: a ? (a.proxy && a.proxy.url ? "set" : a.proxy && a.proxy.fromEnv ? "env" : "off") : "-",
+      diag: S.rungs.filter(function (r) { return r.status === "fail"; }).length || (S.traceRun ? "OK" : "-"),
       agent: "25",
       skills: String(S.skills.filter(function (s) { return s.enabled; }).length),
       checkpoints: String(S.checkpoints.length),
@@ -291,7 +291,7 @@ function _run() {
     var html = "<h3>Endpoints</h3>" +
       '<div class="explainer">Profiles are YAML files in <code>' +
       esc(S.config.profileDirectory || ".agent/endpoints") +
-      "</code>. A file-system watcher reloads profiles and skills on change — no window restart, and the auth cache is cleared on reload.</div>";
+      "</code>. A file-system watcher reloads profiles and skills on change - no window restart, and the auth cache is cleared on reload.</div>";
 
     if (!S.profiles.length) {
       html += '<div class="empty">No profiles in ' + esc(S.config.profileDirectory || ".agent/endpoints") + "</div>" +
@@ -325,8 +325,8 @@ function _run() {
         ["Model", a.model],
         ["Timeout", a.timeoutMs + " ms"],
         ["Retries", String(a.retries)],
-        ["Context window", a.capabilities ? String(a.capabilities.contextWindow) : "—"],
-        ["Max output", a.capabilities ? String(a.capabilities.maxOutputTokens) : "—"]
+        ["Context window", a.capabilities ? String(a.capabilities.contextWindow) : "-"],
+        ["Max output", a.capabilities ? String(a.capabilities.maxOutputTokens) : "-"]
       ]) + '<div style="margin-top:9px">' +
         optGroup("tokenCounting",
           [["heuristic", "heuristic"], ["api", "api"]],
@@ -335,18 +335,18 @@ function _run() {
 
       html += card("Merged into every request",
         '<div class="kv"><span class="k">Headers</span><span class="v wrap">' +
-        (mapEntries(a.headers).length ? esc(mapEntries(a.headers).join(", ")) : "—") + "</span>" +
+        (mapEntries(a.headers).length ? esc(mapEntries(a.headers).join(", ")) : "-") + "</span>" +
         '<span class="k">Query</span><span class="v wrap">' +
-        (mapEntries(a.query).length ? esc(mapEntries(a.query).join(", ")) : "—") + "</span>" +
+        (mapEntries(a.query).length ? esc(mapEntries(a.query).join(", ")) : "-") + "</span>" +
         '<span class="k">Extra body</span><span class="v wrap">' +
-        (mapEntries(a.extraBody).length ? esc(mapEntries(a.extraBody).join(", ")) : "—") + "</span></div>");
+        (mapEntries(a.extraBody).length ? esc(mapEntries(a.extraBody).join(", ")) : "-") + "</span></div>");
       html += "</div>";
     }
 
     html += '<div class="row-actions">' +
       '<span class="' + (errorCount() ? "err-line" : "empty") + '">' +
       (errorCount()
-        ? errorCount() + " profile(s) failed to load — see Logs."
+        ? errorCount() + " profile(s) failed to load - see Logs."
         : readyProfiles().length + " profile(s) loaded cleanly.") + "</span>" +
       '<span class="sp"></span>' +
       '<button class="btn" data-act="newEndpoint">New profile from template</button>' +
@@ -373,15 +373,15 @@ function _run() {
         '<label for="fModel">Model</label><input id="fModel" value="' + esc(f.model || "") + '" placeholder="openrouter/free">' +
         (needsKey
           ? '<label for="fKey">API Key</label><input id="fKey" type="password" autocomplete="off" spellcheck="false" value="" placeholder="' +
-            (f.hasStoredKey ? "stored — leave blank to keep" : "sk-…") + '">'
+            (f.hasStoredKey ? "stored - leave blank to keep" : "sk-…") + '">'
           : "") +
-        '<label for="fPath">Route</label><input id="fPath" value="' + esc(f.chatPath || "") + '" placeholder="auto — derived from Base URL">' +
+        '<label for="fPath">Route</label><input id="fPath" value="' + esc(f.chatPath || "") + '" placeholder="auto - derived from Base URL">' +
         '<label for="fTimeout">Timeout</label>' +
         '<div class="fsplit"><input id="fTimeout" type="number" min="1" max="600" step="1" value="' +
           esc(f.timeoutMs ? Math.round(f.timeoutMs / 1000) : "") + '" placeholder="30"><span class="unit">seconds</span></div>' +
         '<label for="fHttp2">HTTP/2</label>' +
         '<div class="fsplit"><input id="fHttp2" type="checkbox"' + (f.http2 ? " checked" : "") +
-          '><span class="unit">last resort — slows streaming badly</span></div>' +
+          '><span class="unit">last resort - slows streaming badly</span></div>' +
       "</div>" +
       (needsKey
         ? '<div class="hint2">Stored in VS Code SecretStorage. The YAML holds only a <code>${secret:…}</code> reference.</div>'
@@ -474,7 +474,7 @@ function _run() {
           esc(sv.serverInfo ? sv.serverInfo.name + " " + sv.serverInfo.version : sv.command) +
         "</span></span>" +
         '<span class="mono" style="font-size:10.5px">stdio · ' + esc(sv.approval) + "</span>" +
-        '<span class="mono">' + (ready ? sv.toolCount : "—") + "</span>" +
+        '<span class="mono">' + (ready ? sv.toolCount : "-") + "</span>" +
         '<span class="acts"><button class="mini" data-mcp="reconnect" data-name="' + esc(sv.name) +
           '" title="Reconnect">' + icon("i-refresh", "ic-13") + "</button></span>" +
         "</div>";
@@ -537,7 +537,7 @@ function _run() {
         ? '<div class="chips" style="margin-bottom:8px"><span class="chip">' + esc(a.transform) + "</span>" +
           '<span class="ok-mark">' + icon("i-check", "ic-11") + "sandboxed · no fs, no network</span></div>"
         : '<div class="empty" style="margin-bottom:8px">No transform module configured. ' +
-          "Set <code>transform:</code> in the profile YAML — required when <code>wire: raw</code>.</div>") +
+          "Set <code>transform:</code> in the profile YAML - required when <code>wire: raw</code>.</div>") +
       '<div class="pre">' + esc(TRANSFORM_SAMPLE) + "</div>" +
       (a.transform
         ? '<div class="row-actions"><button class="btn sm" data-act="openTransform">Open module</button></div>'
@@ -609,7 +609,7 @@ function _run() {
     var a = active();
     var html = "<h3>TLS &amp; mTLS</h3>" +
       '<div class="explainer">Requests go out on an undici dispatcher rather than Node&rsquo;s global fetch, so custom CAs and ' +
-      "client certificates apply inside the extension host — including through a CONNECT tunnel, where the TLS settings " +
+      "client certificates apply inside the extension host - including through a CONNECT tunnel, where the TLS settings " +
       "must be applied to the tunnelled origin rather than the proxy hop.</div>";
     if (!a) return html + '<div class="empty">No active profile.</div>';
 
@@ -660,12 +660,12 @@ function _run() {
             ["Client cert", p.tls.clientCert || "none"],
             ["Min version", p.tls.minVersion || "(default)"]]);
     }
-    var expires = (rung.detail.match(/Leaf expires (.+)$/) || [])[1] || "—";
+    var expires = (rung.detail.match(/Leaf expires (.+)$/) || [])[1] || "-";
     var rows = '<div class="tr3 head" style="font-size:10.5px;text-transform:uppercase;color:var(--vscode-descriptionForeground)">' +
       "<span>#</span><span>Subject</span><span>Expiry</span></div>";
     for (var i = 0; i < chain.length; i++) {
       var isRoot = i === chain.length - 1;
-      var expiry = i === 0 ? expires : isRoot ? "in trust store" : "—";
+      var expiry = i === 0 ? expires : isRoot ? "in trust store" : "-";
       var cls = S.tlsError && isRoot ? ' style="color:var(--vscode-editorError-foreground)"' : "";
       rows += '<div class="tr3"><span class="muted">' + (i + 1) + "</span>" +
         '<span class="ell" title="' + esc(chain[i]) + '">' + esc(chain[i]) + "</span>" +
@@ -685,7 +685,7 @@ function _run() {
     html += '<div class="grid-cards">' +
       card("Configuration", kv([
         ["Proxy URL", a.proxy.url || "(from environment)"],
-        ["No-proxy", a.proxy.noProxy.length ? a.proxy.noProxy.join(", ") : "—", true]
+        ["No-proxy", a.proxy.noProxy.length ? a.proxy.noProxy.join(", ") : "-", true]
       ])) +
       card("Behaviour",
         toggle("envProxy", "Use proxy from environment", "HTTPS_PROXY / HTTP_PROXY are honoured.", a.proxy.fromEnv, false, PROFILE_TIP) +
@@ -712,7 +712,7 @@ function _run() {
 
     html += '<div class="card">';
     if (!S.rungs.length && !S.tracing) {
-      html += '<div class="empty">No trace yet — run diagnostics to check the connection.</div>';
+      html += '<div class="empty">No trace yet - run diagnostics to check the connection.</div>';
     } else {
       for (var i = 0; i < S.rungs.length; i++) html += rungRow(S.rungs[i]);
       if (S.tracing) html += rungRow({ name: "", status: "pending", detail: "Running…", ms: 0 });
@@ -731,9 +731,9 @@ function _run() {
         " TLS failure at " + esc(S.tlsError.rung) + "</div>" +
         '<div class="err-line" style="margin-bottom:8px">' + esc(S.tlsError.message) + "</div>" +
         kv([["Endpoint", S.tlsError.endpoint],
-            ["Cert subject", S.tlsError.proxied ? "unavailable (tunnelled)" : (S.tlsError.certSubject || "—")],
-            ["Cert issuer", S.tlsError.proxied ? "unavailable (tunnelled)" : (S.tlsError.certIssuer || "—")],
-            ["TLS version", S.tlsError.proxied ? "—" : (S.tlsError.tlsVersion || "—")]]) +
+            ["Cert subject", S.tlsError.proxied ? "unavailable (tunnelled)" : (S.tlsError.certSubject || "-")],
+            ["Cert issuer", S.tlsError.proxied ? "unavailable (tunnelled)" : (S.tlsError.certIssuer || "-")],
+            ["TLS version", S.tlsError.proxied ? "-" : (S.tlsError.tlsVersion || "-")]]) +
         '<div class="row-actions">' +
           '<button class="btn" data-act="copyFix">' + flash("copyFix", "Copied", "Copy fix key") + "</button>" +
           '<button class="btn" data-act="systemTrust">Use system trust store</button>' +
@@ -751,7 +751,7 @@ function _run() {
     if (!S.rungs.length) body = '<span class="empty">Not run.</span>';
     else if (blocked) {
       var failing = S.rungs.filter(function (x) { return x.status === "fail"; })[0];
-      body = '<span class="err-line">blocked — ' +
+      body = '<span class="err-line">blocked - ' +
         esc(RUNG_LABELS[failing.name] || failing.name) + " failed</span>";
     } else if (r) {
       body = '<span class="' + (r.status === "warn" ? "warn-line" : "ok-mark") + '">' +
@@ -808,7 +808,7 @@ function _run() {
     var enabled = S.skills.filter(function (s) { return s.enabled; });
     var html = "<h3>Skills</h3>" +
       '<div class="explainer">Folders with a <code>SKILL.md</code> and YAML frontmatter. Only the one-line index enters the ' +
-      "system prompt — bodies load on demand, so forty skills cost the same as five until one is used.</div>";
+      "system prompt - bodies load on demand, so forty skills cost the same as five until one is used.</div>";
 
     if (!S.skills.length) {
       html += '<div class="empty">No skills found in ' + esc(S.config.skillsDirectory || ".agent/skills") + "</div>";
@@ -823,7 +823,7 @@ function _run() {
           '<span class="ell" style="font-weight:600;font-size:12px">' + esc(s.name) + "</span></button>" +
           '<span class="muted" style="font-size:11px">' + esc(s.source) + "</span>" +
           '<span class="muted ell" title="' + esc(s.description) + '">' + esc(s.description) + "</span>" +
-          '<span class="muted" style="font-size:11px">' + (s.files && s.files.length ? s.files.length + " files" : "—") + "</span>" +
+          '<span class="muted" style="font-size:11px">' + (s.files && s.files.length ? s.files.length + " files" : "-") + "</span>" +
           "</div>";
       }
       html += '<div class="tbl">' + rows + "</div>";
@@ -833,7 +833,7 @@ function _run() {
       ? "Skills available in this workspace. Each is a set of instructions you can read on demand.\n" +
         "When a task matches one, call read_skill with its name before starting work.\n" +
         enabled.map(function (s) { return "- " + s.name + ": " + s.description; }).join("\n")
-      : "(no skills enabled — nothing is injected)";
+      : "(no skills enabled - nothing is injected)";
 
     html += '<div class="block" style="margin-top:14px"><h4>Skill index preview</h4>' +
       '<div class="explainer">This exact text is what the model receives.</div>' +

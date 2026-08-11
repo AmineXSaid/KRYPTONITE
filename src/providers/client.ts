@@ -1,5 +1,5 @@
 // TRANSPORT RULE: every request in this file goes through the undici
-// Dispatcher from buildTransport(). Global fetch is never used — it ignores
+// Dispatcher from buildTransport(). Global fetch is never used - it ignores
 // NODE_EXTRA_CA_CERTS in some extension-host launch paths and has no client
 // certificate support at all, which is exactly what this extension exists for.
 
@@ -72,7 +72,7 @@ export interface TokenUsage {
 
 /** What one call to `complete()` cost, in wall-clock. */
 export interface TurnTimings {
-  /** Time to response headers — connect, TLS, auth, upload, model queue. */
+  /** Time to response headers - connect, TLS, auth, upload, model queue. */
   headersMs: number;
   /** Time to the first text token the UI could render. 0 if none arrived. */
   ttftMs: number;
@@ -99,7 +99,7 @@ export class EndpointError extends Error {
  * most self-hosted vLLM deployments publish the origin *with* `/v1` already on
  * it. Blindly appending `/v1/chat/completions` to the latter produces
  * `https://openrouter.ai/api/v1/v1/chat/completions` and a 404 that reads like
- * a credential problem — the single most common way a correct profile looks
+ * a credential problem - the single most common way a correct profile looks
  * broken. So the version segment is only added when the base lacks one.
  */
 export function defaultChatPath(baseUrl: string, wire: Wire): string {
@@ -197,7 +197,7 @@ export class EndpointClient {
         stream,
         // Ask for the final usage frame. An OpenAI-compatible gateway sends
         // token counts on a non-streaming reply unprompted, but on a stream it
-        // stays silent unless this is set — which left the panel with only a
+        // stays silent unless this is set - which left the panel with only a
         // character-count estimate for every streamed turn. Measured against
         // OpenRouter, that estimate read 5 tokens where the truth was 95,
         // because it cannot see the system prompt or the tool schemas.
@@ -317,8 +317,8 @@ export class EndpointClient {
     };
 
     // Reported before the throw, deliberately. A turn that fails is exactly
-    // when the timings are worth having — how long the endpoint took to reject
-    // us, and whether the socket was reused — and reporting after the throw
+    // when the timings are worth having - how long the endpoint took to reject
+    // us, and whether the socket was reused - and reporting after the throw
     // meant every failed turn silently produced no numbers at all.
     if (res.statusCode >= 400) {
       const text = await res.body.text();
@@ -396,7 +396,7 @@ export class EndpointClient {
    * handshake, the CONNECT tunnel, and the client certificate exchange.
    *
    * undici has no preconnect on `Agent`, so this is a throwaway request whose
-   * response we do not care about — a 404 or a 405 is a perfectly good outcome,
+   * response we do not care about - a 404 or a 405 is a perfectly good outcome,
    * because what we wanted was the socket.
    */
   async warmConnection(signal?: AbortSignal): Promise<void> {
@@ -426,8 +426,8 @@ export class EndpointClient {
    *
    * `max_tokens: 0` runs prefill and returns immediately with no content and
    * no output tokens billed, leaving a cache entry the real request reads. The
-   * breakpoint has to sit on the last block shared with that request — the
-   * system prompt — not on the placeholder turn.
+   * breakpoint has to sit on the last block shared with that request - the
+   * system prompt - not on the placeholder turn.
    */
   async warmCache(system: string, signal?: AbortSignal): Promise<void> {
     const caps = this.profile.capabilities;
@@ -469,7 +469,7 @@ export class EndpointClient {
 function withTailBreakpoint(msgs: any[], mark: object, on: boolean): any[] {
   if (!on || !msgs.length) return msgs;
   const last = msgs[msgs.length - 1];
-  // Never promote an empty string into a text block — the wire rejects those,
+  // Never promote an empty string into a text block - the wire rejects those,
   // and turning a tolerated shape into a 400 is not an optimisation.
   if (typeof last.content === "string" && !last.content.trim()) return msgs;
   const blocks: any[] = Array.isArray(last.content)
@@ -486,7 +486,7 @@ function withTailBreakpoint(msgs: any[], mark: object, on: boolean): any[] {
  * The wire expects every `tool_result` for a single assistant turn to arrive
  * together. Emitting one message each is harmless while the model only ever
  * makes one call at a time, but it trains a model that *can* call in parallel
- * to stop doing so — and each extra sequential call is a whole round trip.
+ * to stop doing so - and each extra sequential call is a whole round trip.
  */
 function packAnthropicMessages(msgs: Msg[]): any[] {
   const out: any[] = [];
@@ -632,7 +632,7 @@ function openAiStream() {
     //
     // The spec-shaped final frame carries `usage` with an empty `choices`, and
     // the old `if (!d)` guard handled that. OpenRouter instead attaches usage to
-    // the *last content frame*, which still has a delta — so the delta branch
+    // the *last content frame*, which still has a delta - so the delta branch
     // ran, returned, and the token counts were dropped on the floor for every
     // streamed turn. Reading it unconditionally covers both shapes.
     if (json.usage) {
@@ -659,7 +659,7 @@ function openAiStream() {
       yield { type: "text", text: d.content };
     }
     // Reasoning models stream their thinking on a separate field and only then
-    // — if the budget lasts — produce content. Dropping it meant a turn that
+    // - if the budget lasts - produce content. Dropping it meant a turn that
     // spent its whole budget reasoning rendered as an empty reply, and the
     // streaming probe reported "the model produced no visible output" against
     // a model that was working perfectly.
@@ -735,7 +735,7 @@ export function explainNetworkError(e: any, profile: EndpointProfile): EndpointE
   const map: Record<string, string> = {
     ENOTFOUND: `DNS could not resolve ${host}. If you're offline or on a split-horizon network, check your VPN.`,
     ECONNREFUSED: `${host} refused the connection. The port may be wrong or the service is down.`,
-    ETIMEDOUT: `${host} did not answer in time. A corporate proxy usually causes this — set proxy.url in the profile.`,
+    ETIMEDOUT: `${host} did not answer in time. A corporate proxy usually causes this - set proxy.url in the profile.`,
     UNABLE_TO_VERIFY_LEAF_SIGNATURE: `TLS verification failed for ${host}. Your proxy is re-signing traffic; add its root to tls.caBundle.`,
     SELF_SIGNED_CERT_IN_CHAIN: `The certificate chain for ${host} is self-signed. Add the signing root to tls.caBundle, or use "system".`,
     DEPTH_ZERO_SELF_SIGNED_CERT: `${host} presented a self-signed certificate. Add it to tls.caBundle.`,

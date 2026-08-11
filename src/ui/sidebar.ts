@@ -8,7 +8,7 @@ import { sidebarHtml, webviewOptions } from "./shell";
  *
  * The provider is a thin conduit: it hands the webview its HTML, registers a
  * sink so `App` can push to it, and forwards inbound messages. It deliberately
- * holds no conversation state — a turn survives the view being hidden,
+ * holds no conversation state - a turn survives the view being hidden,
  * reloaded, or disposed, and the frontend re-hydrates from `stateSync` plus the
  * replay buffer when it comes back.
  */

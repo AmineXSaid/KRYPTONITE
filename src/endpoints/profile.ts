@@ -27,7 +27,7 @@ export interface AuthSpec {
     /** how the resulting token is attached to the model request */
     attachAs?: { header: string; template?: string };
   };
-  /** kind: exec — command printing the token to stdout */
+  /** kind: exec - command printing the token to stdout */
   exec?: { command: string; args?: string[]; ttlSeconds?: number; header?: string; template?: string };
 }
 
@@ -71,8 +71,8 @@ export interface Capabilities {
    * How this endpoint caches the stable head of a prompt.
    *
    * "anthropic" emits `cache_control` breakpoints on the system block and the
-   * tail of the conversation. "prefix" sends nothing — the gateway caches
-   * automatically — but the loop still keeps the prefix byte-stable so that
+   * tail of the conversation. "prefix" sends nothing - the gateway caches
+   * automatically - but the loop still keeps the prefix byte-stable so that
    * caching can hit. "none" disables both, and is the default: these are
    * arbitrary enterprise gateways and an unknown field is a 400 on some of
    * them, so caching is opt-in per profile rather than assumed.
@@ -107,7 +107,7 @@ export interface EndpointProfile {
    * Negotiate HTTP/2 with the origin.
    *
    * A last resort, and measured rather than assumed. Against NVIDIA NIM it does
-   * fix the non-streaming POST that stalls over HTTP/1.1 — but the same switch
+   * fix the non-streaming POST that stalls over HTTP/1.1 - but the same switch
    * took a streaming completion from under a second to just over five minutes,
    * because undici's h2 support is experimental and its streaming path is where
    * that shows. Since the agent streams, enabling this usually trades a fast
@@ -167,7 +167,7 @@ export function loadProfile(file: string): EndpointProfile {
     throw new ProfileError(`Missing required field(s): ${missing.join(", ")}`, file);
   }
   if (!["openai", "anthropic", "raw"].includes(doc.wire)) {
-    throw new ProfileError(`wire must be openai, anthropic, or raw — got "${doc.wire}"`, file);
+    throw new ProfileError(`wire must be openai, anthropic, or raw - got "${doc.wire}"`, file);
   }
   if (doc.wire === "raw" && !doc.transform) {
     throw new ProfileError("wire: raw requires a transform module.", file);

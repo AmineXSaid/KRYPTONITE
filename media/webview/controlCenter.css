@@ -2,7 +2,7 @@
    KRYPTONITE Control Center.
 
    Same token discipline as the sidebar: --vscode-* for everything structural,
-   three brand accents with one job each. The difference is width — this
+   three brand accents with one job each. The difference is width - this
    surface can be a full editor column or a narrow split, so every table uses
    minmax(0, …) tracks and every card grid is auto-fit. Nothing here may push a
    horizontal scrollbar onto the pane.

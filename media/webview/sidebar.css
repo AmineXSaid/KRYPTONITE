@@ -1,4 +1,4 @@
-﻿/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
    KRYPTONITE sidebar.
 
    The panel owns its palette. It used to draw every structural colour from the
@@ -881,6 +881,22 @@ li.doing .cbx { border-color: var(--kx-accent); }
 .mcp-head {
   display: flex; align-items: center; gap: 8px; padding: 12px 16px 10px; flex: none;
 }
+/* ── syntax highlighting ──
+   Drawn from the doorway palette, and assigned by how much each token needs to
+   be found rather than by tradition. Strings and comments are the two things
+   the eye scans for in an excerpt, so they take the wall and the stone; the
+   keywords that give code its shape take the frame. Punctuation is dimmed
+   rather than coloured - colouring every brace is how highlighting turns into
+   noise. */
+.tk-st { color: var(--kx-accent); }                 /* strings: the turquoise wall */
+.tk-cm { color: var(--kx-fg-4); font-style: italic; } /* comments: stone, receding */
+.tk-kw { color: var(--kx-active); font-weight: 600; } /* keywords: the pink frame */
+.tk-ty { color: var(--kx-mcp); }                    /* types and tags: teal */
+.tk-fn { color: var(--kx-link); }                   /* calls: the blue door */
+.tk-nu { color: var(--kx-info); }                   /* numbers: measurement */
+.tk-at { color: var(--kx-warn); }                   /* keys, attributes, decorators */
+.tk-pu { color: var(--kx-fg-3); }                   /* punctuation stays quiet */
+
 /* Acknowledges a message taken mid-turn. Without it the composer clears and
    nothing visibly happens, which reads as the message having been lost. */
 .queued-note {
@@ -914,7 +930,7 @@ li.doing .cbx { border-color: var(--kx-accent); }
 }
 @keyframes kxsweep { to { left: 100%; } }
 
-/* What Load found: a count, or why it could not be read. Informational — a
+/* What Load found: a count, or why it could not be read. Informational - a
    gateway with no /models route is normal, not a fault. */
 .f-hint {
   display: flex; align-items: center; gap: 7px;

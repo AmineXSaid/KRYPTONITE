@@ -159,7 +159,7 @@ export class SessionController {
     //
     // This used to keep `image/*` and drop everything else on the floor: a
     // .txt, .md, .json or .log went through the picker, showed a pill in the
-    // composer, and then never reached the model at all. Silently — the send
+    // composer, and then never reached the model at all. Silently - the send
     // looked like it worked.
     //
     // Text-bearing files are now inlined as fenced blocks, which is the only
@@ -178,7 +178,7 @@ export class SessionController {
     for (const a of textual) {
       const decoded = decodeTextAttachment(a.data);
       if (decoded === undefined) {
-        notes.push(`${a.name} was not attached — it is not a text file (${a.mediaType}).`);
+        notes.push(`${a.name} was not attached - it is not a text file (${a.mediaType}).`);
         continue;
       }
       // A very large paste would evict the conversation from the window on the
@@ -191,7 +191,7 @@ export class SessionController {
 
     if (images.length && !vision) {
       notes.push(
-        `${images.length} image(s) were not attached — ${profile.name} does not declare vision. ` +
+        `${images.length} image(s) were not attached - ${profile.name} does not declare vision. ` +
           `Set capabilities.vision: true in the profile if the gateway supports it.`
       );
     }
@@ -222,7 +222,7 @@ export class SessionController {
     const turnId = crypto.randomUUID();
     const touched = new Set<string>();
 
-    // Snapshot so a reject has somewhere to restore from — but do not wait for
+    // Snapshot so a reject has somewhere to restore from - but do not wait for
     // it here. `git add -A` plus a commit over the whole workspace used to sit
     // between the user's Enter key and the request going out. It only has to
     // have finished before the first tool changes a file, which `ctx.approve`
@@ -331,7 +331,7 @@ export class SessionController {
           }
           case "steer": {
             // Rendered as a user turn in the transcript, because that is
-            // exactly what it is — the reply after it was written knowing it.
+            // exactly what it is - the reply after it was written knowing it.
             const out: ReplayableEvent = { type: "steerAccepted", text: ev.text ?? "" };
             this.buffer(out);
             this.app.broadcast(out);
@@ -511,7 +511,7 @@ export class SessionController {
    * Adopt the conversation this workspace was last using.
    *
    * Without this every extension-host restart minted a fresh id, so a window
-   * reload silently split one conversation into two files — and reloading is
+   * reload silently split one conversation into two files - and reloading is
    * exactly what someone does after installing a new build.
    */
   restore(): void {
@@ -539,7 +539,7 @@ export class SessionController {
    *
    * This used to ask the model, after the first exchange, in a separate request.
    * Three things were wrong with that. It spent a request and tokens on a string
-   * decided once — visible on a rate-limited endpoint, where it was the call that
+   * decided once - visible on a rate-limited endpoint, where it was the call that
    * tipped into 429. It arrived late, so the title appeared and then rewrote
    * itself under the reader. And it could fail, leaving "Untitled 3" on a
    * conversation that plainly had a subject.
@@ -554,7 +554,7 @@ export class SessionController {
 
     // `titleFrom` is the existing helper the store has always used for this:
     // first user turn, whitespace collapsed, capped. Deliberately NOT
-    // `sanitizeTitle`, which is tuned for model output — it strips a leading
+    // `sanitizeTitle`, which is tuned for model output - it strips a leading
     // "ok" or "so" (wrong for a person's own words) and rejects anything under
     // three characters, which would turn "Hi" into "Untitled".
     const title = titleFrom(this.history);
@@ -615,7 +615,7 @@ export class SessionController {
   }
 
   newChat(): void {
-    // Pressing New chat on an untouched conversation keeps the id — rotating it
+    // Pressing New chat on an untouched conversation keeps the id - rotating it
     // would orphan nothing and only churn the history list. The announcement
     // still fires either way, so the UI resets regardless.
     //
@@ -667,7 +667,7 @@ export class SessionController {
  * Split a plan reply into prose and steps.
  *
  * The fenced ```plan block is the contract from PLAN_ADDENDUM. A model that
- * ignores it produces no steps, and the whole reply falls through as prose —
+ * ignores it produces no steps, and the whole reply falls through as prose -
  * degraded, but never lost.
  */
 export function extractPlan(raw: string): { body: string; steps: string[] } {

@@ -10,7 +10,7 @@ import type { SessionMetaDto } from "../ui/protocol";
  * Session transcripts on disk.
  *
  * Files live under `<globalStorage>/sessions/<workspaceKey>/<id>.json`, never
- * inside the workspace — a corporate repo should not accumulate chat logs that
+ * inside the workspace - a corporate repo should not accumulate chat logs that
  * someone then has to explain in review. The workspace key is a short md5 of
  * the root path, which keeps directory names flat and free of separators
  * while still partitioning one machine's workspaces from each other.
@@ -68,7 +68,7 @@ export function isUntitled(title: string): boolean {
 export function sanitizeTitle(raw: string, fallback: string): string {
   let t = String(raw ?? "").split("\n").map((l) => l.trim()).filter(Boolean)[0] ?? "";
 
-  // "Sure! Here's a title: "PCAP trace analyser"" — small models stack several
+  // "Sure! Here's a title: "PCAP trace analyser"" - small models stack several
   // layers of preamble, so drop through the last colon whenever everything
   // before it reads like chat rather than like a title. Bounded to the first
   // 44 characters so a real title containing a colon survives.
@@ -113,7 +113,7 @@ export class SessionStore {
    * Everything the history popover and `nextUntitled` need, held in memory.
    *
    * Both used to read and JSON.parse every transcript on disk, and `list` runs
-   * on every save — which is the first thing that happens when a user sends a
+   * on every save - which is the first thing that happens when a user sends a
    * message. On a workspace with a few long conversations that was megabytes
    * of synchronous parsing between the Enter key and the request going out.
    */
@@ -188,7 +188,7 @@ export class SessionStore {
 
   load(id: string): StoredSession | undefined {
     // A transcript whose write is still in flight must read back as the
-    // version we hold, not as whatever is currently on disk — switching
+    // version we hold, not as whatever is currently on disk - switching
     // sessions immediately after sending a message would otherwise lose the
     // message that had just been recorded.
     const inflight = this.pending.get(id);
@@ -224,7 +224,7 @@ export class SessionStore {
   }
 
   /**
-   * Write the transcript. Empty sessions are never persisted — otherwise every
+   * Write the transcript. Empty sessions are never persisted - otherwise every
    * window open would leave an "Untitled" entry in the history popover.
    *
    * This is called as soon as the user's message is recorded rather than only

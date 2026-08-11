@@ -112,7 +112,7 @@ export class ShadowRepo {
 
   // CHANGED: added. Restores one file to its state at `from`, leaving every
   // other change in the turn intact. Throws when the path did not exist at
-  // `from` — the caller treats that as "the agent created it" and deletes it.
+  // `from` - the caller treats that as "the agent created it" and deletes it.
   async restoreFile(from: string, relPath: string): Promise<void> {
     await this.init();
     await this.run(["checkout", from, "--", relPath]);

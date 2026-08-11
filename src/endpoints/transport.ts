@@ -18,7 +18,7 @@ import type { EndpointProfile, TlsSpec, ProxySpec } from "./profile";
  *
  * undici's default `keepAliveTimeout` is 4 seconds. A chat turn is separated
  * from the next one by however long a person takes to read a reply and type,
- * which is never 4 seconds — so every turn was paying a fresh TCP connect, TLS
+ * which is never 4 seconds - so every turn was paying a fresh TCP connect, TLS
  * handshake, and on these endpoints also a CONNECT tunnel and an mTLS client
  * certificate exchange. Holding idle sockets for a minute is the single
  * largest recurring saving available to time-to-first-token here.
@@ -80,7 +80,7 @@ export function clearSecureContexts(): void {
 }
 
 /**
- * A one-way digest of the key material, never the material itself — this value
+ * A one-way digest of the key material, never the material itself - this value
  * is only ever a Map key, and must not be logged or surfaced.
  */
 function materialDigest(m: TlsMaterial): string {
@@ -97,7 +97,7 @@ function materialDigest(m: TlsMaterial): string {
 /**
  * `caOnly` builds a context that can verify the peer but carries no client
  * identity. The CONNECT hop uses it so the origin's client certificate is
- * never offered to the proxy — a proxy that asks for one should not be handed
+ * never offered to the proxy - a proxy that asks for one should not be handed
  * the credential that authenticates us to the model endpoint.
  */
 function secureContextFor(m: TlsMaterial, caOnly = false): tls.SecureContext {
@@ -230,8 +230,8 @@ function proxyUrlFor(target: string, spec: ProxySpec | undefined): string | unde
  * Which proxy this profile would tunnel through, without building anything.
  *
  * The diagnostics ladder only wants to report the answer. Building a whole
- * dispatcher to read one field left an Agent — and, now that idle sockets are
- * held for a minute, real connections — alive with nothing to close it.
+ * dispatcher to read one field left an Agent - and, now that idle sockets are
+ * held for a minute, real connections - alive with nothing to close it.
  */
 export function resolveProxy(profile: EndpointProfile): string | undefined {
   return proxyUrlFor(profile.baseUrl, profile.proxy);
@@ -295,14 +295,14 @@ export function buildTransport(profile: EndpointProfile): BuiltTransport {
       token: profile.proxy?.auth
         ? "Basic " + Buffer.from(profile.proxy.auth).toString("base64")
         : undefined,
-      // Applies to the CONNECT hop. CA only, no client identity — unchanged
+      // Applies to the CONNECT hop. CA only, no client identity - unchanged
       // from before, just pre-parsed.
       proxyTls: {
         secureContext: secureContextFor(material, true),
         rejectUnauthorized: material.rejectUnauthorized,
         ...SOCKET_EXTRAS,
       } as any,
-      // Applies to the tunnelled origin — this is the one every other
+      // Applies to the tunnelled origin - this is the one every other
       // extension forgets, which is why mTLS-behind-proxy never works.
       requestTls: originTls as any,
       // ProxyAgent replaces `connect` with its own tunnel connector, so the

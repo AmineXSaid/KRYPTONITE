@@ -1,5 +1,5 @@
 // TRANSPORT RULE: the ladder's model probes go through the undici Dispatcher.
-// node:tls is used here for one thing only — reading the peer certificate of a
+// node:tls is used here for one thing only - reading the peer certificate of a
 // DIRECT connection so the TLS error card can name the issuer. It never
 // carries request traffic.
 
@@ -11,7 +11,7 @@ import type { RungDto, TlsErrorDto } from "../ui/protocol";
 
 /**
  * Ladder rung name to the short label the design shows. The mockup's separate
- * "Proxy" rung does not exist — proxy information lives inside the TCP rung's
+ * "Proxy" rung does not exist - proxy information lives inside the TCP rung's
  * detail, which is where buildTransport() reports it.
  */
 export const RUNG_LABELS: Record<string, string> = {

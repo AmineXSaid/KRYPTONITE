@@ -115,8 +115,8 @@ const REAL_CONFIG_KEYS = new Set([
  * The single owner of extension state.
  *
  * Both webviews are thin: they render what App sends and post intent back.
- * Everything that survives a reload — profiles, skills, phase, trace results,
- * the client pool, the running turn — lives here.
+ * Everything that survives a reload - profiles, skills, phase, trace results,
+ * the client pool, the running turn - lives here.
  */
 export class App {
   readonly output: vscode.OutputChannel;
@@ -232,7 +232,7 @@ export class App {
    * Profiles and skills are watched separately on purpose.
    *
    * A profile edit can change TLS material, auth, or the proxy, so it has to
-   * tear the transport down. A skill edit cannot change any of those — and
+   * tear the transport down. A skill edit cannot change any of those - and
    * folding both into one watcher meant saving a SKILL.md mid-conversation
    * destroyed the connection pool and made the next turn pay a full handshake.
    */
@@ -380,7 +380,7 @@ export class App {
       ? loadSkills(bundledDir)
       : { skills: [] as Skill[], warnings: [] as string[] };
 
-    // Workspace wins name collisions — a repo's own version of a skill is the
+    // Workspace wins name collisions - a repo's own version of a skill is the
     // one its authors intended.
     const merged = new Map<string, Skill>();
     for (const s of bundled.skills) merged.set(s.name, s);
@@ -419,7 +419,7 @@ export class App {
    *
    * The engine's interpolation is synchronous, so the values must be resolved
    * ahead of time. A missing secret resolves to "" and lets applyAuth throw its
-   * own actionable error — pre-validating here would only duplicate it worse.
+   * own actionable error - pre-validating here would only duplicate it worse.
    */
   private async primeSecrets(): Promise<void> {
     this.secretCache.clear();
@@ -472,7 +472,7 @@ export class App {
       // it climbs by one every turn, something is tearing the pool down.
       this.log(
         "info",
-        `Turn timing — headers ${Math.round(t.headersMs)}ms, TTFT ${
+        `Turn timing - headers ${Math.round(t.headersMs)}ms, TTFT ${
           t.ttftMs ? Math.round(t.ttftMs) + "ms" : "n/a"
         }, TPOT ${Number.isFinite(t.tpotMs) ? t.tpotMs.toFixed(1) + "ms" : "n/a"}, total ${Math.round(
           t.totalMs
@@ -488,7 +488,7 @@ export class App {
    *
    * Everything expensive about the first request of a session is knowable in
    * advance: the socket, the token, and the cacheable head of the prompt. This
-   * is debounced and entirely best-effort — a failure here must never surface,
+   * is debounced and entirely best-effort - a failure here must never surface,
    * because the real request will report it properly a moment later.
    */
   warmPath(): void {
@@ -517,7 +517,7 @@ export class App {
    * The exact stable head of the prompt the next turn will send.
    *
    * Shared with the agent loop so the pre-warmed cache entry and the real
-   * request are byte-identical — a prefix that differs by one character caches
+   * request are byte-identical - a prefix that differs by one character caches
    * nothing.
    */
   systemPrompt(phase: Phase = this.phase): string {
@@ -683,8 +683,8 @@ export class App {
       id: e.file ? path.basename(e.file) : "unknown.yaml",
       description: "",
       wire: "openai",
-      model: "—",
-      baseUrl: "—",
+      model: "-",
+      baseUrl: "-",
       chatPath: null,
       status: "error",
       error: e.message,
@@ -779,7 +779,7 @@ export class App {
     const active = this.activeProfile();
     this.status.text = `$(plug) KRYPTONITE: ${dto.label}`;
     this.status.tooltip = active
-      ? `${active.name} — ${active.wire} · ${active.model} · ${active.baseUrl}`
+      ? `${active.name} - ${active.wire} · ${active.model} · ${active.baseUrl}`
       : "Create an endpoint profile to get started.";
     this.status.backgroundColor =
       dto.state === "error" ? new vscode.ThemeColor("statusBarItem.errorBackground") : undefined;
@@ -866,14 +866,14 @@ export class App {
    *
    * Nothing here touches disk or `this.profiles`: a check that half-saved on
    * failure would leave a broken profile behind every time someone got a URL
-   * wrong. When no key was typed but one is already stored — the edit case —
+   * wrong. When no key was typed but one is already stored - the edit case -
    * the stored value is used so "Check" works without re-pasting.
    */
   /**
    * Ask the gateway in the draft form which models it serves.
    *
-   * Reads the key the same way the check does — from the form if one was just
-   * typed, otherwise from SecretStorage — so listing works both while editing
+   * Reads the key the same way the check does - from the form if one was just
+   * typed, otherwise from SecretStorage - so listing works both while editing
    * an existing endpoint and while creating one.
    */
   private async listModelsFor(form: EndpointForm, source: Surface): Promise<void> {
@@ -974,7 +974,7 @@ export class App {
         this.phase = "act";
         this.broadcast({ type: "phaseChanged", phase: "act" });
         this.updateStatus();
-        await this.session.send("Approved — run the plan.");
+        await this.session.send("Approved - run the plan.");
         return;
 
       case "resolvePermission":
@@ -1054,7 +1054,7 @@ export class App {
           }
         }
         const { file, removed } = saveEndpointFile(this.profileDir(), form, this.profiles);
-        if (removed) this.log("info", `Renamed profile — removed ${path.basename(removed)}.`);
+        if (removed) this.log("info", `Renamed profile - removed ${path.basename(removed)}.`);
         this.log("info", `Saved endpoint ${form.id} to ${path.basename(file)}.`);
         clearAuthCache();
         await this.reload("endpoint saved");
@@ -1215,7 +1215,7 @@ export class App {
    * Candidates for an `@` mention: files and folders.
    *
    * `findFiles` cannot return directories, so folders are derived from the
-   * paths of the files inside them — which also means a folder only appears
+   * paths of the files inside them - which also means a folder only appears
    * when it actually holds something the picker would offer. Folders are listed
    * first: mentioning `src/agent` is a coarser, more common intent than
    * reaching for one file in it, and it is the harder thing to type.
@@ -1235,7 +1235,7 @@ export class App {
     );
     const rels = files.map((u) => path.relative(root, u.fsPath).split(path.sep).join("/"));
 
-    // Every ancestor directory of every hit, plus — when there is a query —
+    // Every ancestor directory of every hit, plus - when there is a query -
     // directories whose own name matches even if no child matched the text.
     const dirs = new Set<string>();
     const q = query.toLowerCase();

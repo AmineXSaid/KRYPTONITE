@@ -28,7 +28,7 @@ export interface ToolContext {
    * the offline test harness keep working with no MCP at all.
    *
    * Typed structurally rather than importing McpRegistry, to keep this module
-   * free of the mcp/ dependency — tools.ts is the one file both the agent loop
+   * free of the mcp/ dependency - tools.ts is the one file both the agent loop
    * and the harness import.
    */
   mcp?: {
@@ -181,7 +181,7 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
   try {
     // MCP tools are namespaced (`mcp__<server>__<tool>`) so they can never
     // collide with a built-in, and are dispatched before the switch. A server
-    // set to approval: ask goes through the same gate as a shell command —
+    // set to approval: ask goes through the same gate as a shell command -
     // an MCP tool is a side effect in a process this extension started, and
     // "someone else wrote the server" is not a reason to trust it more.
     if (ctx.mcp?.has(name)) {
@@ -327,8 +327,8 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
         // straight to read_file without guessing at the layout.
         const rel = path.relative(ctx.root, skill.dir).split(path.sep).join("/");
 
-        // Bounded. The bundled `claude-api` SKILL.md is 72,000 characters —
-        // roughly 20k tokens — and returning it whole did two kinds of damage:
+        // Bounded. The bundled `claude-api` SKILL.md is 72,000 characters -
+        // roughly 20k tokens - and returning it whole did two kinds of damage:
         // it consumed most of a small model's context in one tool call, and it
         // put a wall of documentation in the transcript. The loader already
         // warns when a SKILL.md is this large; handing it over intact anyway
@@ -355,7 +355,7 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
         return { content: body + cut + extras };
       }
 
-      // CHANGED: added. No approval gate — this touches no files and runs no
+      // CHANGED: added. No approval gate - this touches no files and runs no
       // commands, so prompting for it would train the user to click through.
       case "update_todos": {
         const todos = normaliseTodos(args?.todos);

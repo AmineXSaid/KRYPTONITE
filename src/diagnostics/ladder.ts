@@ -99,11 +99,11 @@ export async function runLadder(
     inspector
       ? ` ${inspector} is terminating TLS on this machine and is the most likely cause: ` +
         `inspection proxies routinely hold a response until it is complete, which stalls ` +
-        `long POSTs and SSE while leaving short GETs — curl's usual test — working. ` +
+        `long POSTs and SSE while leaving short GETs - curl's usual test - working. ` +
         `Add ${url.hostname} to its HTTPS-scanning exclusions and check again.`
       : "";
 
-  // 1. Local material — fails fast and offline, before touching the network.
+  // 1. Local material - fails fast and offline, before touching the network.
   {
     const [mat, err, ms] = await timed(async () => buildTlsMaterial(profile.tls));
     if (err) {
@@ -155,7 +155,7 @@ export async function runLadder(
       push({
         name: "TCP",
         status: "fail",
-        detail: `Could not open a socket to ${target.hostname}:${tPort} — ${(err as Error).message}.`,
+        detail: `Could not open a socket to ${target.hostname}:${tPort} - ${(err as Error).message}.`,
         fix: transport.proxy
           ? "The proxy itself is unreachable. Check proxy.url and HTTPS_PROXY."
           : "A firewall is likely blocking the port, or you need a proxy. Set proxy.url.",
@@ -172,7 +172,7 @@ export async function runLadder(
     });
   }
 
-  // 4. TLS — direct only. Reports the chain so you can see which root signed it.
+  // 4. TLS - direct only. Reports the chain so you can see which root signed it.
   if (url.protocol === "https:") {
     const mat = buildTlsMaterial(profile.tls);
     const viaProxy = buildTransport(profile).proxy;
@@ -272,7 +272,7 @@ export async function runLadder(
     // Bound this probe well below profile.timeoutMs.
     //
     // The gateways described below do not answer this shape slowly, they hang
-    // on it — so waiting out a 120s production timeout spends two minutes to
+    // on it - so waiting out a 120s production timeout spends two minutes to
     // learn something the streaming fallback answers in half a second, with
     // the panel showing nothing but "Running…" the whole time. The signal
     // aborts the request rather than abandoning it to finish in the dark.
@@ -294,7 +294,7 @@ export async function runLadder(
       } catch (e: any) {
         // Reported as a TIMEOUT so the fix text below matches on it.
         if (bail.signal.aborted) {
-          throw new Error(`TIMEOUT — no reply to a non-streaming request within ${PROBE_MS}ms`);
+          throw new Error(`TIMEOUT - no reply to a non-streaming request within ${PROBE_MS}ms`);
         }
         throw e;
       } finally {
@@ -308,7 +308,7 @@ export async function runLadder(
       //
       // NVIDIA NIM (integrate.api.nvidia.com) answers GET and answers a
       // streaming POST in under half a second, but hangs forever on a
-      // non-streaming POST over HTTP/1.1 — it only replies to that shape over
+      // non-streaming POST over HTTP/1.1 - it only replies to that shape over
       // HTTP/2. Condemning the profile there tells the user their gateway is
       // unreachable while the agent, which streams, would have worked fine. So
       // before failing, ask the same question the way the agent actually asks
@@ -351,7 +351,7 @@ export async function runLadder(
         // timeout and the real reason never reached the user at all.
         if (serr) {
           const s: any = serr;
-          streamErr = [s.message, s.detail].filter(Boolean).join(" — ").slice(0, 400);
+          streamErr = [s.message, s.detail].filter(Boolean).join(" - ").slice(0, 400);
         }
       }
 
@@ -363,7 +363,7 @@ export async function runLadder(
             `This gateway did not answer a non-streaming request (${e.message}), ` +
             `but answered the same request when streaming, in ${streamMs}ms.`,
           fix:
-            "Usable as-is — the agent streams by default, so keep capabilities.streaming: true. " +
+            "Usable as-is - the agent streams by default, so keep capabilities.streaming: true. " +
             "Non-streaming calls (conversation naming) will be slow or fail on this endpoint. " +
             "Raising the timeout usually fixes it; http2: true makes the non-streaming shape " +
             "work on some gateways but measurably degrades streaming, so try the timeout first.",
@@ -385,12 +385,12 @@ export async function runLadder(
               ? "The credential was rejected. Check scopes, audience, and whether the token has expired."
               : e.status === 404
               ? // A 404 from a chat endpoint is more often the model than the
-                // route. Gateways that aggregate models — NVIDIA NIM, OpenRouter —
+                // route. Gateways that aggregate models - NVIDIA NIM, OpenRouter -
                 // list ids in /v1/models that they will not actually serve, so a
                 // name copied from that list 404s while the path is perfectly
                 // fine. Sending people to edit chatPath first cost real time.
                 `The route resolved but returned 404. Check the model id ("${profile.model}") ` +
-                "against what the gateway actually serves — an id can be listed and still not " +
+                "against what the gateway actually serves - an id can be listed and still not " +
                 "be servable. If the model is right, set chatPath explicitly; some gateways " +
                 "prefix their routes."
               : e.status === 400
@@ -433,7 +433,7 @@ export async function runLadder(
     });
     if (err) {
       // A timeout here is a slow endpoint, not a broken one. Telling the user
-      // to turn streaming off would trade the fast path for the slow one — on
+      // to turn streaming off would trade the fast path for the slow one - on
       // gateways like NVIDIA NIM the non-streaming shape is the one that
       // stalls, so that advice makes the profile worse.
       const timedOut = /TIMEOUT|timeout/i.test(String((err as any).message));
@@ -444,7 +444,7 @@ export async function runLadder(
         fix: timedOut
           ? `The stream did not finish within ${profile.timeoutMs}ms.` +
             inspectorNote() +
-            " Otherwise the endpoint is slow rather than unreachable — raise the timeout. Only set " +
+            " Otherwise the endpoint is slow rather than unreachable - raise the timeout. Only set " +
             "capabilities.streaming: false if it still fails with a generous budget."
           : "Set capabilities.streaming: false to fall back to whole responses.",
         ms,
@@ -452,14 +452,14 @@ export async function runLadder(
     } else if ((chunks ?? 0) === 0) {
       // Zero is not one. A single chunk means something buffered the stream;
       // zero means the transport worked and the model sent no visible text at
-      // all — a reasoning model spending its budget before answering, or a
+      // all - a reasoning model spending its budget before answering, or a
       // router that picked one. Blaming the proxy here sends the user to
       // inspect a network that is fine.
       push({
         name: "Streaming",
         status: "warn",
         detail:
-          "The stream opened and closed without any text. The transport is fine — the model produced no visible output.",
+          "The stream opened and closed without any text. The transport is fine - the model produced no visible output.",
         fix:
           "Usually a reasoning model with too small a token budget, or an auto-router that picked one. " +
           "Try a specific model id, or raise capabilities.maxOutputTokens.",
@@ -511,7 +511,7 @@ export async function runLadder(
         detail: String((err as any).message),
         fix: timedOut
           ? `Nothing finished within ${profile.timeoutMs}ms. A tool call is the largest request the ` +
-            "ladder makes, so a tight timeout kills it first — raise it and check again." +
+            "ladder makes, so a tight timeout kills it first - raise it and check again." +
             inspectorNote()
           : "Set capabilities.tools: false. The agent will fall back to a text protocol for tools.",
         ms,

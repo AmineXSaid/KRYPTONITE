@@ -21,7 +21,7 @@ When you are finished, say what changed and what the user should verify.`;
 
 // CHANGED: added. The tools that cannot alter the workspace. In plan phase the
 // tool set is filtered to these, so a plan is researched rather than executed.
-// update_todos is included deliberately — it writes no files, and a plan that
+// update_todos is included deliberately - it writes no files, and a plan that
 // can track its own steps is more useful than one that cannot.
 export const READ_ONLY = new Set([
   "read_file",
@@ -38,23 +38,23 @@ export const READ_ONLY = new Set([
 // Plan is deliberately a *product* mode, not a dry-run of Act. Its previous
 // wording ("name the files you will touch") made it a worse Act: the model
 // wrote the implementation in prose, the user read a wall of code they could
-// not run, and the actual design questions — who is this for, what does it
-// look like, what is deliberately left out — never got asked. Shaping comes
+// not run, and the actual design questions - who is this for, what does it
+// look like, what is deliberately left out - never got asked. Shaping comes
 // first; the file list is what Act is for.
 export const PLAN_ADDENDUM = `You are in PLAN mode: a product designer, not an implementer.
 
 Think about what should exist and why. Cover, in your own words and only where they apply:
-- The user and the problem — who hits this, what it costs them today.
-- The shape of the thing — what it looks like, what the main surfaces are, how someone moves through it.
-- The experience — what feels good, what the tone is, what the first thirty seconds are like.
-- Tradeoffs and scope — what you would deliberately leave out of a first version, and why.
-- Risks and open questions — what could sink this, what you would want to find out first.
+- The user and the problem - who hits this, what it costs them today.
+- The shape of the thing - what it looks like, what the main surfaces are, how someone moves through it.
+- The experience - what feels good, what the tone is, what the first thirty seconds are like.
+- Tradeoffs and scope - what you would deliberately leave out of a first version, and why.
+- Risks and open questions - what could sink this, what you would want to find out first.
 
 Be opinionated and concrete. Name things. Describe screens, flows, states and copy. Sketch with words, tables and ASCII layouts. Where a decision could reasonably go two ways, pick one and say why.
 
 Hard rules for this mode:
 - Do NOT write implementation code, config files, schemas, dependency lists, CLI commands, or file trees.
-- A short illustrative snippet is fine ONLY when it is the clearest way to show a shape — an interface sketch, an example payload, a sample of user-facing copy. Never a working implementation.
+- A short illustrative snippet is fine ONLY when it is the clearest way to show a shape - an interface sketch, an example payload, a sample of user-facing copy. Never a working implementation.
 - File-changing tools and shell commands are unavailable. You may read the workspace to ground yourself in what already exists.
 - If the user asks for code, config, or a build in this mode, give them the design answer, then say plainly: switch to Act mode and say "continue" and you will build it.
 
@@ -63,12 +63,12 @@ End your reply with a fenced block exactly like:
 1. First step
 2. Second step
 \`\`\`
-Those steps are the build order for Act — outcomes, not keystrokes. "Ship the capture screen with a live packet list" beats "create src/capture.ts".`;
+Those steps are the build order for Act - outcomes, not keystrokes. "Ship the capture screen with a live packet list" beats "create src/capture.ts".`;
 
 /**
  * Recover a tool call a model emitted as plain text.
  *
- * Small instruct models — `llama-3.2-3b`, most 7B-and-under chat tunes — accept
+ * Small instruct models - `llama-3.2-3b`, most 7B-and-under chat tunes - accept
  * a `tools` array and then answer with the JSON *as prose* instead of filling in
  * `tool_calls`. Nothing consumed that, so the raw object went straight into the
  * transcript and the product looked broken:
@@ -86,7 +86,7 @@ Those steps are the build order for Act — outcomes, not keystrokes. "Ship the 
  *   {"tool":N,"input":A} / {"tool_name":N,"tool_input":A}     Anthropic-ish
  * optionally wrapped in a ```json fence, and preceded by junk the model leaked.
  *
- * Returns `undefined` unless the text is *essentially nothing but* the call —
+ * Returns `undefined` unless the text is *essentially nothing but* the call -
  * a reply that merely mentions JSON must never be swallowed. `known` gates it to
  * tools that actually exist, so prose containing a stray object cannot invent a
  * tool name.
@@ -128,7 +128,7 @@ export function parseTextToolCall(
   }
   if (end === -1) return undefined;
 
-  // The prefix may be template junk, but never a sentence — if the model wrote
+  // The prefix may be template junk, but never a sentence - if the model wrote
   // prose and then some JSON, that is a reply, not a call.
   const prefix = body.slice(0, start);
   if (/[A-Za-z]{4,}/.test(prefix)) return undefined;
@@ -260,7 +260,7 @@ export interface AgentRunOptions {
    * Drain anything the user typed while this turn was running.
    *
    * Called once per iteration, before the model is asked again. Returning an
-   * empty array — the default — is the old behaviour exactly.
+   * empty array - the default - is the old behaviour exactly.
    */
   takeSteer?: () => Msg[];
 }
@@ -289,7 +289,7 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
   // write is impossible rather than merely discouraged.
   //
   // MCP tools are withheld entirely in plan phase. MCP has no way to declare a
-  // tool read-only, so there is nothing to check — and a plan that quietly filed
+  // tool read-only, so there is nothing to check - and a plan that quietly filed
   // a GitHub issue would break the one promise plan mode makes.
   const availableTools: ToolDef[] =
     phase === "plan"
@@ -316,7 +316,7 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
     // request already in flight, and injecting between a tool call and its
     // result would orphan the result from the call that produced it. Here the
     // transcript is complete and the next request simply carries one more user
-    // turn — which is exactly what the model needs in order to change course.
+    // turn - which is exactly what the model needs in order to change course.
     for (const steer of opts.takeSteer?.() ?? []) {
       messages.push(steer);
       opts.onMessage?.(steer);
@@ -324,7 +324,7 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
     }
 
     const fitted = fitToWindow(messages, caps.contextWindow, caps.maxOutputTokens + 512);
-    // The pre-flight number is an estimate — chars/3.6 — and it is emitted only
+    // The pre-flight number is an estimate - chars/3.6 - and it is emitted only
     // so the meter is not blank on the first turn. `exact: false` says so, and
     // the panel refuses to print an estimated figure. As soon as the endpoint
     // reports real usage below, that replaces it.
@@ -410,7 +410,7 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
 
     /* Resolve anything withheld above.
        When the model produced no native tool call but wrote one as text, adopt
-       it and drop the JSON from the transcript entirely — the tool card that
+       it and drop the JSON from the transcript entirely - the tool card that
        follows is the honest rendering of what happened. Otherwise release the
        buffered text unchanged. */
     if (holding) {

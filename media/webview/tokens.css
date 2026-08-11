@@ -1,18 +1,18 @@
 /* ─────────────────────────────────────────────────────────────────────────
-   KRYPTONITE design tokens — the single definition of the palette and type.
+   KRYPTONITE design tokens - the single definition of the palette and type.
 
    Loaded before both surface stylesheets, for the same reason crystal.js is
    shared: the sidebar and the Control Center are separate documents, and two
    copies of a palette drift. Anything that needs a colour takes it from here.
 
    The panel used to draw every structural colour from the --vscode-* variables
-   VS Code injects, which made it a chameleon — correct in any theme, and an
+   VS Code injects, which made it a chameleon - correct in any theme, and an
    expression of none. Frame 1b of the design review replaces that with a fixed
    warm-neutral system so the surface reads as one product.
 
    The trade is deliberate and total: the panel looks the same in a light theme
    as in a dark one. (Redefining the VS Code variables instead would not have
-   worked — VS Code sets them as an inline style on <html>, which beats any
+   worked - VS Code sets them as an inline style on <html>, which beats any
    :root rule in a stylesheet.)
    ───────────────────────────────────────────────────────────────────────── */
 
@@ -27,7 +27,7 @@
 
   /* ── text: warm, descending prominence ── */
   --kx-fg:   #faf9f5;  /* primary, active tabs, titles                       */
-  --kx-fg-2: #dedcd1;  /* body and labels — the workhorse                    */
+  --kx-fg-2: #dedcd1;  /* body and labels - the workhorse                    */
   --kx-fg-3: #c2c0b6;  /* inactive                                           */
   --kx-fg-4: #9c9a92;  /* placeholder, line numbers                          */
   --kx-fg-5: #52514d;  /* dimmest                                            */
@@ -35,9 +35,9 @@
   /* ── accents ──
    *
    * Each colour has exactly one job, and nothing may borrow one for decoration.
-   * Mint and violet were previously doing double duty — mint tinted inline code
+   * Mint and violet were previously doing double duty - mint tinted inline code
    * in every answer, the user's rail, history dots and picker ticks; violet
-   * tinted selected chips and the profile label — which left the panel reading
+   * tinted selected chips and the profile label - which left the panel reading
    * green-and-purple rather than warm. A colour that appears everywhere stops
    * meaning anything, and the surface it sits on stops being the subject.
    *
@@ -47,21 +47,21 @@
    *
    *   turquoise   success and health: a passing rung, an added line, a
    *               finished todo, Act.
-   *   teal        capability from outside this extension — MCP servers and
+   *   teal        capability from outside this extension - MCP servers and
    *               the tools they expose. Adjacent to turquoise on purpose:
    *               related claims, not identical ones.
    *   pink        the Plan phase, and the tab underline that shows position.
    *   blue        interaction: send, links, focus, selection, and the mark
    *               that means "you".
    *   burgundy    failure. Only failure.
-   *   rose        warning — the state between success and failure, mixed from
+   *   rose        warning - the state between success and failure, mixed from
    *               the pink and the burgundy so it stays inside the palette.
    *   warm grey   every neutral: text, hairlines, disabled.
    *
    * Two adjustments the source swatches needed, both about legibility on a
    * #1f1f1d panel rather than taste:
    *
-   *   The burgundy is ~2:1 against the panel — fine as a fill, invisible as
+   *   The burgundy is ~2:1 against the panel - fine as a fill, invisible as
    *   text. It keeps its full strength in `--kx-error-deep` for fills and
    *   washes, and `--kx-error` is the same hue lifted until it can be read.
    *
@@ -73,12 +73,12 @@
   --kx-active: #d98cbe;    /* pink frame: Plan phase                         */
   --kx-under:  #d98cbe;    /* position: the 2px tab underline                */
   --kx-link:   #4a92d8;    /* blue door, lifted for text: links, "you"       */
-  --kx-action: #1a6fb5;    /* blue door: send — a fill, so it stays deep     */
+  --kx-action: #1a6fb5;    /* blue door: send - a fill, so it stays deep     */
   --kx-error:  #d1476b;    /* burgundy, lifted until it can be read          */
   --kx-error-deep: #78122f;/* the recess itself: fills and washes            */
   --kx-warn:   #c96f92;    /* rose: between the pink and the burgundy        */
   --kx-info:   #4a92d8;    /* measured figures, meters, reported counts      */
-  --kx-on-accent: #141413; /* text on a filled accent — deepest surface      */
+  --kx-on-accent: #141413; /* text on a filled accent - deepest surface      */
   --kx-mcp-wash:  rgba(23, 169, 184, .16);
   --kx-info-wash: rgba(74, 146, 216, .16);
 
@@ -96,7 +96,7 @@
   --kx-shadow:   rgba(0, 0, 0, .6);
   /* Derived from the palette above, so a hue change here cannot leave a wash
      pointing at the colour it replaced. The deletion wash uses the burgundy at
-     full strength — as a ground behind text it is doing the job the swatch is
+     full strength - as a ground behind text it is doing the job the swatch is
      actually good at. */
   --kx-diff-add: rgba(34, 201, 214, .14);
   --kx-diff-del: rgba(120, 18, 47, .30);
@@ -114,7 +114,7 @@
      Nothing is fetched remotely: the CSP is `default-src 'none'` with font-src
      scoped to the extension origin. shell.ts emits @font-face for whichever
      files are present in media/fonts/, and each stack falls through to the
-     platform sans when they are absent — see media/fonts/LICENSE-NOTE.md. */
+     platform sans when they are absent - see media/fonts/LICENSE-NOTE.md. */
   --kx-ui: 'Anthropic Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --kx-display: 'Anthropic Sans Display', 'Anthropic Sans', ui-sans-serif, system-ui, 'Segoe UI', sans-serif;
   --kx-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Monaco, Consolas, monospace;

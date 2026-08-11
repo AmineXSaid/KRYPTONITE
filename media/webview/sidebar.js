@@ -1,11 +1,11 @@
 /* KRYPTONITE sidebar frontend. Plain DOM, zero dependencies.
  *
  * The store mirrors what the host sends; nothing here is authoritative. The
- * transcript is append-only — a full re-render on every stream delta would
- * discard scroll position and expanded tool cards — while the diagnostics
+ * transcript is append-only - a full re-render on every stream delta would
+ * discard scroll position and expanded tool cards - while the diagnostics
  * panes re-render wholesale because they are small and always coherent.
  *
- * crystal.js must have run first — see the same guard in controlCenter.js.
+ * crystal.js must have run first - see the same guard in controlCenter.js.
  */
 (function _boot() {
   if (!window.__kxCrystal) { setTimeout(_boot, 5); return; }
@@ -45,7 +45,7 @@ function _sbRun() {
     '<symbol id="i-pencil" viewBox="0 0 24 24"><path d="M16.5 3.8l3.7 3.7L8.4 19.3l-4.7.9.9-4.7z" ' + S6 + ' stroke-width="1.5"/></symbol>' +
     '<symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 6.5h16M9.5 6.5V4h5v2.5M6.5 6.5l1 14h9l1-14" ' + S6 + ' stroke-width="1.5"/></symbol>' +
     '<symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="12" height="12" rx="1.5" ' + S6 + ' stroke-width="1.5"/><path d="M15.5 8.5v-3a1.5 1.5 0 00-1.5-1.5H5a1.5 1.5 0 00-1.5 1.5v9A1.5 1.5 0 005 16h3" ' + S6 + ' stroke-width="1.5"/></symbol>' +
-    /* Branch: two nodes on a trunk with a limb leaving it — the git-branch
+    /* Branch: two nodes on a trunk with a limb leaving it - the git-branch
        shape, which is what "branch this conversation" means here. */
     '<symbol id="i-branch" viewBox="0 0 24 24"><circle cx="7" cy="5.5" r="2.4" ' + S6 + ' stroke-width="1.6"/>' +
       '<circle cx="7" cy="18.5" r="2.4" ' + S6 + ' stroke-width="1.6"/>' +
@@ -83,7 +83,7 @@ function _sbRun() {
   /* Waiting verbs.
    *
    * A tool call names its own work ("Editing watcher.ts") and that always wins
-   * — these only cover the stretches where the model is thinking and there is
+   * - these only cover the stretches where the model is thinking and there is
    * genuinely nothing to report. One is drawn per turn and held for its whole
    * length: rotating mid-turn reads as progress that is not happening, which is
    * worse than a flat label. Green-crystal flavour, kept short enough not to
@@ -106,7 +106,7 @@ function _sbRun() {
   }
 
   /* Extension features, not skills. `/` lists the workspace's SKILL.md files
-     first and these underneath — see slashItems(). `/skill:` is gone: every
+     first and these underneath - see slashItems(). `/skill:` is gone: every
      skill now has its own row, which is what it was a stand-in for. */
   var CMDS = [
     ["/clear", "Clear conversation history"],
@@ -130,7 +130,7 @@ function _sbRun() {
 
   /* Chars of a tool result rendered before the Show-more expander.
    *
-   * Was 100,000, which is not a limit — it is larger than almost every result,
+   * Was 100,000, which is not a limit - it is larger than almost every result,
    * so a 72,000-character skill body rendered in full and buried the
    * conversation under a wall of documentation. 3,000 shows enough to tell what
    * came back, and the expander is one click away. */
@@ -235,7 +235,7 @@ function _sbRun() {
    *
    * The previous renderer handled fences, bold and inline code only, so a
    * reply containing "### Rust", a "---" rule or a table came out as literal
-   * punctuation — which is most replies.
+   * punctuation - which is most replies.
    *
    * SECURITY: every branch escapes before it composes. `esc()` runs on raw
    * source text first and the markup is built from the escaped result, so a
@@ -254,7 +254,7 @@ function _sbRun() {
       return "<C" + (codes.length - 1) + ">";
     });
 
-    /* Links: [text](url). Only http/https/mailto survive — a javascript: or
+    /* Links: [text](url). Only http/https/mailto survive - a javascript: or
        data: href from model output collapses to its text. */
     s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, function (_m, text, href) {
       return /^(https?:|mailto:)/i.test(href)
@@ -282,12 +282,109 @@ function _sbRun() {
     return t.split("|").map(function (c) { return c.trim(); });
   }
 
+  /* ─────────────────────── syntax highlighting ─────────────────────── */
+
+  /*
+   * Four grammars, not forty.
+   *
+   * A transcript shows short excerpts, so what matters is that strings,
+   * comments, numbers and keywords separate at a glance - not that every
+   * dialect is modelled exactly. Languages are folded into the family whose
+   * lexical shape they share, which is why Rust, C and TypeScript are one
+   * entry: the things being coloured here are identical across them.
+   *
+   * Everything runs off one alternation per family, scanned left to right, so
+   * a token can never be found inside a string or comment that already
+   * claimed those characters. Text is escaped as each token is emitted rather
+   * than up front, so the tokeniser never sees `&amp;` where a `&` was.
+   */
+  var KW_C = "auto|break|case|char|const|continue|default|do|double|else|enum|extern|float|for|goto|if|inline|int|long|register|restrict|return|short|signed|sizeof|static|struct|switch|typedef|union|unsigned|void|volatile|while|bool|true|false|NULL|nullptr|class|public|private|protected|virtual|override|template|typename|namespace|using|new|delete|this|try|catch|throw|fn|let|mut|impl|trait|pub|crate|mod|match|move|ref|where|async|await|dyn|unsafe|as|in|loop|Some|None|Ok|Err|self|Self|function|var|const|export|import|from|interface|type|extends|implements|readonly";
+  var KW_PY = "and|as|assert|async|await|break|class|continue|def|del|elif|else|except|finally|for|from|global|if|import|in|is|lambda|nonlocal|not|or|pass|raise|return|try|while|with|yield|True|False|None|self|cls|match|case";
+
+  var GRAMMAR = {
+    c: [
+      ["cm", /\/\*[\s\S]*?\*\/|\/\/[^\n]*/],
+      ["st", /"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|`(?:\\[\s\S]|[^`\\])*`/],
+      ["at", /#\s*\w+/],                                  // preprocessor
+      ["nu", /\b0[xXbB][0-9a-fA-F_]+|\b\d[\d_]*(?:\.\d+)?(?:[eE][+-]?\d+)?[a-zA-Z_]*/],
+      ["kw", new RegExp("\\b(?:" + KW_C + ")\\b")],
+      ["ty", /\b[A-Z]\w*/],                               // types are capitalised
+      ["fn", /\b[A-Za-z_]\w*(?=\s*[(<])/],
+      ["pu", /[{}()[\];,.<>+\-*/%=!&|^~?:@#]/],
+    ],
+    py: [
+      ["cm", /#[^\n]*/],
+      ["st", /"""[\s\S]*?"""|'''[\s\S]*?'''|[rbfu]*"(?:\\[\s\S]|[^"\\])*"|[rbfu]*'(?:\\[\s\S]|[^'\\])*'/],
+      ["at", /@[\w.]+/],                                  // decorators
+      ["nu", /\b0[xXbB][0-9a-fA-F_]+|\b\d[\d_]*(?:\.\d+)?(?:[eE][+-]?\d+)?/],
+      ["kw", new RegExp("\\b(?:" + KW_PY + ")\\b")],
+      ["ty", /\b[A-Z]\w*/],
+      ["fn", /\b[A-Za-z_]\w*(?=\s*\()/],
+      ["pu", /[{}()[\];,.:=+\-*/%<>!&|^~]/],
+    ],
+    json: [
+      ["cm", /\/\/[^\n]*/],                               // jsonc, and mcp.json uses it
+      ["at", /"(?:\\[\s\S]|[^"\\])*"(?=\s*:)/],           // a key, not a value
+      ["st", /"(?:\\[\s\S]|[^"\\])*"/],
+      ["kw", /\b(?:true|false|null)\b/],
+      ["nu", /-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/],
+      ["pu", /[{}[\],:]/],
+    ],
+    xml: [
+      ["cm", /<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<!\[CDATA\[[\s\S]*?\]\]>/],
+      ["ty", /<\/?[\w:.-]+|\/?>/],                        // the tag itself
+      ["at", /[\w:.-]+(?=\s*=)/],
+      ["st", /"(?:\\[\s\S]|[^"\\])*"|'(?:[^'])*'/],
+      ["nu", /\b\d+(?:\.\d+)?\b/],
+      ["pu", /[=&;]/],
+    ],
+  };
+
+  /* Which family a fence label belongs to. Unknown labels render unhighlighted
+     rather than guessing - a wrong grammar is more distracting than none. */
+  var LANG_FAMILY = {
+    c: "c", h: "c", cpp: "c", "c++": "c", cc: "c", hpp: "c", cs: "c", java: "c",
+    rs: "c", rust: "c", go: "c", js: "c", jsx: "c", ts: "c", tsx: "c",
+    javascript: "c", typescript: "c", swift: "c", kt: "c", kotlin: "c", php: "c",
+    py: "py", python: "py", rb: "py", ruby: "py", sh: "py", bash: "py", zsh: "py",
+    yml: "py", yaml: "py", toml: "py", ini: "py", conf: "py", dockerfile: "py",
+    json: "json", jsonc: "json", json5: "json",
+    xml: "xml", arxml: "xml", html: "xml", htm: "xml", svg: "xml", xsd: "xml",
+    xsl: "xml", plist: "xml", vue: "xml",
+  };
+
+  function highlight(code, lang) {
+    var rules = GRAMMAR[LANG_FAMILY[String(lang || "").toLowerCase()]];
+    if (!rules) return esc(code);
+
+    // One alternation, so the leftmost match always wins and a keyword can
+    // never be found inside a string that started earlier.
+    var src = rules.map(function (r) { return "(" + r[1].source + ")"; }).join("|");
+    var re = new RegExp(src, "g");
+    var out = "";
+    var last = 0;
+    var m;
+    while ((m = re.exec(code)) !== null) {
+      // A zero-width match would spin forever; step over it.
+      if (m[0] === "") { re.lastIndex++; continue; }
+      if (m.index > last) out += esc(code.slice(last, m.index));
+      var cls = "";
+      for (var g = 1; g < m.length; g++) {
+        if (m[g] !== undefined) { cls = rules[g - 1][0]; break; }
+      }
+      out += '<span class="tk-' + cls + '">' + esc(m[0]) + "</span>";
+      last = m.index + m[0].length;
+    }
+    out += esc(code.slice(last));
+    return out;
+  }
+
   function md(t) {
     var out = "";
     var chunks = String(t).split("```");
 
     for (var c = 0; c < chunks.length; c++) {
-      /* Odd chunks are fenced code. An unterminated fence — common mid-stream —
+      /* Odd chunks are fenced code. An unterminated fence - common mid-stream -
          still renders as code rather than dumping the source as prose. */
       if (c % 2) {
         var body = chunks[c];
@@ -296,7 +393,7 @@ function _sbRun() {
         var code = nl === -1 ? "" : body.slice(nl + 1);
         if (/[^\w.+#-]/.test(lang)) { code = body; lang = ""; }
         // Every fenced block gets a header, labelled or not, because the header
-        // is what carries Copy — and code the model wrote is the single thing in
+        // is what carries Copy - and code the model wrote is the single thing in
         // a transcript most likely to be wanted verbatim. Selecting it by hand
         // in a 340px panel is miserable.
         out += '<div class="cb">' +
@@ -304,7 +401,7 @@ function _sbRun() {
           '<span class="sp"></span>' +
           '<button class="cb-copy" data-cb-copy title="Copy code" aria-label="Copy code">' +
             icon("i-copy", "ic-11") + "</button></div>" +
-          "<pre>" + esc(code.replace(/\n$/, "")) + "</pre></div>";
+          "<pre>" + highlight(code.replace(/\n$/, ""), lang) + "</pre></div>";
         continue;
       }
 
@@ -345,7 +442,7 @@ function _sbRun() {
           continue;
         }
 
-        /* Blockquote — and callouts, which are a quote whose first line is a
+        /* Blockquote - and callouts, which are a quote whose first line is a
            `[!NOTE]`-style marker. Models reach for these whenever they want to
            flag a caveat, and as a plain quote the marker showed up as literal
            `[!WARNING]` text: the one shape whose whole purpose is to be seen at
@@ -370,7 +467,7 @@ function _sbRun() {
           continue;
         }
 
-        /* Lists. Nesting is by leading whitespace, two levels deep — beyond
+        /* Lists. Nesting is by leading whitespace, two levels deep - beyond
            that a sidebar has no horizontal room to show the difference. */
         var li = line.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
         if (li) {
@@ -398,7 +495,7 @@ function _sbRun() {
             else if (d < depth) { out += "</" + tag + ">"; depth = d; }
             // A checklist is not a bullet list. `- [x] ship it` was rendering as
             // a bullet with literal square brackets, which is the shape models
-            // use for plans and progress — the exact case worth seeing at a
+            // use for plans and progress - the exact case worth seeing at a
             // glance. Give it a box and drop the marker.
             var task = m2[3].match(/^\[([ xX])\]\s+(.*)$/);
             if (task) {
@@ -519,12 +616,12 @@ function _sbRun() {
               '<div class="att-strip" id="attachStrip" hidden></div>' +
               '<textarea id="draft" rows="1" aria-label="Message" placeholder="Ask Kryptonite anything…   ( / skills · @ files )"></textarea>' +
               '<div class="toolbar">' +
-                // #4 — the control row carries controls only. The keycap that
+                // #4 - the control row carries controls only. The keycap that
                 // used to sit here was chrome describing chrome; the shortcut
                 // lives in the group's accessible name and the tooltip, where a
                 // keyboard user finds it and everyone else is not taxed for it.
                 '<div class="seg" id="phaseSeg" role="group" title="Shift+Tab to switch phase"' +
-                  ' aria-label="Phase — press Shift+Tab to switch">' +
+                  ' aria-label="Phase - press Shift+Tab to switch">' +
                   '<button data-phase="plan" data-on="0">Plan</button>' +
                   '<button data-phase="act" data-on="1">Act</button>' +
                 '</div>' +
@@ -564,7 +661,7 @@ function _sbRun() {
     return '<div class="sec" id="' + secId + '" data-open="' + (open ? 1 : 0) + '">' +
       '<button class="sec-head" data-sec="' + secId + '" aria-expanded="' + open + '">' +
       icon("i-chev", "ic-9 chev") + '<span class="lbl">' + label + '</span><span class="sp"></span>' +
-      '<span class="badge" id="' + badgeId + '">—</span></button>' +
+      '<span class="badge" id="' + badgeId + '">-</span></button>' +
       '<div class="sec-body" id="' + bodyId + '"' + (open ? "" : " hidden") + '></div></div>';
   }
 
@@ -579,7 +676,7 @@ function _sbRun() {
 
   /* Each row is one stored conversation. The message count and the active dot
      are there so it is obvious that a session holds a transcript rather than a
-     single message — the old list showed only a title and a timestamp, which
+     single message - the old list showed only a title and a timestamp, which
      read identically whether a session had one message or forty. */
   function renderHistory() {
     var html = "";
@@ -648,8 +745,8 @@ function _sbRun() {
   function scroll() { logEl.scrollTop = logEl.scrollHeight; }
   function add(el) {
     // Anything appended after a streaming answer must not appear before the
-    // last unpainted deltas of it. Flushing here covers every insertion point —
-    // tool cards, errors, diffs, permissions — without each having to remember.
+    // last unpainted deltas of it. Flushing here covers every insertion point -
+    // tool cards, errors, diffs, permissions - without each having to remember.
     // Safe during aiEl's own creation: aiEl is still null at that moment.
     flushAi();
     var stick = atBottom();
@@ -703,7 +800,7 @@ function _sbRun() {
    * One chip per attached file, rendered inside the user's turn.
    *
    * Before this the composer pills cleared on send and the transcript showed
-   * only the text, which is indistinguishable from the file being dropped —
+   * only the text, which is indistinguishable from the file being dropped -
    * exactly what it looked like back when it actually was. The turn now carries
    * its own evidence.
    */
@@ -749,7 +846,7 @@ function _sbRun() {
    * `md()` parses from scratch and innerHTML replaces the subtree, so doing it
    * per delta is O(n²) in the number of deltas. Measured in the harness at a
    * constant payload: 50 deltas took 8ms, 100 took 436ms, 200 took 2.4s and 400
-   * took 10s — each doubling roughly quadrupling. Real streaming arrives token
+   * took 10s - each doubling roughly quadrupling. Real streaming arrives token
    * by token, so a long reply meant thousands of deltas and a locked panel.
    *
    * Text still accumulates on every delta; only the paint is coalesced. At 50ms
@@ -821,7 +918,7 @@ function _sbRun() {
    * Paint a finished assistant message in one go.
    *
    * Replay is not streaming: the text already exists, so there is nothing to
-   * pace. Routing it through the typewriter would be wrong twice over — it
+   * pace. Routing it through the typewriter would be wrong twice over - it
    * would animate history on every hydrate, and because the caller drops
    * `aiEl` immediately afterwards the paced frame would find nothing to paint
    * and the message would stay permanently blank.
@@ -838,7 +935,7 @@ function _sbRun() {
 
   function appendAi(text) {
     if (!aiEl) {
-      // Prose after a run of tools ends the strip — the model has stopped
+      // Prose after a run of tools ends the strip - the model has stopped
       // working and started explaining.
       closeToolGroup();
       aiEl = add(div("msg-ai", ""));
@@ -974,7 +1071,7 @@ function _sbRun() {
       el.setAttribute("data-open", "1");
       body.hidden = false;
     }
-    // Back to the turn's own verb, not a fresh one — the work has not changed.
+    // Back to the turn's own verb, not a fresh one - the work has not changed.
     S.gerund = S.idleVerb || "Thinking…";
     tickGerund();
   }
@@ -1198,7 +1295,7 @@ function _sbRun() {
   /**
    * The Overload aura: spinning radiation rays, three frame-swapped ki bands,
    * a shockwave ring and three rising embers, all behind a crystal that never
-   * moves. Every layer is a bare span positioned by CSS — the markup carries
+   * moves. Every layer is a bare span positioned by CSS - the markup carries
    * no geometry so the whole composition can be retuned in sidebar.css alone.
    */
   function auraMarkup() {
@@ -1237,7 +1334,7 @@ function _sbRun() {
    * Close the turn: freeze the tool strip, then add the hover actions and a
    * divider so the transcript has a pulse instead of running together.
    *
-   * The footer is only added when the turn actually produced something —
+   * The footer is only added when the turn actually produced something -
    * an interrupt before the first token should not leave a stray rule behind.
    */
   function endTurn() {
@@ -1284,7 +1381,7 @@ function _sbRun() {
     draft.disabled = blocked;
     // syncComposer runs on every render and overwrites the placeholder set at
     // mount, so this is the string that actually shows. It said "/ commands"
-    // after `/` was changed to list skills — the mount was updated and this was
+    // after `/` was changed to list skills - the mount was updated and this was
     // not, which is why the panel disagreed with the palette.
     draft.placeholder = blocked
       ? "Configure an endpoint first…"
@@ -1308,7 +1405,7 @@ function _sbRun() {
       var steering = S.config && S.config.ui && S.config.ui.inputWhileRunning === "steer";
       send.setAttribute("data-mode", "send");
       send.setAttribute("data-ready", "1");
-      send.title = steering ? "Send now — the model reads it before its next step" : "Queue for when this turn finishes";
+      send.title = steering ? "Send now - the model reads it before its next step" : "Queue for when this turn finishes";
       send.setAttribute("aria-label", send.title);
       send.innerHTML = icon("i-up", "ic-13");
       send.disabled = false;
@@ -1326,7 +1423,7 @@ function _sbRun() {
 
     /* Reset to auto so scrollHeight reflects the real content height, not a
        previous clamp. Then set overflow: the scrollbar must only appear once the
-       content exceeds max-height — showing it on an empty textarea was the bug. */
+       content exceeds max-height - showing it on an empty textarea was the bug. */
     draft.style.height = "auto";
     var natural = draft.scrollHeight;
     draft.style.height = Math.min(natural, 120) + "px";
@@ -1388,7 +1485,7 @@ function _sbRun() {
    * Skills first, because that is what a slash means here: the SKILL.md files
    * in this workspace plus the ones that ship with the extension, exactly as
    * they appear on disk. The extension's own features are still reachable, but
-   * they are chrome — they sit in a second group under "Commands" so they
+   * they are chrome - they sit in a second group under "Commands" so they
    * cannot crowd out the thing the user is actually looking for.
    *
    * Disabled skills are omitted rather than greyed: an unchecked skill is not
@@ -1518,12 +1615,12 @@ function _sbRun() {
       case "/help": {
         draft.value = "";
         var skills = S.skills.filter(function (s) { return s.enabled; });
-        var text = "Skills — type / to insert one\n\n" +
+        var text = "Skills - type / to insert one\n\n" +
           (skills.length
-            ? skills.map(function (s) { return "/" + s.name + "  —  " + (s.description || ""); }).join("\n")
+            ? skills.map(function (s) { return "/" + s.name + "  -  " + (s.description || ""); }).join("\n")
             : "No skills enabled. Add a SKILL.md under .agent/skills/.") +
           "\n\nCommands\n\n" +
-          CMDS.map(function (c) { return c[0] + "  —  " + c[1]; }).join("\n");
+          CMDS.map(function (c) { return c[0] + "  -  " + c[1]; }).join("\n");
         aiEl = null;
         add(div("note-box", esc(text)));
         break;
@@ -1540,7 +1637,7 @@ function _sbRun() {
     if (!hasEndpoint()) { addError("Select an endpoint profile first."); return; }
     if (S.running) {
       // Mid-turn: hand it to the host and stop there. None of the turn setup
-      // below applies — no second aura, no second running flag, and the
+      // below applies - no second aura, no second running flag, and the
       // message is not painted yet because it has not been accepted. The host
       // answers with inputAccepted, and with steerAccepted once the model has
       // actually been given it.
@@ -1597,7 +1694,7 @@ function _sbRun() {
    *
    * It is derived from the first thing the user said, so it appears immediately
    * and never changes underneath them. Several conversations called "Hi" is the
-   * accepted cost of that — a name that arrives late and rewrites itself is
+   * accepted cost of that - a name that arrives late and rewrites itself is
    * worse than a dull one that was right from the first frame.
    */
   function renderTitle() {
@@ -1622,7 +1719,7 @@ function _sbRun() {
     // A figure is printed only when the gateway reported real token usage.
     // The fallback is a chars/3.6 estimate that drifts about a tenth of a k
     // per message, and a number that is quietly wrong is worse than the meter
-    // alone — so when it is not exact, only the meter speaks.
+    // alone - so when it is not exact, only the meter speaks.
     var exact = S.context ? S.context.exact === true : false;
     $("ctxText").textContent = exact ? fmtK(used) + " / " + fmtK(limit) : "";
     $("ctxText").title = exact ? "Reported by the endpoint" : "";
@@ -1637,7 +1734,7 @@ function _sbRun() {
 
     var active = activeProfile();
     var name = active ? active.id : "No endpoint";
-    $("epName").textContent = S.tlsError ? name + " — TLS error" : name;
+    $("epName").textContent = S.tlsError ? name + " - TLS error" : name;
     $("epInd").setAttribute("data-err", S.tlsError ? "1" : "0");
     $("modelName").textContent = active ? active.model : "No model";
   }
@@ -1647,10 +1744,10 @@ function _sbRun() {
   function renderTls() {
     var e = S.tlsError;
     var badge = $("tlsBadge");
-    badge.textContent = e ? "1" : S.traceRun ? "OK" : "—";
+    badge.textContent = e ? "1" : S.traceRun ? "OK" : "-";
     badge.className = e ? "badge alert" : "badge";
 
-    // #5 — a count, not a dot and not a status word. The number is what is
+    // #5 - a count, not a dot and not a status word. The number is what is
     // actionable: how many rungs are failing right now.
     var failing = 0;
     for (var i = 0; i < S.rungs.length; i++) if (S.rungs[i].status === "fail") failing++;
@@ -1662,7 +1759,7 @@ function _sbRun() {
     var html = "";
     if (!e) {
       if (!S.traceRun && !S.rungs.length) {
-        html += '<div class="ok-state"><p>No trace yet — run diagnostics to check the connection.</p>' +
+        html += '<div class="ok-state"><p>No trace yet - run diagnostics to check the connection.</p>' +
           '<div><button class="btn sm primary" data-tls="trace">Run trace</button></div></div>';
       } else if (!S.tracing && S.rungs.every(function (r) { return r.status !== "fail"; })) {
         html += '<div class="ok-state"><div class="h">' + icon("i-check", "ic-14") + "No TLS errors</div>" +
@@ -1676,16 +1773,16 @@ function _sbRun() {
         '<div class="errc-grid">' +
           '<span class="k">Endpoint</span><span class="v ell" title="' + esc(e.endpoint) + '">' + esc(e.endpoint) + "</span>" +
           (e.proxied ? "" :
-            '<span class="k">Cert subject</span><span class="v ell">' + esc(e.certSubject || "—") + "</span>" +
-            '<span class="k">Cert issuer</span><span class="v ell">' + esc(e.certIssuer || "—") + "</span>" +
-            '<span class="k">TLS version</span><span class="v">' + esc(e.tlsVersion || "—") + "</span>") +
+            '<span class="k">Cert subject</span><span class="v ell">' + esc(e.certSubject || "-") + "</span>" +
+            '<span class="k">Cert issuer</span><span class="v ell">' + esc(e.certIssuer || "-") + "</span>" +
+            '<span class="k">TLS version</span><span class="v">' + esc(e.tlsVersion || "-") + "</span>") +
         "</div>" +
         (e.proxied
-          ? '<div class="proxied-note">Certificate details unavailable — the failing certificate was presented inside the CONNECT tunnel.</div>'
+          ? '<div class="proxied-note">Certificate details unavailable - the failing certificate was presented inside the CONNECT tunnel.</div>'
           : "") +
         "</div>";
 
-      html += '<div class="fixk"><div class="l">Exact fix — set this configuration key:</div>' +
+      html += '<div class="fixk"><div class="l">Exact fix - set this configuration key:</div>' +
         '<div class="row"><code>"' + esc(e.fixKey) + '": "' + esc(e.fixValue) + '"</code>' +
         '<button class="mini" data-tls="copy" title="Copy" aria-label="Copy fix key">' + icon("i-copy", "ic-13") + "</button></div>" +
         (S.copied ? '<div class="copied">Copied to clipboard</div>' : "") + "</div>";
@@ -1728,7 +1825,7 @@ function _sbRun() {
       '<span class="body"><span class="dt">' + esc(detail) + "</span>" +
       (fix ? '<div class="fx">' + esc(fix) + "</div>" : "") + "</span>" +
       '<span class="ms">' + (status === "pass" || status === "fail" || status === "warn"
-        ? (ms ? ms + "ms" : "—") : "—") + "</span></div>";
+        ? (ms ? ms + "ms" : "-") : "-") + "</span></div>";
   }
 
   /* ──────────────────── diagnostics: endpoints ──────────────────── */
@@ -1784,9 +1881,9 @@ function _sbRun() {
           '<span></span><span class="f-hint" id="fModelHint"></span>' +
           (needsKey
             ? '<label for="fKey">API Key</label><input id="fKey" type="password" autocomplete="off" spellcheck="false" value="" placeholder="' +
-              (f.hasStoredKey ? "stored — leave blank to keep" : "sk-…") + '">'
+              (f.hasStoredKey ? "stored - leave blank to keep" : "sk-…") + '">'
             : "") +
-          '<label for="fPath">Route</label><input id="fPath" value="' + esc(f.chatPath || "") + '" placeholder="auto — derived from Base URL">' +
+          '<label for="fPath">Route</label><input id="fPath" value="' + esc(f.chatPath || "") + '" placeholder="auto - derived from Base URL">' +
           '<label for="fTimeout">Timeout</label>' +
           '<div class="fsplit">' +
             '<input id="fTimeout" type="number" min="1" max="600" step="1" value="' +
@@ -1795,7 +1892,7 @@ function _sbRun() {
           '<label for="fHttp2">HTTP/2</label>' +
           '<div class="fsplit">' +
             '<input id="fHttp2" type="checkbox"' + (f.http2 ? " checked" : "") + '>' +
-            '<span class="unit">last resort — slows streaming badly</span>' +
+            '<span class="unit">last resort - slows streaming badly</span>' +
           "</div>" +
         "</div>" +
         (needsKey
@@ -1842,7 +1939,7 @@ function _sbRun() {
    * The connection-check panel inside the endpoint form.
    *
    * Rungs stream in one at a time, so this renders whatever has arrived and
-   * appends a pending row while the walk is still going — the same shape the
+   * appends a pending row while the walk is still going - the same shape the
    * TLS trace uses, because it is literally the same ladder underneath.
    */
   function renderEpCheck() {
@@ -1866,7 +1963,7 @@ function _sbRun() {
    *
    * One row per configured server: a 3px status rail, the name with a pill, the
    * transport line, and the tool count. Ready servers list their tools as chips
-   * (capped, with a "+N more" tail — a 14-tool server would otherwise push the
+   * (capped, with a "+N more" tail - a 14-tool server would otherwise push the
    * next row off the panel); a failed one gets a card with the reason and the
    * two actions that can do something about it.
    *
@@ -1900,8 +1997,8 @@ function _sbRun() {
     if (state === "ready") return '<span class="mcp-pill ok">' + icon("i-check", "ic-9") + "connected</span>";
     if (state === "starting") return '<span class="mcp-pill">starting…</span>';
     if (state === "stopped") return '<span class="mcp-pill">stopped</span>';
-    // Declared with enabled:false. Not an error — it was never started on
-    // purpose — so it must not wear the red "unavailable" pill.
+    // Declared with enabled:false. Not an error - it was never started on
+    // purpose - so it must not wear the red "unavailable" pill.
     if (state === "disabled") return '<span class="mcp-pill">disabled</span>';
     return '<span class="mcp-pill err">' + icon("i-x", "ic-9") + "unavailable</span>";
   }
@@ -1941,8 +2038,8 @@ function _sbRun() {
       var ready = sv.state === "ready";
       var off = sv.state === "disabled";
       // Defaulted rather than trusted. The host always sends both fields, but a
-      // stateSync from an older build — or a server that answered the handshake
-      // and nothing else — renders "undefined tools" without this.
+      // stateSync from an older build - or a server that answered the handshake
+      // and nothing else - renders "undefined tools" without this.
       var n = typeof sv.toolCount === "number" ? sv.toolCount : 0;
       var list = Array.isArray(sv.tools) ? sv.tools : [];
       if (ready) tools += n;
@@ -2281,7 +2378,7 @@ function _sbRun() {
 
     logEl.addEventListener("click", function (e) {
       // Code-block copy is delegated because md() writes blocks as innerHTML on
-      // every repaint — a listener bound per block would be lost each flush.
+      // every repaint - a listener bound per block would be lost each flush.
       var cbc = e.target.closest("[data-cb-copy]");
       if (cbc) {
         var pre = cbc.closest(".cb") && cbc.closest(".cb").querySelector("pre");
@@ -2379,7 +2476,7 @@ function _sbRun() {
      *
      * Typing Japanese, Chinese or Korean means typing latin keys, then pressing
      * Enter to commit the candidate the IME is offering. Treating that Enter as
-     * "send" fires the message mid-word and leaves the composition unfinished —
+     * "send" fires the message mid-word and leaves the composition unfinished -
      * the panel was unusable for anyone typing a CJK language. The same applies
      * to the quick-picker below, so this returns before any key handling.
      *
@@ -2457,9 +2554,9 @@ function _sbRun() {
         var p = S.profiles[i];
         S.epForm = {
           isNew: false, id: p.id, name: p.description || p.id,
-          url: p.baseUrl === "—" ? "" : p.baseUrl,
+          url: p.baseUrl === "-" ? "" : p.baseUrl,
           type: p.wire === "anthropic" ? "anthropic" : "openai-compatible",
-          model: p.model === "—" ? "" : p.model,
+          model: p.model === "-" ? "" : p.model,
           chatPath: p.chatPath || "",
           timeoutMs: p.timeoutMs || 0,
           http2: !!p.http2,
@@ -2480,7 +2577,7 @@ function _sbRun() {
       if (!mDraft) return;
       var hint = $("fModelHint");
       // Says what it is doing, because it is trying every id the gateway lists
-      // and that takes a few seconds — silence would read as a hung button.
+      // and that takes a few seconds - silence would read as a hung button.
       if (hint) {
         hint.innerHTML = spinner() +
           "<span>Asking the gateway, then checking which ids actually answer…</span>";
@@ -2662,10 +2759,10 @@ function _sbRun() {
         // message having been lost.
         S.pending = m.depth;
         var word = m.mode === "steer"
-          ? "Sent to the model — it will read this before its next step."
+          ? "Sent to the model - it will read this before its next step."
           : m.depth > 1
             ? m.depth + " messages queued for when this turn finishes."
-            : "Queued — it will be sent when this turn finishes.";
+            : "Queued - it will be sent when this turn finishes.";
         var note = div("queued-note", icon(m.mode === "steer" ? "i-up" : "i-clock", "ic-11") +
           "<span>" + esc(word) + "</span>");
         add(note);
@@ -2691,8 +2788,8 @@ function _sbRun() {
           // Assigning textContent replaces the spinner node as well as the
           // message, so the busy state clears itself here.
           if (m.error) {
-            // Not a failure of the endpoint — plenty of gateways serve no
-            // /models route — so it reads as information, not an error state.
+            // Not a failure of the endpoint - plenty of gateways serve no
+            // /models route - so it reads as information, not an error state.
             mh.textContent = "Could not list models: " + m.error + " Type the id instead.";
             mh.setAttribute("data-err", "1");
           } else {
@@ -2703,7 +2800,7 @@ function _sbRun() {
             // hang instead of failing cleanly.
             mh.textContent = n
               ? n + " of " + listed + " listed model" + (listed === 1 ? "" : "s") +
-                " answered — start typing to filter. The rest 404 or never reply."
+                " answered - start typing to filter. The rest 404 or never reply."
               : listed
                 ? "None of the " + listed + " listed models answered. Check the key and the base URL."
                 : "The gateway listed no models. Type the id instead.";
@@ -2771,7 +2868,7 @@ function _sbRun() {
         break;
 
       case "sessionTitled":
-        // Only the name changed — the transcript on screen must not be touched.
+        // Only the name changed - the transcript on screen must not be touched.
         if (m.id === S.sessionId) { S.title = m.title || ""; renderTitle(); }
         break;
 

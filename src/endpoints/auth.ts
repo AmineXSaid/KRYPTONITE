@@ -1,6 +1,6 @@
 // TRANSPORT RULE: all endpoint and auth HTTP I/O goes through the undici
 // Dispatcher built by buildTransport(). Global fetch, node:http, node:https,
-// axios and node-fetch are forbidden here — they bypass the profile's CA
+// axios and node-fetch are forbidden here - they bypass the profile's CA
 // bundle, client certificate and proxy configuration.
 
 import { execFile } from "node:child_process";
@@ -147,7 +147,7 @@ export function clearAuthCache(): void {
 // CHANGED: added. Powers the Control Center "Cached token" row.
 /**
  * Cache keys and their expiry timestamps. Deliberately returns no token
- * material — the Control Center only needs to say "expires in Nm" or
+ * material - the Control Center only needs to say "expires in Nm" or
  * "not cached", and a DTO that carried the token could leak it to a webview.
  *
  * Keys are `exchange:<profile>:<url>` or `exec:<profile>`; callers match on

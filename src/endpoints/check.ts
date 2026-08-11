@@ -12,7 +12,7 @@ import { runLadder, type Rung } from "../diagnostics/ladder";
  *
  * Typing a model id by hand is the most expensive mistake this form allows. A
  * wrong id does not fail cleanly: on aggregating gateways it either 404s with
- * a message about the route, or — worse — is listed and still not servable, in
+ * a message about the route, or - worse - is listed and still not servable, in
  * which case the request simply hangs until a timeout. Offering the gateway's
  * own list turns a guess into a pick.
  *
@@ -72,7 +72,7 @@ export async function listModels(
  * ids returned by /v1/models, 28 answered, 60 returned 404, 10 accepted the
  * request and never replied, and 3 errored. A picker built on the raw list is
  * worse than a free-text field, because it looks authoritative while being
- * wrong most of the time — and the hanging ids are the cruellest, since they
+ * wrong most of the time - and the hanging ids are the cruellest, since they
  * cost a full timeout each to discover by hand.
  *
  * So every id gets one real, tiny request. Concurrency is capped to stay
@@ -129,7 +129,7 @@ async function keepServable(
 }
 
 /**
- * "Check connection" — verifying an endpoint *before* it is saved.
+ * "Check connection" - verifying an endpoint *before* it is saved.
  *
  * The diagnostics ladder already knows how to walk a profile from local TLS
  * material through to a tool call, and reusing it is the whole point: a check
@@ -230,7 +230,7 @@ function validateForm(form: EndpointForm, apiKey: string): Rung | undefined {
   } catch {
     return bad(
       `Base URL "${form.url}" is not a valid URL.`,
-      "Include the scheme — https://host/path, not host/path."
+      "Include the scheme - https://host/path, not host/path."
     );
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") {
@@ -287,7 +287,7 @@ export async function checkEndpoint(
 export function summarise(rungs: Rung[], profile: EndpointProfile): CheckOutcome {
   const failed = rungs.find((r) => r.status === "fail");
   if (failed) {
-    let summary = `${failed.name} failed — ${failed.detail.split("\n")[0]}`;
+    let summary = `${failed.name} failed - ${failed.detail.split("\n")[0]}`;
     if (failed.name === "Completion") {
       const path = profile.chatPath ?? defaultChatPath(profile.baseUrl, profile.wire);
       if (/404/.test(failed.detail)) {
@@ -298,12 +298,12 @@ export function summarise(rungs: Rung[], profile: EndpointProfile): CheckOutcome
         // Reaching auth and then failing on the body points at the payload,
         // and the only part of the payload the user typed is the model id.
         // Multi-vendor gateways namespace their models, and a bare id is
-        // usually fuzzy-matched into something that fails far downstream —
+        // usually fuzzy-matched into something that fails far downstream -
         // OpenRouter answers `free` with a 502 "Invalid URL", which reads
         // like the gateway is broken rather than like a typo.
         summary =
           `The credential was accepted but ${profile.baseUrl}${path} rejected the request. ` +
-          `The model id "${profile.model}" has no vendor prefix — gateways that serve several ` +
+          `The model id "${profile.model}" has no vendor prefix - gateways that serve several ` +
           `vendors expect "vendor/model" (for example "openrouter/free"). Check that first.`;
       }
     }
@@ -315,14 +315,14 @@ export function summarise(rungs: Rung[], profile: EndpointProfile): CheckOutcome
     return {
       rungs,
       ok: true,
-      summary: `Connected — ${profile.model} responded, with ${warned.length} warning${
+      summary: `Connected - ${profile.model} responded, with ${warned.length} warning${
         warned.length > 1 ? "s" : ""
       }: ${warned.map((w) => w.name.toLowerCase()).join(", ")}. Usable.`,
     };
   }
   // A reasoning model given a 16-token probe can spend the whole budget before
   // emitting visible text, so the completion rung's quoted answer is sometimes
-  // empty. That is a pass, not a failure — but appending an empty quote reads
+  // empty. That is a pass, not a failure - but appending an empty quote reads
   // like the check trailed off mid-sentence.
   const detail = rungs.find((r) => r.name === "Completion")?.detail ?? "";
   const quoted = detail.replace(/^Model answered:\s*/, "").trim();
@@ -330,7 +330,7 @@ export function summarise(rungs: Rung[], profile: EndpointProfile): CheckOutcome
     rungs,
     ok: true,
     summary:
-      `Ready to go — ${profile.model} answered over the ${profile.wire} wire.` +
+      `Ready to go - ${profile.model} answered over the ${profile.wire} wire.` +
       (quoted ? ` It said: "${quoted}"` : ""),
   };
 }

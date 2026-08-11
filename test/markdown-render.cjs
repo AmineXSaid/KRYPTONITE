@@ -30,7 +30,13 @@ const code = [
   grab("  function isTableRule(line) {"),
   grab("  function cells(line) {"),
   grab("  function icon(id, cls) {"),
+  grab("  function highlight(code, lang) {"),
   grab("  function md(t) {"),
+  // The grammars are object literals, so grab()'s "stop at `  }`" rule cannot
+  // lift them. Sliced whole instead, which also means a new language family
+  // is covered by these tests the moment it is added.
+  SRC.match(/var KW_C = [\s\S]*?var GRAMMAR = \{[\s\S]*?\n  \};/)[0],
+  SRC.match(/var LANG_FAMILY = \{[\s\S]*?\n  \};/)[0],
   // A plain object literal, so grab()'s "stop at `  }`" rule cannot lift it.
   // Kept in sync by the assertion below, which fails if a kind is dropped.
   "var CALLOUT_ICON = " + JSON.stringify(
@@ -43,8 +49,8 @@ const code = [
 
 const scope = {};
 // eslint-disable-next-line no-new-func
-new Function(code + "\n;this.md=md;this.inline=inline;this.esc=esc;").call(scope);
-const { md } = scope;
+new Function(code + "\n;this.md=md;this.inline=inline;this.esc=esc;this.highlight=highlight;").call(scope);
+const { md, highlight } = scope;
 
 let pass = 0;
 let fail = 0;
@@ -67,9 +73,64 @@ ck(/<ol class="md-l"><li>one<\/li>/.test(md("1. one\n2. two")), "ordered list");
 ck(/<ul class="md-l"><li>a<\/li><ul class="md-l"><li>nested<\/li>/.test(md("- a\n  - nested")), "one level of nesting");
 ck(/<p>plain<\/p>/.test(md("plain")), "paragraph");
 
+console.log("\n──── syntax highlighting ────");
+{
+  const tk = (code, lang) => highlight(code, lang);
+  // Token text arrives escaped, because escaping happens per token rather than
+  // up front. Expectations are escaped the same way so they describe the code
+  // as written rather than as encoded.
+  const e = (s) =>
+    String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const has = (h, cls, text) =>
+    h.includes('<span class="tk-' + cls + '">' + e(text) + "</span>");
+
+  // C family — one grammar covers C, Rust, TS and friends, because the tokens
+  // being coloured are lexically identical across them.
+  const c = tk('int n = 0x1F; // note\nchar *s = "hi";', "c");
+  ck(has(c, "kw", "int"), "c: keyword");
+  ck(has(c, "nu", "0x1F"), "c: hex number");
+  ck(has(c, "cm", "// note"), "c: line comment");
+  ck(has(c, "st", '"hi"'), "c: string");
+  ck(has(tk("fn main() { let x: u8 = 1; }", "rs"), "kw", "fn"), "rust shares the c grammar");
+  ck(has(tk("const a = `t`;", "ts"), "st", "`t`"), "ts template literal is a string");
+
+  // A keyword inside a string must stay a string — the whole point of one
+  // left-to-right alternation rather than several passes.
+  ck(!/tk-kw">int/.test(tk('char *s = "int x";', "c")), "c: keyword inside a string is not a keyword");
+  ck(!/tk-kw">def/.test(tk('s = "def f():"', "py")), "py: keyword inside a string is not a keyword");
+  ck(!/tk-st/.test(tk("// a \"quote\" in a comment", "c")), "c: a quote inside a comment is not a string");
+
+  const py = tk('@dec\ndef f(x):\n    return "s"  # c', "py");
+  ck(has(py, "kw", "def"), "py: keyword");
+  ck(has(py, "at", "@dec"), "py: decorator");
+  ck(has(py, "cm", "# c"), "py: comment");
+  ck(has(tk("s = '''a\nb'''", "py"), "st", "'''a\nb'''"), "py: triple-quoted string");
+
+  const j = tk('{"k": "v", "n": 1, "b": true}', "json");
+  ck(has(j, "at", '"k"'), "json: a key is not a value");
+  ck(has(j, "st", '"v"'), "json: value string");
+  ck(has(j, "nu", "1"), "json: number");
+  ck(has(j, "kw", "true"), "json: literal");
+
+  const x = tk('<!-- c --><ROOT id="1"><A/></ROOT>', "arxml");
+  ck(has(x, "cm", "<!-- c -->"), "arxml: comment, escaped");
+  ck(has(x, "ty", "<ROOT"), "arxml: tag");
+  ck(has(x, "at", "id"), "arxml: attribute");
+  ck(has(x, "st", '"1"'), "arxml: attribute value");
+
+  // Escaping is the security property: markup inside code must never survive
+  // as markup, highlighted or not.
+  ck(!/<img/.test(tk('x = "<img src=x onerror=alert(1)>"', "py")), "markup inside code stays escaped");
+  ck(tk("<script>", "xml").indexOf("<script>") === -1, "a script tag cannot survive the tokeniser");
+  // An unknown label must not be guessed at — a wrong grammar is worse than none.
+  ck(tk("let x = 1;", "cobol") === "let x = 1;", "an unknown language is left alone");
+  ck(tk("a < b && c > d", "text") === "a &lt; b &amp;&amp; c &gt; d", "no language still escapes");
+}
+
 console.log("\n──── code ────");
-ck(/<span class="cb-l">ts<\/span>[\s\S]*<pre>let x;<\/pre>/.test(md("```ts\nlet x;\n```")),
-  "fenced code with a language label");
+ck(/<span class="cb-l">ts<\/span>/.test(md("```ts\nlet x;\n```")) &&
+   /<pre><span class="tk-kw">let<\/span>/.test(md("```ts\nlet x;\n```")),
+  "fenced code with a language label, highlighted");
 ck(/<span class="cb-l">text<\/span>[\s\S]*<pre>raw<\/pre>/.test(md("```\nraw\n```")), "fenced code, no language");
 ck(/<pre>a\nb<\/pre>/.test(md("```\na\nb\n```")), "multi-line body preserved");
 ck(/<div class="cb">[\s\S]*<pre>unterminated/.test(md("```\nunterminated")), "an unterminated fence still renders as code");
