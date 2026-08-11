@@ -860,7 +860,12 @@ li.doing .cbx { border-color: var(--kx-accent); }
   width: 70px; height: 3px; flex: none; border-radius: 2px; overflow: hidden;
   background: var(--kx-divider);
 }
-#ctxFill { display: block; height: 100%; width: 0; background: var(--kx-fg-3); transition: width .6s; }
+/* Sky: the meter reports a measurement, it does not assert health. On the
+   neutral foreground it read as chrome rather than as data. */
+#ctxFill { display: block; height: 100%; width: 0; background: var(--kx-info); transition: width .6s; }
+/* Near the ceiling it stops being a measurement and becomes a warning. */
+#ctxFill[data-level="warn"] { background: var(--kx-warn); }
+#ctxFill[data-level="full"] { background: var(--kx-error); }
 .ep { display: flex; align-items: center; gap: 5px; min-width: 0; }
 .ep .dot { width: 5px; height: 5px; flex: none; border-radius: 50%; background: var(--kx-accent); }
 .ep[data-err="1"] { color: var(--kx-error); }
@@ -904,7 +909,10 @@ li.doing .cbx { border-color: var(--kx-accent); }
 }
 /* The rail and the pill read the same field, so they cannot disagree. */
 .mcp-row .rail { align-self: stretch; border-radius: 2px; background: var(--kx-fg-5); }
-.mcp-row[data-state="ready"] .rail { background: var(--kx-accent); }
+/* Turquoise, not mint. A connected MCP server is not the same claim as a
+   passing health check — it says the agent gained tools it did not ship with,
+   so it earns its own colour and the two cannot be misread for each other. */
+.mcp-row[data-state="ready"] .rail { background: var(--kx-mcp); }
 .mcp-row[data-state="failed"] .rail { background: var(--kx-error); }
 .mcp-row[data-state="starting"] .rail { background: var(--kx-warn); }
 /* Declared but deliberately not started: present, and visibly inert. */
@@ -929,15 +937,17 @@ li.doing .cbx { border-color: var(--kx-accent); }
   font-size: 10.5px; font-weight: 600; letter-spacing: .02em;
   background: var(--kx-surface-3); color: var(--kx-fg-2);
 }
-.mcp-pill.ok { background: var(--kx-accent-wash); color: var(--kx-accent); }
+.mcp-pill.ok { background: var(--kx-mcp-wash); color: var(--kx-mcp); }
 .mcp-pill.err { background: var(--kx-error-wash); color: var(--kx-error); }
 
 /* Chips are capped in the renderer; the tail carries the rest in its tooltip. */
 .mcp-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 16px 12px 29px; }
+/* A chip is a tool the model gained from a server, so it carries the server's
+   colour at wash strength — related to the rail above it, not competing. */
 .mcp-chip {
   display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 4px;
-  background: var(--kx-surface-3);
-  font-family: var(--kx-mono); font-size: 11px; color: var(--kx-fg-2);
+  background: var(--kx-mcp-wash);
+  font-family: var(--kx-mono); font-size: 11px; color: var(--kx-mcp);
 }
 .mcp-more {
   display: inline-flex; align-items: center; padding: 3px 8px;

@@ -1598,7 +1598,11 @@ function _sbRun() {
     var exact = S.context ? S.context.exact === true : false;
     $("ctxText").textContent = exact ? fmtK(used) + " / " + fmtK(limit) : "";
     $("ctxText").title = exact ? "Reported by the endpoint" : "";
-    $("ctxFill").style.width = limit ? Math.min(100, (used / limit) * 100) + "%" : "0";
+    var pct = limit ? Math.min(100, (used / limit) * 100) : 0;
+    $("ctxFill").style.width = pct + "%";
+    // Sky while the bar is only a reading; amber and then coral once the
+    // number stops being information and starts being a problem.
+    $("ctxFill").setAttribute("data-level", pct >= 90 ? "full" : pct >= 75 ? "warn" : "ok");
     // Header carries the bare number; the footer keeps the meter it fills.
     // Same rule in the header.
     $("ctxHead").textContent = exact && used ? fmtK(used) : "";

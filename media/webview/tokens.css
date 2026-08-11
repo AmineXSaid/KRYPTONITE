@@ -48,10 +48,18 @@
    *   periwinkle  interaction: send, links, focus, selection, and the mark that
    *               means "you". This is the colour that carries the UI now.
    *   violet      the Plan phase, and the tab underline that shows position.
+   *   turquoise   capability that came from outside this extension: MCP
+   *               servers and the tools they expose. Deliberately not mint —
+   *               a connected MCP server and a passing TLS rung are different
+   *               claims, and sharing one colour made the panel say "healthy"
+   *               twice instead of "reachable" and "extended".
+   *   sky         measurement rather than state: the context meter, and counts
+   *               the endpoint reported rather than ones we estimated.
    *
    * Everything else is a warm neutral. If something needs to stand out and is
-   * not one of the five meanings above, it wants a surface or a weight — not a
-   * hue. */
+   * not one of the seven meanings above, it wants a surface or a weight — not
+   * a hue. An eighth has to pass the same test these did: name the claim it
+   * makes that no existing colour already makes. */
   --kx-accent: #4af6a4;    /* success & health only                          */
   --kx-error:  #f4767e;    /* warm coral, not the theme's cool red           */
   --kx-warn:   #f2c14e;
@@ -59,7 +67,11 @@
   --kx-action: #7c88f4;    /* send                                           */
   --kx-active: #6e49cb;    /* Plan phase                                     */
   --kx-under:  #916df6;    /* position: the 2px tab underline                */
+  --kx-mcp:    #3ed6cf;    /* turquoise: MCP servers and the tools they add  */
+  --kx-info:   #5cc8f5;    /* sky: measured figures, meters, reported counts */
   --kx-on-accent: #141413; /* text on a filled accent — deepest surface      */
+  --kx-mcp-wash:  rgba(62, 214, 207, .14);
+  --kx-info-wash: rgba(92, 200, 245, .14);
 
   /* ── scrims: every one tinted from --kx-fg-2, never neutral grey. A cool
         grey hairline on a warm surface is the most visible way this palette
