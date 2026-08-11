@@ -15,7 +15,7 @@ import * as http from "node:http";
 import * as os from "node:os";
 import * as path from "node:path";
 import { loadMcpConfig, expandVars, capOutput, makeClient, MCP_OUTPUT_CAP } from "../src/mcp/registry";
-import { McpHttpClient } from "../src/mcp/http";
+import { McpHttpClient, McpSseClient } from "../src/mcp/http";
 import { McpClient } from "../src/mcp/client";
 
 let pass = 0;
@@ -295,6 +295,172 @@ const quiet = () => {};
     ck(Boolean(r.isError) && /not connected/.test(r.content),
       "and calling it says so instead of hanging");
     await c.stop();
+  }
+
+  /* ── the legacy HTTP+SSE transport ───────────────────────────────── */
+  console.log("\n──── legacy sse transport ────");
+  {
+    // The older protocol: a long-lived GET stream, an `endpoint` event naming a
+    // second URL, POSTs to that URL answered 202, and every reply arriving back
+    // on the GET stream. Treating it as Streamable HTTP fails here, which is the
+    // point of testing it rather than assuming the two are interchangeable.
+    let stream: http.ServerResponse | undefined;
+    const sse = http.createServer((req, res) => {
+      const url = new URL(req.url!, "http://x");
+      if (req.method === "GET") {
+        res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+        // The endpoint is a path, so the client has to resolve it against the
+        // stream URL rather than using it verbatim.
+        res.write("event: endpoint\ndata: /messages?session=abc\n\n");
+        stream = res;
+        return;
+      }
+      let body = "";
+      req.on("data", (c) => (body += c));
+      req.on("end", () => {
+        const msg = JSON.parse(body || "{}");
+        res.writeHead(202).end();               // the reply does NOT come back here
+        if (msg.id === undefined) return;
+        const result = rpcResult(msg.method, msg.id);
+        stream?.write(`event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: msg.id, result })}\n\n`);
+      });
+      void url;
+    });
+    await new Promise<void>((r) => sse.listen(0, "127.0.0.1", r));
+    const sPort = (sse.address() as any).port;
+
+    const c = new McpSseClient(
+      { name: "legacy", transport: "sse", url: `http://127.0.0.1:${sPort}/sse`, command: "", timeoutMs: 5000 },
+      quiet
+    );
+    await c.start(tmp);
+    ck(c.state === "ready", "connects over the legacy sse transport", c.error);
+    ck(c.serverInfo?.name === "probe", "and completes the handshake on the GET stream");
+    ck(c.tools.length === 1, "and lists tools posted to the endpoint it was given");
+
+    const r = await c.callTool("ping", {});
+    ck(r.content === "pong", "a tool call round-trips across two connections", r.content);
+
+    await c.stop();
+    ck(c.state === "stopped", "and stops cleanly");
+    stream?.end();
+    await new Promise<void>((r) => sse.close(() => r()));
+  }
+  {
+    // Nothing answers: the handshake must fail, not hang until the turn dies.
+    const c = new McpSseClient(
+      { name: "dead-sse", transport: "sse", url: "http://127.0.0.1:1/sse", command: "", timeoutMs: 2000 },
+      quiet
+    );
+    await c.start(tmp);
+    ck(c.state === "failed" && !!c.error, "an unreachable sse server fails cleanly", c.error?.slice(0, 50));
+    await c.stop();
+  }
+  {
+    // A server that opens the stream but never names an endpoint would leave
+    // the client waiting forever with no way to send anything.
+    const mute = http.createServer((_q, res) => {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write(": waiting\n\n");
+    });
+    await new Promise<void>((r) => mute.listen(0, "127.0.0.1", r));
+    const mPort = (mute.address() as any).port;
+    const c = new McpSseClient(
+      { name: "mute", transport: "sse", url: `http://127.0.0.1:${mPort}/sse`, command: "", timeoutMs: 1200 },
+      quiet
+    );
+    await c.start(tmp);
+    ck(c.state === "failed" && /endpoint event/.test(c.error ?? ""),
+      "a stream that never names its endpoint times out with a reason", c.error);
+    await c.stop();
+    await new Promise<void>((r) => mute.close(() => r()));
+  }
+
+  /* ── transport is chosen, and reported, correctly ────────────────── */
+  console.log("\n──── transport is reported honestly ────");
+  {
+    const { specs } = loadMcpConfig(
+      write({ mcpServers: { s: { type: "sse", url: "https://x.example/sse" } } }), {} as any
+    );
+    ck(specs[0]?.transport === "sse", 'type "sse" selects the legacy transport, not Streamable HTTP');
+    ck(makeClient(specs[0], quiet) instanceof McpSseClient, "and builds the sse client");
+  }
+  {
+    const { specs } = loadMcpConfig(
+      write({ mcpServers: { s: { type: "http", url: "https://x.example/mcp" } } }), {} as any
+    );
+    ck(specs[0]?.transport === "http", 'type "http" selects Streamable HTTP');
+  }
+  {
+    const { specs } = loadMcpConfig(
+      write({ mcpServers: { s: { type: "streamable-http", url: "https://x.example/mcp" } } }), {} as any
+    );
+    ck(specs[0]?.transport === "http", '"streamable-http" is accepted as a spelling of http');
+  }
+  {
+    // Both panels printed "stdio" for every row, so a remote server was
+    // labelled a local child process - the first thing anyone checks.
+    const { McpRegistry } = await import("../src/mcp/registry");
+    const reg = new McpRegistry(quiet);
+    await reg.reload(
+      write({
+        mcpServers: {
+          local: { command: "definitely-not-a-real-binary", enabled: false },
+          remote: { url: "https://x.example/mcp", enabled: false },
+          legacy: { type: "sse", url: "https://x.example/sse", enabled: false },
+        },
+      }),
+      tmp
+    );
+    const byName: Record<string, any> = {};
+    for (const s of reg.statuses()) byName[s.name] = s;
+    ck(byName.local?.transport === "stdio", "a stdio server reports stdio");
+    ck(byName.remote?.transport === "http", "a remote server reports http, not stdio");
+    ck(byName.legacy?.transport === "sse", "a legacy server reports sse");
+    ck(byName.remote?.command === "https://x.example/mcp",
+      "and a remote row shows its url where stdio shows its command line",
+      byName.remote?.command);
+    await reg.stopAll();
+  }
+
+  /* ── the config template the Create button writes ────────────────── */
+  console.log("\n──── mcp.json template ────");
+  {
+    // This file is written into the user's workspace and is the first thing
+    // they read. It claimed "Only stdio is implemented" long enough to matter,
+    // and a template that does not parse hands someone a broken config.
+    const src = fs.readFileSync(path.join(__dirname, "..", "src", "core", "app.ts"), "utf8");
+    const m = src.match(/const MCP_CONFIG_TEMPLATE = `([\s\S]*?)`;/);
+    ck(!!m, "the template is still where this test looks for it");
+    if (m) {
+      const text = m[1].replace(/\\\$/g, "$").replace(/\\`/g, "`");
+      let doc: any;
+      try {
+        doc = JSON.parse(text);
+      } catch (e: any) {
+        ck(false, "the template is valid JSON", e.message);
+      }
+      if (doc) {
+        ck(true, "the template is valid JSON");
+        const readme = (doc._readme ?? []).join(" ");
+        ck(!/Only stdio/.test(readme),
+          "it no longer tells the user remote servers are unsupported");
+        ck(/REMOTE/.test(readme), "it documents the remote options");
+        ck(/\$\{VAR\}/.test(readme), "and the variable expansion that keeps tokens out of it");
+        const remote = doc.mcpServers?.["example-remote"];
+        ck(!!remote?.url && /^https:/.test(remote.url), "the remote example uses https");
+        ck(/\$\{[A-Z_]+\}/.test(remote?.headers?.Authorization ?? ""),
+          "and its token comes from the environment, not the file",
+          remote?.headers?.Authorization);
+        ck(Object.values(doc.mcpServers ?? {}).every((v: any) => v.enabled === false),
+          "every example ships disabled, so creating the file starts nothing");
+        // The examples must survive the real parser, not just JSON.parse.
+        const { specs, warnings } = loadMcpConfig(write(doc), { EXAMPLE_MCP_TOKEN: "t" } as any);
+        ck(specs.length === 2, "both examples parse into specs", String(specs.length));
+        ck(warnings.length === 0, "with no warnings", warnings.join(" "));
+        ck(specs.some((s) => s.transport === "http"), "including a remote one");
+      }
+    }
   }
 
   await new Promise<void>((r) => server.close(() => r()));

@@ -21,8 +21,13 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 export interface McpServerSpec {
   /** Stable id used to namespace tools and to report status. */
   name: string;
-  /** `stdio` spawns a child process; `http` talks to a remote endpoint. */
-  transport?: "stdio" | "http";
+  /**
+   * `stdio` spawns a child process. `http` is Streamable HTTP, the current
+   * remote transport. `sse` is the older HTTP+SSE transport it replaced, which
+   * is a genuinely different protocol - a long-lived GET stream plus POSTs to a
+   * second URL the server names - not a variation on the same one.
+   */
+  transport?: "stdio" | "http" | "sse";
   /** Remote endpoint, when transport is http. */
   url?: string;
   /** Extra headers for a remote server, typically Authorization. */

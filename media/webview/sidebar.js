@@ -2073,7 +2073,8 @@ function _sbRun() {
         '<span class="rail"></span>' +
         '<span class="mid">' +
           '<span class="top"><span class="nm">' + esc(sv.name) + "</span>" + mcpPill(sv.state) + "</span>" +
-          '<span class="sub ell" title="' + esc(sv.command) + '">stdio · ' +
+          '<span class="sub ell" title="' + esc(sv.command) + '">' +
+            esc(sv.transport || "stdio") + " · " +
             esc(sv.serverInfo ? sv.serverInfo.name + " " + sv.serverInfo.version : sv.command) +
           "</span>" +
         "</span>" +

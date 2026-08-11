@@ -1,11 +1,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { McpClient, type McpServerSpec, type McpTool } from "./client";
-import { McpHttpClient } from "./http";
+import { McpHttpClient, McpSseClient } from "./http";
 import type { ToolDef } from "../providers/client";
 
-/** Either transport, seen through the surface the registry actually uses. */
-type AnyClient = McpClient | McpHttpClient;
+/** Any transport, seen through the surface the registry actually uses. */
+type AnyClient = McpClient | McpHttpClient | McpSseClient;
 
 /**
  * Which MCP servers exist, which of their tools the model sees, and where a
@@ -40,6 +40,12 @@ export interface McpServerStatus {
    * visible.
    */
   state: "idle" | "starting" | "ready" | "failed" | "stopped" | "disabled";
+  /**
+   * How this server is reached. Both panels used to print "stdio" for every
+   * row, so a remote server was labelled as a local child process - the one
+   * fact a person checks first when a server will not connect.
+   */
+  transport: "stdio" | "http" | "sse";
   command: string;
   error?: string;
   toolCount: number;
@@ -164,7 +170,8 @@ export function loadMcpConfig(
     };
 
     // A URL, or an explicit http/sse type, means a remote server.
-    const isRemote = Boolean(cfg.url) || cfg.type === "http" || cfg.type === "sse";
+    const isRemote = Boolean(cfg.url) || cfg.type === "http" || cfg.type === "sse" ||
+      cfg.type === "streamable-http";
     if (isRemote) {
       if (typeof cfg.url !== "string" || !cfg.url.trim()) {
         warnings.push(`Server "${name}" is declared as ${cfg.type ?? "remote"} but has no "url".`);
@@ -191,7 +198,9 @@ export function loadMcpConfig(
       }
       specs.push({
         ...common,
-        transport: "http",
+        // Only an explicit "sse" selects the older protocol. A bare url means
+        // Streamable HTTP, which is what a server written today speaks.
+        transport: cfg.type === "sse" ? "sse" : "http",
         url: parsed.toString(),
         headers: cfg.headers,
         command: "",
@@ -276,10 +285,10 @@ export class McpRegistry {
     const running: McpServerStatus[] = [...this.clients.values()].map((c) => ({
       name: c.spec.name,
       state: c.state,
-      command:
-        c.spec.transport === "http"
-          ? c.spec.url ?? ""
-          : [c.spec.command, ...(c.spec.args ?? [])].join(" "),
+      transport: c.spec.transport ?? "stdio",
+      command: isRemoteSpec(c.spec)
+        ? c.spec.url ?? ""
+        : [c.spec.command, ...(c.spec.args ?? [])].join(" "),
       error: c.error,
       toolCount: c.tools.length,
       tools: c.tools.map((t) => t.name),
@@ -289,7 +298,8 @@ export class McpRegistry {
     const off: McpServerStatus[] = this.disabled.map((s) => ({
       name: s.name,
       state: "disabled" as const,
-      command: s.transport === "http" ? s.url ?? "" : [s.command, ...(s.args ?? [])].join(" "),
+      transport: s.transport ?? "stdio",
+      command: isRemoteSpec(s) ? s.url ?? "" : [s.command, ...(s.args ?? [])].join(" "),
       toolCount: 0,
       tools: [],
       approval: s.approval === "auto" ? ("auto" as const) : ("ask" as const),
@@ -401,12 +411,18 @@ export function capOutput(
   };
 }
 
+export function isRemoteSpec(s: McpServerSpec): boolean {
+  return s.transport === "http" || s.transport === "sse";
+}
+
 /** Pick a transport. The spec's own declaration decides; stdio is the default. */
 export function makeClient(
   spec: McpServerSpec,
   log: (level: "info" | "warn" | "error", msg: string) => void
 ): AnyClient {
-  return spec.transport === "http" ? new McpHttpClient(spec, log) : new McpClient(spec, log);
+  if (spec.transport === "http") return new McpHttpClient(spec, log);
+  if (spec.transport === "sse") return new McpSseClient(spec, log);
+  return new McpClient(spec, log);
 }
 
 /** Default config path, relative to the workspace root. */

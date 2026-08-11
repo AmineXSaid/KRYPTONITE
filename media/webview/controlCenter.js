@@ -861,7 +861,8 @@ function _run() {
         '<span class="url ell" title="' + esc(sv.command) + '">' +
           esc(sv.serverInfo ? sv.serverInfo.name + " " + sv.serverInfo.version : sv.command) +
         "</span></span>" +
-        '<span class="mono" style="font-size:10.5px">stdio · ' + esc(sv.approval) + "</span>" +
+        '<span class="mono" style="font-size:10.5px">' +
+          esc(sv.transport || "stdio") + " · " + esc(sv.approval) + "</span>" +
         '<span class="mono">' + (ready ? sv.toolCount : "-") + "</span>" +
         '<span class="acts"><button class="mini" data-mcp="reconnect" data-name="' + esc(sv.name) +
           '" title="Reconnect">' + icon("i-refresh", "ic-13") + "</button></span>" +
