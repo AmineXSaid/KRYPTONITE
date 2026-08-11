@@ -292,10 +292,15 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
   // MCP tools are withheld entirely in plan phase. MCP has no way to declare a
   // tool read-only, so there is nothing to check - and a plan that quietly filed
   // a GitHub issue would break the one promise plan mode makes.
+  // generate_image is offered only when the active profile declares an image
+  // model. Advertising a tool that can only ever answer "not configured" costs
+  // tokens on every request and invites the model to reach for it.
+  const builtins = ctx.image ? TOOL_DEFS : TOOL_DEFS.filter((t) => t.name !== "generate_image");
+
   const availableTools: ToolDef[] =
     phase === "plan"
-      ? TOOL_DEFS.filter((t) => READ_ONLY.has(t.name))
-      : [...TOOL_DEFS, ...(opts.mcpTools ?? [])];
+      ? builtins.filter((t) => READ_ONLY.has(t.name))
+      : [...builtins, ...(opts.mcpTools ?? [])];
 
   const messages: Msg[] = [
     { role: "system", content: system },

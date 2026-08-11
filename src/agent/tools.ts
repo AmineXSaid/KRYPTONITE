@@ -36,6 +36,20 @@ export interface ToolContext {
     needsApproval(name: string): boolean;
     call(name: string, args: unknown): Promise<{ content: string; isError?: boolean }>;
   };
+  /**
+   * Image generation, present only when the active profile declares one.
+   *
+   * Typed structurally for the same reason as `mcp` above: tools.ts is imported
+   * by both the agent loop and the offline harness, and neither should be made
+   * to drag in the provider client.
+   */
+  image?: {
+    /** Model id, for the approval prompt and the result line. */
+    model: string;
+    generate(prompt: string, size?: string): Promise<{ bytes: Buffer; mime: string }>;
+  };
+  /** Told about a rendered image so the transcript can show it. */
+  onImage?: (absPath: string, prompt: string) => void;
 }
 
 export interface ToolResult {
@@ -136,6 +150,30 @@ function globToRe(glob: string): RegExp {
 }
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** A filename from a prompt: readable, bounded, and safe on every platform. */
+function slug(s: string): string {
+  const out = s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48)
+    .replace(/-+$/, "");
+  return out || "image";
+}
+
+/** Local copy of the mime → extension map, so tools.ts imports no provider code. */
+function extFor(mime: string): string {
+  return (
+    {
+      "image/png": ".png",
+      "image/jpeg": ".jpg",
+      "image/webp": ".webp",
+      "image/gif": ".gif",
+      "image/svg+xml": ".svg",
+    } as Record<string, string>
+  )[mime] ?? ".bin";
 }
 
 export const TOOL_DEFS: ToolDef[] = [
@@ -257,6 +295,32 @@ export const TOOL_DEFS: ToolDef[] = [
         name: { type: "string", description: "Exact skill name from the Skills index." },
       },
       required: ["name"],
+    },
+  },
+  {
+    name: "generate_image",
+    description:
+      "Draw an image from a text description and save it into the workspace. " +
+      "Use this whenever the user asks for a picture, illustration, diagram or logo. " +
+      "Do not write a script to draw one instead - this calls a real image model.",
+    parameters: {
+      type: "object",
+      properties: {
+        prompt: {
+          type: "string",
+          description:
+            "What to draw, described in full. Include subject, style, composition and " +
+            "lighting; the image model sees only this string and none of the conversation.",
+        },
+        path: {
+          type: "string",
+          description:
+            "Workspace-relative file to write. The extension is corrected to match the " +
+            "bytes actually returned. Defaults to images/<slug>.png",
+        },
+        size: { type: "string", description: "e.g. 1024x1024. Falls back to the profile's default." },
+      },
+      required: ["prompt"],
     },
   },
   // CHANGED: added. The todo card's only data source.
@@ -688,6 +752,64 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
             skill.files.map((f) => `- ${rel}/${f}`).join("\n")
           : "";
         return { content: body + cut + extras };
+      }
+
+      case "generate_image": {
+        if (!ctx.image) {
+          return {
+            content:
+              "This endpoint profile has no image model. Add an `image:` block with a " +
+              "`model:` to the profile YAML, then try again. Do not attempt to draw the " +
+              "image with a script instead - say that image generation is not configured.",
+            isError: true,
+          };
+        }
+        const prompt = String(args?.prompt ?? "").trim();
+        if (!prompt) return { content: "prompt is required.", isError: true };
+
+        // Chosen before the request so the approval names a real destination.
+        const wanted = typeof args?.path === "string" && args.path.trim()
+          ? args.path.trim()
+          : "images/" + slug(prompt) + ".png";
+
+        const ok = await ctx.approve(
+          `Generate an image with ${ctx.image.model}`,
+          `${prompt}\n\n→ ${wanted}`
+        );
+        if (!ok) return { content: "The user declined image generation.", isError: true };
+
+        let out: { bytes: Buffer; mime: string };
+        try {
+          out = await ctx.image.generate(prompt, typeof args?.size === "string" ? args.size : undefined);
+        } catch (e: any) {
+          return { content: `Image generation failed: ${e?.message ?? e}`, isError: true };
+        }
+        if (!out.bytes.length) return { content: "The image model returned no data.", isError: true };
+        if (out.mime === "application/octet-stream") {
+          return {
+            content: "The endpoint returned data that is not a recognised image format.",
+            isError: true,
+          };
+        }
+
+        // The extension follows the bytes, not the request: asking for .png and
+        // being handed JPEG is common, and a mislabelled file fails to render
+        // later in a way that looks like the generation failed.
+        const want = extFor(out.mime);
+        const rel = wanted.replace(/\.[A-Za-z0-9]+$/, "") + want;
+        const abs = inside(ctx.root, rel);
+        fs.mkdirSync(path.dirname(abs), { recursive: true });
+        fs.writeFileSync(abs, out.bytes);
+        ctx.onFileTouched(abs);
+        ctx.onImage?.(abs, prompt);
+
+        const kb = Math.max(1, Math.round(out.bytes.length / 1024));
+        return {
+          content:
+            `Saved ${rel} (${out.mime}, ${kb} KB). It is already shown to the user - ` +
+            `describe it briefly rather than restating the prompt, and do not offer to ` +
+            `generate it again unless asked.`,
+        };
       }
 
       // CHANGED: added. No approval gate - this touches no files and runs no

@@ -388,6 +388,20 @@ export interface ToolEndOut {
   tool: { name: string; args: unknown; result?: string; isError?: boolean };
 }
 export interface TodosUpdatedOut { type: "todosUpdated"; todos: TodoDto[] }
+/**
+ * An image the agent generated and wrote into the workspace.
+ *
+ * Carries the workspace-relative path rather than the bytes, so the transcript
+ * and the saved session stay small and a restored session re-reads from disk.
+ * `src` is the same file as a webview-safe URI, resolved by the host because
+ * only it can call `asWebviewUri`.
+ */
+export interface ImageGeneratedOut {
+  type: "imageGenerated";
+  path: string;
+  prompt: string;
+  src?: string;
+}
 export interface PlanProposedOut { type: "planProposed"; meta: string; steps: string[] }
 export interface PermissionRequestOut {
   type: "permissionRequest";
@@ -565,6 +579,7 @@ export interface EndpointCheckDoneOut {
 
 export type OutboundMessage =
   | StateSyncOut | StreamDeltaOut | ToolStartOut | ToolEndOut | TodosUpdatedOut
+  | ImageGeneratedOut
   | PlanProposedOut | PermissionRequestOut | PermissionResolvedOut
   | DiffPendingOut | DiffResolvedOut | FileTouchedOut | TurnEndOut | ErrorOut
   | TraceStartedOut | TraceUpdateOut | TraceDoneOut | TlsErrorOut
@@ -585,7 +600,8 @@ export type OutboundType = OutboundMessage["type"];
  */
 export type ReplayableEvent =
   | StreamDeltaOut | ToolStartOut | ToolEndOut
-  | TodosUpdatedOut | PermissionRequestOut | ContextUsageOut | SteerAcceptedOut;
+  | TodosUpdatedOut | ImageGeneratedOut
+  | PermissionRequestOut | ContextUsageOut | SteerAcceptedOut;
 
 /** Narrowing helper for host-side switch statements. */
 export type InboundOf<T extends InboundType> = Extract<InboundMessage, { type: T }>;

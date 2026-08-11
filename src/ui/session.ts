@@ -236,6 +236,24 @@ export class SessionController {
       root,
       skills: this.app.enabledSkills(),
       mcp: this.app.mcp,
+      // Present only when the profile declares an image model. That absence is
+      // what withholds the tool from the model entirely, rather than offering
+      // one that could only ever answer "not configured".
+      image: profile.image
+        ? {
+            model: profile.image.model,
+            generate: (prompt: string, size?: string) =>
+              client.generateImage(prompt, { size, signal: this.abort?.signal }),
+          }
+        : undefined,
+      onImage: (abs: string, prompt: string) => {
+        const rel = path.relative(root, abs).split(path.sep).join("/");
+        // Buffered as well as broadcast, so a restored session shows the image
+        // instead of a sentence claiming one was produced.
+        const ev: ReplayableEvent = { type: "imageGenerated", path: rel, prompt };
+        this.buffer(ev);
+        this.app.broadcast(ev);
+      },
       // Every path that can change the workspace is gated on approval, so this
       // is where the deferred snapshot is joined. By the time any tool writes,
       // the checkpoint it would be restored to already exists.

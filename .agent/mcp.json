@@ -3,23 +3,37 @@
     "MCP servers Kryptonite may start. Same shape as Claude Desktop and Claude Code,",
     "so a server block can be copied between them verbatim.",
     "",
-    "Keys per server:",
+    "LOCAL (stdio) - the server runs as a child process on this machine:",
     "  command   executable. On Windows, npx/npm/uvx shims are handled for you.",
     "  args      argument list.",
     "  env       merged over the extension host's environment.",
     "  cwd       defaults to the workspace root.",
+    "",
+    "REMOTE - the server is reached over the network:",
+    "  url       https://... A plain http:// url to anywhere but localhost is",
+    "            refused, because the headers below would travel in clear text.",
+    "  headers   sent on every request, which is where a token belongs.",
+    "  type      omit for Streamable HTTP, which is what current servers speak.",
+    "            'sse' selects the older HTTP+SSE protocol - a different wire,",
+    "            not a variation, so only set it if the server documents it.",
+    "",
+    "BOTH:",
     "  approval  'ask' (default) routes every call through the approval gate;",
-    "            'auto' does not. A tool from an MCP server is a side effect in a",
-    "            process this extension started, so 'ask' is the safe default.",
+    "            'auto' does not. A server is someone else's code.",
     "  timeoutMs per-request budget. The first start of an npx-launched server",
     "            includes a package download; the handshake allows 45s minimum.",
     "  enabled   false keeps the block here without starting anything.",
     "",
-    "Only stdio is implemented. A block with a url/type of http or sse is reported",
-    "as unsupported rather than silently ignored.",
+    "${VAR} and ${VAR:-default} expand from the environment in command, args,",
+    "env, cwd, url and headers - so a token never has to be written into this",
+    "file, which lives in the workspace and usually gets committed.",
     "",
     "Tools reach the model as mcp__<server>__<tool>. They are withheld entirely in",
-    "Plan mode, because MCP has no way to declare a tool read-only."
+    "Plan mode, because MCP has no way to declare a tool read-only.",
+    "",
+    "The filesystem server below is live. It exposes read/write tools scoped to",
+    "the directory named in args - the workspace root here, and nothing above it.",
+    "approval is 'ask', so every call still stops for you first."
   ],
   "mcpServers": {
     "filesystem": {
@@ -27,7 +41,7 @@
       "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
       "approval": "ask",
       "timeoutMs": 120000,
-      "enabled": false
+      "enabled": true
     }
   }
 }

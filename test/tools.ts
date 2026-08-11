@@ -292,6 +292,104 @@ const run = (name: string, args: any) => runTool(name, args, ctx);
       r.content.slice(0, 60));
   }
 
+  /* ── generate_image ──────────────────────────────────────────────── */
+  console.log("\n──── generate_image ────");
+  const PNG = Buffer.from(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489", "hex"
+  );
+  const JPG = Buffer.from("ffd8ffe000104a46494600010100000100010000", "hex");
+
+  {
+    // Without an image block the tool must refuse in a way that stops the model
+    // reaching for a script instead, which is exactly what it did before.
+    const r = await run("generate_image", { prompt: "a ferrari" });
+    ck(Boolean(r.isError) && /no image model/i.test(r.content), "refused when unconfigured");
+    ck(/image:/.test(r.content) && /do not attempt/i.test(r.content),
+      "and the refusal names the fix and forbids the script workaround");
+  }
+
+  let asked: string[] = [];
+  let give: { bytes: Buffer; mime: string } | Error = { bytes: PNG, mime: "image/png" };
+  ctx.image = {
+    model: "black-forest-labs/flux.1-dev",
+    generate: async (prompt: string) => {
+      asked.push(prompt);
+      if (give instanceof Error) throw give;
+      return give;
+    },
+  };
+  const shown: Array<[string, string]> = [];
+  ctx.onImage = (abs, prompt) => shown.push([abs, prompt]);
+
+  {
+    approveAnswer = true;
+    approvals = [];
+    asked = [];
+    const r = await run("generate_image", { prompt: "A Van Gogh style Ferrari" });
+    ck(!r.isError, "a configured profile generates", r.content);
+    ck(asked[0] === "A Van Gogh style Ferrari", "the prompt reaches the model verbatim");
+    ck(/images\/a-van-gogh-style-ferrari\.png/.test(r.content),
+      "the default path is a slug of the prompt", r.content);
+    const abs = path.join(root, "images", "a-van-gogh-style-ferrari.png");
+    ck(fs.existsSync(abs), "and the file is on disk");
+    ck(fs.readFileSync(abs).equals(PNG), "with the exact bytes returned");
+    ck(shown.length === 1 && shown[0][0] === abs, "the transcript is told to render it");
+    ck(/already shown to the user/.test(r.content),
+      "and the model is told not to re-announce it");
+    ck(approvals.length === 1 && /flux\.1-dev/.test(approvals[0]),
+      "approval names the model doing the drawing", approvals[0]);
+  }
+  {
+    // Asking for .png and being handed JPEG is common; a mislabelled file fails
+    // to render later in a way that looks like the generation failed.
+    give = { bytes: JPG, mime: "image/jpeg" };
+    const r = await run("generate_image", { prompt: "x", path: "art/thing.png" });
+    ck(/art\/thing\.jpg/.test(r.content), "the extension follows the bytes, not the request", r.content);
+    ck(fs.existsSync(path.join(root, "art", "thing.jpg")), "and that is the file written");
+    ck(!fs.existsSync(path.join(root, "art", "thing.png")), "the requested name is not also written");
+  }
+  {
+    give = { bytes: PNG, mime: "image/png" };
+    const r = await run("generate_image", { prompt: "y", path: "../outside/x.png" });
+    ck(Boolean(r.isError) && /outside the workspace/i.test(r.content),
+      "an image cannot be written outside the workspace");
+  }
+  {
+    approveAnswer = false;
+    asked = [];
+    const r = await run("generate_image", { prompt: "z" });
+    ck(Boolean(r.isError) && /declined/.test(r.content), "a declined generation reports the decline");
+    ck(asked.length === 0, "and never calls the endpoint - approval comes first, so a refusal costs nothing");
+    approveAnswer = true;
+  }
+  {
+    const r = await run("generate_image", { prompt: "" });
+    ck(Boolean(r.isError) && /required/.test(r.content), "an empty prompt is refused");
+  }
+  {
+    give = new Error("HTTP 402. quota exceeded");
+    const r = await run("generate_image", { prompt: "q" });
+    ck(Boolean(r.isError) && /quota exceeded/.test(r.content),
+      "a provider failure is reported verbatim rather than swallowed", r.content);
+    give = { bytes: PNG, mime: "image/png" };
+  }
+  {
+    give = { bytes: Buffer.from("not an image at all"), mime: "application/octet-stream" };
+    const r = await run("generate_image", { prompt: "w" });
+    ck(Boolean(r.isError) && /not a recognised image/i.test(r.content),
+      "data that is not an image is refused rather than saved as one");
+    ck(!fs.existsSync(path.join(root, "images", "w.png")), "and nothing is written");
+    give = { bytes: PNG, mime: "image/png" };
+  }
+  {
+    // A prompt made entirely of punctuation must still yield a legal filename.
+    const r = await run("generate_image", { prompt: "!!! ??? ***" });
+    ck(!r.isError && /images\/image\.png/.test(r.content),
+      "a prompt with no usable characters still names a file", r.content);
+  }
+  ctx.image = undefined;
+  ctx.onImage = undefined;
+
   /* ── schema and wiring ───────────────────────────────────────────── */
   console.log("\n──── schema ────");
   {

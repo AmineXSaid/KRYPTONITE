@@ -297,7 +297,9 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 .md-h { font-family: var(--kx-ui); line-height: 1.3; margin: 14px 0 6px; }
 .md-h:first-child { margin-top: 0; }
 .md-h1 { font-family: var(--kx-display); font-size: 16px; font-weight: 700; letter-spacing: -.01em; }
-.md-h2 { font-size: 14.5px; font-weight: 700; letter-spacing: -.005em; }
+/* The Display cut's Semibold, which is drawn for exactly this size band and was
+   the one shipped weight nothing referenced. */
+.md-h2 { font-family: var(--kx-display); font-size: 14.5px; font-weight: 600; letter-spacing: -.005em; }
 .md-h3 { font-size: 13.5px; font-weight: 700; }
 .md-h4, .md-h5, .md-h6 {
   font-family: var(--kx-ui); font-size: 12.5px; font-weight: 600;
@@ -477,6 +479,13 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   font-family: var(--kx-mono); font-size: 11px;
   color: var(--kx-fg);
 }
+/* A path in three weights, so a column of tool rows can be scanned by filename
+   without reading the prefixes. Flat mono made `src/agent/tools.ts` and
+   `tools.ts` cost the same effort to read. */
+.p-dir { color: var(--kx-fg-4); }
+.p-name { color: var(--kx-fg); font-weight: 600; }
+.p-ext { color: var(--kx-mcp); }
+.tool[data-error="1"] .p-name { color: var(--kx-error); }
 /* Diff stat on the row that produced it, so an edit is legible at a glance. */
 .tool-stat { flex: none; font-family: var(--kx-mono); font-size: 10.5px; }
 .tool-stat .a { color: var(--kx-accent); }
@@ -527,6 +536,23 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .dl.add .sg { color: var(--kx-accent); }
 .dl.del { background: var(--kx-diff-del); }
 .dl.del .sg { color: var(--kx-error); }
+/* The second tint, on just the words that differ. A line background alone says
+   "something here changed" and leaves the reader to find it; this is the part
+   that makes a dense diff scannable. Only modified pairs get it - a pure
+   insertion has no counterpart to compare against, so its whole line is new. */
+.dl.add .w { background: var(--kx-diff-add-word); border-radius: 2px; }
+.dl.del .w { background: var(--kx-diff-del-word); border-radius: 2px; }
+
+/* The same treatment inside a tool card, so an edit reads identically wherever
+   it appears. No gutters here: there are no line numbers to show. */
+.edit-preview {
+  font-family: var(--kx-mono); font-size: 11px; line-height: 1.7;
+  border: 1px solid var(--kx-line); border-radius: 5px;
+  background: var(--kx-bg-deep); overflow-x: auto; max-height: 320px; overflow-y: auto;
+}
+.edit-preview .dl { min-width: max-content; }
+.edit-preview .sg { width: 16px; }
+.edit-preview .c { padding-right: 12px; }
 .diff-foot {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   padding: 7px 9px; font-size: 11.5px;
@@ -928,6 +954,34 @@ li.doing .cbx { border-color: var(--kx-accent); }
 .tk-nu { color: var(--kx-info); }                   /* numbers: measurement */
 .tk-at { color: var(--kx-warn); }                   /* keys, attributes, decorators */
 .tk-pu { color: var(--kx-fg-3); }                   /* punctuation stays quiet */
+/* ── generated image ──
+   The picture is the message, so it leads; the path and prompt sit under it as
+   provenance. Bounded in height so a tall image cannot push the rest of the
+   turn off screen. */
+.gen-img {
+  margin: 8px 0; border: 1px solid var(--kx-line); border-radius: 6px;
+  overflow: hidden; background: var(--kx-surface-2);
+}
+.gi-frame {
+  display: block; cursor: pointer; line-height: 0;
+  background: repeating-conic-gradient(var(--kx-surface-3) 0 25%, transparent 0 50%) 0 0 / 16px 16px;
+}
+.gi-frame img { display: block; width: 100%; height: auto; max-height: 420px; object-fit: contain; }
+.gi-frame:hover { outline: 1px solid var(--kx-accent); outline-offset: -1px; }
+.gi-missing {
+  display: flex; align-items: center; gap: 7px; padding: 14px;
+  color: var(--kx-fg-3); font-size: 11.5px; line-height: 1.4; background: none;
+}
+.gi-meta {
+  display: flex; align-items: center; gap: 6px; padding: 5px 8px;
+  border-top: 1px solid var(--kx-line);
+}
+.gi-path { flex: 1; min-width: 0; font-size: 10.5px; color: var(--kx-fg-2); }
+.gi-prompt {
+  padding: 0 9px 8px; font-size: 11px; line-height: 1.5;
+  color: var(--kx-fg-3); overflow-wrap: anywhere;
+}
+
 .tk-va { color: var(--kx-mcp); }                    /* $variables: shell and PowerShell */
 /* A diff's added and removed lines. Not --kx-diff-add/--kx-diff-del: those are
    translucent washes meant to sit behind a row, and at 14% and 30% alpha they

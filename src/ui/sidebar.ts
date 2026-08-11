@@ -26,6 +26,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     view.webview.html = sidebarHtml(view.webview, this.extensionUri);
 
     const sink = (msg: OutboundMessage) => {
+      // A generated image is stored as a workspace-relative path, because that
+      // is what survives in a saved session. Turning it into a URI the webview
+      // may actually load has to happen here: `asWebviewUri` is per-webview, so
+      // neither the agent nor the session can do it.
+      if (msg.type === "imageGenerated" && !msg.src) {
+        const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+        if (root) {
+          msg = {
+            ...msg,
+            src: view.webview.asWebviewUri(vscode.Uri.joinPath(root, ...msg.path.split("/"))).toString(),
+          };
+        }
+      }
       void view.webview.postMessage(msg);
     };
     this.app.registerSink("sidebar", sink);

@@ -87,11 +87,34 @@ export interface Capabilities {
   parallelToolExecution: boolean;
 }
 
+/**
+ * An image-generation endpoint, when the profile has one.
+ *
+ * Kept beside the chat settings rather than in a profile of its own because it
+ * is nearly always the same host and the same credential - only the path, the
+ * model and the response shape differ. A profile without this block simply has
+ * no image tool, which is the honest default: most endpoints cannot draw.
+ */
+export interface ImageSpec {
+  /** Model id sent in the body, e.g. `black-forest-labs/flux.1-dev`. */
+  model: string;
+  /** Path appended to baseUrl. Defaults to `/v1/images/generations`. */
+  path?: string;
+  /** Default size, e.g. `1024x1024`. Providers disagree; this is passed through. */
+  size?: string;
+  /** Merged into every image request, for provider-specific knobs. */
+  extraBody?: Record<string, unknown>;
+  /** Its own budget: drawing takes far longer than a chat completion. */
+  timeoutMs?: number;
+}
+
 export interface EndpointProfile {
   name: string;
   description?: string;
   wire: Wire;
   baseUrl: string;
+  /** Present only when the profile declares an `image:` block. */
+  image?: ImageSpec;
   /** Path appended to baseUrl. Some gateways prefix everything. */
   chatPath?: string;
   model: string;
@@ -171,6 +194,16 @@ export function loadProfile(file: string): EndpointProfile {
   }
   if (doc.wire === "raw" && !doc.transform) {
     throw new ProfileError("wire: raw requires a transform module.", file);
+  }
+  // An image block with no model would produce a tool the model can call and
+  // that can only ever fail, which is worse than not offering it.
+  if (doc.image !== undefined) {
+    if (typeof doc.image !== "object" || doc.image === null) {
+      throw new ProfileError("image: must be a block with a model.", file);
+    }
+    if (typeof doc.image.model !== "string" || !doc.image.model.trim()) {
+      throw new ProfileError("image.model is required when an image block is present.", file);
+    }
   }
 
   return {

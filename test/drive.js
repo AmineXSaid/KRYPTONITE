@@ -173,6 +173,146 @@ const STATE = (over = {}) => ({ type: "stateSync", state: {
   ok("failed tool card shows the fail mark", !!d.querySelector("#log .tool-meta .tool-fail"));
 }
 
+/* ── 6d. tool rows: filenames, previews, word-level edits ────────────── */
+{
+  const { d, inbound } = boot();
+
+  // A path is what the eye goes to on a tool row. Flat mono made
+  // `src/agent/tools.ts` and `tools.ts` cost the same effort to read.
+  inbound({ type: "toolStart", tool: { name: "read_file", args: { path: "src/agent/tools.ts" } } });
+  const row = d.querySelector("#log .tool .tool-arg");
+  ok("a path splits into directory, name and extension",
+    row.querySelector(".p-dir") && row.querySelector(".p-name") && row.querySelector(".p-ext"));
+  ok("the directory is the prefix", row.querySelector(".p-dir").textContent === "src/agent/");
+  ok("the name carries the weight", row.querySelector(".p-name").textContent === "tools");
+  ok("and the extension is separate", row.querySelector(".p-ext").textContent === ".ts");
+  ok("the whole path still reads correctly", row.textContent === "src/agent/tools.ts");
+
+  // A dotfile's leading dot is its name, not an extension.
+  inbound({ type: "toolStart", tool: { name: "read_file", args: { path: ".gitignore" } } });
+  const rows = d.querySelectorAll("#log .tool .tool-arg");
+  const dot = rows[rows.length - 1];
+  ok("a dotfile is not split at its leading dot",
+    dot.querySelector(".p-name").textContent === ".gitignore" && !dot.querySelector(".p-ext"));
+
+  // A command is not a path; splitting one on "/" would invent structure.
+  inbound({ type: "toolStart", tool: { name: "run_command", args: { command: "ls /usr/bin" } } });
+  const all = d.querySelectorAll("#log .tool .tool-arg");
+  const cmd = all[all.length - 1];
+  ok("a shell command is not treated as a path", !cmd.querySelector(".p-dir"));
+
+  // "Wrote 30 lines to x.md" repeats the header; the content is the point.
+  inbound({ type: "toolStart", tool: { name: "write_file", args: { path: "a.py", content: "def f():\n    return 1\n" } } });
+  inbound({ type: "toolEnd", tool: { name: "write_file", args: { path: "a.py", content: "def f():\n    return 1\n" }, result: "Wrote 2 lines to a.py." } });
+  const writes = d.querySelectorAll("#log .tool");
+  const wcard = writes[writes.length - 1];
+  ok("a write shows what it wrote", /def f/.test(wcard.querySelector(".tool-body").textContent));
+  ok("and not the sentence that repeats its own header",
+    !/Wrote 2 lines/.test(wcard.querySelector(".tool-body").textContent));
+  ok("highlighted by the file's own language",
+    !!wcard.querySelector(".tool-body .tk-kw"));
+
+  // An edit shows a word-level diff, the same treatment the diff cards use.
+  const eargs = { path: "b.ts", old_text: "const timeout = 30;", new_text: "const timeout = 60;" };
+  inbound({ type: "toolStart", tool: { name: "edit_file", args: eargs } });
+  inbound({ type: "toolEnd", tool: { name: "edit_file", args: eargs, result: "Edited b.ts." } });
+  const edits = d.querySelectorAll("#log .tool");
+  const ecard = edits[edits.length - 1];
+  const prev = ecard.querySelector(".edit-preview");
+  ok("an edit renders a diff rather than a sentence", !!prev);
+  ok("with a removed and an added line",
+    !!prev.querySelector(".dl.del") && !!prev.querySelector(".dl.add"));
+  const changed = [...prev.querySelectorAll(".w")].map((w) => w.textContent);
+  ok("and only the word that changed is tinted",
+    changed.includes("30") && changed.includes("60") && !changed.includes("timeout"),
+    JSON.stringify(changed));
+}
+
+/* ── 6e. word-level diff in the diff card ────────────────────────────── */
+{
+  const { d, inbound } = boot();
+  inbound({
+    type: "diffPending",
+    turnId: "t1",
+    file: "src/a.ts",
+    added: 1,
+    removed: 1,
+    patch: [
+      "@@ -1,1 +1,1 @@",
+      "-export const retries = 2;",
+      "+export const retries = 5;",
+    ].join("\n"),
+  });
+  const card = d.querySelector("#log .diff-card");
+  ok("the diff card renders", !!card);
+  const marks = [...card.querySelectorAll(".dl .w")].map((w) => w.textContent);
+  ok("only the changed token is word-tinted", marks.includes("2") && marks.includes("5"),
+    JSON.stringify(marks));
+  ok("unchanged words are not tinted", !marks.includes("retries"));
+  ok("modified lines are marked as such", card.querySelectorAll(".dl.mod").length === 2);
+
+  // A pure insertion has no counterpart, so there is nothing to compare and the
+  // line background is the whole signal.
+  const b = boot();
+  b.inbound({
+    type: "diffPending", turnId: "t2", file: "x.ts", added: 1, removed: 0,
+    patch: ["@@ -1,0 +1,1 @@", "+brand new line"].join("\n"),
+  });
+  ok("a pure insertion gets no word tint",
+    b.d.querySelectorAll("#log .diff-card .dl .w").length === 0);
+
+  // Two lines sharing almost nothing are a replacement; tinting fragments of
+  // them is noise rather than information.
+  const c = boot();
+  c.inbound({
+    type: "diffPending", turnId: "t3", file: "y.ts", added: 1, removed: 1,
+    patch: ["@@ -1,1 +1,1 @@", "-aaaa bbbb cccc dddd", "+zzzz yyyy xxxx wwww"].join("\n"),
+  });
+  ok("a wholly rewritten line falls back to the line background",
+    c.d.querySelectorAll("#log .diff-card .dl .w").length === 0);
+}
+
+/* ── 6c. a generated image is shown, not just described ──────────────── */
+{
+  const { d, sent, inbound } = boot();
+
+  inbound({
+    type: "imageGenerated",
+    path: "images/ferrari.png",
+    prompt: "A Van Gogh style Ferrari",
+    src: "https://file%2B.vscode-resource.vscode-cdn.net/w/images/ferrari.png",
+  });
+  const card = d.querySelector("#log .gen-img");
+  ok("a generated image renders a card", !!card);
+  const img = card.querySelector("img");
+  ok("with the picture itself", !!img);
+  ok("pointing at the host-resolved uri", /vscode-resource/.test(img.getAttribute("src")));
+  ok("and alt text a screen reader can use", img.getAttribute("alt") === "A Van Gogh style Ferrari");
+  ok("the path is shown as provenance", /images\/ferrari\.png/.test(card.textContent));
+  ok("and so is the prompt", /Van Gogh style Ferrari/.test(card.textContent));
+
+  // Clicking opens it in an editor: an <a> is inert inside a webview, so the
+  // host has to do it.
+  sent.length = 0;
+  card.querySelector(".gi-frame").dispatchEvent(new d.defaultView.MouseEvent("click", { bubbles: true }));
+  ok("clicking asks the host to open the file",
+    sent.some((m) => m.type === "openFile" && m.path === "images/ferrari.png"));
+
+  // The host cannot resolve a uri when no folder is open. The card must still
+  // carry the path and prompt rather than rendering a broken image, which would
+  // read as a failed generation.
+  inbound({ type: "imageGenerated", path: "images/b.png", prompt: "second" });
+  const cards = d.querySelectorAll("#log .gen-img");
+  const last = cards[cards.length - 1];
+  ok("a card with no uri still renders", cards.length === 2);
+  ok("without a broken img element", !last.querySelector("img"));
+  ok("and still names the file", /images\/b\.png/.test(last.textContent));
+
+  // Model output reaches this card, so it must not survive as markup.
+  inbound({ type: "imageGenerated", path: "a.png", prompt: '<img src=x onerror=alert(1)>' });
+  ok("a prompt cannot inject markup", d.querySelectorAll("#log img[onerror]").length === 0);
+}
+
 /* ── 7. /clear goes through newChat ────────────────────────────────── */
 {
   const { w, d, sent, inbound } = boot();

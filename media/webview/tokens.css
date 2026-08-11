@@ -105,8 +105,16 @@
      pointing at the colour it replaced. The deletion wash uses the burgundy at
      full strength - as a ground behind text it is doing the job the swatch is
      actually good at. */
-  --kx-diff-add: rgba(34, 201, 214, .14);
-  --kx-diff-del: rgba(120, 18, 47, .30);
+  /* Two strengths each, the way GitLab reads a diff: the weaker tint marks the
+     line that changed, the stronger one marks the words inside it that
+     actually differ. With one tint only, a line where a single identifier was
+     renamed paints its other ninety characters as though they had changed too.
+     The deletion pair moves from the burgundy to the rose, because burgundy at
+     the alpha a word tint needs is too dark to read text through. */
+  --kx-diff-add: rgba(34, 201, 214, .13);
+  --kx-diff-add-word: rgba(34, 201, 214, .34);
+  --kx-diff-del: rgba(232, 116, 143, .13);
+  --kx-diff-del-word: rgba(232, 116, 143, .32);
   --kx-accent-wash: rgba(34, 201, 214, .14);
   --kx-error-wash:  rgba(120, 18, 47, .32);
   --kx-warn-wash:   rgba(201, 111, 146, .16);

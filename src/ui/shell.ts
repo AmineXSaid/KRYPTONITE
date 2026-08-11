@@ -142,11 +142,23 @@ export function controlCenterHtml(webview: vscode.Webview, extensionUri: vscode.
   return shell(webview, extensionUri, "controlCenter", "KRYPTONITE Control Center");
 }
 
-/** Shared by both surfaces so `localResourceRoots` is defined in one place. */
+/**
+ * Shared by both surfaces so `localResourceRoots` is defined in one place.
+ *
+ * The open folders are included alongside `media` so a generated image can be
+ * shown in the transcript from where it was saved. That is a read permission
+ * for the webview only, and the CSP above grants it no way to send anything
+ * anywhere: `default-src 'none'` with no `connect-src`. The alternative was
+ * inlining every image as a data: URI, which would put megabytes of base64
+ * into the transcript and into the saved session file.
+ */
 export function webviewOptions(extensionUri: vscode.Uri): vscode.WebviewOptions {
   return {
     enableScripts: true,
-    localResourceRoots: [vscode.Uri.joinPath(extensionUri, "media")],
+    localResourceRoots: [
+      vscode.Uri.joinPath(extensionUri, "media"),
+      ...(vscode.workspace.workspaceFolders ?? []).map((f) => f.uri),
+    ],
   };
 }
 

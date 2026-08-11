@@ -701,6 +701,41 @@ function _sbRun() {
   }
 
   /**
+   * The argument on a tool row, with a path broken into its parts.
+   *
+   * A path is what the eye goes to on that row, and rendering it as one flat
+   * mono string makes `src/agent/tools.ts` and `tools.ts` cost the same effort
+   * to read. The directory recedes, the filename carries the weight, and the
+   * extension is tinted - so a column of tool rows can be scanned by filename
+   * without reading any of the prefixes.
+   *
+   * Only path-shaped arguments get this. A shell command or a search pattern is
+   * not a path, and splitting one on "/" would invent structure that is not
+   * there.
+   */
+  function argHtml(name, a) {
+    var text = argOf(name, a);
+    if (!text) return "";
+    if (name === "run_command" || name === "search" || name === "read_skill" ||
+        name === "update_todos") {
+      return esc(text);
+    }
+    var norm = String(text).replace(/\\/g, "/");
+    var cut = norm.lastIndexOf("/");
+    var dir = cut === -1 ? "" : norm.slice(0, cut + 1);
+    var base = cut === -1 ? norm : norm.slice(cut + 1);
+    var dot = base.lastIndexOf(".");
+    // A leading dot is the whole name (.gitignore), not an extension.
+    var stem = dot > 0 ? base.slice(0, dot) : base;
+    var ext = dot > 0 ? base.slice(dot) : "";
+    return (
+      (dir ? '<span class="p-dir">' + esc(dir) + "</span>" : "") +
+      '<span class="p-name">' + esc(stem) + "</span>" +
+      (ext ? '<span class="p-ext">' + esc(ext) + "</span>" : "")
+    );
+  }
+
+  /**
    * Line delta for an edit, straight off the tool arguments.
    *
    * Deliberately a line count, not a real diff: the authoritative +/− lives on
@@ -1167,7 +1202,8 @@ function _sbRun() {
       '<button class="tool-head">' + icon("i-chev", "ic-9 chev") +
         icon(TOOL_ICON[name] || "i-file", "ic-14 tool-icon") +
         '<span class="tool-verb">' + esc(TOOL_VERB[name] || name) + "</span>" +
-        '<span class="tool-arg ell">' + esc(argOf(name, args)) + "</span>" +
+        // argHtml escapes every part as it builds them.
+        '<span class="tool-arg ell">' + argHtml(name, args) + "</span>" +
         '<span class="sp"></span><span class="tool-stat"></span>' +
         /* Running is the state this card spends most of its life in, and it
            was the one state with no mark at all: the slot sat empty until a
@@ -1231,7 +1267,14 @@ function _sbRun() {
     var body = el.querySelector(".tool-body");
     body.innerHTML = "";
     var text = result == null ? "" : String(result);
-    if (text) body.appendChild(resultBlock(text, name));
+    // A write reports itself as "Wrote 30 lines to x.md", which the card header
+    // already says. Expanding it to read the same sentence twice is the whole
+    // payload of the card. The arguments hold what was actually written, and
+    // they are already here, so show that instead - it costs the model nothing
+    // because none of this is sent back to it.
+    var preview = !isError && argPreview(name, args);
+    if (preview) body.appendChild(preview);
+    else if (text) body.appendChild(resultBlock(text, name));
     if (text.length > MODEL_TRUNCATION) {
       body.appendChild(div("trunc-note",
         icon("i-warn", "ic-11") + "<span>Output truncated to 60,000 characters for the model</span>"));
@@ -1271,6 +1314,162 @@ function _sbRun() {
     return wrap;
   }
 
+  /**
+   * What a tool card should show when opened, built from the call's arguments.
+   *
+   * The result string is written for the model, not for a reader: "Wrote 30
+   * lines to x.md" repeats the header verbatim. The arguments carry the thing
+   * that actually happened, and rendering them costs no tokens because the
+   * transcript sent to the model is unaffected.
+   *
+   * Returns null for tools whose result really is the interesting part - a
+   * command's output, a file's contents, a search's hits.
+   */
+  function argPreview(name, args) {
+    if (!args || typeof args !== "object") return null;
+
+    if (name === "write_file" && typeof args.content === "string") {
+      var wrap = document.createElement("div");
+      var pre = div("code-block");
+      var body = args.content;
+      var cut = body.length > INLINE_LIMIT;
+      pre.innerHTML = highlight(cut ? body.slice(0, INLINE_LIMIT) : body, String(args.path || ""));
+      wrap.appendChild(pre);
+      if (cut) {
+        var more = document.createElement("button");
+        more.className = "show-more";
+        more.textContent = "Show all (" + fmtK(body.length) + " characters)";
+        more.addEventListener("click", function () {
+          pre.innerHTML = highlight(body, String(args.path || ""));
+          more.remove();
+        });
+        wrap.appendChild(more);
+      }
+      return wrap;
+    }
+
+    if (name === "edit_file" && typeof args.old_text === "string" && typeof args.new_text === "string") {
+      // The same word-level treatment the diff cards use, so an edit reads the
+      // same way wherever it appears.
+      var oldLines = args.old_text.split("\n");
+      var newLines = args.new_text.split("\n");
+      var rows = [];
+      for (var i = 0; i < oldLines.length; i++) rows.push({ kind: "del", text: oldLines[i] });
+      for (var j = 0; j < newLines.length; j++) rows.push({ kind: "add", text: newLines[j] });
+      pairWords(rows);
+      var html = "";
+      for (var k = 0; k < rows.length; k++) {
+        var r = rows[k];
+        html += '<div class="dl ' + r.kind + (r.html ? " mod" : "") + '">' +
+          '<span class="sg">' + (r.kind === "add" ? "+" : "−") + "</span>" +
+          '<span class="c">' + (r.html || esc(r.text)) + "</span></div>";
+      }
+      return div("edit-preview", html);
+    }
+
+    return null;
+  }
+
+  /* ───────────────────── word-level diff ─────────────────────
+   *
+   * A line background says "this line changed". On a line where one identifier
+   * was renamed, that paints the other ninety characters as though they had
+   * changed too, and the reader has to find the difference by eye. GitLab's
+   * answer is a second, stronger tint on just the words that differ, and it is
+   * the thing that makes a dense diff readable at a glance.
+   *
+   * Tokens are words, whitespace runs and single punctuation characters, so a
+   * rename lights up the identifier rather than the whole expression.
+   */
+  function wordsOf(s) {
+    return String(s).match(/[A-Za-z0-9_$]+|\s+|[^\sA-Za-z0-9_$]/g) || [];
+  }
+
+  /**
+   * Longest common subsequence over token arrays, returning the pair of
+   * "changed" flags.
+   *
+   * Bounded deliberately: the table is O(n·m), and two 4,000-character lines
+   * would build sixteen million cells inside a render. Past the cap both lines
+   * are reported as wholly changed, which is what the line background already
+   * said - the loss is refinement, not correctness.
+   */
+  function wordDiff(a, b) {
+    var A = wordsOf(a), B = wordsOf(b);
+    if (A.length * B.length > 40000) return null;
+
+    var n = A.length, m = B.length;
+    var dp = new Uint16Array((n + 1) * (m + 1));
+    for (var i = n - 1; i >= 0; i--) {
+      for (var j = m - 1; j >= 0; j--) {
+        dp[i * (m + 1) + j] = A[i] === B[j]
+          ? dp[(i + 1) * (m + 1) + j + 1] + 1
+          : Math.max(dp[(i + 1) * (m + 1) + j], dp[i * (m + 1) + j + 1]);
+      }
+    }
+    var aFlags = new Array(n).fill(true), bFlags = new Array(m).fill(true);
+    var x = 0, y = 0, same = 0;
+    while (x < n && y < m) {
+      if (A[x] === B[y]) {
+        aFlags[x] = false; bFlags[y] = false;
+        if (A[x].trim()) same += A[x].length;
+        x++; y++;
+      } else if (dp[(x + 1) * (m + 1) + y] >= dp[x * (m + 1) + y + 1]) x++;
+      else y++;
+    }
+    // Two lines that share almost nothing are a replacement, not an edit.
+    // Highlighting scattered fragments of them is noise, so fall back to the
+    // plain line background.
+    var longest = Math.max(a.length, b.length);
+    if (longest && same / longest < 0.25) return null;
+    return { a: aFlags, b: bFlags, A: A, B: B };
+  }
+
+  /** Render one side of a word diff, tinting only the tokens that differ. */
+  function markWords(tokens, flags) {
+    var out = "", run = "", runOn = false;
+    for (var i = 0; i < tokens.length; i++) {
+      var on = flags[i];
+      if (on !== runOn && run) {
+        out += runOn ? '<span class="w">' + esc(run) + "</span>" : esc(run);
+        run = "";
+      }
+      runOn = on;
+      run += tokens[i];
+    }
+    if (run) out += runOn ? '<span class="w">' + esc(run) + "</span>" : esc(run);
+    return out;
+  }
+
+  /**
+   * Attach word-level markup to a parsed patch, in place.
+   *
+   * Only a run of removals immediately followed by the same number of additions
+   * is treated as a modification. Anything else is a genuine insertion or
+   * deletion, where there is no counterpart to compare against.
+   */
+  function pairWords(rows) {
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].kind !== "del") continue;
+      var d = i;
+      while (d < rows.length && rows[d].kind === "del") d++;
+      var a = d;
+      while (a < rows.length && rows[a].kind === "add") a++;
+      var dels = d - i, adds = a - d;
+      if (dels && dels === adds) {
+        for (var k = 0; k < dels; k++) {
+          var del = rows[i + k], add = rows[d + k];
+          var w = wordDiff(del.text, add.text);
+          if (!w) continue;
+          del.html = markWords(w.A, w.a);
+          add.html = markWords(w.B, w.b);
+        }
+      }
+      i = a - 1;
+    }
+    return rows;
+  }
+
   /* ───────────────────────── diff cards ───────────────────────── */
 
   function parsePatch(patch) {
@@ -1300,7 +1499,7 @@ function _sbRun() {
   function addDiff(m) {
     aiEl = null;
     closeToolGroup();
-    var rows = parsePatch(m.patch), body = "";
+    var rows = pairWords(parsePatch(m.patch)), body = "";
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i];
       if (r.kind === "hunk") {
@@ -1309,11 +1508,12 @@ function _sbRun() {
         continue;
       }
       var sign = r.kind === "add" ? "+" : r.kind === "del" ? "\u2212" : "";
-      body += '<div class="dl ' + r.kind + '">' +
+      body += '<div class="dl ' + r.kind + (r.html ? " mod" : "") + '">' +
         '<span class="g">' + (r.oldNo == null ? "" : r.oldNo) + "</span>" +
         '<span class="g">' + (r.newNo == null ? "" : r.newNo) + "</span>" +
         '<span class="sg">' + sign + "</span>" +
-        '<span class="c">' + esc(r.text) + "</span></div>";
+        // r.html is built by markWords, which escapes every token as it goes.
+        '<span class="c">' + (r.html || esc(r.text)) + "</span></div>";
     }
 
     var card = div("diff-card",
@@ -1845,6 +2045,43 @@ function _sbRun() {
     closeToolGroup();
     add(div("err-box", icon("i-warn", "ic-13") + "<span>" + esc(message) + "</span>"));
     return;
+  }
+
+  /**
+   * A generated image, shown where it was produced.
+   *
+   * The host resolves `src` into a webview URI because only it can; without one
+   * the card still renders with the path and the prompt, which is the useful
+   * half - the file is on disk either way, and a broken <img> would suggest the
+   * generation had failed when it had not.
+   */
+  function addImage(m) {
+    aiEl = null;
+    closeToolGroup();
+    var card = div("gen-img");
+    var body = m.src
+      ? '<a class="gi-frame" href="' + esc(m.src) + '" title="Open ' + esc(m.path) + '">' +
+          '<img src="' + esc(m.src) + '" alt="' + esc(m.prompt) + '" loading="lazy">' +
+        "</a>"
+      : '<div class="gi-frame gi-missing">' + icon("i-file", "ic-14") + "<span>saved to disk</span></div>";
+    card.innerHTML =
+      body +
+      '<div class="gi-meta">' +
+        '<span class="gi-path mono ell" title="' + esc(m.path) + '">' + esc(m.path) + "</span>" +
+        '<button class="mini" data-img="open" data-path="' + esc(m.path) +
+          '" title="Open in the editor" aria-label="Open in the editor">' +
+          icon("i-file", "ic-13") + "</button>" +
+      "</div>" +
+      '<div class="gi-prompt">' + esc(m.prompt) + "</div>";
+    // The <a> is inert in a webview, so opening goes through the host, which is
+    // also the only side that can put the file in an editor tab.
+    card.addEventListener("click", function (e) {
+      if (!e.target.closest("[data-img], .gi-frame")) return;
+      e.preventDefault();
+      post("openFile", { path: m.path });
+    });
+    add(card);
+    if (atBottom()) scroll();
   }
 
 
@@ -2861,6 +3098,10 @@ function _sbRun() {
 
       case "todosUpdated":
         renderTodos(m.todos);
+        break;
+
+      case "imageGenerated":
+        addImage(m);
         break;
 
       case "planProposed":

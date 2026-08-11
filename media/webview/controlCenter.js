@@ -211,7 +211,11 @@ function _run() {
       ["Read-only vs approval",
         "Read-only tools cannot change anything, so they run without asking and several " +
         "can run at once. Anything that writes runs one at a time, in order, after you " +
-        "approve it."]
+        "approve it."],
+      ["Images",
+        "generate_image appears only when the active profile has an image: block naming " +
+        "a model. Without one the model is not offered the tool at all, so it will say " +
+        "image generation is not configured rather than trying to draw one with a script."]
     ],
     mcp: [
       ["What MCP is",
@@ -352,6 +356,7 @@ function _run() {
     ["glob", "pattern, path?, limit?", "read-only · newest first"],
     ["search", "pattern, path?, glob?, output_mode?, …", "read-only · skips binaries"],
     ["run_command", "command, reason, timeout_ms?", "shell · approval"],
+    ["generate_image", "prompt, path?, size?", "needs image: in the profile · approval"],
     ["read_skill", "name", "enabled skills only"],
     ["update_todos", "todos[]", "no side effects"]
   ];

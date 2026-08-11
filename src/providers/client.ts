@@ -411,6 +411,138 @@ export class EndpointClient {
   }
 
   /**
+   * Generate an image, returning the raw bytes.
+   *
+   * Reuses this client's dispatcher, so the image request goes out over the
+   * same keep-alive pool, the same custom CAs and the same proxy as a chat
+   * completion - the alternative would be a second transport that quietly
+   * ignored the profile's TLS settings.
+   *
+   * Providers disagree about the response shape more than they agree, so every
+   * form seen in the wild is accepted rather than assuming OpenAI's:
+   *   { data: [{ b64_json }] }        OpenAI, and most gateways copying it
+   *   { data: [{ url }] }             OpenAI when asked for a link
+   *   { artifacts: [{ base64 }] }     Stability, and NVIDIA's SDXL endpoints
+   *   { images: ["<base64>"] }        several NIM models
+   *   { image: "<base64>" }           single-image endpoints
+   */
+  async generateImage(
+    prompt: string,
+    opts: { size?: string; signal?: AbortSignal } = {}
+  ): Promise<{ bytes: Buffer; mime: string }> {
+    const spec = this.profile.image;
+    if (!spec) throw new Error("This profile has no image: block.");
+
+    const base = this.profile.baseUrl.replace(/\/$/, "");
+    const url = new URL(base + (spec.path ?? "/v1/images/generations"));
+    for (const [k, v] of Object.entries(this.profile.query ?? {})) url.searchParams.set(k, v);
+
+    const body: Record<string, unknown> = {
+      model: spec.model,
+      prompt,
+      // b64 avoids a second round trip and a second host to trust. A provider
+      // that ignores this and returns a url is still handled below.
+      response_format: "b64_json",
+      ...(opts.size ?? spec.size ? { size: opts.size ?? spec.size } : {}),
+      ...(spec.extraBody ?? {}),
+    };
+
+    const auth = await applyAuth(this.profile, this.dispatcher, this.secrets);
+    const budget = spec.timeoutMs ?? Math.max(this.profile.timeoutMs ?? 120_000, 180_000);
+
+    const res = await request(url.toString(), {
+      method: "POST",
+      dispatcher: this.dispatcher,
+      signal: opts.signal,
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+        ...(this.profile.headers ?? {}),
+        ...auth.headers,
+      },
+      body: JSON.stringify(body),
+      headersTimeout: budget,
+      bodyTimeout: budget,
+    });
+
+    if (res.statusCode >= 400) {
+      const text = await res.body.text().catch(() => "");
+      throw new Error(`Image request failed: HTTP ${res.statusCode}. ${text.slice(0, 400)}`.trim());
+    }
+
+    const json: any = await res.body.json().catch(() => null);
+    if (!json) throw new Error("The image endpoint did not return JSON.");
+
+    const first = Array.isArray(json.data) ? json.data[0]
+      : Array.isArray(json.artifacts) ? json.artifacts[0]
+      : Array.isArray(json.images) ? json.images[0]
+      : undefined;
+
+    const b64 =
+      (first && (first.b64_json ?? first.base64 ?? first.image)) ??
+      (typeof first === "string" ? first : undefined) ??
+      json.b64_json ?? json.image ??
+      undefined;
+
+    if (typeof b64 === "string" && b64) {
+      const cleaned = b64.replace(/^data:[^;]+;base64,/, "");
+      return { bytes: Buffer.from(cleaned, "base64"), mime: sniffImage(cleaned) };
+    }
+
+    const link = first?.url ?? json.url;
+    if (typeof link === "string" && link) return this.fetchImage(link, budget, opts.signal);
+
+    throw new Error(
+      `The image endpoint returned no image. Keys: ${Object.keys(json).join(", ") || "none"}.`
+    );
+  }
+
+  /**
+   * Follow a URL the image endpoint handed back.
+   *
+   * Only http(s), and capped: this is a location chosen by the response rather
+   * than by the user, so it is fetched on the profile's own dispatcher and not
+   * allowed to stream an unbounded body into memory.
+   */
+  private async fetchImage(
+    link: string,
+    budget: number,
+    signal?: AbortSignal
+  ): Promise<{ bytes: Buffer; mime: string }> {
+    let u: URL;
+    try {
+      u = new URL(link);
+    } catch {
+      throw new Error(`The image endpoint returned an unusable url: ${link.slice(0, 120)}`);
+    }
+    if (u.protocol !== "https:" && u.protocol !== "http:") {
+      throw new Error(`Refusing to fetch an image over ${u.protocol}//`);
+    }
+    const res = await request(u.toString(), {
+      method: "GET",
+      dispatcher: this.dispatcher,
+      signal,
+      headersTimeout: budget,
+      bodyTimeout: budget,
+    });
+    if (res.statusCode >= 400) {
+      await res.body.dump();
+      throw new Error(`Fetching the generated image failed: HTTP ${res.statusCode}.`);
+    }
+    const CAP = 32 * 1024 * 1024;
+    const chunks: Buffer[] = [];
+    let total = 0;
+    for await (const c of res.body) {
+      const buf = Buffer.isBuffer(c) ? c : Buffer.from(c);
+      total += buf.length;
+      if (total > CAP) throw new Error("The generated image exceeded 32 MB.");
+      chunks.push(buf);
+    }
+    const bytes = Buffer.concat(chunks);
+    return { bytes, mime: sniffBytes(bytes) };
+  }
+
+  /**
    * Resolve credentials ahead of the turn.
    *
    * `applyAuth` populates its own module-level cache, so a token exchange or a
@@ -753,4 +885,41 @@ function safeHost(u: string): string {
   } catch {
     return u;
   }
+}
+
+/**
+ * Identify an image from its own first bytes.
+ *
+ * The extension is what the file gets saved and rendered as, and a provider's
+ * declared content type is often absent or wrong - several return `image/png`
+ * for JPEG data. The magic number is the only thing that cannot disagree with
+ * the payload.
+ */
+export function sniffBytes(b: Buffer): string {
+  if (b.length >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return "image/png";
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
+  if (b.length >= 12 && b.slice(0, 4).toString("ascii") === "RIFF" &&
+      b.slice(8, 12).toString("ascii") === "WEBP") return "image/webp";
+  if (b.length >= 6 && b.slice(0, 6).toString("ascii").startsWith("GIF8")) return "image/gif";
+  // An SVG is text, so it has no magic number; look for the root element.
+  const head = b.slice(0, 256).toString("utf8").trimStart();
+  if (head.startsWith("<svg") || (head.startsWith("<?xml") && head.includes("<svg"))) return "image/svg+xml";
+  return "application/octet-stream";
+}
+
+/** Sniff without decoding the whole payload: the header is in the first bytes. */
+function sniffImage(b64: string): string {
+  return sniffBytes(Buffer.from(b64.slice(0, 64), "base64"));
+}
+
+export function extensionFor(mime: string): string {
+  return (
+    {
+      "image/png": ".png",
+      "image/jpeg": ".jpg",
+      "image/webp": ".webp",
+      "image/gif": ".gif",
+      "image/svg+xml": ".svg",
+    } as Record<string, string>
+  )[mime] ?? ".bin";
 }
