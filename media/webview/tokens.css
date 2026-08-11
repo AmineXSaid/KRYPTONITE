@@ -117,7 +117,14 @@
      platform sans when they are absent - see media/fonts/LICENSE-NOTE.md. */
   --kx-ui: 'Anthropic Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --kx-display: 'Anthropic Sans Display', 'Anthropic Sans', ui-sans-serif, system-ui, 'Segoe UI', sans-serif;
-  --kx-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Monaco, Consolas, monospace;
+  /* No monospace ships in media/fonts/, and naming one that does not is worse
+     than not naming it: the panel then renders in whichever of these the
+     machine happens to have, so the same build looks different on two
+     desktops - the exact inconsistency the @font-face rule above exists to
+     avoid. This is a deliberate platform stack, best cut first. Drop a woff2
+     into media/fonts/ and it can be named here instead. */
+  --kx-mono: ui-monospace, 'Cascadia Mono', 'SF Mono', 'JetBrains Mono', Menlo,
+             Consolas, 'DejaVu Sans Mono', monospace;
 
   /* The brand face is now the Display cut rather than a separate family. */
   --kx-brand: var(--kx-display);

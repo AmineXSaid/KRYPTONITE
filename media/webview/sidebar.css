@@ -347,6 +347,12 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .md-call[data-kind="warning"], .md-call[data-kind="caution"] { border-left-color: var(--kx-warn); }
 .md-call[data-kind="warning"] .md-call-h, .md-call[data-kind="caution"] .md-call-h { color: var(--kx-warn); }
 
+/* The Text italic cut ships and had nothing to render it. Emphasis in an
+   answer is the one place a transcript genuinely needs it, and shipping a real
+   italic is the reason not to let the browser slant an upright face instead. */
+.msg-ai em, .msg-user em, .md-q em { font-style: italic; font-weight: 400; }
+.msg-ai strong, .md-q strong { font-weight: 700; }
+
 .md-q {
   margin: 8px 0; padding: 2px 0 2px 10px;
   border-left: 2px solid var(--kx-line-2);
@@ -395,21 +401,28 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 /* #13 â€” always visible. These were opacity:0 until hover, which hid Copy,
    Retry and Branch behind a gesture nobody performs on a turn they have
    finished reading. */
+/* The row under a turn is a footnote, not a toolbar.
+   It was 24px buttons with 16px gaps and a 16px margin - about 56px of the
+   panel spent on three glyphs that are only wanted occasionally. Halved, and
+   dimmed until the turn is hovered, so it stops competing with the answer it
+   belongs to. The hit targets stay 22px, which is still comfortable. */
 .turn-foot {
-  display: flex; align-items: center; gap: 16px;
-  margin: 0 0 16px;
+  display: flex; align-items: center; gap: 2px;
+  margin: 0 0 8px;
+  opacity: .45; transition: opacity .12s;
 }
+.turn-foot:hover, .turn-foot:focus-within { opacity: 1; }
 .turn-foot button {
-  height: 24px; padding: 0 8px; border-radius: 4px;
-  font-family: var(--kx-ui); font-size: 12px;
-  color: var(--kx-fg-2);
+  height: 22px; width: 22px; padding: 0; border-radius: 4px;
+  display: grid; place-items: center;
+  color: var(--kx-fg-3);
 }
 .turn-foot button:hover { background: var(--kx-hover); color: var(--kx-fg); }
 .turn-foot .cost {
-  margin-left: auto; font-family: var(--kx-mono); font-size: 12px;
-  color: var(--kx-fg-2);
+  margin-left: auto; font-family: var(--kx-mono); font-size: 10.5px;
+  color: var(--kx-fg-3);
 }
-.turn-div { height: 1px; background: var(--kx-line); margin: 0 0 16px; }
+.turn-div { height: 1px; background: var(--kx-line); margin: 0 0 10px; }
 
 /* â”€â”€ tool rows, grouped into one strip â”€â”€
    Consecutive tool calls collapse under a single "N steps" header with the
