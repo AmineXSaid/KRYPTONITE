@@ -21,6 +21,12 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 export interface McpServerSpec {
   /** Stable id used to namespace tools and to report status. */
   name: string;
+  /** `stdio` spawns a child process; `http` talks to a remote endpoint. */
+  transport?: "stdio" | "http";
+  /** Remote endpoint, when transport is http. */
+  url?: string;
+  /** Extra headers for a remote server, typically Authorization. */
+  headers?: Record<string, string>;
   command: string;
   args?: string[];
   /** Merged over the extension host's own environment. */

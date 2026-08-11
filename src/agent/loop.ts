@@ -26,6 +26,7 @@ When you are finished, say what changed and what the user should verify.`;
 export const READ_ONLY = new Set([
   "read_file",
   "list_files",
+  "glob",
   "search",
   "read_skill",
   "update_todos",

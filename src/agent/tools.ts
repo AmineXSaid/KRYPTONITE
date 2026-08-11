@@ -43,12 +43,99 @@ export interface ToolResult {
   isError?: boolean;
 }
 
+/**
+ * Resolve a workspace-relative path, refusing anything that escapes the root.
+ *
+ * The prefix test this replaced was `abs.startsWith(root)`, which is a string
+ * comparison pretending to be a path comparison: with a root of `/work/proj`,
+ * the path `../proj-secrets/id_rsa` resolves to `/work/proj-secrets/id_rsa`,
+ * which starts with `/work/proj` and was therefore admitted. Every tool routes
+ * through here, so a sibling directory whose name merely began with the
+ * workspace name was fully readable and writable. The boundary has to be a
+ * separator, not a character offset.
+ *
+ * `realpathSync` closes the second half of the same hole: a symlink inside the
+ * workspace pointing anywhere on disk passes a purely lexical check. It is
+ * applied to the nearest existing ancestor so that creating a new file still
+ * works, and falls back to the lexical result when nothing on the path exists
+ * yet.
+ */
 function inside(root: string, p: string): string {
-  const abs = path.resolve(root, p);
-  if (!abs.startsWith(path.resolve(root))) {
-    throw new Error(`Path ${p} is outside the workspace.`);
+  const base = path.resolve(root);
+  const abs = path.resolve(base, p ?? ".");
+  const contains = (parent: string, child: string) =>
+    child === parent || child.startsWith(parent.endsWith(path.sep) ? parent : parent + path.sep);
+
+  if (!contains(base, abs)) throw new Error(`Path ${p} is outside the workspace.`);
+
+  let probe = abs;
+  for (;;) {
+    try {
+      const real = fs.realpathSync(probe);
+      const realRoot = fs.realpathSync(base);
+      // Re-attach the part that does not exist yet to the resolved ancestor.
+      const tail = path.relative(probe, abs);
+      const finalAbs = tail ? path.resolve(real, tail) : real;
+      if (!contains(realRoot, finalAbs)) {
+        throw new Error(`Path ${p} resolves outside the workspace.`);
+      }
+      return abs;
+    } catch (e: any) {
+      if (e?.code !== "ENOENT") throw e;
+      const up = path.dirname(probe);
+      if (up === probe) return abs; // nothing on the path exists; lexical check stands
+      probe = up;
+    }
   }
-  return abs;
+}
+
+/** Skip anything that is not plausibly text, so a search never scans a binary. */
+const BINARY_EXT = new Set([
+  ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".bmp", ".pdf", ".zip", ".gz",
+  ".tar", ".7z", ".rar", ".exe", ".dll", ".so", ".dylib", ".class", ".jar", ".wasm",
+  ".woff", ".woff2", ".ttf", ".otf", ".eot", ".mp3", ".mp4", ".mov", ".avi", ".webm",
+  ".vsix", ".pyc", ".node", ".bin", ".lock",
+]);
+
+/** Cheap NUL sniff for extensionless binaries the list above cannot catch. */
+function looksBinary(buf: Buffer): boolean {
+  const n = Math.min(buf.length, 8000);
+  for (let i = 0; i < n; i++) if (buf[i] === 0) return true;
+  return false;
+}
+
+/**
+ * Translate a glob to a RegExp.
+ *
+ * Supports `**` (any depth), `*` (within one segment), `?`, and `{a,b}`. The
+ * old one-liner replaced every `*` with `.*`, so `*.ts` matched
+ * `src/deep/x.ts` and `**` was indistinguishable from `*` - a filter that
+ * silently matched more than it claimed.
+ */
+function globToRe(glob: string): RegExp {
+  let re = "";
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === "*") {
+      if (glob[i + 1] === "*") {
+        // `**/` may match zero segments, so `**/*.ts` also matches `x.ts`.
+        if (glob[i + 2] === "/") { re += "(?:[^/]*/)*"; i += 2; }
+        else { re += ".*"; i += 1; }
+      } else re += "[^/]*";
+    } else if (c === "?") re += "[^/]";
+    else if (c === "{") {
+      const close = glob.indexOf("}", i);
+      if (close === -1) re += "\\{";
+      else {
+        re += "(?:" + glob.slice(i + 1, close).split(",").map(escapeRe).join("|") + ")";
+        i = close;
+      }
+    } else re += escapeRe(c);
+  }
+  return new RegExp("^" + re + "$");
+}
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 export const TOOL_DEFS: ToolDef[] = [
@@ -76,13 +163,19 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: "edit_file",
-    description: "Replace one exact string in a file. The old text must appear exactly once.",
+    description:
+      "Replace exact text in a file. The old text must appear exactly once unless " +
+      "replace_all is set, which replaces every occurrence.",
     parameters: {
       type: "object",
       properties: {
         path: { type: "string" },
         old_text: { type: "string" },
         new_text: { type: "string" },
+        replace_all: {
+          type: "boolean",
+          description: "Replace every occurrence instead of requiring exactly one.",
+        },
       },
       required: ["path", "old_text", "new_text"],
     },
@@ -97,23 +190,58 @@ export const TOOL_DEFS: ToolDef[] = [
     },
   },
   {
-    name: "search",
-    description: "Search file contents with a regular expression.",
+    name: "glob",
+    description:
+      "Find files by path pattern, newest first. Supports ** for any depth, * within " +
+      "a segment, ? for one character and {a,b} alternates. Use this to locate files " +
+      "by name; use search to look inside them.",
     parameters: {
       type: "object",
       properties: {
-        pattern: { type: "string" },
-        glob: { type: "string", description: "Optional filename filter, e.g. *.ts" },
+        pattern: { type: "string", description: "e.g. src/**/*.ts or **/*.{js,ts}" },
+        path: { type: "string", description: "Directory to search under. Defaults to the workspace root." },
+        limit: { type: "number", description: "Maximum paths to return. Default 200." },
+      },
+      required: ["pattern"],
+    },
+  },
+  {
+    name: "search",
+    description:
+      "Search file contents with a regular expression. Returns matching lines by default; " +
+      "set output_mode to files_with_matches for paths only or count for per-file totals.",
+    parameters: {
+      type: "object",
+      properties: {
+        pattern: { type: "string", description: "Regular expression." },
+        path: { type: "string", description: "File or directory to search under. Defaults to the workspace root." },
+        glob: { type: "string", description: "Filename filter, e.g. *.ts or src/**/*.{js,ts}" },
+        output_mode: {
+          type: "string",
+          enum: ["content", "files_with_matches", "count"],
+          description: "content (default) shows matching lines; the others summarise.",
+        },
+        case_insensitive: { type: "boolean", description: "Ignore case." },
+        multiline: { type: "boolean", description: "Let the pattern span lines; . matches newline." },
+        context_before: { type: "number", description: "Lines of context before each match." },
+        context_after: { type: "number", description: "Lines of context after each match." },
+        head_limit: { type: "number", description: "Cap results. Default 200." },
       },
       required: ["pattern"],
     },
   },
   {
     name: "run_command",
-    description: "Run a shell command in the workspace root. Requires approval.",
+    description:
+      "Run a shell command in the workspace root. Requires approval. " +
+      "Never use it for commands that wait for input.",
     parameters: {
       type: "object",
-      properties: { command: { type: "string" }, reason: { type: "string" } },
+      properties: {
+        command: { type: "string" },
+        reason: { type: "string" },
+        timeout_ms: { type: "number", description: "Milliseconds before the command is killed. Default 120000, max 600000." },
+      },
       required: ["command", "reason"],
     },
   },
@@ -157,6 +285,43 @@ export const TOOL_DEFS: ToolDef[] = [
 
 const IGNORED = new Set(["node_modules", ".git", "dist", "out", "build", ".venv", "__pycache__"]);
 
+/**
+ * Walk the workspace, yielding files.
+ *
+ * Both list_files and search previously skipped every entry whose name began
+ * with a dot, which hid `.agent/` - the extension's own configuration folder,
+ * where profiles, skills and mcp.json live. The agent could not read the
+ * settings it was being asked about. Only the IGNORED set is skipped now, and
+ * dot-entries are visible; `.git` stays out because it is in that set.
+ */
+function walkFiles(
+  root: string,
+  from: string,
+  onFile: (abs: string, rel: string, ent: fs.Dirent) => boolean | void,
+  maxDepth = Infinity
+): void {
+  const stack: Array<[string, number]> = [[from, 0]];
+  while (stack.length) {
+    const [dir, depth] = stack.pop()!;
+    if (depth > maxDepth) continue;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue; // unreadable directory is not a reason to abort the whole walk
+    }
+    for (const e of entries) {
+      if (IGNORED.has(e.name)) continue;
+      const abs = path.join(dir, e.name);
+      const rel = path.relative(root, abs).split(path.sep).join("/");
+      if (e.isDirectory()) {
+        stack.push([abs, depth + 1]);
+        if (onFile(abs, rel + "/", e) === false) return;
+      } else if (onFile(abs, rel, e) === false) return;
+    }
+  }
+}
+
 // CHANGED: added. Models get the schema wrong often enough that the card would
 // otherwise render blank rows or an unbounded list. Coerce rather than reject:
 // a slightly wrong todo list is still useful, a hard failure is not.
@@ -199,18 +364,32 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
     switch (name) {
       case "read_file": {
         const abs = inside(ctx.root, args.path);
-        const lines = fs.readFileSync(abs, "utf8").split("\n");
-        const start = Math.max(1, args.start ?? 1);
-        const end = Math.min(lines.length, args.end ?? lines.length);
-        if (end - start > 2000) {
-          return { content: `That range is ${end - start} lines. Read it in smaller pieces.`, isError: true };
+        const st = fs.statSync(abs);
+        if (st.isDirectory()) {
+          return { content: `${args.path} is a directory. Use list_files or glob.`, isError: true };
         }
-        return {
-          content: lines
-            .slice(start - 1, end)
-            .map((l, i) => `${start + i}\t${l}`)
-            .join("\n"),
-        };
+        const raw = fs.readFileSync(abs);
+        if (looksBinary(raw)) {
+          return { content: `${args.path} is a binary file (${st.size} bytes).`, isError: true };
+        }
+        const lines = raw.toString("utf8").split("\n");
+        const start = Math.max(1, args.start ?? 1);
+        const asked = args.end ?? lines.length;
+        // Asking for a 5,000-line file used to be an error telling the model to
+        // try again smaller, which costs a whole round trip to learn something
+        // the tool already knew. Serve the first window and say what was left.
+        const CAP = 2000;
+        const end = Math.min(lines.length, asked, start + CAP - 1);
+        const body = lines
+          .slice(start - 1, end)
+          .map((l, i) => `${start + i}\t${l}`)
+          .join("\n");
+        const more =
+          end < Math.min(lines.length, asked)
+            ? `\n\n[${lines.length} lines total; showing ${start}-${end}. ` +
+              `Call read_file again with start: ${end + 1}.]`
+            : "";
+        return { content: body + more };
       }
 
       case "write_file": {
@@ -231,83 +410,239 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
         const abs = inside(ctx.root, args.path);
         if (!fs.existsSync(abs)) return { content: `${args.path} does not exist.`, isError: true };
         const before = fs.readFileSync(abs, "utf8");
+        // An empty needle "appears" between every character; split would report
+        // a match on every file and the replace would corrupt it.
+        if (typeof args.old_text !== "string" || args.old_text === "") {
+          return { content: "old_text must be a non-empty string.", isError: true };
+        }
+        if (args.old_text === args.new_text) {
+          return { content: "old_text and new_text are identical; nothing to do.", isError: true };
+        }
         const count = before.split(args.old_text).length - 1;
         if (count === 0) {
           return { content: `That exact text is not in ${args.path}. Read the file again.`, isError: true };
         }
-        if (count > 1) {
+        const all = args.replace_all === true;
+        if (count > 1 && !all) {
           return {
-            content: `That text appears ${count} times in ${args.path}. Include more surrounding context.`,
+            content:
+              `That text appears ${count} times in ${args.path}. Include more surrounding ` +
+              `context, or set replace_all to change every occurrence.`,
             isError: true,
           };
         }
-        const ok = await ctx.approve(`Edit ${args.path}`, `- ${args.old_text}\n+ ${args.new_text}`);
+        const ok = await ctx.approve(
+          `Edit ${args.path}${all && count > 1 ? ` (${count} occurrences)` : ""}`,
+          `- ${args.old_text}\n+ ${args.new_text}`
+        );
         if (!ok) return { content: "The user declined this edit.", isError: true };
-        fs.writeFileSync(abs, before.replace(args.old_text, args.new_text), "utf8");
+        const after = all
+          ? before.split(args.old_text).join(args.new_text)
+          : before.replace(args.old_text, args.new_text);
+        fs.writeFileSync(abs, after, "utf8");
         ctx.onFileTouched(abs);
-        return { content: `Edited ${args.path}.` };
+        return { content: `Edited ${args.path}${all && count > 1 ? ` (${count} occurrences).` : "."}` };
       }
 
       case "list_files": {
         const abs = inside(ctx.root, args.path ?? ".");
         const out: string[] = [];
-        const walk = (dir: string, depth: number) => {
-          if (depth > (args.depth ?? 2) || out.length > 500) return;
-          for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-            if (e.name.startsWith(".") || IGNORED.has(e.name)) continue;
-            const full = path.join(dir, e.name);
-            out.push(path.relative(ctx.root, full) + (e.isDirectory() ? "/" : ""));
-            if (e.isDirectory()) walk(full, depth + 1);
-          }
-        };
-        walk(abs, 0);
+        walkFiles(
+          ctx.root,
+          abs,
+          (_a, rel) => {
+            out.push(rel);
+            return out.length < 500;
+          },
+          args.depth ?? 2
+        );
+        out.sort();
         return { content: out.join("\n") || "(empty)" };
       }
 
+      case "glob": {
+        if (typeof args.pattern !== "string" || !args.pattern) {
+          return { content: "pattern is required.", isError: true };
+        }
+        const from = inside(ctx.root, args.path ?? ".");
+        const re = globToRe(args.pattern);
+        // Patterns are written either against the workspace root ("src/**/*.ts")
+        // or as a bare filename ("*.ts"); accept both rather than making the
+        // model guess which one this tool wants.
+        const bare = !args.pattern.includes("/");
+        const found: Array<{ rel: string; mtime: number }> = [];
+        walkFiles(ctx.root, from, (abs, rel, ent) => {
+          if (ent.isDirectory()) return;
+          const name = rel.slice(rel.lastIndexOf("/") + 1);
+          if (!re.test(bare ? name : rel)) return;
+          let mtime = 0;
+          try { mtime = fs.statSync(abs).mtimeMs; } catch { /* raced deletion */ }
+          found.push({ rel, mtime });
+        });
+        // Newest first: when a pattern matches many files, the ones just touched
+        // are nearly always the ones being asked about.
+        found.sort((a, b) => b.mtime - a.mtime);
+        const lim = Math.max(1, Math.min(args.limit ?? 200, 1000));
+        const shown = found.slice(0, lim);
+        if (!shown.length) return { content: `No files match ${args.pattern}.` };
+        return {
+          content:
+            shown.map((f) => f.rel).join("\n") +
+            (found.length > lim ? `\n\n[${found.length} matches; showing ${lim}.]` : ""),
+        };
+      }
+
       case "search": {
-        const re = new RegExp(args.pattern, "gm");
-        const globRe = args.glob
-          ? new RegExp("^" + args.glob.replace(/\./g, "\\.").replace(/\*/g, ".*") + "$")
-          : undefined;
-        const hits: string[] = [];
-        const walk = (dir: string) => {
-          if (hits.length > 200) return;
-          for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-            if (e.name.startsWith(".") || IGNORED.has(e.name)) continue;
-            const full = path.join(dir, e.name);
-            if (e.isDirectory()) {
-              walk(full);
-              continue;
-            }
-            if (globRe && !globRe.test(e.name)) continue;
-            let text: string;
-            try {
-              text = fs.readFileSync(full, "utf8");
-            } catch {
-              continue;
-            }
-            text.split("\n").forEach((line, i) => {
+        let re: RegExp;
+        try {
+          let flags = "g";
+          if (args.case_insensitive) flags += "i";
+          if (args.multiline) flags += "s";
+          re = new RegExp(args.pattern, flags);
+        } catch (e: any) {
+          return { content: `Invalid pattern: ${e.message}`, isError: true };
+        }
+
+        const from = inside(ctx.root, args.path ?? ".");
+        const globRe = args.glob ? globToRe(args.glob) : undefined;
+        const globBare = args.glob ? !args.glob.includes("/") : false;
+        const mode = args.output_mode ?? "content";
+        const limit = Math.max(1, Math.min(args.head_limit ?? 200, 2000));
+        const before = Math.max(0, Math.min(args.context_before ?? 0, 20));
+        const after = Math.max(0, Math.min(args.context_after ?? 0, 20));
+
+        const lines: string[] = [];
+        const files: string[] = [];
+        const counts: Array<[string, number]> = [];
+        let truncated = false;
+
+        const scan = (abs: string, rel: string) => {
+          if (BINARY_EXT.has(path.extname(abs).toLowerCase())) return;
+          let buf: Buffer;
+          try { buf = fs.readFileSync(abs); } catch { return; }
+          if (looksBinary(buf)) return;
+          const text = buf.toString("utf8");
+
+          if (args.multiline) {
+            re.lastIndex = 0;
+            const hit = re.test(text);
+            if (!hit) return;
+            files.push(rel);
+            if (mode === "content") {
               re.lastIndex = 0;
-              if (re.test(line)) hits.push(`${path.relative(ctx.root, full)}:${i + 1}: ${line.trim().slice(0, 200)}`);
-            });
+              let m: RegExpExecArray | null;
+              let n = 0;
+              while ((m = re.exec(text)) && lines.length < limit) {
+                const ln = text.slice(0, m.index).split("\n").length;
+                lines.push(`${rel}:${ln}: ${m[0].replace(/\n/g, "\\n").slice(0, 300)}`);
+                n++;
+                if (m.index === re.lastIndex) re.lastIndex++;
+              }
+              counts.push([rel, n]);
+            } else if (mode === "count") {
+              re.lastIndex = 0;
+              let n = 0;
+              while (re.exec(text)) { n++; if (re.lastIndex === 0) break; }
+              counts.push([rel, n]);
+            }
+            return;
+          }
+
+          const rows = text.split("\n");
+          let n = 0;
+          for (let i = 0; i < rows.length; i++) {
+            re.lastIndex = 0;
+            if (!re.test(rows[i])) continue;
+            n++;
+            if (mode === "content" && lines.length < limit) {
+              for (let b = Math.max(0, i - before); b < i; b++) {
+                lines.push(`${rel}-${b + 1}- ${rows[b].slice(0, 300)}`);
+              }
+              lines.push(`${rel}:${i + 1}: ${rows[i].trim().slice(0, 300)}`);
+              for (let a = i + 1; a <= Math.min(rows.length - 1, i + after); a++) {
+                lines.push(`${rel}-${a + 1}- ${rows[a].slice(0, 300)}`);
+              }
+            } else if (mode === "content") {
+              truncated = true;
+            }
+          }
+          if (n) {
+            files.push(rel);
+            counts.push([rel, n]);
           }
         };
-        walk(ctx.root);
-        return { content: hits.slice(0, 200).join("\n") || "No matches." };
+
+        // A path pointing at a single file searches just that file.
+        let st: fs.Stats | undefined;
+        try { st = fs.statSync(from); } catch { /* handled below */ }
+        if (!st) return { content: `${args.path} does not exist.`, isError: true };
+
+        if (st.isFile()) {
+          scan(from, path.relative(ctx.root, from).split(path.sep).join("/"));
+        } else {
+          walkFiles(ctx.root, from, (abs, rel, ent) => {
+            if (ent.isDirectory()) return;
+            if (globRe) {
+              const name = rel.slice(rel.lastIndexOf("/") + 1);
+              if (!globRe.test(globBare ? name : rel)) return;
+            }
+            scan(abs, rel);
+            return files.length < limit || mode === "content";
+          });
+        }
+
+        if (mode === "files_with_matches") {
+          const shown = files.slice(0, limit);
+          return {
+            content: shown.join("\n") ||
+              "No matches." + (files.length > limit ? `\n\n[${files.length} files; showing ${limit}.]` : ""),
+          };
+        }
+        if (mode === "count") {
+          if (!counts.length) return { content: "No matches." };
+          const total = counts.reduce((s, c) => s + c[1], 0);
+          return {
+            content:
+              counts.slice(0, limit).map(([f, c]) => `${c}\t${f}`).join("\n") +
+              `\n\n[${total} matches across ${counts.length} file(s).]`,
+          };
+        }
+        if (!lines.length) return { content: "No matches." };
+        return {
+          content:
+            lines.join("\n") +
+            (truncated || lines.length >= limit
+              ? `\n\n[Truncated at ${limit} lines. Narrow the pattern, pass a glob, or raise head_limit.]`
+              : ""),
+        };
       }
 
       case "run_command": {
+        if (typeof args.command !== "string" || !args.command.trim()) {
+          return { content: "command is required.", isError: true };
+        }
         const ok = await ctx.approve(`Run: ${args.command}`, args.reason);
         if (!ok) return { content: "The user declined to run that command.", isError: true };
+        const timeout = Math.max(1_000, Math.min(args.timeout_ms ?? 120_000, 600_000));
         try {
           const { stdout, stderr } = await pexec(args.command, {
             cwd: ctx.root,
             shell: true,
-            timeout: 120_000,
+            timeout,
             maxBuffer: 4 * 1024 * 1024,
           } as any);
           return { content: (stdout + (stderr ? "\n" + stderr : "")).slice(0, 30_000) || "(no output)" };
         } catch (e: any) {
+          // A timeout kill arrives as a signal with no exit code, and reporting
+          // it as "Exit undefined" tells the model nothing it can act on.
+          if (e?.killed || e?.signal) {
+            return {
+              content:
+                `Command timed out after ${timeout}ms and was killed.\n` +
+                `${(e.stdout ?? "") + (e.stderr ?? "")}`.slice(0, 30_000),
+              isError: true,
+            };
+          }
           return {
             content: `Exit ${e.code}\n${(e.stdout ?? "") + (e.stderr ?? "")}`.slice(0, 30_000),
             isError: true,

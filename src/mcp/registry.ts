@@ -1,7 +1,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { McpClient, type McpServerSpec, type McpTool } from "./client";
+import { McpHttpClient } from "./http";
 import type { ToolDef } from "../providers/client";
+
+/** Either transport, seen through the surface the registry actually uses. */
+type AnyClient = McpClient | McpHttpClient;
 
 /**
  * Which MCP servers exist, which of their tools the model sees, and where a
@@ -65,8 +69,55 @@ export function parseQualified(name: string): { server: string; tool: string } |
 
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
+/**
+ * Expand `${VAR}` and `${VAR:-fallback}` from the environment.
+ *
+ * Remote servers authenticate with a bearer token, and without this the only
+ * way to configure one is to paste the token into `.mcp.json` - a file that
+ * lives in the workspace and gets committed. Claude Desktop and Claude Code
+ * both expand these, so a server block stays copy-pasteable between them.
+ *
+ * An unset variable with no fallback is reported rather than silently becoming
+ * an empty string, because a header reading `Bearer ` fails at the server with
+ * a 401 that says nothing about the real cause.
+ */
+export function expandVars(
+  value: string,
+  env: NodeJS.ProcessEnv,
+  missing: string[]
+): string {
+  return value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g, (_m, name, fallback) => {
+    const got = env[name];
+    if (got !== undefined && got !== "") return got;
+    if (fallback !== undefined) return fallback;
+    if (!missing.includes(name)) missing.push(name);
+    return "";
+  });
+}
+
+/** Walk a spec's string fields, expanding each. */
+function expandSpec(raw: any, env: NodeJS.ProcessEnv, missing: string[]): any {
+  const s = (v: unknown) => (typeof v === "string" ? expandVars(v, env, missing) : v);
+  const out: any = { ...raw };
+  out.command = s(raw.command);
+  out.url = s(raw.url);
+  out.cwd = s(raw.cwd);
+  if (Array.isArray(raw.args)) out.args = raw.args.map((a: unknown) => s(String(a)));
+  for (const key of ["env", "headers"] as const) {
+    if (raw[key] && typeof raw[key] === "object") {
+      const m: Record<string, string> = {};
+      for (const [k, v] of Object.entries<any>(raw[key])) m[k] = String(s(String(v)));
+      out[key] = m;
+    }
+  }
+  return out;
+}
+
 /** Parse `.agent/mcp.json`. Returns specs plus anything wrong with the file. */
-export function loadMcpConfig(file: string): { specs: McpServerSpec[]; warnings: string[] } {
+export function loadMcpConfig(
+  file: string,
+  env: NodeJS.ProcessEnv = process.env
+): { specs: McpServerSpec[]; warnings: string[] } {
   const specs: McpServerSpec[] = [];
   const warnings: string[] = [];
   if (!fs.existsSync(file)) return { specs, warnings };
@@ -92,28 +143,73 @@ export function loadMcpConfig(file: string): { specs: McpServerSpec[]; warnings:
       warnings.push(`Server "${name}" is not an object.`);
       continue;
     }
-    // Only stdio is implemented. Saying so is better than starting nothing and
-    // leaving the user to guess why their URL server never appears.
-    if (raw.url || raw.type === "http" || raw.type === "sse") {
-      warnings.push(`Server "${name}" uses an HTTP/SSE transport, which is not implemented yet - only stdio.`);
+
+    const missing: string[] = [];
+    const cfg = expandSpec(raw, env, missing);
+    if (missing.length) {
+      warnings.push(
+        `Server "${name}" references unset environment variable(s): ${missing.join(", ")}. ` +
+          `Use \${VAR:-default} if the value is optional.`
+      );
+    }
+    if (cfg.approval && cfg.approval !== "ask" && cfg.approval !== "auto") {
+      warnings.push(`Server "${name}": approval must be "ask" or "auto" - got "${cfg.approval}".`);
+    }
+
+    const common = {
+      name,
+      approval: cfg.approval === "auto" ? ("auto" as const) : ("ask" as const),
+      timeoutMs: Number.isFinite(cfg.timeoutMs) ? Number(cfg.timeoutMs) : undefined,
+      enabled: cfg.enabled !== false,
+    };
+
+    // A URL, or an explicit http/sse type, means a remote server.
+    const isRemote = Boolean(cfg.url) || cfg.type === "http" || cfg.type === "sse";
+    if (isRemote) {
+      if (typeof cfg.url !== "string" || !cfg.url.trim()) {
+        warnings.push(`Server "${name}" is declared as ${cfg.type ?? "remote"} but has no "url".`);
+        continue;
+      }
+      let parsed: URL;
+      try {
+        parsed = new URL(cfg.url.trim());
+      } catch {
+        warnings.push(`Server "${name}" has an unparseable url: ${cfg.url}`);
+        continue;
+      }
+      // A token in a header would go out in clear text over http://. Localhost
+      // is the exception: it never leaves the machine, and every local dev
+      // server speaks plain http.
+      const local = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" ||
+        parsed.hostname === "::1";
+      if (parsed.protocol !== "https:" && !local) {
+        warnings.push(
+          `Server "${name}" uses ${parsed.protocol}// to a remote host. Credentials would ` +
+            `travel unencrypted, so it was not started. Use https.`
+        );
+        continue;
+      }
+      specs.push({
+        ...common,
+        transport: "http",
+        url: parsed.toString(),
+        headers: cfg.headers,
+        command: "",
+      });
       continue;
     }
-    if (typeof raw.command !== "string" || !raw.command.trim()) {
-      warnings.push(`Server "${name}" has no "command".`);
+
+    if (typeof cfg.command !== "string" || !cfg.command.trim()) {
+      warnings.push(`Server "${name}" has no "command" and no "url".`);
       continue;
-    }
-    if (raw.approval && raw.approval !== "ask" && raw.approval !== "auto") {
-      warnings.push(`Server "${name}": approval must be "ask" or "auto" - got "${raw.approval}".`);
     }
     specs.push({
-      name,
-      command: raw.command.trim(),
-      args: Array.isArray(raw.args) ? raw.args.map(String) : [],
-      env: raw.env && typeof raw.env === "object" ? raw.env : undefined,
-      cwd: typeof raw.cwd === "string" ? raw.cwd : undefined,
-      approval: raw.approval === "auto" ? "auto" : "ask",
-      timeoutMs: Number.isFinite(raw.timeoutMs) ? Number(raw.timeoutMs) : undefined,
-      enabled: raw.enabled !== false,
+      ...common,
+      transport: "stdio",
+      command: cfg.command.trim(),
+      args: Array.isArray(cfg.args) ? cfg.args.map(String) : [],
+      env: cfg.env,
+      cwd: typeof cfg.cwd === "string" ? cfg.cwd : undefined,
     });
   }
   return { specs, warnings };
@@ -121,7 +217,7 @@ export function loadMcpConfig(file: string): { specs: McpServerSpec[]; warnings:
 
 export class McpRegistry {
   warnings: string[] = [];
-  private clients = new Map<string, McpClient>();
+  private clients = new Map<string, AnyClient>();
   /** Declared but not started, kept so the panel can still show them. */
   private disabled: McpServerSpec[] = [];
   /** True once a config file has been read, even if it declared nothing. */
@@ -153,7 +249,7 @@ export class McpRegistry {
     // up the others, and a failure is per-client state, never a throw.
     await Promise.all(
       enabled.map(async (spec) => {
-        const client = new McpClient(spec, this.log);
+        const client = makeClient(spec, this.log);
         this.clients.set(spec.name, client);
         await client.start(workspaceRoot);
       })
@@ -171,7 +267,7 @@ export class McpRegistry {
     const existing = this.clients.get(name);
     if (!existing) return;
     await existing.stop();
-    const fresh = new McpClient(existing.spec, this.log);
+    const fresh = makeClient(existing.spec, this.log);
     this.clients.set(name, fresh);
     await fresh.start(workspaceRoot);
   }
@@ -180,7 +276,10 @@ export class McpRegistry {
     const running: McpServerStatus[] = [...this.clients.values()].map((c) => ({
       name: c.spec.name,
       state: c.state,
-      command: [c.spec.command, ...(c.spec.args ?? [])].join(" "),
+      command:
+        c.spec.transport === "http"
+          ? c.spec.url ?? ""
+          : [c.spec.command, ...(c.spec.args ?? [])].join(" "),
       error: c.error,
       toolCount: c.tools.length,
       tools: c.tools.map((t) => t.name),
@@ -190,7 +289,7 @@ export class McpRegistry {
     const off: McpServerStatus[] = this.disabled.map((s) => ({
       name: s.name,
       state: "disabled" as const,
-      command: [s.command, ...(s.args ?? [])].join(" "),
+      command: s.transport === "http" ? s.url ?? "" : [s.command, ...(s.args ?? [])].join(" "),
       toolCount: 0,
       tools: [],
       approval: s.approval === "auto" ? ("auto" as const) : ("ask" as const),
@@ -244,7 +343,7 @@ export class McpRegistry {
     return (this.clients.get(q.server)?.approval ?? "ask") === "ask";
   }
 
-  find(name: string): { client: McpClient; tool: McpTool } | undefined {
+  find(name: string): { client: AnyClient; tool: McpTool } | undefined {
     const q = parseQualified(name);
     if (!q) return undefined;
     const client = this.clients.get(q.server);
@@ -272,8 +371,42 @@ export class McpRegistry {
       const known = client.tools.map((t) => t.name).join(", ") || "none";
       return { content: `Server "${q.server}" has no tool "${q.tool}". It exposes: ${known}.`, isError: true };
     }
-    return client.callTool(q.tool, args);
+    return capOutput(await client.callTool(q.tool, args), `${q.server}/${q.tool}`);
   }
+}
+
+/**
+ * Bound what a server can put into the context window.
+ *
+ * Built-in tools each cap their own output; MCP results went in whole. A server
+ * answering `read_file` on a large log, or a search returning every match, could
+ * hand back megabytes - enough to evict the entire conversation on the next
+ * turn, from a process the user did not write. The truncation is announced
+ * in-band so the model knows to narrow its request rather than assume that was
+ * everything.
+ */
+export const MCP_OUTPUT_CAP = 60_000;
+
+export function capOutput(
+  res: { content: string; isError?: boolean },
+  label: string
+): { content: string; isError?: boolean } {
+  if (typeof res.content !== "string" || res.content.length <= MCP_OUTPUT_CAP) return res;
+  return {
+    ...res,
+    content:
+      res.content.slice(0, MCP_OUTPUT_CAP) +
+      `\n\n[${label} returned ${res.content.length.toLocaleString()} characters; ` +
+      `truncated to ${MCP_OUTPUT_CAP.toLocaleString()}. Ask for a narrower result.]`,
+  };
+}
+
+/** Pick a transport. The spec's own declaration decides; stdio is the default. */
+export function makeClient(
+  spec: McpServerSpec,
+  log: (level: "info" | "warn" | "error", msg: string) => void
+): AnyClient {
+  return spec.transport === "http" ? new McpHttpClient(spec, log) : new McpClient(spec, log);
 }
 
 /** Default config path, relative to the workspace root. */

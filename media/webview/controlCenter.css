@@ -216,6 +216,14 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 .acc-body .explainer { margin-top: 0; }
 @media (prefers-reduced-motion: reduce) { .acc-chev { transition: none; } }
 
+/* Section heading, with its explain-yourself control always in the same place.
+   A help affordance that moves between tabs is one people stop looking for. */
+.sec-head { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 10px; }
+.sec-head-t { flex: 1; min-width: 0; }
+.sec-head-t h3 { margin-bottom: 4px; }
+.sec-head-t .explainer { margin: 0; }
+.sec-head .btn { flex: none; white-space: nowrap; }
+
 /* ── legend ──
    Opt-in, because a panel that explains itself permanently shouts at the
    people who already know. Same sentences as the header tooltips. */

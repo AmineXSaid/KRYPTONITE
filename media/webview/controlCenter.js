@@ -133,8 +133,180 @@ function _run() {
   };
 
   /* Off by default: a panel that explains itself permanently is a panel that
-     shouts at people who already know. Opt-in, and it stays open. */
-  var LEGEND = false;
+     shouts at people who already know. Opt-in, per section, and it stays open. */
+  var LEGEND_OPEN = {};
+
+  /**
+   * What each section is for, in the words of someone who has not read the code.
+   *
+   * Every tab gets one. A control panel whose labels are only legible to the
+   * person who wrote them is a control panel nobody else can use, and these
+   * sections describe undici dispatchers, CONNECT tunnels and wire formats -
+   * none of which explain themselves.
+   */
+  var LEGENDS = {
+    conn: [
+      ["Wire format",
+        "Which API dialect a request is written in. openai and anthropic are the two " +
+        "built-in shapes; raw means a transform module writes the body itself. This is " +
+        "about request shape, not about who sells the model - most gateways speak openai."],
+      ["System role",
+        "Where the system prompt goes in the payload. message puts it in the messages " +
+        "array, top-level puts it in its own field, prepend-to-user glues it onto the " +
+        "first user message for endpoints that accept no system role at all."],
+      ["Transform module",
+        "A JavaScript file that rewrites the request on its way out and the response on " +
+        "its way in, for gateways neither standard shape can express. Required when the " +
+        "wire is raw. It runs sandboxed: no filesystem, no network."],
+      ["Auth mode",
+        "Bearer sends a token. Custom header sends it under a name you choose. OAuth2 " +
+        "exchanges a client credential for a short-lived token and refreshes it before " +
+        "expiry. Credential helper runs a program and reads the token from its output."],
+      ["Secret resolution",
+        "Tokens never sit in profile YAML. ${env:NAME} reads the environment, " +
+        "${secret:NAME} reads VS Code's encrypted store, ${file:path} reads a file - " +
+        "all at request time, so the YAML stays safe to commit."],
+      ["CA bundles",
+        "Extra certificate authorities to trust, for a corporate gateway signed by an " +
+        "internal root. Empty means Node's built-in root store."],
+      ["Client certificate",
+        "mTLS: the certificate this extension presents to prove who it is. Needed when " +
+        "the gateway authenticates clients by certificate rather than by token."],
+      ["Proxy",
+        "Where requests go first. Behind a CONNECT tunnel the client certificate must be " +
+        "presented to the real destination rather than to the proxy, which is the " +
+        "distinction most tooling gets wrong and why mTLS-behind-proxy usually fails."]
+    ],
+    diag: [
+      ["How to read it",
+        "Each rung runs only if the one above it passed, so the topmost failure is the " +
+        "real one - everything below it is a consequence, not a second problem."],
+      ["DNS / TCP / TLS",
+        "The network path: name resolves, socket opens, certificates verify. A failure " +
+        "here is infrastructure, not configuration."],
+      ["Auth",
+        "Your credential was accepted. A 401 here means the key, not the model."],
+      ["Completion / Streaming / Tools",
+        "The three things the agent needs the endpoint to actually do. A model can pass " +
+        "Completion and fail Streaming or Tools, and the agent needs all three."],
+      ["Timing",
+        "Milliseconds per rung. A slow TLS rung points at the proxy or the region; a slow " +
+        "Completion rung is the model itself."]
+    ],
+    agent: [
+      ["Iteration cap",
+        "How many tool calls the agent may make in one turn before it must stop and " +
+        "answer. It bounds a loop that would otherwise run until the context fills."],
+      ["Approval mode",
+        "ask stops before every side effect. edits-auto lets file writes through but " +
+        "still asks before shell commands. full-auto never asks - only sensible in a " +
+        "workspace you are willing to see rewritten."],
+      ["Context fitting",
+        "When the conversation outgrows the model's window, the oldest turns are dropped " +
+        "first, and a dropped tool call always takes its result with it - an orphaned " +
+        "result is a protocol error at most endpoints."],
+      ["Tools",
+        "Everything the model can do. Every one is confined to the folder you have open; " +
+        "the ones marked approval stop and ask first."],
+      ["Read-only vs approval",
+        "Read-only tools cannot change anything, so they run without asking and several " +
+        "can run at once. Anything that writes runs one at a time, in order, after you " +
+        "approve it."]
+    ],
+    mcp: [
+      ["What MCP is",
+        "A standard way to plug external tools into the model. Each server is a separate " +
+        "program exposing its own tools - a database, an issue tracker, a filesystem."],
+      ["Transport",
+        "stdio starts the server as a child process on this machine. http talks to a " +
+        "remote server over the network; those need a URL and usually a token."],
+      ["Tool names",
+        "A server's tools reach the model as mcp__<server>__<tool>, so two servers can " +
+        "both expose search without colliding."],
+      ["Approval",
+        "ask routes every call from that server through the same gate as a shell command. " +
+        "auto lets them run. A server is someone else's code, so ask is the default."],
+      ["Plan mode",
+        "MCP tools are withheld while planning, because the protocol gives no way for a " +
+        "server to declare a tool read-only and a plan must not change anything."],
+      ["State",
+        "connected means its tools are live. starting is still handshaking. failed shows " +
+        "the reason - hover it for the server's own error."]
+    ],
+    skills: [
+      ["What a skill is",
+        "A folder with a SKILL.md holding instructions for a recurring task. The model " +
+        "reads one on demand, the way you would open a runbook."],
+      ["Cost",
+        "Only the one-line description enters the system prompt. Bodies load when a skill " +
+        "is actually used, so forty skills cost about the same as five."],
+      ["Enabled",
+        "A disabled skill is invisible to the model - not in the index and not loadable."]
+    ],
+    checkpoints: [
+      ["What they are",
+        "A snapshot of the workspace taken before each turn, in a git repository kept " +
+        "separately from your own, so it never touches your history, branches or staging."],
+      ["Restore",
+        "Puts the files back as they were at that point. Your own git repository is left " +
+        "exactly as it is."],
+      ["Snapshot before every turn",
+        "Turning this off means no snapshot and no diff cards for that turn - faster, with " +
+        "nothing to roll back to."]
+    ],
+    logs: [
+      ["What is here",
+        "Everything the extension recorded this session: profile loads, request timings, " +
+        "tool calls and failures."],
+      ["Export",
+        "Writes the log to a file. Attach it when reporting a problem - it carries the " +
+        "timings and errors that a screenshot cannot."]
+    ]
+  };
+
+  /**
+   * A section heading with its own explain-yourself toggle.
+   *
+   * Every section renders through here so the control is in the same place on
+   * every tab; a help affordance that moves is one people stop looking for.
+   */
+  function secHead(id, title, explainerHtml, extraHtml) {
+    var open = LEGEND_OPEN[id];
+    return '<div class="sec-head">' +
+        '<div class="sec-head-t"><h3>' + esc(title) + "</h3>" +
+          (explainerHtml ? '<div class="explainer">' + explainerHtml + "</div>" : "") +
+        "</div>" +
+        (extraHtml || "") +
+        (hasLegend(id)
+          ? '<button class="btn sm help" data-legend="' + id + '" aria-expanded="' +
+            (open ? "true" : "false") + '" title="Explain this tab">' +
+            icon("i-info", "ic-13") + "<span>What am I looking at?</span></button>"
+          : "") +
+      "</div>" +
+      (open ? legendFor(id) : "");
+  }
+
+  function hasLegend(id) {
+    return id === "endpoints" || Boolean(LEGENDS[id]);
+  }
+
+  /* Endpoints keeps a bespoke panel because its health key shows the real
+     chips rather than describing them; every other tab is a term list. */
+  function legendFor(id) {
+    if (id === "endpoints") return legendPanel();
+    var rows = LEGENDS[id];
+    return rows ? legendRows(rows) : "";
+  }
+
+  /** The shared legend table. One row per term. */
+  function legendRows(rows) {
+    var out = '<div class="legend">';
+    for (var i = 0; i < rows.length; i++) {
+      out += '<div class="lg-row"><span class="lg-k">' + esc(rows[i][0]) + "</span>" +
+        '<span class="lg-v">' + esc(rows[i][1]) + "</span></div>";
+    }
+    return out + "</div>";
+  }
 
   /**
    * The waiting mark: three arcs from the palette on their own periods.
@@ -173,12 +345,13 @@ function _run() {
   var ENGINE_TIP = "Always on - engine behavior.";
 
   var TOOLS = [
-    ["read_file", "path, start?, end?", "workspace only"],
+    ["read_file", "path, start?, end?", "read-only · text only"],
     ["write_file", "path, content", "workspace only · approval"],
-    ["edit_file", "path, old_text, new_text", "workspace only · approval"],
-    ["list_files", "path, depth?", "workspace only"],
-    ["search", "pattern, glob?", "workspace only"],
-    ["run_command", "command, reason", "shell · approval"],
+    ["edit_file", "path, old_text, new_text, replace_all?", "workspace only · approval"],
+    ["list_files", "path, depth?", "read-only"],
+    ["glob", "pattern, path?, limit?", "read-only · newest first"],
+    ["search", "pattern, path?, glob?, output_mode?, …", "read-only · skips binaries"],
+    ["run_command", "command, reason, timeout_ms?", "shell · approval"],
     ["read_skill", "name", "enabled skills only"],
     ["update_todos", "todos[]", "no side effects"]
   ];
@@ -459,10 +632,10 @@ function _run() {
 
   /* ── endpoints ── */
   function secEndpoints() {
-    var html = "<h3>Endpoints</h3>" +
-      '<div class="explainer">Profiles are YAML files in <code>' +
-      esc(S.config.profileDirectory || ".agent/endpoints") +
-      "</code>. A file-system watcher reloads profiles and skills on change - no window restart, and the auth cache is cleared on reload.</div>";
+    var html = secHead("endpoints", "Endpoints",
+      "Profiles are YAML files in <code>" + esc(S.config.profileDirectory || ".agent/endpoints") +
+      "</code>. A file-system watcher reloads profiles and skills on change - no window " +
+      "restart, and the auth cache is cleared on reload.");
 
     if (!S.profiles.length) {
       html += '<div class="empty">No profiles in ' + esc(S.config.profileDirectory || ".agent/endpoints") + "</div>" +
@@ -524,11 +697,9 @@ function _run() {
             '<span class="seg-l">Auto</span>' + segs +
           "</div>" +
           '<span class="sp"></span>' +
-          '<button class="btn sm help" data-act="legend" aria-expanded="' + (LEGEND ? "true" : "false") +
-            '" title="Explain each column">' + icon("i-info", "ic-13") +
-            "<span>What am I looking at?</span></button>" +
+          '<span class="muted tiny bar-note">Times the path to the gateway, not the model. ' +
+            "No tokens are spent.</span>" +
         "</div>" +
-        (LEGEND ? legendPanel() : "") +
         '<div class="tbl">' + rows + "</div>";
     }
 
@@ -657,11 +828,11 @@ function _run() {
   /* ── MCP servers ── */
   function secMcp() {
     var m = S.mcp || { servers: [], warnings: [] };
-    var html = "<h3>MCP servers</h3>" +
-      '<div class="explainer">Servers declared in <code>.agent/mcp.json</code>, in the same shape ' +
-      'Claude Desktop and Claude Code use. Each is a child process this extension starts over stdio; ' +
-      'its tools reach the model as <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>. Tools are withheld ' +
-      'in Plan mode, because MCP cannot declare a tool read-only.</div>';
+    var html = secHead("mcp", "MCP servers",
+      'Servers declared in <code>.agent/mcp.json</code>, in the same shape Claude Desktop and ' +
+      'Claude Code use - stdio for a local child process, or a <code>url</code> for a remote one. ' +
+      'Their tools reach the model as <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>, and are ' +
+      'withheld in Plan mode because MCP cannot declare a tool read-only.');
 
     if (m.warnings && m.warnings.length) {
       html += '<div class="warn-line">' + esc(m.warnings.join(" ")) + "</div>";
@@ -740,10 +911,10 @@ function _run() {
 
   function secConnection() {
     var a = active();
-    var html = "<h3>Connection</h3>" +
-      '<div class="explainer">Everything that happens to a request between your keystroke and the ' +
-      "model: how it is encoded, how it proves who you are, and how it leaves the machine. These are " +
-      "read-only views of the active profile&rsquo;s YAML - open the file from Endpoints to change any of it.</div>";
+    var html = secHead("conn", "Connection",
+      "Everything that happens to a request between your keystroke and the model: how it is " +
+      "encoded, how it proves who you are, and how it leaves the machine. These are read-only " +
+      "views of the active profile&rsquo;s YAML - open the file from Endpoints to change any of it.");
     if (!a) return html + '<div class="empty">No active profile.</div>';
 
     var caCount = a.tls && a.tls.ca ? a.tls.ca.length : 0;
@@ -956,12 +1127,11 @@ function _run() {
 
   /* ── diagnostics ── */
   function secDiag() {
-    var html = '<div style="display:flex;align-items:flex-start;gap:10px">' +
-      '<div style="flex:1;min-width:0"><h3>Diagnostics</h3>' +
-      '<div class="explainer">Each rung runs only if the one above it passed, so the first failure is always the real one.</div></div>' +
+    var html = secHead("diag", "Diagnostics",
+      "Each rung runs only if the one above it passed, so the first failure is always the real one.",
       '<button class="btn primary wait" data-act="trace"' + (S.tracing ? " disabled" : "") + ">" +
-      (S.tracing ? spinner(13) + "<span>Running…</span>" : "<span>Re-run trace</span>") +
-      "</button></div>";
+        (S.tracing ? spinner(13) + "<span>Running…</span>" : "<span>Re-run trace</span>") +
+      "</button>");
 
     html += '<div class="card">';
     if (!S.rungs.length && !S.tracing) {
@@ -1018,9 +1188,9 @@ function _run() {
   /* ── agent & tools ── */
   function secAgent() {
     var ui = S.config.ui || {};
-    var html = "<h3>Agent &amp; tools</h3>" +
-      '<div class="explainer">The loop reads before it edits, drops the oldest turns when the window fills, and never ' +
-      "separates a tool result from the call that produced it.</div>";
+    var html = secHead("agent", "Agent & tools",
+      "The loop reads before it edits, drops the oldest turns when the window fills, and never " +
+      "separates a tool result from the call that produced it.");
 
     html += '<div class="grid-cards">' +
       card("Limits", kv([
@@ -1059,9 +1229,9 @@ function _run() {
   /* ── skills ── */
   function secSkills() {
     var enabled = S.skills.filter(function (s) { return s.enabled; });
-    var html = "<h3>Skills</h3>" +
-      '<div class="explainer">Folders with a <code>SKILL.md</code> and YAML frontmatter. Only the one-line index enters the ' +
-      "system prompt - bodies load on demand, so forty skills cost the same as five until one is used.</div>";
+    var html = secHead("skills", "Skills",
+      'Folders with a <code>SKILL.md</code> and YAML frontmatter. Only the one-line index enters ' +
+      "the system prompt - bodies load on demand, so forty skills cost the same as five until one is used.");
 
     if (!S.skills.length) {
       html += '<div class="empty">No skills found in ' + esc(S.config.skillsDirectory || ".agent/skills") + "</div>";
@@ -1109,9 +1279,9 @@ function _run() {
   /* ── checkpoints ── */
   function secCheckpoints() {
     var ui = S.config.ui || {};
-    var html = "<h3>Checkpoints</h3>" +
-      '<div class="explainer">A shadow git repository snapshots the workspace before every agent turn, using a separate ' +
-      "GIT_DIR, so the real repository, index and reflog are never touched.</div>";
+    var html = secHead("checkpoints", "Checkpoints",
+      "A shadow git repository snapshots the workspace before every agent turn, using a separate " +
+      "GIT_DIR, so the real repository, index and reflog are never touched.");
 
     html += '<div class="grid-cards">' +
       card("Shadow repository", kv([
@@ -1146,8 +1316,8 @@ function _run() {
 
   /* ── logs & export ── */
   function secLogs() {
-    var html = "<h3>Logs &amp; export</h3>" +
-      '<div class="explainer">The last 200 lines from the KRYPTONITE output channel.</div>' +
+    var html = secHead("logs", "Logs & export",
+      "The last 200 lines from the KRYPTONITE output channel.") +
       '<div class="watch-mark">' + icon("i-check", "ic-11") + "watcher active on .agent/</div>";
 
     if (!S.logs.length) {
@@ -1240,6 +1410,12 @@ function _run() {
       return;
     }
 
+    if ((t = e.target.closest("[data-legend]"))) {
+      var lk = t.getAttribute("data-legend");
+      LEGEND_OPEN[lk] = !LEGEND_OPEN[lk];
+      render();
+      return;
+    }
     if ((t = e.target.closest("[data-conn]"))) {
       var ck = t.getAttribute("data-conn");
       CONN_OPEN[ck] = !CONN_OPEN[ck];
@@ -1286,7 +1462,6 @@ function _run() {
     switch (action) {
       case "newEndpoint": post("newEndpoint"); break;
       case "health": post("healthCheck"); break;
-      case "legend": LEGEND = !LEGEND; render(); break;
       case "mcpReload": post("mcpReload"); break;
       case "trace": S.tracing = true; S.rungs = []; render(); post("runTrace"); break;
       case "reloadSkills": post("reloadSkills"); setFlash("reloadSkills"); break;
