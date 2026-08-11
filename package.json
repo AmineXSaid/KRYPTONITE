@@ -6,14 +6,31 @@
   "publisher": "local",
   "license": "MIT",
   "icon": "media/logo.png",
-  "engines": { "vscode": "^1.90.0" },
-  "categories": ["AI", "Programming Languages", "Other"],
-  "activationEvents": ["onStartupFinished"],
+  "engines": {
+    "vscode": "^1.90.0",
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AmineXSaid/KRYPTONITE.git"
+  },
+  "categories": [
+    "AI",
+    "Programming Languages",
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {
       "activitybar": [
-        { "id": "kryptonite", "title": "Kryptonite", "icon": "media/icon.svg" }
+        {
+          "id": "kryptonite",
+          "title": "Kryptonite",
+          "icon": "media/icon.svg"
+        }
       ]
     },
     "views": {
@@ -26,14 +43,38 @@
       ]
     },
     "commands": [
-      { "command": "kryptonite.focusSidebar", "title": "KRYPTONITE: Focus sidebar" },
-      { "command": "kryptonite.openControlCenter", "title": "KRYPTONITE: Open Control Center" },
-      { "command": "kryptonite.newChat", "title": "KRYPTONITE: New chat" },
-      { "command": "kryptonite.runDiagnostics", "title": "KRYPTONITE: Run connection diagnostics" },
-      { "command": "kryptonite.selectEndpoint", "title": "KRYPTONITE: Select active endpoint" },
-      { "command": "kryptonite.newEndpoint", "title": "KRYPTONITE: Create endpoint profile" },
-      { "command": "kryptonite.restoreCheckpoint", "title": "KRYPTONITE: Restore checkpoint" },
-      { "command": "kryptonite.exportBundle", "title": "KRYPTONITE: Export offline bundle" }
+      {
+        "command": "kryptonite.focusSidebar",
+        "title": "KRYPTONITE: Focus sidebar"
+      },
+      {
+        "command": "kryptonite.openControlCenter",
+        "title": "KRYPTONITE: Open Control Center"
+      },
+      {
+        "command": "kryptonite.newChat",
+        "title": "KRYPTONITE: New chat"
+      },
+      {
+        "command": "kryptonite.runDiagnostics",
+        "title": "KRYPTONITE: Run connection diagnostics"
+      },
+      {
+        "command": "kryptonite.selectEndpoint",
+        "title": "KRYPTONITE: Select active endpoint"
+      },
+      {
+        "command": "kryptonite.newEndpoint",
+        "title": "KRYPTONITE: Create endpoint profile"
+      },
+      {
+        "command": "kryptonite.restoreCheckpoint",
+        "title": "KRYPTONITE: Restore checkpoint"
+      },
+      {
+        "command": "kryptonite.exportBundle",
+        "title": "KRYPTONITE: Export offline bundle"
+      }
     ],
     "configuration": {
       "title": "KRYPTONITE",
@@ -55,7 +96,11 @@
         },
         "kryptonite.approvalMode": {
           "type": "string",
-          "enum": ["ask", "edits-auto", "full-auto"],
+          "enum": [
+            "ask",
+            "edits-auto",
+            "full-auto"
+          ],
           "default": "ask",
           "description": "When tools run without confirming: ask = every side effect; edits-auto = file edits auto, shell commands ask; full-auto = never ask."
         },
@@ -71,6 +116,12 @@
     "typecheck": "tsc --noEmit",
     "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node18",
     "watch": "npm run build -- --sourcemap --watch",
+    "test:bundle": "esbuild test/activation.ts test/send-path.ts test/skill-bounds.ts test/text-tool-protocol.ts --bundle --outdir=dist --out-extension:.js=.cjs --format=cjs --platform=node --target=node20 --alias:vscode=./test/vscode-stub.ts",
+    "pretest": "npm run build && npm run test:bundle",
+    "test": "node test/markdown-render.cjs && node test/mcp-render.cjs && node test/drive.js && node test/host.js && node dist/activation.cjs && node dist/send-path.cjs && node dist/skill-bounds.cjs && node dist/text-tool-protocol.cjs",
+    "test:live": "esbuild test/attachment-e2e.ts test/skill-gating-live.ts --bundle --outdir=dist --out-extension:.js=.cjs --format=cjs --platform=node --target=node20 && node dist/attachment-e2e.cjs && node dist/skill-gating-live.cjs",
+    "test:mcp": "npm install --no-save @modelcontextprotocol/server-filesystem && esbuild test/mcp-e2e.ts --bundle --outdir=dist --out-extension:.js=.cjs --format=cjs --platform=node --target=node20 && node dist/mcp-e2e.cjs",
+    "verify": "npm run typecheck && npm test",
     "vscode:prepublish": "npm run build",
     "package": "vsce package --no-dependencies"
   },
@@ -83,6 +134,7 @@
     "@types/vscode": "^1.90.0",
     "@vscode/vsce": "^2.32.0",
     "esbuild": "^0.23.0",
+    "jsdom": "^27.0.0",
     "typescript": "^5.5.0"
   }
 }

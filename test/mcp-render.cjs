@@ -84,6 +84,36 @@ console.log("──── empty state ────");
   ck(!/undefined|NaN/.test(r.html), "no undefined leaked");
 }
 
+console.log("\n──── disabled server is visible, not vanished ────");
+{
+  // A server declared with enabled:false used to be dropped by the registry, so
+  // the panel rendered the no-config empty state and offered to create a file
+  // the user had just edited. It is configuration, and it has to be shown.
+  const off = {
+    name: "filesystem", state: "disabled",
+    command: "npx -y @modelcontextprotocol/server-filesystem .",
+    toolCount: 0, tools: [], approval: "ask",
+  };
+  const r = render([off]);
+  ck(!/No MCP servers configured/.test(r.html), "does NOT claim nothing is configured");
+  ck(/data-state="disabled"/.test(r.html), "row carries the disabled state");
+  ck(/>disabled</.test(r.html), "wears a disabled pill");
+  ck(!/mcp-pill err/.test(r.html), "not dressed up as an error");
+  ck(!/unavailable/.test(r.html), "not counted as unavailable");
+  ck(/enabled/.test(r.html) && /mcp\.json/.test(r.html), "says how to turn it on");
+  ck(!/undefined|NaN/.test(r.html), "no undefined leaked");
+}
+
+console.log("\n──── disabled alongside ready ────");
+{
+  const r = render([
+    ready(),
+    { name: "zeta", state: "disabled", command: "npx zeta", toolCount: 0, tools: [], approval: "ask" },
+  ]);
+  ck(/data-state="ready"/.test(r.html) && /data-state="disabled"/.test(r.html), "both rows render");
+  ck(/6 tools .*exposed|6 tools/.test(r.html), "disabled server adds no tools to the total");
+}
+
 console.log("\n──── one ready server ────");
 {
   const r = render([ready()]);

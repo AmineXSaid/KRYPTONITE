@@ -3,9 +3,10 @@
 // NODE_EXTRA_CA_CERTS in some extension-host launch paths and has no client
 // certificate support at all, which is exactly what this extension exists for.
 
+import { performance } from "node:perf_hooks";
 import { request, Dispatcher } from "undici";
 import type { EndpointProfile, Wire } from "../endpoints/profile";
-import { buildTransport } from "../endpoints/transport";
+import { buildTransport, isStaleSocketError, TransportStats } from "../endpoints/transport";
 import { applyAuth } from "../endpoints/auth";
 import { loadTransform, Transform } from "../endpoints/transform";
 
@@ -38,14 +39,50 @@ export interface CompletionRequest {
   maxTokens?: number;
   temperature?: number;
   stream?: boolean;
+  /**
+   * Aborts the in-flight HTTP request, not just the consumption of it.
+   * Without this an interrupt is only noticed when the next chunk happens to
+   * arrive, so a long pause before the first token was uninterruptible and we
+   * kept paying for output nobody was going to read.
+   */
+  signal?: AbortSignal;
 }
 
 export interface CompletionEvent {
   type: "text" | "tool_call" | "done" | "usage";
   text?: string;
   toolCall?: ToolCall;
-  usage?: { input: number; output: number };
+  usage?: TokenUsage;
   stopReason?: string;
+}
+
+export interface TokenUsage {
+  input: number;
+  output: number;
+  /**
+   * Tokens served from the prompt cache, and tokens written into it.
+   *
+   * These are the only honest signal that caching is working. If `cacheRead`
+   * stays zero across turns of one conversation, something in the prefix is
+   * changing between requests and the breakpoints are doing nothing.
+   */
+  cacheRead?: number;
+  cacheWrite?: number;
+}
+
+/** What one call to `complete()` cost, in wall-clock. */
+export interface TurnTimings {
+  /** Time to response headers — connect, TLS, auth, upload, model queue. */
+  headersMs: number;
+  /** Time to the first text token the UI could render. 0 if none arrived. */
+  ttftMs: number;
+  /** Mean inter-token time after the first. NaN when fewer than two arrived. */
+  tpotMs: number;
+  totalMs: number;
+  /** Sockets opened by this profile's dispatcher so far, cumulative. */
+  handshakes: number;
+  /** True when the request had to be replayed onto a fresh socket. */
+  retried: boolean;
 }
 
 export class EndpointError extends Error {
@@ -81,6 +118,10 @@ export class EndpointClient {
   private dispatcher: Dispatcher;
   private transform?: Transform;
   readonly transportReport: string[];
+  readonly stats: TransportStats;
+
+  /** Set by App so a finished turn can report what it cost. */
+  onTiming?: (t: TurnTimings) => void;
 
   constructor(
     readonly profile: EndpointProfile,
@@ -90,6 +131,7 @@ export class EndpointClient {
     const t = buildTransport(profile);
     this.dispatcher = t.dispatcher;
     this.transportReport = t.report;
+    this.stats = t.stats;
     if (profile.transform) this.transform = loadTransform(profile.transform, workspaceRoot);
   }
 
@@ -116,12 +158,22 @@ export class EndpointClient {
     if (this.profile.wire === "anthropic") {
       const system = req.messages.filter((m) => m.role === "system").map(textOf).join("\n\n");
       const rest = req.messages.filter((m) => m.role !== "system");
+      // Caching is a prefix match over rendered bytes in the order
+      // tools -> system -> messages, so a breakpoint on the system block
+      // covers the tool definitions too, and one on the tail of the
+      // conversation lets the next turn read everything before it.
+      const cached = caps.promptCaching === "anthropic";
+      const mark = cached
+        ? { cache_control: { type: "ephemeral", ...(caps.cacheTtl === "1h" ? { ttl: "1h" } : {}) } }
+        : {};
       body = {
         model: this.profile.model,
         max_tokens: req.maxTokens ?? caps.maxOutputTokens,
         stream,
-        ...(system ? { system } : {}),
-        messages: rest.map(toAnthropicMessage),
+        ...(system
+          ? { system: cached ? [{ type: "text", text: system, ...mark }] : system }
+          : {}),
+        messages: withTailBreakpoint(packAnthropicMessages(rest), mark, cached),
         ...(req.tools?.length && caps.tools
           ? {
               tools: req.tools.map((t) => ({
@@ -179,34 +231,98 @@ export class EndpointClient {
     };
   }
 
-  async *complete(req: CompletionRequest): AsyncGenerator<CompletionEvent> {
-    const auth = await applyAuth(this.profile, this.dispatcher, this.secrets);
-    const { body, stream: wantsStream } = this.encode(req);
-
-    const headers: Record<string, string> = {
+  private headersFor(wantsStream: boolean, auth: { headers: Record<string, string> }) {
+    return {
       "content-type": "application/json",
       accept: wantsStream ? "text/event-stream" : "application/json",
       ...(this.profile.wire === "anthropic" ? { "anthropic-version": "2023-06-01" } : {}),
       ...(this.profile.headers ?? {}),
       ...auth.headers,
+    } as Record<string, string>;
+  }
+
+  /**
+   * Issue the request, replaying it once onto a fresh socket if the pooled one
+   * turned out to be dead.
+   *
+   * Holding sockets open for a minute means occasionally picking one a
+   * middlebox has already reaped. That failure happens on the first write,
+   * before the request reaches the server, so the replay cannot produce a
+   * second completion. Every other error is surfaced as-is.
+   */
+  private async send(
+    url: string,
+    headers: Record<string, string>,
+    payload: string,
+    signal?: AbortSignal
+  ) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return {
+          res: await request(url, {
+            method: "POST",
+            dispatcher: this.dispatcher,
+            headers,
+            body: payload,
+            signal,
+            headersTimeout: this.profile.timeoutMs,
+            bodyTimeout: this.profile.timeoutMs,
+          }),
+          retried: attempt > 0,
+        };
+      } catch (e: any) {
+        if (signal?.aborted) throw e;
+        if (attempt === 0 && isStaleSocketError(e)) continue;
+        throw explainNetworkError(e, this.profile);
+      }
+    }
+  }
+
+  async *complete(req: CompletionRequest): AsyncGenerator<CompletionEvent> {
+    const t0 = performance.now();
+    // Auth is I/O and encoding is CPU; neither depends on the other, so a
+    // credential helper process or a token exchange round trip now overlaps
+    // the serialisation of the request body instead of preceding it.
+    const authPromise = applyAuth(this.profile, this.dispatcher, this.secrets);
+    const { body, stream: wantsStream } = this.encode(req);
+    const payload = JSON.stringify(body);
+    const auth = await authPromise;
+
+    if (req.signal?.aborted) return;
+
+    const { res, retried } = await this.send(
+      this.url(),
+      this.headersFor(wantsStream, auth),
+      payload,
+      req.signal
+    );
+    const headersMs = performance.now() - t0;
+
+    // Bound once per turn rather than per event: on a `raw` profile this
+    // crosses a vm context boundary for every token that arrives.
+    const post = this.transform?.transformResponse?.bind(this.transform);
+
+    let ttftMs = 0;
+    let tokens = 0;
+    const report = () => {
+      const totalMs = performance.now() - t0;
+      this.onTiming?.({
+        headersMs,
+        ttftMs,
+        tpotMs: tokens > 1 ? (totalMs - ttftMs) / (tokens - 1) : NaN,
+        totalMs,
+        handshakes: this.stats.handshakes + this.stats.proxyHandshakes,
+        retried,
+      });
     };
 
-    let res;
-    try {
-      res = await request(this.url(), {
-        method: "POST",
-        dispatcher: this.dispatcher,
-        headers,
-        body: JSON.stringify(body),
-        headersTimeout: this.profile.timeoutMs,
-        bodyTimeout: this.profile.timeoutMs,
-      });
-    } catch (e: any) {
-      throw explainNetworkError(e, this.profile);
-    }
-
+    // Reported before the throw, deliberately. A turn that fails is exactly
+    // when the timings are worth having — how long the endpoint took to reject
+    // us, and whether the socket was reused — and reporting after the throw
+    // meant every failed turn silently produced no numbers at all.
     if (res.statusCode >= 400) {
       const text = await res.body.text();
+      report();
       throw new EndpointError(
         `The endpoint returned ${res.statusCode}.`,
         text.slice(0, 2000),
@@ -215,41 +331,179 @@ export class EndpointClient {
     }
 
     if (!wantsStream) {
-      const json: any = this.postprocess(await res.body.json());
-      for (const ev of decodeWhole(json, this.profile.wire)) yield ev;
+      const raw = await res.body.json();
+      const json: any = post ? post(raw, this.profile) : raw;
+      try {
+        for (const ev of decodeWhole(json, this.profile.wire)) {
+          if (ev.type === "text") {
+            tokens++;
+            if (!ttftMs) ttftMs = performance.now() - t0;
+          }
+          yield ev;
+        }
+      } finally {
+        report();
+      }
       return;
     }
 
     const parser = this.profile.wire === "anthropic" ? anthropicStream() : openAiStream();
+    // A multi-byte character can straddle a chunk boundary. Decoding each
+    // chunk independently turned those into U+FFFD, so any reply containing
+    // an emoji or CJK text corrupted at random points in the stream.
+    const decoder = new TextDecoder("utf-8");
     let buf = "";
-    for await (const chunk of res.body) {
-      buf += chunk.toString("utf8");
-      // Gateways vary on line endings; normalise before splitting on blank lines.
-      buf = buf.replace(/\r\n/g, "\n");
-      let idx: number;
-      while ((idx = buf.indexOf("\n\n")) !== -1) {
-        const frame = buf.slice(0, idx);
-        buf = buf.slice(idx + 2);
-        for (const line of frame.split("\n")) {
-          if (!line.startsWith("data:")) continue;
-          const payload = line.slice(5).trim();
-          if (payload === "[DONE]") continue;
-          let json: any;
-          try {
-            json = JSON.parse(payload);
-          } catch {
-            continue;
+    try {
+      for await (const chunk of res.body) {
+        // Normalise only the newly arrived text: re-scanning the whole
+        // retained buffer on every chunk is quadratic in frame size, and a
+        // lone trailing \r never terminates a frame so it is safe to carry.
+        buf += decoder.decode(chunk as Buffer, { stream: true }).replace(/\r\n/g, "\n");
+        let idx: number;
+        while ((idx = buf.indexOf("\n\n")) !== -1) {
+          const frame = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          for (const line of frame.split("\n")) {
+            if (!line.startsWith("data:")) continue;
+            const payloadLine = line.slice(5).trim();
+            if (payloadLine === "[DONE]") continue;
+            let json: any;
+            try {
+              json = JSON.parse(payloadLine);
+            } catch {
+              continue;
+            }
+            for (const ev of parser(post ? post(json, this.profile) : json)) {
+              if (ev.type === "text") {
+                tokens++;
+                if (!ttftMs) ttftMs = performance.now() - t0;
+              }
+              yield ev;
+            }
           }
-          for (const ev of parser(this.postprocess(json))) yield ev;
         }
       }
+      yield { type: "done" };
+    } finally {
+      report();
     }
-    yield { type: "done" };
   }
 
-  private postprocess(json: any): any {
-    return this.transform?.transformResponse ? this.transform.transformResponse(json, this.profile) : json;
+  /* ─────────────────────────── warm-up ─────────────────────────── */
+
+  /**
+   * Open and pool a socket so the next real request skips the connect, the TLS
+   * handshake, the CONNECT tunnel, and the client certificate exchange.
+   *
+   * undici has no preconnect on `Agent`, so this is a throwaway request whose
+   * response we do not care about — a 404 or a 405 is a perfectly good outcome,
+   * because what we wanted was the socket.
+   */
+  async warmConnection(signal?: AbortSignal): Promise<void> {
+    const res = await request(this.url(), {
+      method: "OPTIONS",
+      dispatcher: this.dispatcher,
+      signal,
+      headersTimeout: 10_000,
+      bodyTimeout: 10_000,
+    });
+    await res.body.dump();
   }
+
+  /**
+   * Resolve credentials ahead of the turn.
+   *
+   * `applyAuth` populates its own module-level cache, so a token exchange or a
+   * credential-helper process runs while the user is still typing instead of
+   * sitting between their Enter key and the first token.
+   */
+  async warmAuth(): Promise<void> {
+    await applyAuth(this.profile, this.dispatcher, this.secrets);
+  }
+
+  /**
+   * Prefill the prompt cache for the stable head of the next request.
+   *
+   * `max_tokens: 0` runs prefill and returns immediately with no content and
+   * no output tokens billed, leaving a cache entry the real request reads. The
+   * breakpoint has to sit on the last block shared with that request — the
+   * system prompt — not on the placeholder turn.
+   */
+  async warmCache(system: string, signal?: AbortSignal): Promise<void> {
+    const caps = this.profile.capabilities;
+    if (caps.promptCaching !== "anthropic" || !system) return;
+    const auth = await applyAuth(this.profile, this.dispatcher, this.secrets);
+    const res = await request(this.url(), {
+      method: "POST",
+      dispatcher: this.dispatcher,
+      headers: this.headersFor(false, auth),
+      signal,
+      body: JSON.stringify({
+        model: this.profile.model,
+        max_tokens: 0,
+        system: [
+          {
+            type: "text",
+            text: system,
+            cache_control: { type: "ephemeral", ...(caps.cacheTtl === "1h" ? { ttl: "1h" } : {}) },
+          },
+        ],
+        messages: [{ role: "user", content: "warmup" }],
+        ...(this.profile.extraBody ?? {}),
+      }),
+      headersTimeout: 20_000,
+      bodyTimeout: 20_000,
+    });
+    await res.body.dump();
+  }
+}
+
+/**
+ * Mark the last content block of the last message.
+ *
+ * Each turn then reads the previous turn's entry and writes a slightly longer
+ * one, so the cached prefix grows with the conversation rather than being
+ * rebuilt from scratch. A plain string `content` is promoted to a block array,
+ * which is the only shape that can carry `cache_control`.
+ */
+function withTailBreakpoint(msgs: any[], mark: object, on: boolean): any[] {
+  if (!on || !msgs.length) return msgs;
+  const last = msgs[msgs.length - 1];
+  // Never promote an empty string into a text block — the wire rejects those,
+  // and turning a tolerated shape into a 400 is not an optimisation.
+  if (typeof last.content === "string" && !last.content.trim()) return msgs;
+  const blocks: any[] = Array.isArray(last.content)
+    ? last.content
+    : [{ type: "text", text: last.content }];
+  if (!blocks.length) return msgs;
+  const marked = blocks.map((b, i) => (i === blocks.length - 1 ? { ...b, ...mark } : b));
+  return [...msgs.slice(0, -1), { ...last, content: marked }];
+}
+
+/**
+ * Collapse consecutive tool results into one user message.
+ *
+ * The wire expects every `tool_result` for a single assistant turn to arrive
+ * together. Emitting one message each is harmless while the model only ever
+ * makes one call at a time, but it trains a model that *can* call in parallel
+ * to stop doing so — and each extra sequential call is a whole round trip.
+ */
+function packAnthropicMessages(msgs: Msg[]): any[] {
+  const out: any[] = [];
+  for (let i = 0; i < msgs.length; i++) {
+    if (msgs[i].role !== "tool") {
+      out.push(toAnthropicMessage(msgs[i]));
+      continue;
+    }
+    const blocks: any[] = [];
+    while (i < msgs.length && msgs[i].role === "tool") {
+      blocks.push({ type: "tool_result", tool_use_id: msgs[i].toolCallId, content: textOf(msgs[i]) });
+      i++;
+    }
+    i--;
+    out.push({ role: "user", content: blocks });
+  }
+  return out;
 }
 
 function textOf(m: Msg): string {
@@ -319,7 +573,7 @@ function* decodeWhole(json: any, wire: string): Generator<CompletionEvent> {
       if (b.type === "text") yield { type: "text", text: b.text };
       if (b.type === "tool_use") yield { type: "tool_call", toolCall: { id: b.id, name: b.name, arguments: b.input } };
     }
-    if (json.usage) yield { type: "usage", usage: { input: json.usage.input_tokens, output: json.usage.output_tokens } };
+    if (json.usage) yield { type: "usage", usage: anthropicUsage(json.usage) };
   } else {
     const msg = json.choices?.[0]?.message ?? {};
     if (msg.content) yield { type: "text", text: msg.content };
@@ -329,8 +583,7 @@ function* decodeWhole(json: any, wire: string): Generator<CompletionEvent> {
         toolCall: { id: tc.id, name: tc.function.name, arguments: safeJson(tc.function.arguments) },
       };
     }
-    if (json.usage)
-      yield { type: "usage", usage: { input: json.usage.prompt_tokens, output: json.usage.completion_tokens } };
+    if (json.usage) yield { type: "usage", usage: openAiUsage(json.usage) };
   }
   yield { type: "done" };
 }
@@ -341,6 +594,28 @@ function safeJson(s: string): any {
   } catch {
     return { _raw: s };
   }
+}
+
+/**
+ * Cache counters are the only honest confirmation that caching is working.
+ * `cache_read_input_tokens` staying at zero across turns of one conversation
+ * means something in the prefix is changing between requests.
+ */
+function anthropicUsage(u: any): TokenUsage {
+  return {
+    input: u.input_tokens ?? 0,
+    output: u.output_tokens ?? 0,
+    cacheRead: u.cache_read_input_tokens,
+    cacheWrite: u.cache_creation_input_tokens,
+  };
+}
+
+function openAiUsage(u: any): TokenUsage {
+  return {
+    input: u.prompt_tokens ?? 0,
+    output: u.completion_tokens ?? 0,
+    cacheRead: u.prompt_tokens_details?.cached_tokens,
+  };
 }
 
 /** Streaming decoders accumulate partial tool-call arguments across deltas. */
@@ -366,6 +641,7 @@ function openAiStream() {
           usage: {
             input,
             output: u.total_tokens ? Math.max(0, u.total_tokens - input) : output,
+            cacheRead: u.prompt_tokens_details?.cached_tokens,
           },
         };
       }
@@ -415,7 +691,13 @@ function anthropicStream() {
         break;
       }
       case "message_delta":
-        if (json.usage) yield { type: "usage", usage: { input: 0, output: json.usage.output_tokens } };
+        if (json.usage) yield { type: "usage", usage: { input: 0, output: json.usage.output_tokens ?? 0 } };
+        break;
+      // The input and cache counters only ever appear here, on the opening
+      // frame. Ignoring it meant the one number that proves prompt caching is
+      // working never reached the UI.
+      case "message_start":
+        if (json.message?.usage) yield { type: "usage", usage: anthropicUsage(json.message.usage) };
         break;
     }
   };

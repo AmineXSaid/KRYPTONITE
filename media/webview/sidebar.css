@@ -881,6 +881,21 @@ li.doing .cbx { border-color: var(--kx-accent); }
   color: var(--kx-fg-3);
 }
 .mcp-head .when { font-family: var(--kx-mono); font-size: 11px; color: var(--kx-fg-3); }
+/* The two header actions were a bare icon+label pair and a plain box, at
+   different visual weights, so the row read as two unrelated controls. They
+   are one pair: same height, same padding, icon locked to the cap height, and
+   periwinkle on hover — the palette's one interaction colour. */
+.mcp-head .btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 24px; padding: 0 10px; white-space: nowrap;
+}
+.mcp-head .btn svg { flex: none; }
+.mcp-head .btn:hover:not(:disabled) {
+  color: var(--kx-link); border-color: var(--kx-link);
+}
+/* The empty state's single call to action carries the interaction colour;
+   the header pair stays quiet so they do not compete. */
+.mcp-empty .btn.primary { height: 26px; padding: 0 14px; }
 
 .mcp-row {
   display: grid; grid-template-columns: 3px minmax(0, 1fr) auto;
@@ -892,6 +907,11 @@ li.doing .cbx { border-color: var(--kx-accent); }
 .mcp-row[data-state="ready"] .rail { background: var(--kx-accent); }
 .mcp-row[data-state="failed"] .rail { background: var(--kx-error); }
 .mcp-row[data-state="starting"] .rail { background: var(--kx-warn); }
+/* Declared but deliberately not started: present, and visibly inert. */
+.mcp-row[data-state="disabled"] .rail { background: var(--kx-border); }
+.mcp-row[data-state="disabled"] .nm,
+.mcp-row[data-state="disabled"] .sub,
+.mcp-row[data-state="disabled"] .count { opacity: .55; }
 .mcp-row .mid { min-width: 0; }
 .mcp-row .top { display: flex; align-items: center; gap: 8px; }
 .mcp-row .nm { font-size: 12px; font-weight: 600; color: var(--kx-fg); }

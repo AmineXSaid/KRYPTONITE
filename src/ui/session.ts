@@ -189,22 +189,27 @@ export class SessionController {
     const turnId = crypto.randomUUID();
     const touched = new Set<string>();
 
-    // Snapshot before anything runs, so a reject has somewhere to restore from.
-    let preHash: string | undefined;
-    if (phase === "act" && this.app.uiConfig.snapshotTurn !== false) {
-      try {
-        preHash = await this.app.shadow?.snapshot(text.slice(0, 60));
-      } catch {
-        // git may be absent entirely. Diff cards simply do not appear.
-        preHash = undefined;
-      }
-    }
+    // Snapshot so a reject has somewhere to restore from — but do not wait for
+    // it here. `git add -A` plus a commit over the whole workspace used to sit
+    // between the user's Enter key and the request going out. It only has to
+    // have finished before the first tool changes a file, which `ctx.approve`
+    // below enforces: every mutating tool is gated on it.
+    const snapshot: Promise<string | undefined> =
+      phase === "act" && this.app.uiConfig.snapshotTurn !== false && this.app.shadow
+        ? this.app.shadow.snapshot(text.slice(0, 60)).catch(() => undefined)
+        : Promise.resolve(undefined);
 
     const ctx: ToolContext = {
       root,
       skills: this.app.enabledSkills(),
       mcp: this.app.mcp,
-      approve: (summary, detail) => this.requestApproval(summary, detail),
+      // Every path that can change the workspace is gated on approval, so this
+      // is where the deferred snapshot is joined. By the time any tool writes,
+      // the checkpoint it would be restored to already exists.
+      approve: async (summary, detail) => {
+        await snapshot;
+        return this.requestApproval(summary, detail);
+      },
       onFileTouched: (abs: string) => {
         const rel = path.relative(root, abs).split(path.sep).join("/");
         if (rel && !rel.startsWith("..")) touched.add(rel);
@@ -314,8 +319,9 @@ export class SessionController {
 
     this.persist();
 
-    if (preHash && touched.size) {
-      await this.emitDiffs(turnId, preHash, touched);
+    if (touched.size) {
+      const preHash = await snapshot;
+      if (preHash) await this.emitDiffs(turnId, preHash, touched);
     }
 
     this.running = false;

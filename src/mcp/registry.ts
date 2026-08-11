@@ -26,7 +26,16 @@ export const MCP_PREFIX = "mcp__";
 
 export interface McpServerStatus {
   name: string;
-  state: "idle" | "starting" | "ready" | "failed" | "stopped";
+  /**
+   * `disabled` is a declared server that was deliberately not started.
+   *
+   * It is a state rather than an absence because dropping those servers made
+   * them invisible: a user who set `enabled: false` saw "No MCP servers
+   * configured" and a button offering to create the config file they had just
+   * edited. A disabled server is configuration, and configuration should be
+   * visible.
+   */
+  state: "idle" | "starting" | "ready" | "failed" | "stopped" | "disabled";
   command: string;
   error?: string;
   toolCount: number;
@@ -113,6 +122,10 @@ export function loadMcpConfig(file: string): { specs: McpServerSpec[]; warnings:
 export class McpRegistry {
   warnings: string[] = [];
   private clients = new Map<string, McpClient>();
+  /** Declared but not started, kept so the panel can still show them. */
+  private disabled: McpServerSpec[] = [];
+  /** True once a config file has been read, even if it declared nothing. */
+  configPresent = false;
 
   constructor(
     private log: (level: "info" | "warn" | "error", msg: string) => void
@@ -124,9 +137,14 @@ export class McpRegistry {
    */
   async reload(configFile: string, workspaceRoot: string): Promise<void> {
     await this.stopAll();
+    this.configPresent = fs.existsSync(configFile);
     const { specs, warnings } = loadMcpConfig(configFile);
     this.warnings = warnings;
     for (const w of warnings) this.log("warn", `MCP config: ${w}`);
+
+    // Remembered so the panel can show them greyed out rather than pretending
+    // no configuration exists.
+    this.disabled = specs.filter((s) => s.enabled === false);
 
     const enabled = specs.filter((s) => s.enabled !== false);
     if (!enabled.length) return;
@@ -159,18 +177,25 @@ export class McpRegistry {
   }
 
   statuses(): McpServerStatus[] {
-    return [...this.clients.values()]
-      .map((c) => ({
-        name: c.spec.name,
-        state: c.state,
-        command: [c.spec.command, ...(c.spec.args ?? [])].join(" "),
-        error: c.error,
-        toolCount: c.tools.length,
-        tools: c.tools.map((t) => t.name),
-        approval: c.approval,
-        serverInfo: c.serverInfo,
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+    const running: McpServerStatus[] = [...this.clients.values()].map((c) => ({
+      name: c.spec.name,
+      state: c.state,
+      command: [c.spec.command, ...(c.spec.args ?? [])].join(" "),
+      error: c.error,
+      toolCount: c.tools.length,
+      tools: c.tools.map((t) => t.name),
+      approval: c.approval,
+      serverInfo: c.serverInfo,
+    }));
+    const off: McpServerStatus[] = this.disabled.map((s) => ({
+      name: s.name,
+      state: "disabled" as const,
+      command: [s.command, ...(s.args ?? [])].join(" "),
+      toolCount: 0,
+      tools: [],
+      approval: s.approval === "auto" ? ("auto" as const) : ("ask" as const),
+    }));
+    return [...running, ...off].sort((a, b) => a.name.localeCompare(b.name));
   }
 
   logTail(name: string): string {

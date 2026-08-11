@@ -1,5 +1,77 @@
 # Changelog
 
+## 0.5.0
+
+Latency work — connection reuse, prompt caching, and getting disk, git, and
+JSON serialisation off the path between Enter and the first token. Plus a
+diagnostics fix for gateways that hang on non-streaming requests.
+
+### Fixed
+- **Diagnostics hung for two minutes on NVIDIA NIM.** The Completion rung sends
+  a non-streaming request, which that gateway does not answer at all over
+  HTTP/1.1. The streaming fallback and its warning already existed, but the
+  probe waited out the full 120s production timeout before reaching them, with
+  the panel showing only "Running…". The probe is now bounded to 20s and aborts
+  rather than being abandoned, so the fallback and its explanation appear
+  almost immediately.
+- **A reply that arrived in one frame did not type out.** How a response is
+  chunked is the gateway's choice; some send the whole answer in a single SSE
+  frame. Painting on arrival made those land as one block. Display is now paced
+  from a buffer, so a reply types regardless of how it arrives, and the end of
+  a turn always reveals whatever is left.
+- **A disabled MCP server was invisible.** `enabled: false` caused the registry
+  to drop the server entirely, so the panel showed "No MCP servers configured"
+  and offered to create a config file the user had just edited. Disabled
+  servers are now a state: listed, greyed, not counted as failures, with a note
+  saying how to turn them on.
+- **Multi-byte characters corrupted mid-stream.** The SSE reader decoded each
+  chunk independently, so a UTF-8 sequence spanning a TCP segment boundary
+  became U+FFFD — any reply with emoji or CJK broke at random points. Now
+  decoded through a streaming `TextDecoder`.
+- **Interrupt did not abort the request**, only the reading of it, so a cancel
+  during a long pause before the first token had no effect until the next chunk
+  arrived. The signal now reaches `undici.request`.
+- **Anthropic tool results were sent one message each.** The wire expects every
+  `tool_result` for a turn in a single user message; splitting them teaches a
+  model that can call in parallel to stop. They are now batched.
+- `message_start` was ignored, so input and cache token counts never surfaced.
+- The diagnostics ladder built four undici dispatchers and closed none.
+
+### Added
+- **Prompt caching**, opt-in per profile via `capabilities.promptCaching`
+  (`anthropic` | `prefix` | `none`, default `none`) and `capabilities.cacheTtl`.
+- **Warm-up on composer focus** — connection, credential, and the cacheable
+  head of the prompt are paid for while the user is still typing.
+- **Per-turn timings in the log**: headers, TTFT, TPOT, total, and a cumulative
+  handshake count. A count that climbs once per turn means connection reuse is
+  broken; it is the first thing to check.
+- `usage.cacheRead` / `usage.cacheWrite`, the only honest confirmation caching
+  is working.
+- CI: `npm test` / `npm run verify`, a declared `jsdom` devDependency, and a
+  GitHub Actions matrix (Node 20/22 × Ubuntu/Windows) that also uploads a
+  packaged `.vsix`. Live-API and MCP-server suites are excluded from CI and
+  have their own `test:live` / `test:mcp` scripts.
+
+### Changed
+- **Idle sockets are pooled for 60s, not undici's default 4s.** A turn is
+  separated from the next by however long a person takes to read and type, so
+  every turn was paying a fresh TCP connect, TLS handshake, and — on the
+  endpoints this extension exists for — a CONNECT tunnel and an mTLS exchange.
+- TLS material is parsed once into a shared `SecureContext` instead of handing
+  ~150 root PEMs to every handshake.
+- **Skill edits no longer tear down the transport.** Profiles and skills are
+  watched separately; saving a `SKILL.md` mid-conversation used to destroy the
+  connection pool.
+- Transcripts are written asynchronously behind an in-memory metadata index.
+  `list()` and `nextUntitled()` each used to read and parse every transcript on
+  disk, and `list()` runs on every save.
+- The turn checkpoint no longer blocks the request: it starts immediately and
+  is joined at the approval gate, which every mutating tool passes through.
+- Token counts are memoised per message rather than recomputed each iteration.
+- Auth resolution overlaps request encoding rather than preceding it.
+- A request that fails on a stale pooled socket, before reaching the server, is
+  replayed once on a fresh one.
+
 ## 0.4.0
 
 Bundled skills, Act button in brand green, and a Control Center fix.

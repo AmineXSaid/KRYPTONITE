@@ -1,6 +1,6 @@
 import type { EndpointClient, Msg, ToolCall, ToolDef } from "../providers/client";
 import { TOOL_DEFS, runTool, ToolContext } from "./tools";
-import { skillIndex } from "../skills/loader";
+import { skillIndex, Skill } from "../skills/loader";
 
 export interface AgentEvent {
   type: "text" | "tool_start" | "tool_end" | "turn_end" | "error" | "context";
@@ -185,9 +185,23 @@ export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 3.6);
 }
 
+/**
+ * Messages are immutable once appended, so their size is worth remembering.
+ *
+ * This re-serialised every message on every iteration of the agent loop, which
+ * on a long transcript meant megabytes of JSON.stringify blocking the
+ * extension host immediately before the request went out.
+ */
+const tokenCache = new WeakMap<Msg, number>();
+
 function messageTokens(m: Msg): number {
+  const hit = tokenCache.get(m);
+  if (hit !== undefined) return hit;
   const body = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
-  return estimateTokens(body) + estimateTokens(JSON.stringify(m.toolCalls ?? "")) + 8;
+  const n =
+    estimateTokens(body) + (m.toolCalls ? estimateTokens(JSON.stringify(m.toolCalls)) : 0) + 8;
+  tokenCache.set(m, n);
+  return n;
 }
 
 /**
@@ -244,15 +258,25 @@ export interface AgentRunOptions {
   onMessage?: (msg: Msg) => void;
 }
 
+/**
+ * The stable head of every request, for a given skill set and phase.
+ *
+ * Exported so the cache pre-warm and the real request build it the same way.
+ * They have to be byte-identical: a prefix that differs by a single character
+ * shares no cache entry, and a pre-warm that misses is pure cost.
+ */
+export function systemPromptFor(skills: Skill[], phase: "plan" | "act"): string {
+  return [SYSTEM, skillIndex(skills), phase === "plan" ? PLAN_ADDENDUM : ""]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEvent> {
   const { client, ctx } = opts;
   const caps = client.profile.capabilities;
-  const index = skillIndex(ctx.skills);
   // CHANGED: the plan addendum joins the system prompt in plan phase.
   const phase = opts.phase ?? "act";
-  const system = [SYSTEM, index, phase === "plan" ? PLAN_ADDENDUM : ""]
-    .filter(Boolean)
-    .join("\n\n");
+  const system = systemPromptFor(ctx.skills, phase);
 
   // CHANGED: in plan phase the model is only offered the read-only tools, so a
   // write is impossible rather than merely discouraged.
@@ -307,6 +331,10 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
       for await (const ev of client.complete({
         messages: fitted,
         tools: caps.tools ? availableTools : undefined,
+        // Aborts the HTTP request itself, so an interrupt during a long pause
+        // before the first token takes effect immediately instead of waiting
+        // for the next chunk to arrive.
+        signal: opts.signal,
       })) {
         if (opts.signal?.aborted) return;
         if (ev.type === "text") {

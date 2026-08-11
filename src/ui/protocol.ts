@@ -274,6 +274,20 @@ export interface SendMessageMsg {
   attachments?: Array<{ name: string; mediaType: string; data: string }>;
 }
 export interface AttachFilesMsg { type: "attachFiles" }
+/**
+ * Open `.agent/mcp.json`, writing a commented starter if it is not there yet.
+ *
+ * "Create config" used to post `openFile`, which asked VS Code to open a path
+ * that by definition did not exist — the button's whole purpose is the case
+ * where it is missing — and the user got "Unable to resolve nonexistent file".
+ */
+export interface McpOpenConfigMsg { type: "mcpOpenConfig" }
+/**
+ * The composer took focus. Nothing is being sent yet — this is the cue to pay
+ * the connection, credential, and prompt-cache costs of the next turn while
+ * the user is still typing, rather than after they press Enter.
+ */
+export interface WarmMsg { type: "warm" }
 export interface InterruptMsg { type: "interrupt" }
 export interface NewChatMsg { type: "newChat" }
 export interface SetPhaseMsg { type: "setPhase"; phase: Phase }
@@ -324,7 +338,8 @@ export interface McpReconnectMsg { type: "mcpReconnect"; name: string }
 export interface McpReloadMsg { type: "mcpReload" }
 
 export type InboundMessage =
-  | ReadyMsg | SendMessageMsg | AttachFilesMsg | InterruptMsg | NewChatMsg | SetPhaseMsg
+  | ReadyMsg | SendMessageMsg | AttachFilesMsg | WarmMsg | McpOpenConfigMsg
+  | InterruptMsg | NewChatMsg | SetPhaseMsg
   | ApprovePlanMsg | ResolvePermissionMsg | ResolveDiffMsg | SelectModelMsg
   | RunTraceMsg | SaveCaBundleMsg | BrowseCaBundleMsg | UseSystemTrustMsg
   | CopyTextMsg | NewEndpointMsg | SaveEndpointMsg | DeleteEndpointMsg
@@ -440,7 +455,8 @@ export interface SessionTitledOut { type: "sessionTitled"; id: string; title: st
 /** One configured MCP server, as the panel shows it. */
 export interface McpServerDto {
   name: string;
-  state: "idle" | "starting" | "ready" | "failed" | "stopped";
+  /** `disabled` is declared in mcp.json with `enabled: false` — shown, not hidden. */
+  state: "idle" | "starting" | "ready" | "failed" | "stopped" | "disabled";
   /** The command line, for the row subtitle. */
   command: string;
   error?: string;

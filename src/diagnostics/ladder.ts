@@ -269,12 +269,37 @@ export async function runLadder(
 
   // 6. Non-streaming completion
   {
+    // Bound this probe well below profile.timeoutMs.
+    //
+    // The gateways described below do not answer this shape slowly, they hang
+    // on it — so waiting out a 120s production timeout spends two minutes to
+    // learn something the streaming fallback answers in half a second, with
+    // the panel showing nothing but "Running…" the whole time. The signal
+    // aborts the request rather than abandoning it to finish in the dark.
+    const PROBE_MS = Math.min(profile.timeoutMs ?? 120_000, 20_000);
+    const bail = new AbortController();
     const [text, err, ms] = await timed(async () => {
-      let out = "";
-      for await (const ev of client.complete({ messages: probe, stream: false, maxTokens: 16 })) {
-        if (ev.type === "text") out += ev.text;
+      const timer = setTimeout(() => bail.abort(), PROBE_MS);
+      try {
+        let out = "";
+        for await (const ev of client.complete({
+          messages: probe,
+          stream: false,
+          maxTokens: 16,
+          signal: bail.signal,
+        })) {
+          if (ev.type === "text") out += ev.text;
+        }
+        return out;
+      } catch (e: any) {
+        // Reported as a TIMEOUT so the fix text below matches on it.
+        if (bail.signal.aborted) {
+          throw new Error(`TIMEOUT — no reply to a non-streaming request within ${PROBE_MS}ms`);
+        }
+        throw e;
+      } finally {
+        clearTimeout(timer);
       }
-      return out;
     });
     if (err) {
       const e = err as any;

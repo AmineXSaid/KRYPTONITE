@@ -67,6 +67,24 @@ export interface Capabilities {
   /** "api" trusts a usage field; "heuristic" estimates locally (offline-safe). */
   tokenCounting: "api" | "heuristic";
   parallelToolCalls: boolean;
+  /**
+   * How this endpoint caches the stable head of a prompt.
+   *
+   * "anthropic" emits `cache_control` breakpoints on the system block and the
+   * tail of the conversation. "prefix" sends nothing — the gateway caches
+   * automatically — but the loop still keeps the prefix byte-stable so that
+   * caching can hit. "none" disables both, and is the default: these are
+   * arbitrary enterprise gateways and an unknown field is a 400 on some of
+   * them, so caching is opt-in per profile rather than assumed.
+   */
+  promptCaching: "anthropic" | "prefix" | "none";
+  /** Anthropic cache TTL. Longer costs more to write, survives idle gaps. */
+  cacheTtl: "5m" | "1h";
+  /**
+   * Run tools the model asked for concurrently when none of them can mutate
+   * the workspace. Off means the old strictly-sequential behaviour.
+   */
+  parallelToolExecution: boolean;
 }
 
 export interface EndpointProfile {
@@ -113,6 +131,9 @@ const DEFAULT_CAPS: Capabilities = {
   maxOutputTokens: 4096,
   tokenCounting: "heuristic",
   parallelToolCalls: false,
+  promptCaching: "none",
+  cacheTtl: "5m",
+  parallelToolExecution: true,
 };
 
 export class ProfileError extends Error {

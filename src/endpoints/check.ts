@@ -31,6 +31,12 @@ const DRAFT_CAPS: Capabilities = {
   maxOutputTokens: 4096,
   tokenCounting: "heuristic",
   parallelToolCalls: false,
+  // A pre-save check probes reachability, not throughput. Caching is opt-in
+  // per saved profile, and a warm-up write here would be charged against a
+  // profile the user may never save.
+  promptCaching: "none",
+  cacheTtl: "5m",
+  parallelToolExecution: true,
 };
 
 /**

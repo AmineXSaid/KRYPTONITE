@@ -67,8 +67,13 @@ const STATE = (over = {}) => ({ type: "stateSync", state: {
   ok("send posts sendMessage", sent.some(m => m.type === "sendMessage"));
   const rad = d.querySelector(".stream .rad");
   ok("aura shows while waiting", !!rad);
-  ok("aura has one ring (heartbeat)", rad.querySelectorAll(".ring").length === 1);
-  ok("aura has breathing core", !!rad.querySelector(".core"));
+  // The aura was rebuilt around rays / ki / shock / emitters; the old markup
+  // was a single .ring plus a .core. These assert the parts that actually
+  // animate now, so the test fails if a layer is dropped rather than renamed.
+  ok("aura has rays", !!rad.querySelector(".rays"));
+  ok("aura has three ki arcs", rad.querySelectorAll(".ki").length === 3);
+  ok("aura has shockwave", !!rad.querySelector(".shock"));
+  ok("aura has three emitters", rad.querySelectorAll(".em").length === 3);
   ok("aura wraps crystal", !!rad.querySelector("svg use"));
   inbound({ type: "turnEnd" });
   ok("aura clears on turn end", !d.querySelector(".stream"));
@@ -207,6 +212,245 @@ const STATE = (over = {}) => ({ type: "stateSync", state: {
   ] } }));
   ok("image renders in user bubble", !!d.querySelector("#log .msg-user .msg-img"));
   ok("text renders alongside image", /describe this/.test(d.querySelector("#log .msg-user").textContent));
+}
+
+/* ── 12. a one-frame reply still types out ──────────────────────────── */
+{
+  // How a reply arrives is the gateway's choice: some stream a token at a
+  // time, others hand back the whole answer in one SSE frame. Painting on
+  // arrival made the second kind land as a single block with no typing, which
+  // is what a user sees as "it didn't stream". Display is paced from a buffer
+  // instead, so a single large delta is revealed progressively.
+  const { d, inbound } = boot();
+  inbound(STATE());
+  const whole = "x".repeat(600);
+  inbound({ type: "streamDelta", text: whole });
+
+  const ai = d.querySelector("#log .msg-ai");
+  ok("a delta creates the answer bubble", !!ai);
+  ok("the whole delta is buffered", ai._raw.length === 600);
+  ok("but not all of it is revealed at once", (ai._shown || 0) < 600);
+  ok("something is revealed immediately", (ai._shown || 0) > 0 || ai.innerHTML === "");
+
+  // Turn end must never strand unrevealed text.
+  inbound({ type: "turnEnd" });
+  ok("turn end reveals the rest", d.querySelector("#log .msg-ai")._shown === 600);
+  ok("full text is in the DOM", d.querySelector("#log .msg-ai").textContent.length >= 600);
+}
+
+/* ══ §1 Activation & first paint ═══════════════════════════════════════ */
+
+/* 1.2 — no folder open */
+{
+  const { d, sent, inbound } = boot();
+  inbound(STATE({ workspace: { open: false, name: null }, profiles: [], endpoint: null }));
+  const root = d.getElementById("root");
+  ok("1.2 renders something with no folder", root.textContent.trim().length > 0);
+  ok("1.2 does not claim to be connected", !/OK · ACT/.test(root.textContent));
+  ok("1.2 composer is disabled", d.getElementById("draft").disabled === true);
+  ok("1.2 no message can be sent", !sent.some((m) => m.type === "sendMessage"));
+  ok("1.2 nothing rendered undefined", !/undefined|NaN|\[object Object\]/.test(root.innerHTML));
+}
+
+/* 1.3 — no endpoint profile configured */
+{
+  const { d, inbound } = boot();
+  inbound(STATE({ profiles: [], endpoint: null, models: [], status: { state: "none", label: "NO ENDPOINT" } }));
+  ok("1.3 composer blocked without an endpoint", d.getElementById("draft").disabled === true);
+  ok("1.3 placeholder says why", /endpoint/i.test(d.getElementById("draft").placeholder));
+  ok("1.3 nothing rendered undefined", !/undefined|NaN/.test(d.getElementById("root").innerHTML));
+}
+
+/* 1.4 — a profile that failed to parse */
+{
+  const { d, inbound } = boot();
+  inbound(STATE({
+    profiles: [{ id: "broken.yaml", status: "error", error: "Missing required field(s): model",
+      active: false, wire: "openai", baseUrl: "—", model: "—", capabilities: null }],
+    endpoint: null, status: { state: "error", label: "NO ENDPOINT" },
+  }));
+  const html = d.getElementById("root").innerHTML;
+  ok("1.4 a broken profile does not crash the render", html.length > 0);
+  // capabilities:null is the shape that used to throw on a property read.
+  ok("1.4 null capabilities did not leak", !/undefined|NaN/.test(html));
+}
+
+/* 1.5 — stateSync hydrates every surface */
+{
+  const { d, inbound } = boot();
+  inbound(STATE({
+    todos: [{ content: "step one", status: "pending" }],
+    context: { used: 1234, limit: 128000 },
+    sessions: [{ id: "s1", title: "Earlier chat", when: "2h ago", count: 4, active: true }],
+    session: { id: "s1", title: "Earlier chat", messages: [
+      { role: "user", content: "hello" }, { role: "assistant", content: "hi" }] },
+  }));
+  const log = d.getElementById("log");
+  ok("1.5 transcript hydrated", /hello/.test(log.textContent) && /hi/.test(log.textContent));
+  ok("1.5 composer enabled with a ready endpoint", d.getElementById("draft").disabled === false);
+  ok("1.5 todos hydrated", /step one/.test(d.getElementById("root").textContent));
+  // The meter fills from an estimate, but the figure is printed only when the
+  // gateway reported real usage — an estimate that drifts is worse than no
+  // number. So hydration proves itself through the bar, not the text.
+  ok("1.5 context meter fills", parseFloat(d.getElementById("ctxFill").style.width) > 0);
+  ok("1.5 estimated usage prints no figure", d.getElementById("ctxText").textContent === "");
+}
+
+/* 1.5b — an endpoint-reported count does print */
+{
+  const { d, inbound } = boot();
+  inbound(STATE());
+  inbound({ type: "contextUsage", used: 12000, limit: 128000, exact: true });
+  ok("1.5b exact usage prints a figure", d.getElementById("ctxText").textContent.trim().length > 0);
+  ok("1.5b figure is attributed", /endpoint/i.test(d.getElementById("ctxText").title));
+  ok("1.5b meter fills for exact usage", parseFloat(d.getElementById("ctxFill").style.width) > 0);
+}
+
+/* 1.6 — a second stateSync replaces, never duplicates */
+{
+  const { d, inbound } = boot();
+  const withMsgs = { session: { id: "s1", title: "t", messages: [
+    { role: "user", content: "only once" }] } };
+  inbound(STATE(withMsgs));
+  inbound(STATE(withMsgs));
+  const hits = (d.getElementById("log").textContent.match(/only once/g) || []).length;
+  ok("1.6 re-hydration does not duplicate the transcript", hits === 1);
+  ok("1.6 exactly one user bubble", d.querySelectorAll("#log .msg-user").length === 1);
+}
+
+/* 1.7 — a restored session paints on first hydrate */
+{
+  const { d, inbound } = boot();
+  inbound(STATE({ session: { id: "restored", title: "Yesterday", messages: [
+    { role: "user", content: "carried over" },
+    { role: "assistant", content: "still here" },
+  ] } }));
+  const t = d.getElementById("log").textContent;
+  ok("1.7 restored transcript renders", /carried over/.test(t) && /still here/.test(t));
+  ok("1.7 not treated as a running turn", !d.querySelector(".stream"));
+}
+
+/* ══ §2 Composer & send path (UI half) ═════════════════════════════════ */
+
+function composer(over) {
+  const h = boot();
+  h.inbound(STATE(over));
+  h.type = (v) => {
+    h.d.getElementById("draft").value = v;
+    h.d.getElementById("draft").dispatchEvent(new h.w.Event("input"));
+  };
+  h.key = (init) =>
+    h.d.getElementById("draft").dispatchEvent(
+      new h.w.KeyboardEvent("keydown", Object.assign({ bubbles: true, cancelable: true }, init))
+    );
+  h.msgs = () => h.sent.filter((m) => m.type === "sendMessage");
+  return h;
+}
+
+/* 2.1 — empty and whitespace-only sends are refused */
+{
+  const c = composer();
+  c.d.getElementById("sendBtn").click();
+  ok("2.1 empty send posts nothing", c.msgs().length === 0);
+
+  c.type("   \n\t  ");
+  c.d.getElementById("sendBtn").click();
+  ok("2.1 whitespace-only send posts nothing", c.msgs().length === 0);
+
+  c.type("real text");
+  c.d.getElementById("sendBtn").click();
+  ok("2.1 real text does send", c.msgs().length === 1);
+  ok("2.1 the text survives intact", c.msgs()[0].text === "real text");
+  ok("2.1 draft is cleared after send", c.d.getElementById("draft").value === "");
+}
+
+/* 2.2 — the send button tracks whether there is anything to send
+ *
+ * `data-ready` is the content signal and `disabled` is reserved for a blocked
+ * composer (no workspace, no endpoint). They are deliberately different: an
+ * empty draft leaves the button clickable but visibly not ready, and the click
+ * handler is what refuses. Asserting on `disabled` here would be asserting the
+ * wrong contract. */
+{
+  const c = composer();
+  const btn = c.d.getElementById("sendBtn");
+  const ready = () => btn.getAttribute("data-ready") === "1";
+  ok("2.2 not ready on an empty draft", !ready());
+  ok("2.2 but not disabled — the endpoint is fine", btn.disabled === false);
+  c.type("x");
+  ok("2.2 ready once there is text", ready());
+  c.type("   ");
+  ok("2.2 whitespace is not content", !ready());
+  c.type("");
+  ok("2.2 not ready again when cleared", !ready());
+}
+
+/* 2.2b — a blocked composer really is disabled */
+{
+  const c = composer({ workspace: { open: false, name: null }, profiles: [], endpoint: null });
+  ok("2.2b send disabled with no workspace", c.d.getElementById("sendBtn").disabled === true);
+  ok("2.2b attach disabled too", c.d.getElementById("atBtn").disabled === true);
+}
+
+/* 2.3 — Enter sends, Shift+Enter does not */
+{
+  const c = composer();
+  c.type("line one");
+  c.key({ key: "Enter", shiftKey: true });
+  ok("2.3 Shift+Enter does not send", c.msgs().length === 0);
+  c.key({ key: "Enter" });
+  ok("2.3 Enter sends", c.msgs().length === 1);
+}
+
+/* 2.4 — an IME composition owns Enter */
+{
+  const c = composer();
+  c.type("にほんご");
+  c.key({ key: "Enter", isComposing: true });
+  ok("2.4 Enter during composition does not send", c.msgs().length === 0);
+  // Older Windows IMEs report keyCode 229 rather than isComposing.
+  c.key({ key: "Enter", keyCode: 229 });
+  ok("2.4 keyCode 229 also does not send", c.msgs().length === 0);
+  c.key({ key: "Enter" });
+  ok("2.4 the committed Enter sends", c.msgs().length === 1);
+  ok("2.4 CJK text is not mangled", c.msgs()[0].text === "にほんご");
+}
+
+/* 2.5 — a double-click is one turn, not two */
+{
+  const c = composer();
+  c.type("once only");
+  const btn = c.d.getElementById("sendBtn");
+  btn.click();
+  btn.click();
+  ok("2.5 second click sends nothing", c.msgs().length === 1);
+}
+
+/* 2.6 — a very long message is neither truncated nor mangled */
+{
+  const c = composer();
+  const big = "A".repeat(100000);
+  c.type(big);
+  c.d.getElementById("sendBtn").click();
+  ok("2.6 100k chars sent whole", c.msgs()[0].text.length === 100000);
+}
+
+/* 2.7 — awkward text round-trips byte for byte */
+{
+  const c = composer();
+  const nasty = "**bold** `code` <script>alert(1)</script> 🙂 مرحبا 中文  end";
+  c.type(nasty);
+  c.d.getElementById("sendBtn").click();
+  ok("2.7 markdown/HTML/emoji/RTL/CJK survive", c.msgs()[0].text === nasty);
+}
+
+/* 2.8 — while a turn runs, the button interrupts instead of sending */
+{
+  const c = composer({ running: true });
+  c.type("queued");
+  c.d.getElementById("sendBtn").click();
+  ok("2.8 no second turn is started", c.msgs().length === 0);
+  ok("2.8 the click interrupts instead", c.sent.some((m) => m.type === "interrupt"));
 }
 
 console.log(`\n${pass} passed, ${failures.length} failed`);

@@ -661,6 +661,7 @@ function _sbRun() {
   }
   function clearTranscript() {
     if (aiPaint) { clearTimeout(aiPaint); aiPaint = null; }
+    if (aiFrame) { cancelAnimationFrame(aiFrame); aiFrame = 0; }
     logEl.innerHTML = "";
     aiEl = null; streamEl = null; pendingTool = null; todoEl = null; toolGroup = null;
   }
@@ -756,18 +757,83 @@ function _sbRun() {
    * becomes a function of elapsed time rather than of delta count. */
   var aiPaint = null;
 
+  /*
+   * Typing is paced from a buffer, not from arrival.
+   *
+   * How a reply arrives is the gateway's choice, not a property of the model:
+   * some stream a token per frame, others hand back the whole answer in one
+   * SSE frame. Painting on arrival meant the second kind landed as a single
+   * block of text with no typing at all. `_raw` is everything received,
+   * `_shown` is how much has been revealed, and a frame loop closes the gap.
+   *
+   * The rate is proportional to the backlog, so a big burst catches up in a
+   * few frames instead of crawling, while a genuine token stream still reveals
+   * smoothly. `_done` marks the end of the turn: once set, the last frame
+   * reveals whatever is left so nothing is ever stranded unpainted.
+   */
+  var aiFrame = 0;
+  var TYPE_MIN = 2;      // chars per frame at the tail, so short replies still type
+  var TYPE_DIVISOR = 9;  // larger backlog reveals proportionally faster
+
+  function paintAi() {
+    if (!aiEl) return;
+    var full = aiEl._raw || "";
+    var shown = aiEl._shown || 0;
+    if (shown === full.length) return;
+    // Measured before the content grows, not after. A coalesced paint adds a
+    // screenful at once, so checking afterwards always reads as "the user has
+    // scrolled up" and autoscroll silently stops following the answer.
+    var stick = atBottom();
+    aiEl._shown = full.length;
+    aiEl.innerHTML = md(full);
+    if (stick) scroll();
+  }
+
+  function typeStep() {
+    aiFrame = 0;
+    if (!aiEl) return;
+    var full = aiEl._raw || "";
+    var shown = aiEl._shown || 0;
+    if (shown >= full.length) return;
+
+    var backlog = full.length - shown;
+    var step = aiEl._done ? backlog : Math.max(TYPE_MIN, Math.ceil(backlog / TYPE_DIVISOR));
+    var next = Math.min(full.length, shown + step);
+
+    var stick = atBottom();
+    aiEl._shown = next;
+    aiEl.innerHTML = md(full.slice(0, next));
+    if (stick) scroll();
+
+    if (next < full.length) aiFrame = requestAnimationFrame(typeStep);
+  }
+
+  /** Reveal everything immediately. Used at turn end and before reordering. */
   function flushAi() {
     if (aiPaint) { clearTimeout(aiPaint); aiPaint = null; }
-    if (!aiEl || aiEl._painted === aiEl._raw) return;
-    // Measured before the content grows, not after. Per-delta painting could
-    // get away with checking afterwards because each step was a line or two
-    // inside atBottom()'s tolerance; a coalesced paint adds a screenful at
-    // once, so checking after always reads as "the user has scrolled up" and
-    // autoscroll silently stops following the answer.
-    var stick = atBottom();
-    aiEl._painted = aiEl._raw;
-    aiEl.innerHTML = md(aiEl._raw);
-    if (stick) scroll();
+    if (aiFrame) { cancelAnimationFrame(aiFrame); aiFrame = 0; }
+    if (!aiEl) return;
+    aiEl._done = true;
+    paintAi();
+  }
+
+  /**
+   * Paint a finished assistant message in one go.
+   *
+   * Replay is not streaming: the text already exists, so there is nothing to
+   * pace. Routing it through the typewriter would be wrong twice over — it
+   * would animate history on every hydrate, and because the caller drops
+   * `aiEl` immediately afterwards the paced frame would find nothing to paint
+   * and the message would stay permanently blank.
+   */
+  function addAiStatic(text) {
+    closeToolGroup();
+    var el = add(div("msg-ai", ""));
+    el._raw = text;
+    el._shown = text.length;
+    el._done = true;
+    el.innerHTML = md(text);
+    return el;
   }
 
   function appendAi(text) {
@@ -777,10 +843,14 @@ function _sbRun() {
       closeToolGroup();
       aiEl = add(div("msg-ai", ""));
       aiEl._raw = "";
-      aiEl._painted = null;
+      aiEl._shown = 0;
+      aiEl._done = false;
     }
     aiEl._raw += text;
-    if (!aiPaint) aiPaint = setTimeout(function () { aiPaint = null; flushAi(); }, 50);
+    // `add()` flushes mid-stream to keep insertion order, which marks the
+    // element done. New text means the turn is still going, so resume pacing.
+    aiEl._done = false;
+    if (!aiFrame) aiFrame = requestAnimationFrame(typeStep);
   }
 
   /* ───────────────────────── tool cards ───────────────────────── */
@@ -1766,6 +1836,9 @@ function _sbRun() {
     if (state === "ready") return '<span class="mcp-pill ok">' + icon("i-check", "ic-9") + "connected</span>";
     if (state === "starting") return '<span class="mcp-pill">starting…</span>';
     if (state === "stopped") return '<span class="mcp-pill">stopped</span>';
+    // Declared with enabled:false. Not an error — it was never started on
+    // purpose — so it must not wear the red "unavailable" pill.
+    if (state === "disabled") return '<span class="mcp-pill">disabled</span>';
     return '<span class="mcp-pill err">' + icon("i-x", "ic-9") + "unavailable</span>";
   }
 
@@ -1802,6 +1875,7 @@ function _sbRun() {
     for (var i = 0; i < servers.length; i++) {
       var sv = servers[i];
       var ready = sv.state === "ready";
+      var off = sv.state === "disabled";
       // Defaulted rather than trusted. The host always sends both fields, but a
       // stateSync from an older build — or a server that answered the handshake
       // and nothing else — renders "undefined tools" without this.
@@ -1809,6 +1883,8 @@ function _sbRun() {
       var list = Array.isArray(sv.tools) ? sv.tools : [];
       if (ready) tools += n;
       else if (sv.state === "failed") down++;
+      // A disabled server is configuration, not a fault. It is listed so the
+      // panel reflects mcp.json, but it is not counted as "unavailable".
 
       rows += '<div class="mcp-row" data-state="' + esc(sv.state) + '">' +
         '<span class="rail"></span>' +
@@ -1818,8 +1894,17 @@ function _sbRun() {
             esc(sv.serverInfo ? sv.serverInfo.name + " " + sv.serverInfo.version : sv.command) +
           "</span>" +
         "</span>" +
-        '<span class="count">' + (ready ? n + (n === 1 ? " tool" : " tools") : "no tools") + "</span>" +
+        '<span class="count">' + (ready ? n + (n === 1 ? " tool" : " tools") : off ? "off" : "no tools") + "</span>" +
         "</div>";
+
+      if (off) {
+        rows += '<div class="mcp-err" data-kind="hint">' +
+          '<div class="t">Declared in <code>.agent/mcp.json</code> with <code>"enabled": false</code>, ' +
+          "so it was not started and its tools are not offered to the model.</div>" +
+          '<div class="acts">' +
+            '<button class="btn sm" data-mcp="open">Edit config</button>' +
+          "</div></div>";
+      }
 
       if (ready && list.length) {
         var shown = list.slice(0, MCP_CHIP_CAP);
@@ -1868,7 +1953,10 @@ function _sbRun() {
     if (!b) return;
     var a = b.getAttribute("data-mcp");
     if (a === "reload") post("mcpReload");
-    else if (a === "open") post("openFile", { path: ".agent/mcp.json" });
+    // Creates the file when it is missing, then opens it. Posting `openFile`
+    // here asked VS Code to open a path that, for the "Create config" button,
+    // is missing by definition.
+    else if (a === "open") post("mcpOpenConfig");
     else if (a === "reconnect") post("mcpReconnect", { name: b.getAttribute("data-name") });
     else if (a === "log") post("copyText", { text: b.getAttribute("data-name") || "" });
   }
@@ -1931,7 +2019,7 @@ function _sbRun() {
       if (msg.role !== "assistant") continue;
 
       var body = textOf(msg.content);
-      if (body) { aiEl = null; appendAi(body); aiEl = null; }
+      if (body) { aiEl = null; addAiStatic(body); }
 
       var calls = msg.toolCalls || [];
       if (!calls.length) continue;
@@ -2155,6 +2243,10 @@ function _sbRun() {
     var draft = $("draft");
     draft.addEventListener("input", function () { syncComposer(); detectQuickPick(); });
     draft.addEventListener("keydown", onDraftKey);
+    // Pay the connection, credential, and prompt-cache costs of the next turn
+    // while the user is still typing, instead of after they press Enter. The
+    // host debounces this and ignores it while a turn is running.
+    draft.addEventListener("focus", function () { post("warm"); });
 
     $("qp").addEventListener("click", function (e) {
       var b = e.target.closest("[data-i]");

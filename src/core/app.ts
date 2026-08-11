@@ -9,7 +9,9 @@ import {
   Capabilities,
 } from "../endpoints/profile";
 import { clearAuthCache, authCacheReport } from "../endpoints/auth";
+import { clearSecureContexts } from "../endpoints/transport";
 import { EndpointClient } from "../providers/client";
+import { systemPromptFor } from "../agent/loop";
 import { loadSkills, Skill, skillIndex } from "../skills/loader";
 import { McpRegistry, mcpConfigPath } from "../mcp/registry";
 import { ShadowRepo } from "../checkpoint/shadow";
@@ -51,6 +53,46 @@ import type {
 } from "../ui/protocol";
 
 type Sink = (msg: OutboundMessage) => void;
+
+/**
+ * The starter written by "Create config".
+ *
+ * It declares one real, disabled server rather than an empty object: a bare
+ * `{"mcpServers":{}}` gives the reader nothing to copy, and the fastest way to
+ * explain the shape is to show a working block they only have to flip to
+ * `true`. Every key the loader understands is documented inline, because this
+ * file is the only place that contract is visible.
+ */
+const MCP_CONFIG_TEMPLATE = `{
+  "_readme": [
+    "MCP servers Kryptonite may start. Same shape as Claude Desktop and Claude Code,",
+    "so a server block can be copied between them verbatim.",
+    "",
+    "  command   executable. On Windows, npx/npm/uvx shims are handled for you.",
+    "  args      argument list.",
+    "  env       merged over the extension host's environment.",
+    "  cwd       defaults to the workspace root.",
+    "  approval  'ask' (default) routes every call through the approval gate;",
+    "            'auto' does not.",
+    "  timeoutMs per-request budget. A first npx start includes a download.",
+    "  enabled   false keeps the block here without starting anything.",
+    "",
+    "Only stdio is implemented. A block with a url, or type http or sse, is",
+    "reported as unsupported rather than silently ignored.",
+    "",
+    "Tools reach the model as mcp__<server>__<tool>, and are withheld in Plan mode."
+  ],
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+      "approval": "ask",
+      "timeoutMs": 120000,
+      "enabled": false
+    }
+  }
+}
+`;
 
 const UI_DEFAULTS: UiConfigDto = { openTouched: true, snapshotTurn: true, previewDiff: true };
 const LOG_RING = 200;
@@ -102,6 +144,8 @@ export class App {
   private logs: LogLine[] = [];
   private status: vscode.StatusBarItem;
   private watcher?: vscode.FileSystemWatcher;
+  private skillWatcher?: vscode.FileSystemWatcher;
+  private warmTimer?: NodeJS.Timeout;
   private selectionTimer?: NodeJS.Timeout;
   private disposables: vscode.Disposable[] = [];
 
@@ -177,27 +221,57 @@ export class App {
   }
 
   /** Rebuilt whenever the configured directories change. */
+  /**
+   * Profiles and skills are watched separately on purpose.
+   *
+   * A profile edit can change TLS material, auth, or the proxy, so it has to
+   * tear the transport down. A skill edit cannot change any of those — and
+   * folding both into one watcher meant saving a SKILL.md mid-conversation
+   * destroyed the connection pool and made the next turn pay a full handshake.
+   */
   private installWatcher(): void {
     this.watcher?.dispose();
     this.watcher = undefined;
+    this.skillWatcher?.dispose();
+    this.skillWatcher = undefined;
     const root = this.root;
     if (!root) return;
     const profileDir = this.cfg().get<string>("profileDirectory", ".agent/endpoints");
     const skillsDir = this.cfg().get<string>("skillsDirectory", ".agent/skills");
-    const pattern = new vscode.RelativePattern(root, `{${profileDir}/**,${skillsDir}/**}`);
-    const watcher = vscode.workspace.createFileSystemWatcher(pattern);
-    const onChange = () => {
+
+    const bind = (glob: string, handler: () => void) => {
+      const w = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, glob));
+      w.onDidChange(handler);
+      w.onDidCreate(handler);
+      w.onDidDelete(handler);
+      return w;
+    };
+
+    this.watcher = bind(`${profileDir}/**`, () => {
       clearAuthCache();
       void this.reload("watcher");
-    };
-    watcher.onDidChange(onChange);
-    watcher.onDidCreate(onChange);
-    watcher.onDidDelete(onChange);
-    this.watcher = watcher;
+    });
+    this.skillWatcher = bind(`${skillsDir}/**`, () => void this.reloadSkillsOnly("watcher"));
+  }
+
+  /**
+   * Re-read skills without touching the client pool.
+   *
+   * Nothing about a skill can change how we connect, so a skill edit must not
+   * cost the next turn a TLS handshake.
+   */
+  async reloadSkillsOnly(reason: string): Promise<void> {
+    const root = this.root;
+    if (!root) return;
+    await this.reload(reason, { keepClients: true });
   }
 
   async dispose(): Promise<void> {
     this.session.dispose();
+    this.skillWatcher?.dispose();
+    if (this.warmTimer) clearTimeout(this.warmTimer);
+    // Transcript writes are asynchronous now, so make sure the last one lands.
+    await this.sessions.flush();
     await this.mcp.stopAll();
     await this.closeClients();
     this.watcher?.dispose();
@@ -250,8 +324,13 @@ export class App {
 
   /* ───────────────────────────── reload ───────────────────────────── */
 
-  async reload(reason: string): Promise<void> {
-    await this.closeClients();
+  async reload(reason: string, opts?: { keepClients?: boolean }): Promise<void> {
+    if (!opts?.keepClients) {
+      await this.closeClients();
+      // Profiles can change CA bundles or client certificates, so the parsed
+      // TLS contexts keyed off that material have to go with them.
+      clearSecureContexts();
+    }
 
     const root = this.root;
     if (!root) {
@@ -341,10 +420,14 @@ export class App {
     for (const p of this.profiles) {
       for (const m of JSON.stringify(p).matchAll(/\$\{secret:([^}]+)\}/g)) names.add(m[1]);
     }
-    for (const name of names) {
-      const v = await this.context.secrets.get(`kryptonite.${name}`);
-      if (v) this.secretCache.set(name, v);
-    }
+    // Independent keychain reads, so they resolve concurrently rather than
+    // one round trip after another during activation.
+    const resolved = await Promise.all(
+      [...names].map(
+        async (name) => [name, await this.context.secrets.get(`kryptonite.${name}`)] as const
+      )
+    );
+    for (const [name, v] of resolved) if (v) this.secretCache.set(name, v);
   }
 
   secrets = (key: string): string | undefined => this.secretCache.get(key);
@@ -371,8 +454,62 @@ export class App {
     const root = this.root;
     if (!root) throw new Error("Open a folder first.");
     const client = new EndpointClient(profile, this.secrets, root);
+    client.onTiming = (t) => {
+      // `handshakes` is the number that says whether connection reuse is
+      // actually working: in a healthy session it stays flat across turns. If
+      // it climbs by one every turn, something is tearing the pool down.
+      this.log(
+        "info",
+        `Turn timing — headers ${Math.round(t.headersMs)}ms, TTFT ${
+          t.ttftMs ? Math.round(t.ttftMs) + "ms" : "n/a"
+        }, TPOT ${Number.isFinite(t.tpotMs) ? t.tpotMs.toFixed(1) + "ms" : "n/a"}, total ${Math.round(
+          t.totalMs
+        )}ms, handshakes ${t.handshakes}${t.retried ? ", retried on a fresh socket" : ""}`
+      );
+    };
     this.clients.set(profile.name, client);
     return client;
+  }
+
+  /**
+   * Pay the cold-start costs while the user is still typing.
+   *
+   * Everything expensive about the first request of a session is knowable in
+   * advance: the socket, the token, and the cacheable head of the prompt. This
+   * is debounced and entirely best-effort — a failure here must never surface,
+   * because the real request will report it properly a moment later.
+   */
+  warmPath(): void {
+    if (this.warmTimer) clearTimeout(this.warmTimer);
+    this.warmTimer = setTimeout(() => void this.warmNow(), 150);
+  }
+
+  private async warmNow(): Promise<void> {
+    if (this.session.running) return;
+    const profile = this.activeProfile();
+    if (!profile || !this.root) return;
+    let client: EndpointClient;
+    try {
+      client = this.clientFor(profile);
+    } catch {
+      return;
+    }
+    await Promise.allSettled([
+      client.warmConnection(),
+      client.warmAuth(),
+      client.warmCache(this.systemPrompt()),
+    ]);
+  }
+
+  /**
+   * The exact stable head of the prompt the next turn will send.
+   *
+   * Shared with the agent loop so the pre-warmed cache entry and the real
+   * request are byte-identical — a prefix that differs by one character caches
+   * nothing.
+   */
+  systemPrompt(phase: Phase = this.phase): string {
+    return systemPromptFor(this.enabledSkills(), phase);
   }
 
   setRunning(running: boolean): void {
@@ -781,6 +918,10 @@ export class App {
         await this.pickAndAttach();
         return;
 
+      case "warm":
+        this.warmPath();
+        return;
+
       case "interrupt":
         this.session.interrupt();
         return;
@@ -894,6 +1035,24 @@ export class App {
         const root = this.requireRoot();
         await this.mcp.restart(msg.name, root);
         this.broadcast({ type: "mcpChanged", servers: this.mcp.statuses(), warnings: this.mcp.warnings });
+        return;
+      }
+
+      case "mcpOpenConfig": {
+        const root = this.requireRoot();
+        const file = mcpConfigPath(root);
+        // Written only when absent. "Create config" exists precisely for the
+        // case where the file is missing, so opening it blind produced VS
+        // Code's "Unable to resolve nonexistent file" every single time.
+        if (!fs.existsSync(file)) {
+          fs.mkdirSync(path.dirname(file), { recursive: true });
+          fs.writeFileSync(file, MCP_CONFIG_TEMPLATE, "utf8");
+          this.log("info", `Created ${path.relative(root, file)}.`);
+          await this.mcp.reload(file, root);
+          this.broadcast({ type: "mcpChanged", servers: this.mcp.statuses(), warnings: this.mcp.warnings });
+        }
+        const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+        await vscode.window.showTextDocument(doc);
         return;
       }
 

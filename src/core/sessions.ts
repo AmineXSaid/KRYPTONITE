@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
 import type * as vscode from "vscode";
@@ -98,8 +99,32 @@ export function sanitizeTitle(raw: string, fallback: string): string {
   return t;
 }
 
+interface SessionMeta {
+  id: string;
+  title: string;
+  updatedAt: number;
+  count: number;
+}
+
 export class SessionStore {
   private dir: string;
+
+  /**
+   * Everything the history popover and `nextUntitled` need, held in memory.
+   *
+   * Both used to read and JSON.parse every transcript on disk, and `list` runs
+   * on every save — which is the first thing that happens when a user sends a
+   * message. On a workspace with a few long conversations that was megabytes
+   * of synchronous parsing between the Enter key and the request going out.
+   */
+  private meta = new Map<string, SessionMeta>();
+  private hydrated = false;
+
+  /** Serialises writes so a slow one cannot be overtaken by a newer one. */
+  private writes: Promise<unknown> = Promise.resolve();
+
+  /** Transcripts written but not yet flushed, so `load` never reads stale. */
+  private pending = new Map<string, StoredSession>();
 
   constructor(context: vscode.ExtensionContext, root: string | undefined) {
     const key = crypto
@@ -110,8 +135,31 @@ export class SessionStore {
     this.dir = path.join(context.globalStorageUri.fsPath, "sessions", key);
   }
 
-  private ensure(): void {
-    fs.mkdirSync(this.dir, { recursive: true });
+  /**
+   * Read every transcript once, to seed the metadata index.
+   *
+   * This is the only full scan, and it happens on the first listing rather
+   * than on the request path.
+   */
+  private hydrate(): void {
+    if (this.hydrated) return;
+    this.hydrated = true;
+    if (!fs.existsSync(this.dir)) return;
+    for (const name of fs.readdirSync(this.dir)) {
+      if (!name.endsWith(".json")) continue;
+      try {
+        const doc = JSON.parse(fs.readFileSync(path.join(this.dir, name), "utf8")) as StoredSession;
+        if (!doc || typeof doc.id !== "string") continue;
+        this.meta.set(doc.id, {
+          id: doc.id,
+          title: doc.title || "New chat",
+          updatedAt: Number(doc.updatedAt) || 0,
+          count: Array.isArray(doc.messages) ? doc.messages.length : 0,
+        });
+      } catch {
+        continue;
+      }
+    }
   }
 
   newId(): string {
@@ -125,35 +173,27 @@ export class SessionStore {
    * controller owns which conversation the composer is writing into.
    */
   list(activeId?: string, limit = 30): SessionMetaDto[] {
-    if (!fs.existsSync(this.dir)) return [];
-    const rows: { id: string; title: string; updatedAt: number; count: number }[] = [];
-    for (const name of fs.readdirSync(this.dir)) {
-      if (!name.endsWith(".json")) continue;
-      try {
-        const raw = fs.readFileSync(path.join(this.dir, name), "utf8");
-        const doc = JSON.parse(raw) as StoredSession;
-        if (!doc || typeof doc.id !== "string") continue;
-        rows.push({
-          id: doc.id,
-          title: doc.title || "New chat",
-          updatedAt: Number(doc.updatedAt) || 0,
-          count: Array.isArray(doc.messages) ? doc.messages.length : 0,
-        });
-      } catch {
-        continue;
-      }
-    }
-    rows.sort((a, b) => b.updatedAt - a.updatedAt);
-    return rows.slice(0, limit).map((r) => ({
-      id: r.id,
-      title: r.title,
-      when: relativeTime(r.updatedAt),
-      count: r.count,
-      active: r.id === activeId,
-    }));
+    this.hydrate();
+    return [...this.meta.values()]
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, limit)
+      .map((r) => ({
+        id: r.id,
+        title: r.title,
+        when: relativeTime(r.updatedAt),
+        count: r.count,
+        active: r.id === activeId,
+      }));
   }
 
   load(id: string): StoredSession | undefined {
+    // A transcript whose write is still in flight must read back as the
+    // version we hold, not as whatever is currently on disk — switching
+    // sessions immediately after sending a message would otherwise lose the
+    // message that had just been recorded.
+    const inflight = this.pending.get(id);
+    if (inflight) return inflight;
+
     const file = path.join(this.dir, `${id}.json`);
     if (!fs.existsSync(file)) return undefined;
     try {
@@ -173,18 +213,11 @@ export class SessionStore {
    * that is still on screen.
    */
   nextUntitled(): string {
+    this.hydrate();
     let highest = -1;
-    if (fs.existsSync(this.dir)) {
-      for (const name of fs.readdirSync(this.dir)) {
-        if (!name.endsWith(".json")) continue;
-        try {
-          const doc = JSON.parse(fs.readFileSync(path.join(this.dir, name), "utf8")) as StoredSession;
-          const m = UNTITLED_RE.exec(String(doc?.title ?? "").trim());
-          if (m) highest = Math.max(highest, m[1] ? Number(m[1]) : 0);
-        } catch {
-          continue;
-        }
-      }
+    for (const row of this.meta.values()) {
+      const m = UNTITLED_RE.exec(row.title.trim());
+      if (m) highest = Math.max(highest, m[1] ? Number(m[1]) : 0);
     }
     if (highest < 0) return "Untitled";
     return `Untitled ${highest + 1}`;
@@ -205,26 +238,45 @@ export class SessionStore {
    */
   save(id: string, messages: Msg[], title?: string): void {
     if (!messages.length) return;
-    this.ensure();
     const doc: StoredSession = {
       id,
       title: title?.trim() || titleFrom(messages),
       updatedAt: Date.now(),
       messages,
     };
-    try {
-      fs.writeFileSync(path.join(this.dir, `${id}.json`), JSON.stringify(doc), "utf8");
-    } catch {
-      // A failed transcript write must not take down the turn that produced it.
-    }
+    // The index updates synchronously so the UI is immediately correct; only
+    // the disk write is deferred. Serialising the whole transcript and writing
+    // it used to happen inline, right before the model request went out.
+    this.meta.set(id, { id, title: doc.title, updatedAt: doc.updatedAt, count: messages.length });
+    this.pending.set(id, doc);
+    const body = JSON.stringify(doc);
+    const file = path.join(this.dir, `${id}.json`);
+    this.writes = this.writes
+      .then(() => fsp.mkdir(this.dir, { recursive: true }))
+      .then(() => fsp.writeFile(file, body, "utf8"))
+      .then(() => {
+        // Only clear if a newer save has not already replaced it.
+        if (this.pending.get(id) === doc) this.pending.delete(id);
+      })
+      .catch(() => {
+        // A failed transcript write must not take down the turn that produced
+        // it. The in-memory copy stays, so the session is still readable.
+      });
+  }
+
+  /** Await any in-flight transcript write. Used on dispose. */
+  async flush(): Promise<void> {
+    await this.writes;
   }
 
   delete(id: string): void {
+    this.meta.delete(id);
+    this.pending.delete(id);
     const file = path.join(this.dir, `${id}.json`);
-    try {
-      if (fs.existsSync(file)) fs.rmSync(file);
-    } catch {
-      // Same reasoning as save().
-    }
+    this.writes = this.writes
+      .then(() => fsp.rm(file, { force: true }))
+      .catch(() => {
+        // Same reasoning as save().
+      });
   }
 }
