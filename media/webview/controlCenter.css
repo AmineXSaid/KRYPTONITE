@@ -192,6 +192,30 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 .st[data-st="error"] { color: var(--kx-error); }
 .tr[data-status="error"] .id { color: var(--kx-error); }
 
+/* ── connection accordion ──
+   Four former tabs as four blocks. Only the head is a control; the bodies are
+   the same read-only reports they always were. */
+.acc-wrap { display: flex; flex-direction: column; gap: 8px; }
+.acc { border: 1px solid var(--kx-line); border-radius: 6px; overflow: hidden; }
+.acc-head {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  min-height: 38px; padding: 0 12px;
+  border: 0; background: var(--kx-surface-2); cursor: pointer;
+  font: inherit; font-size: 12px; color: var(--kx-fg); text-align: left;
+}
+.acc-head:hover { background: var(--kx-surface-3); }
+.acc-t { font-weight: 600; }
+.acc-chev { color: var(--kx-fg-3); transition: transform .13s ease; flex: none; }
+.acc[data-open="1"] .acc-chev { transform: rotate(90deg); }
+.acc-b {
+  font-family: var(--kx-mono); font-size: 10px; letter-spacing: .04em;
+  padding: 2px 7px; border-radius: 999px;
+  background: var(--kx-surface-4); color: var(--kx-fg-2);
+}
+.acc-body { padding: 12px; border-top: 1px solid var(--kx-line); }
+.acc-body .explainer { margin-top: 0; }
+@media (prefers-reduced-motion: reduce) { .acc-chev { transition: none; } }
+
 /* ── legend ──
    Opt-in, because a panel that explains itself permanently shouts at the
    people who already know. Same sentences as the header tooltips. */

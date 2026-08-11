@@ -42,11 +42,18 @@ function _run() {
     '<symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3h7l5 5v13H6z" ' + SW + ' stroke-width="1.5"/><path d="M13 3v5h5" ' + SW + ' stroke-width="1.5"/></symbol>' +
     '<symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" ' + SW + ' stroke-width="1.5"/><path d="M3.5 12h17M12 3.5c-4.5 5-4.5 12 0 17 4.5-5 4.5-12 0-17z" ' + SW + ' stroke-width="1.4"/></symbol>' +
     '<symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="12" rx="1.5" ' + SW + ' stroke-width="1.5"/><path d="M9 20h6M12 16.5V20" ' + SW + ' stroke-width="1.5"/></symbol>' +
-    '<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6h6l2 3h10v10H3z" ' + SW + ' stroke-width="1.5"/></symbol>';
+    '<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6h6l2 3h10v10H3z" ' + SW + ' stroke-width="1.5"/></symbol>' +
+    '<symbol id="i-chev" viewBox="0 0 10 10"><path d="M2.5 0.5L7 5l-4.5 4.5" ' + SW + ' stroke-width="1.4"/></symbol>';
 
   var SECTIONS = [
-    ["endpoints", "Endpoints"], ["wire", "Wire & transforms"], ["auth", "Auth & secrets"],
-    ["tls", "TLS & mTLS"], ["proxy", "Proxy & network"], ["diag", "Diagnostics"],
+    /* Wire, Auth, TLS and Proxy were four separate tabs holding, between them,
+       zero interactive controls: every switch on them is a disabled indicator
+       reflecting the active profile's YAML, and the only two live actions were
+       a pair of buttons. Four tabs of read-only report pushed the strip past
+       its own width - MCP and everything after it needed a scrollbar to reach.
+       They are one "Connection" section now, as collapsible blocks. Nothing was
+       removed; every field and both buttons are still here. */
+    ["endpoints", "Endpoints"], ["conn", "Connection"], ["diag", "Diagnostics"],
     ["agent", "Agent & tools"], ["mcp", "MCP servers"], ["skills", "Skills"], ["checkpoints", "Checkpoints"],
     ["logs", "Logs & export"]
   ];
@@ -333,19 +340,35 @@ function _run() {
     var a = active();
     var counts = {
       endpoints: String(S.profiles.length),
-      wire: a ? (a.wire === "openai" ? "OAI" : a.wire === "anthropic" ? "ANT" : "RAW") : "-",
-      auth: a ? authBadge(a.authKind) : "-",
-      tls: S.tlsError ? "1" : (a && a.tls && a.tls.ca && a.tls.ca.length ? String(a.tls.ca.length) : "-"),
-      proxy: a ? (a.proxy && a.proxy.url ? "set" : a.proxy && a.proxy.fromEnv ? "env" : "off") : "-",
+      /* The four merged badges became one. The wire format is the single most
+         useful thing to see at a glance - it is what a misconfigured profile
+         gets wrong first - and a TLS failure overrides it, because that is the
+         one state in here you must act on. */
+      conn: !a ? "-" : S.tlsError ? "TLS!"
+        : a.wire === "openai" ? "OAI" : a.wire === "anthropic" ? "ANT" : "RAW",
       diag: S.rungs.filter(function (r) { return r.status === "fail"; }).length || (S.traceRun ? "OK" : "-"),
       agent: "25",
+      /* This key was simply missing, so the strip rendered the literal string
+         "undefined" next to MCP servers for every user who had the panel open.
+         Tool count when everything is up, failure count when it is not. */
+      mcp: (function () {
+        var sv = (S.mcp && S.mcp.servers) || [];
+        if (!sv.length) return "-";
+        var down = 0, tools = 0;
+        for (var k = 0; k < sv.length; k++) {
+          if (sv[k].state === "ready") tools += sv[k].toolCount || 0;
+          else if (sv[k].state === "failed") down++;
+        }
+        return down ? down + "!" : String(tools);
+      })(),
       skills: String(S.skills.filter(function (s) { return s.enabled; }).length),
       checkpoints: String(S.checkpoints.length),
       logs: String(S.logs.filter(function (l) { return l.level === "error"; }).length || S.logs.length)
     };
     var alerts = {
       endpoints: errorCount() > 0,
-      tls: Boolean(S.tlsError),
+      conn: Boolean(S.tlsError),
+      mcp: ((S.mcp && S.mcp.servers) || []).some(function (s) { return s.state === "failed"; }),
       diag: S.rungs.some(function (r) { return r.status === "fail"; }),
       logs: S.logs.some(function (l) { return l.level === "error"; })
     };
@@ -379,10 +402,7 @@ function _run() {
     }
     switch (S.section) {
       case "endpoints": pane.innerHTML = secEndpoints(); break;
-      case "wire": pane.innerHTML = secWire(); break;
-      case "auth": pane.innerHTML = secAuth(); break;
-      case "tls": pane.innerHTML = secTls(); break;
-      case "proxy": pane.innerHTML = secProxy(); break;
+      case "conn": pane.innerHTML = secConnection(); break;
       case "diag": pane.innerHTML = secDiag(); break;
       case "agent": pane.innerHTML = secAgent(); break;
       case "mcp": pane.innerHTML = secMcp(); break;
@@ -699,12 +719,50 @@ function _run() {
     return html;
   }
 
+  /* ── connection ──
+     Wire, auth, TLS and proxy are one question asked four ways: what happens
+     to a request between the keystroke and the model. They were four tabs
+     holding zero editable controls between them, which is a report wearing a
+     control panel's clothes. Folded into one section, opened one at a time. */
+  var CONN_OPEN = { wire: true, auth: false, tls: false, proxy: false };
+
+  function connBlock(id, title, badge, body) {
+    var open = CONN_OPEN[id];
+    return '<div class="acc" data-open="' + (open ? "1" : "0") + '">' +
+      '<button class="acc-head" data-conn="' + id + '" aria-expanded="' + (open ? "true" : "false") + '">' +
+        icon("i-chev", "ic-10 acc-chev") +
+        '<span class="acc-t">' + esc(title) + "</span>" +
+        '<span class="sp"></span>' +
+        (badge ? '<span class="acc-b">' + esc(badge) + "</span>" : "") +
+      "</button>" +
+      '<div class="acc-body"' + (open ? "" : " hidden") + ">" + body + "</div></div>";
+  }
+
+  function secConnection() {
+    var a = active();
+    var html = "<h3>Connection</h3>" +
+      '<div class="explainer">Everything that happens to a request between your keystroke and the ' +
+      "model: how it is encoded, how it proves who you are, and how it leaves the machine. These are " +
+      "read-only views of the active profile&rsquo;s YAML - open the file from Endpoints to change any of it.</div>";
+    if (!a) return html + '<div class="empty">No active profile.</div>';
+
+    var caCount = a.tls && a.tls.ca ? a.tls.ca.length : 0;
+    html += '<div class="acc-wrap">' +
+      connBlock("wire", "Wire & transforms", a.wire, secWire()) +
+      connBlock("auth", "Auth & secrets", a.authKind || "none", secAuth()) +
+      connBlock("tls", "TLS & mTLS",
+        S.tlsError ? "error" : caCount ? caCount + " CA" : "defaults", secTls()) +
+      connBlock("proxy", "Proxy & network",
+        a.proxy && a.proxy.url ? "set" : a.proxy && a.proxy.fromEnv ? "env" : "off", secProxy()) +
+      "</div>";
+    return html;
+  }
+
   /* ── wire & transforms ── */
   function secWire() {
     var a = active();
     var caps = a && a.capabilities;
-    var html = "<h3>Wire &amp; transforms</h3>" +
-      '<div class="explainer">The wire format decides how messages are encoded on the way out and decoded on the way in. ' +
+    var html = '<div class="explainer">The wire format decides how messages are encoded on the way out and decoded on the way in. ' +
       "A transform module reshapes anything the two standard adapters cannot express.</div>";
     if (!a) return html + '<div class="empty">No active profile.</div>';
 
@@ -746,8 +804,7 @@ function _run() {
   /* ── auth & secrets ── */
   function secAuth() {
     var a = active();
-    var html = "<h3>Auth &amp; secrets</h3>" +
-      '<div class="explainer">Tokens are never written to profile YAML. Values interpolate from the environment, ' +
+    var html = '<div class="explainer">Tokens are never written to profile YAML. Values interpolate from the environment, ' +
       "the VS Code secret store, or a file on disk at request time.</div>";
     if (!a) return html + '<div class="empty">No active profile.</div>';
 
@@ -804,8 +861,7 @@ function _run() {
   /* ── TLS & mTLS ── */
   function secTls() {
     var a = active();
-    var html = "<h3>TLS &amp; mTLS</h3>" +
-      '<div class="explainer">Requests go out on an undici dispatcher rather than Node&rsquo;s global fetch, so custom CAs and ' +
+    var html = '<div class="explainer">Requests go out on an undici dispatcher rather than Node&rsquo;s global fetch, so custom CAs and ' +
       "client certificates apply inside the extension host - including through a CONNECT tunnel, where the TLS settings " +
       "must be applied to the tunnelled origin rather than the proxy hop.</div>";
     if (!a) return html + '<div class="empty">No active profile.</div>';
@@ -874,8 +930,7 @@ function _run() {
   /* ── proxy & network ── */
   function secProxy() {
     var a = active();
-    var html = "<h3>Proxy &amp; network</h3>" +
-      '<div class="explainer">Behind a CONNECT tunnel the client certificate must be presented to the tunnelled origin, ' +
+    var html = '<div class="explainer">Behind a CONNECT tunnel the client certificate must be presented to the tunnelled origin, ' +
       "not to the proxy. That distinction is why mTLS-behind-proxy fails in most tooling.</div>";
     if (!a) return html + '<div class="empty">No active profile.</div>';
 
@@ -1185,6 +1240,12 @@ function _run() {
       return;
     }
 
+    if ((t = e.target.closest("[data-conn]"))) {
+      var ck = t.getAttribute("data-conn");
+      CONN_OPEN[ck] = !CONN_OPEN[ck];
+      render();
+      return;
+    }
     if ((t = e.target.closest("[data-sync]"))) {
       SYNC_MIN = Number(t.getAttribute("data-sync")) || 0;
       armAutoSync();
