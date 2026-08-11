@@ -296,6 +296,15 @@ export interface McpOpenConfigMsg { type: "mcpOpenConfig" }
 /** Ask the gateway in the draft form which models it actually serves. */
 export interface ListModelsMsg { type: "listModels"; endpoint: EndpointForm }
 /**
+ * Time a cheap authenticated round trip to every ready profile.
+ *
+ * Deliberately not a completion: a health check that spends tokens is one
+ * people turn off. A GET against the gateway's own metadata route exercises
+ * DNS, TCP, TLS, the proxy and the credential, which is everything that can
+ * break between turns, and costs nothing.
+ */
+export interface HealthCheckMsg { type: "healthCheck" }
+/**
  * The composer took focus. Nothing is being sent yet - this is the cue to pay
  * the connection, credential, and prompt-cache costs of the next turn while
  * the user is still typing, rather than after they press Enter.
@@ -352,7 +361,7 @@ export interface McpReloadMsg { type: "mcpReload" }
 
 export type InboundMessage =
   | ReadyMsg | SendMessageMsg | AttachFilesMsg | WarmMsg | McpOpenConfigMsg
-  | ListModelsMsg | InterruptMsg | NewChatMsg | SetPhaseMsg
+  | ListModelsMsg | HealthCheckMsg | InterruptMsg | NewChatMsg | SetPhaseMsg
   | ApprovePlanMsg | ResolvePermissionMsg | ResolveDiffMsg | SelectModelMsg
   | RunTraceMsg | SaveCaBundleMsg | BrowseCaBundleMsg | UseSystemTrustMsg
   | CopyTextMsg | NewEndpointMsg | SaveEndpointMsg | DeleteEndpointMsg
@@ -514,6 +523,16 @@ export interface InputAcceptedOut {
 }
 /** A steered message reached the model and is now part of the transcript. */
 export interface SteerAcceptedOut { type: "steerAccepted"; text: string }
+/** One profile's latest health probe. `ms` is time to response headers. */
+export interface HealthResultOut {
+  type: "healthResult";
+  id: string;
+  ok: boolean;
+  ms: number;
+  detail: string;
+}
+/** Sent before the probes start, so every row can show it is checking. */
+export interface HealthStartedOut { type: "healthStarted"; ids: string[] }
 /**
  * Models the gateway will actually serve, and how many it merely listed.
  *
@@ -556,7 +575,7 @@ export type OutboundMessage =
   | LogLineOut | NavigateOut | FileResultsOut | CaBundlePickedOut
   | EndpointCheckStartedOut | EndpointCheckRungOut | EndpointCheckDoneOut
   | SessionTitledOut | McpChangedOut | ModelsListedOut
-  | InputAcceptedOut | SteerAcceptedOut;
+  | InputAcceptedOut | SteerAcceptedOut | HealthResultOut | HealthStartedOut;
 
 export type OutboundType = OutboundMessage["type"];
 

@@ -58,6 +58,58 @@ function _run() {
   };
 
   /* The fourteen read-only indicators, with why each is not interactive. */
+  /* Latest health probe per profile id, and whether one is in flight. */
+  var HEALTH = {};
+  var HEALTH_BUSY = {};
+  /* On by default: a stale "active" row that has been unreachable for an hour
+     is worse than no row. Ten minutes is well inside the socket keep-alive, so
+     a check usually reuses a warm connection and costs a single round trip. */
+  var AUTO_SYNC = true;
+  var AUTO_MS = 10 * 60 * 1000;
+  var autoTimer = null;
+
+  function armAutoSync() {
+    if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+    if (AUTO_SYNC) autoTimer = setInterval(function () { post("healthCheck"); }, AUTO_MS);
+  }
+  /* Bands, in ms. A number alone tells you nothing without a scale, so the
+     colour does the reading and the figure confirms it. */
+  var FAST = 400;
+  var OK = 1200;
+
+  /**
+   * The waiting mark: three arcs from the palette on their own periods.
+   *
+   * One rotating ring reads as a stalled image; three at 1.1s, 1.7s and 2.6s
+   * never repeat the same figure, so the eye keeps reading it as work.
+   */
+  function spinner(size) {
+    var s = size || 12;
+    return '<svg class="kx-spin" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" ' +
+      'fill="none" aria-hidden="true">' +
+      '<circle class="a1" cx="12" cy="12" r="10" stroke="var(--kx-accent)" stroke-width="2.5" ' +
+        'stroke-linecap="round" stroke-dasharray="16 47"/>' +
+      '<circle class="a2" cx="12" cy="12" r="6.5" stroke="var(--kx-mcp)" stroke-width="2.5" ' +
+        'stroke-linecap="round" stroke-dasharray="10 31"/>' +
+      '<circle class="a3" cx="12" cy="12" r="3" stroke="var(--kx-active)" stroke-width="2.5" ' +
+        'stroke-linecap="round" stroke-dasharray="5 14"/>' +
+      "</svg>";
+  }
+
+  function healthCell(id) {
+    if (HEALTH_BUSY[id]) return '<span class="hp" data-band="wait">' + spinner() + "</span>";
+    var h = HEALTH[id];
+    if (!h) return '<span class="hp muted">-</span>';
+    if (!h.ok) {
+      return '<span class="hp" data-band="down" title="' + esc(h.detail) + '">' +
+        icon("i-x", "ic-10") + "<span>down</span></span>";
+    }
+    var band = h.ms <= FAST ? "fast" : h.ms <= OK ? "ok" : "slow";
+    return '<span class="hp" data-band="' + band + '" title="Time to response headers">' +
+      '<span class="spark" style="--w:' + Math.min(100, Math.round((h.ms / 2000) * 100)) + '%"></span>' +
+      "<span>" + h.ms + "ms</span></span>";
+  }
+
   var PROFILE_TIP = "Controlled by the active profile's YAML.";
   var ENGINE_TIP = "Always on - engine behavior.";
 
@@ -297,7 +349,8 @@ function _run() {
       html += '<div class="empty">No profiles in ' + esc(S.config.profileDirectory || ".agent/endpoints") + "</div>" +
         '<div class="row-actions"><button class="btn primary" data-act="newEndpoint">New profile from template</button></div>';
     } else {
-      var rows = '<div class="tr head"><span></span><span>Profile</span><span>Model &amp; wire</span><span>Status</span><span></span></div>';
+      var rows = '<div class="tr head"><span></span><span>Profile</span><span>Model &amp; wire</span>' +
+        '<span>Health</span><span>Status</span><span></span></div>';
       for (var i = 0; i < S.profiles.length; i++) {
         var p = S.profiles[i];
         rows += '<div class="tr" data-status="' + p.status + '">' +
@@ -307,13 +360,22 @@ function _run() {
           esc(p.status === "error" ? (p.error || "Failed to parse") : p.baseUrl) + "</span></span>" +
           '<span class="ell"><span class="id ell">' + esc(p.model) + "</span>" +
           '<span class="sub ell">' + esc(p.wire) + "</span></span>" +
+          healthCell(p.id) +
           '<span class="ell muted">' + (p.status === "error" ? "error" : p.active ? "active" : "ready") + "</span>" +
           '<span class="acts">' +
             '<button class="mini" data-ep="yaml" data-id="' + esc(p.id) + '" title="Open YAML" aria-label="Open YAML">' + icon("i-file", "ic-13") + "</button>" +
             '<button class="mini danger" data-ep="del" data-id="' + esc(p.id) + '" title="Delete profile" aria-label="Delete profile">' + icon("i-trash", "ic-13") + "</button>" +
           "</span></div>";
       }
-      html += '<div class="tbl">' + rows + "</div>";
+      html += '<div class="tbl">' + rows + "</div>" +
+        '<div class="tbl-foot">' +
+          '<button class="btn sm" data-act="health" title="Time a round trip to every profile now">' +
+            icon("i-refresh", "ic-12") + "<span>Sync now</span></button>" +
+          '<label class="auto-sync"><input type="checkbox" id="ccAutoSync"' +
+            (AUTO_SYNC ? " checked" : "") + '><span>Check every ' + (AUTO_MS / 60000) + " min</span></label>" +
+          '<span class="sp"></span>' +
+          '<span class="muted tiny">Times the path to the gateway, not the model. No tokens are spent.</span>' +
+        "</div>";
     }
 
     var a = active();
@@ -987,6 +1049,11 @@ function _run() {
       return;
     }
 
+    if (e.target && e.target.id === "ccAutoSync") {
+      AUTO_SYNC = e.target.checked;
+      armAutoSync();
+      return;
+    }
     if ((t = e.target.closest("[data-act]"))) {
       onAction(t.getAttribute("data-act"));
       return;
@@ -1017,6 +1084,7 @@ function _run() {
   function onAction(action) {
     switch (action) {
       case "newEndpoint": post("newEndpoint"); break;
+      case "health": post("healthCheck"); break;
       case "mcpReload": post("mcpReload"); break;
       case "trace": S.tracing = true; S.rungs = []; render(); post("runTrace"); break;
       case "reloadSkills": post("reloadSkills"); setFlash("reloadSkills"); break;
@@ -1076,6 +1144,17 @@ function _run() {
 
       case "mcpChanged":
         S.mcp = { servers: m.servers || [], warnings: m.warnings || [] };
+        render();
+        break;
+
+      case "healthStarted":
+        for (var hi = 0; hi < (m.ids || []).length; hi++) HEALTH_BUSY[m.ids[hi]] = true;
+        render();
+        break;
+
+      case "healthResult":
+        HEALTH_BUSY[m.id] = false;
+        HEALTH[m.id] = { ok: m.ok, ms: m.ms, detail: m.detail || "" };
         render();
         break;
 

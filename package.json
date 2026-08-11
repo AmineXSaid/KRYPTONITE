@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "kryptonite",
   "displayName": "KRYPTONITE",
   "description": "A coding agent for endpoints that don't behave. mTLS, corporate CAs, token exchange, air-gapped.",

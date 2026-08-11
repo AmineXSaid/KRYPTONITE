@@ -891,6 +891,44 @@ export class App {
     this.postTo(source, { type: "modelsListed", models, listed, error });
   }
 
+  /**
+   * Time a cheap authenticated round trip to every ready profile.
+   *
+   * Deliberately not a completion. A health check that spends tokens is one
+   * people switch off, and it would measure the model's queue rather than the
+   * path to it. A GET against the gateway's metadata route exercises DNS, TCP,
+   * TLS, the proxy and the credential - everything that breaks between turns -
+   * and costs nothing.
+   *
+   * Probes run together, and each is bounded well under the profile timeout: a
+   * health row that takes two minutes to say "slow" is not a health row.
+   */
+  async healthCheck(): Promise<void> {
+    const ready = this.profiles.filter((p) => p.name);
+    if (!ready.length) return;
+    this.broadcast({ type: "healthStarted", ids: ready.map((p) => p.name) });
+
+    await Promise.all(
+      ready.map(async (profile) => {
+        const t0 = performance.now();
+        try {
+          const client = this.clientFor(profile);
+          await client.warmConnection();
+          const ms = Math.round(performance.now() - t0);
+          this.broadcast({ type: "healthResult", id: profile.name, ok: true, ms, detail: "" });
+        } catch (e: any) {
+          this.broadcast({
+            type: "healthResult",
+            id: profile.name,
+            ok: false,
+            ms: Math.round(performance.now() - t0),
+            detail: String(e?.message ?? e).slice(0, 160),
+          });
+        }
+      })
+    );
+  }
+
   private async checkEndpoint(form: EndpointForm, source: Surface): Promise<void> {
     const id = form.id || "draft";
     const root = this.requireRoot();
@@ -1067,6 +1105,10 @@ export class App {
 
       case "listModels":
         await this.listModelsFor(msg.endpoint, source);
+        return;
+
+      case "healthCheck":
+        await this.healthCheck();
         return;
 
       case "mcpReconnect": {
