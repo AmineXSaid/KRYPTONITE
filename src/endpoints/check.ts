@@ -1,8 +1,62 @@
+import { request } from "undici";
 import type { EndpointProfile, Capabilities } from "./profile";
 import type { EndpointForm } from "../ui/protocol";
 import { wireForType, secretKeyFor } from "../core/profileFiles";
 import { defaultChatPath } from "../providers/client";
+import { buildTransport } from "./transport";
+import { applyAuth } from "./auth";
 import { runLadder, type Rung } from "../diagnostics/ladder";
+
+/**
+ * Ask the gateway which models it serves.
+ *
+ * Typing a model id by hand is the most expensive mistake this form allows. A
+ * wrong id does not fail cleanly: on aggregating gateways it either 404s with
+ * a message about the route, or — worse — is listed and still not servable, in
+ * which case the request simply hangs until a timeout. Offering the gateway's
+ * own list turns a guess into a pick.
+ *
+ * Errors are returned rather than thrown. A gateway with no /models route is a
+ * normal thing to meet, and the field stays free text for exactly that case.
+ */
+export async function listModels(
+  profile: EndpointProfile,
+  secrets: (k: string) => string | undefined
+): Promise<{ models: string[]; error?: string }> {
+  const transport = buildTransport(profile);
+  try {
+    const auth = await applyAuth(profile, transport.dispatcher, secrets);
+    const base = profile.baseUrl.replace(/\/$/, "");
+    // `/v1` may already be on the base, exactly as for chatPath.
+    let pathname = base;
+    try {
+      pathname = new URL(base).pathname;
+    } catch {
+      /* a malformed base is reported by the request below */
+    }
+    const url = /\/v\d+[a-z]*\/?$/i.test(pathname) ? `${base}/models` : `${base}/v1/models`;
+    const res = await request(url, {
+      method: "GET",
+      dispatcher: transport.dispatcher,
+      headers: { accept: "application/json", ...(profile.headers ?? {}), ...auth.headers },
+      headersTimeout: 15_000,
+      bodyTimeout: 15_000,
+    });
+    const text = await res.body.text();
+    if (res.statusCode >= 400) {
+      return { models: [], error: `The gateway returned ${res.statusCode} for /models.` };
+    }
+    const doc = JSON.parse(text);
+    const ids: string[] = (doc?.data ?? doc?.models ?? [])
+      .map((m: any) => (typeof m === "string" ? m : m?.id))
+      .filter((s: any) => typeof s === "string" && s);
+    return { models: [...new Set(ids)].sort() };
+  } catch (e: any) {
+    return { models: [], error: e?.message ?? String(e) };
+  } finally {
+    await transport.dispatcher.close().catch(() => {});
+  }
+}
 
 /**
  * "Check connection" — verifying an endpoint *before* it is saved.

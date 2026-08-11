@@ -25,7 +25,7 @@ import {
   PROFILE_ID_RE,
 } from "./profileFiles";
 // Aliased: `App.checkEndpoint` is the message handler, this is the probe it runs.
-import { checkEndpoint as runEndpointCheck } from "../endpoints/check";
+import { checkEndpoint as runEndpointCheck, draftProfile, listModels } from "../endpoints/check";
 import { SessionController } from "../ui/session";
 import type {
   ApprovalMode,
@@ -857,6 +857,28 @@ export class App {
    * wrong. When no key was typed but one is already stored — the edit case —
    * the stored value is used so "Check" works without re-pasting.
    */
+  /**
+   * Ask the gateway in the draft form which models it serves.
+   *
+   * Reads the key the same way the check does — from the form if one was just
+   * typed, otherwise from SecretStorage — so listing works both while editing
+   * an existing endpoint and while creating one.
+   */
+  private async listModelsFor(form: EndpointForm, source: Surface): Promise<void> {
+    const id = form.id || "draft";
+    let apiKey = form.apiKey?.trim() ?? "";
+    if (!apiKey) {
+      apiKey = (await this.context.secrets.get(`kryptonite.${secretKeyFor(id)}`)) ?? "";
+    }
+    const profile = draftProfile(form);
+    const { models, error } = await listModels(profile, (k) =>
+      k === secretKeyFor(id) ? apiKey : this.secrets(k)
+    );
+    if (error) this.log("warn", `Could not list models for ${id}: ${error}`);
+    else this.log("info", `${form.url}: ${models.length} model(s) offered.`);
+    this.postTo(source, { type: "modelsListed", models, error });
+  }
+
   private async checkEndpoint(form: EndpointForm, source: Surface): Promise<void> {
     const id = form.id || "draft";
     const root = this.requireRoot();
@@ -1029,6 +1051,10 @@ export class App {
 
       case "checkEndpoint":
         await this.checkEndpoint(msg.endpoint, source);
+        return;
+
+      case "listModels":
+        await this.listModelsFor(msg.endpoint, source);
         return;
 
       case "mcpReconnect": {

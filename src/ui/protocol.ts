@@ -282,6 +282,8 @@ export interface AttachFilesMsg { type: "attachFiles" }
  * where it is missing — and the user got "Unable to resolve nonexistent file".
  */
 export interface McpOpenConfigMsg { type: "mcpOpenConfig" }
+/** Ask the gateway in the draft form which models it actually serves. */
+export interface ListModelsMsg { type: "listModels"; endpoint: EndpointForm }
 /**
  * The composer took focus. Nothing is being sent yet — this is the cue to pay
  * the connection, credential, and prompt-cache costs of the next turn while
@@ -339,7 +341,7 @@ export interface McpReloadMsg { type: "mcpReload" }
 
 export type InboundMessage =
   | ReadyMsg | SendMessageMsg | AttachFilesMsg | WarmMsg | McpOpenConfigMsg
-  | InterruptMsg | NewChatMsg | SetPhaseMsg
+  | ListModelsMsg | InterruptMsg | NewChatMsg | SetPhaseMsg
   | ApprovePlanMsg | ResolvePermissionMsg | ResolveDiffMsg | SelectModelMsg
   | RunTraceMsg | SaveCaBundleMsg | BrowseCaBundleMsg | UseSystemTrustMsg
   | CopyTextMsg | NewEndpointMsg | SaveEndpointMsg | DeleteEndpointMsg
@@ -489,6 +491,8 @@ export interface LogLineOut { type: "logLine"; line: LogLine }
 export interface NavigateOut { type: "navigate"; section: CcSection }
 export interface FileResultsOut { type: "fileResults"; query: string; files: FileHitDto[] }
 export interface CaBundlePickedOut { type: "caBundlePicked"; path: string }
+/** The gateway's own model list, or why it could not be read. */
+export interface ModelsListedOut { type: "modelsListed"; models: string[]; error?: string }
 
 /* ── endpoint connection check ── */
 export interface EndpointCheckStartedOut { type: "endpointCheckStarted"; id: string }
@@ -517,7 +521,7 @@ export type OutboundMessage =
   | ConfigChangedOut | PhaseChangedOut | EndpointChangedOut | StatusChangedOut
   | LogLineOut | NavigateOut | FileResultsOut | CaBundlePickedOut
   | EndpointCheckStartedOut | EndpointCheckRungOut | EndpointCheckDoneOut
-  | SessionTitledOut | McpChangedOut;
+  | SessionTitledOut | McpChangedOut | ModelsListedOut;
 
 export type OutboundType = OutboundMessage["type"];
 

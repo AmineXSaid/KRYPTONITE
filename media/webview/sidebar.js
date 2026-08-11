@@ -1742,7 +1742,18 @@ function _sbRun() {
           '<label for="fName">Display Name</label><input id="fName" value="' + esc(f.name) + '" placeholder="OpenRouter">' +
           '<label for="fUrl">Base URL</label><input id="fUrl" value="' + esc(f.url) + '" placeholder="https://openrouter.ai/api/v1">' +
           '<label for="fType">Provider Type</label><select id="fType">' + opts + "</select>" +
-          '<label for="fModel">Model</label><input id="fModel" value="' + esc(f.model || "") + '" placeholder="openrouter/free">' +
+          // A typed model id is the most expensive mistake this form allows: a
+          // wrong one either 404s with a message about the route, or is listed
+          // by the gateway and still not servable, in which case the request
+          // hangs. The list comes from the gateway itself. It stays an input,
+          // not a select, because plenty of gateways serve no /models route.
+          '<label for="fModel">Model</label>' +
+          '<span class="f-with-btn">' +
+            '<input id="fModel" list="fModelList" value="' + esc(f.model || "") + '" placeholder="openrouter/free">' +
+            '<datalist id="fModelList"></datalist>' +
+            '<button type="button" class="btn sm" data-ep="models" title="Ask the gateway which models it serves">Load</button>' +
+          "</span>" +
+          '<span></span><span class="f-hint" id="fModelHint"></span>' +
           (needsKey
             ? '<label for="fKey">API Key</label><input id="fKey" type="password" autocomplete="off" spellcheck="false" value="" placeholder="' +
               (f.hasStoredKey ? "stored — leave blank to keep" : "sk-…") + '">'
@@ -2411,6 +2422,12 @@ function _sbRun() {
       }
     } else if (a === "del") {
       post("deleteEndpoint", { id: id });
+    } else if (a === "models") {
+      var mDraft = readEpForm();
+      if (!mDraft) return;
+      var hint = $("fModelHint");
+      if (hint) { hint.textContent = "Asking the gateway…"; hint.removeAttribute("data-err"); }
+      post("listModels", { endpoint: epPayload(mDraft) });
     } else if (a === "check") {
       var draft = readEpForm();
       if (!draft) return;
@@ -2578,6 +2595,31 @@ function _sbRun() {
         S.epCheck.rungs = S.epCheck.rungs.concat([m.rung]);
         renderEndpoints();
         break;
+
+      case "modelsListed": {
+        var dl = $("fModelList");
+        var mh = $("fModelHint");
+        if (dl) {
+          dl.innerHTML = (m.models || [])
+            .map(function (id) { return '<option value="' + esc(id) + '"></option>'; })
+            .join("");
+        }
+        if (mh) {
+          if (m.error) {
+            // Not a failure of the endpoint — plenty of gateways serve no
+            // /models route — so it reads as information, not an error state.
+            mh.textContent = "Could not list models: " + m.error + " Type the id instead.";
+            mh.setAttribute("data-err", "1");
+          } else {
+            var n = (m.models || []).length;
+            mh.textContent = n
+              ? n + " model" + (n === 1 ? "" : "s") + " offered — start typing to filter."
+              : "The gateway listed no models. Type the id instead.";
+            mh.removeAttribute("data-err");
+          }
+        }
+        break;
+      }
 
       case "endpointCheckDone":
         readEpForm();

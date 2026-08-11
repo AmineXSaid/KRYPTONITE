@@ -881,6 +881,17 @@ li.doing .cbx { border-color: var(--kx-accent); }
 .mcp-head {
   display: flex; align-items: center; gap: 8px; padding: 12px 16px 10px; flex: none;
 }
+/* A field that carries its own action: the model input and its Load button
+   share a row, so the button reads as part of the field rather than a control
+   floating beside it. */
+.f-with-btn { display: flex; gap: 6px; align-items: stretch; min-width: 0; }
+.f-with-btn > input { flex: 1 1 auto; min-width: 0; }
+.f-with-btn > .btn { flex: none; }
+/* What Load found: a count, or why it could not be read. Informational — a
+   gateway with no /models route is normal, not a fault. */
+.f-hint { font-size: 11px; color: var(--kx-fg-3); line-height: 1.4; }
+.f-hint[data-err="1"] { color: var(--kx-warn); }
+
 .mcp-head .l {
   font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
   color: var(--kx-fg-3);
