@@ -204,8 +204,12 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
  * The rail takes the accent rather than a neutral line: it is the only mark in
  * the transcript that says "you", and a grey hairline said nothing.
  */
+/* A question and its answer are one exchange, and the gap between exchanges
+   has to be larger than the gap inside one or the transcript reads as a flat
+   list. The question sits close to the answer it produced (10px) and well
+   clear of the previous turn (22px). */
 .msg-user {
-  display: flex; gap: 10px; margin-bottom: 16px;
+  display: flex; gap: 10px; margin: 22px 0 10px;
   font-family: var(--kx-ui); font-size: 12.5px; font-weight: 500; line-height: 1.5;
   color: var(--kx-fg-3);
   white-space: pre-wrap; overflow-wrap: anywhere;
@@ -412,8 +416,11 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   opacity: .45; transition: opacity .12s;
 }
 .turn-foot:hover, .turn-foot:focus-within { opacity: 1; }
+/* 24px is the WCAG 2.2 AA floor for a pointer target (2.5.8). The 44px figure
+   is the AAA/mobile guideline and does not apply to a desktop panel, but 22px
+   was under the floor that does. The glyph stays 13px; the target grew. */
 .turn-foot button {
-  height: 22px; width: 22px; padding: 0; border-radius: 4px;
+  height: 24px; width: 24px; padding: 0; border-radius: 4px;
   display: grid; place-items: center;
   color: var(--kx-fg-3);
 }
@@ -539,7 +546,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   color: var(--kx-fg-2);
 }
 .btn:hover:not(:disabled) { background: var(--kx-surface-4); }
-.btn.primary { background: var(--kx-action); color: var(--kx-bg); }
+.btn.primary { background: var(--kx-action); color: var(--kx-on-action); }
 .btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
 .btn.sm { font-size: 11.5px; padding: 4px 9px; }
 .btn:disabled { color: var(--kx-fg-3); background: var(--kx-surface-3); }
@@ -785,7 +792,12 @@ li.doing .cbx { border-color: var(--kx-accent); }
   background: var(--kx-surface); border-radius: 10px; overflow: hidden;
   border: 1px solid rgba(222, 220, 209, .15);
 }
-.composer:focus-within { border-color: var(--kx-link); }
+/* A 1px border tint is not a 3:1 focus indicator on its own. The ring is what
+   makes the composer's focus visible without moving anything. */
+.composer:focus-within {
+  border-color: var(--kx-link);
+  box-shadow: 0 0 0 2px var(--kx-info-wash);
+}
 .sel-pill {
   display: flex; align-items: center; gap: 7px; padding: 7px 10px; font-size: 11.5px;
   color: var(--kx-fg-2);
@@ -794,6 +806,10 @@ li.doing .cbx { border-color: var(--kx-accent); }
 /* The textarea must never show a scrollbar when empty. `rows=1` plus a fixed
    min-height gives the resting state; `overflow: hidden` prevents the scrollbar
    until autoGrow flips it to `auto` once the content exceeds one line. */
+/* `outline: none` on an id beats the global `:focus-visible` ring on
+   specificity, so the composer had no visible keyboard focus at all. The
+   composer's frame carries it instead, which is why the outline is dropped
+   here rather than restored. */
 #draft {
   display: block; width: 100%; background: transparent; border: none; outline: none; resize: none;
   font-family: var(--kx-ui); font-size: 13px; line-height: 1.5;
@@ -861,7 +877,7 @@ li.doing .cbx { border-color: var(--kx-accent); }
   width: 28px; height: 28px; flex: none; border-radius: 50%; display: grid; place-items: center;
   background: var(--kx-surface-3); color: var(--kx-fg-2);
 }
-#sendBtn[data-ready="1"] { background: var(--kx-action); color: var(--kx-bg); }
+#sendBtn[data-ready="1"] { background: var(--kx-action); color: var(--kx-on-action); }
 #sendBtn[data-mode="stop"] { background: var(--kx-surface-3); color: var(--kx-fg); }
 
 .footer {
@@ -1210,18 +1226,40 @@ li.doing .cbx { border-color: var(--kx-accent); }
   background: var(--kx-surface);
 }
 .form .t { font-size: 12px; font-weight: 600; }
+/* Rows were a uniform 8px apart, so a nine-field form read as one undivided
+   list and the eye had nowhere to rest. The row gap opens to 10px, labels
+   align to the top of their control rather than centring against two-line
+   hints, and controls grow to 28px. */
 .fgrid {
-  display: grid; grid-template-columns: minmax(80px, 88px) minmax(0, 1fr);
-  gap: 8px 10px; align-items: center;
+  display: grid; grid-template-columns: minmax(80px, 92px) minmax(0, 1fr);
+  gap: 10px 12px; align-items: center;
 }
-.fgrid label { font-size: 11.5px; color: var(--kx-fg-2); }
+.fgrid label {
+  font-size: 11.5px; font-weight: 500; color: var(--kx-fg-2);
+  align-self: center;
+}
 .fgrid input, .fgrid select {
-  height: 26px; min-width: 0; padding: 0 8px; outline: none; border-radius: 4px;
+  height: 28px; min-width: 0; padding: 0 9px; outline: none; border-radius: 5px;
   font-family: var(--kx-ui); font-size: 12px;
   background: var(--kx-surface-2); color: var(--kx-fg);
   border: 1px solid var(--kx-line);
+  transition: border-color .12s, box-shadow .12s;
 }
-.fgrid input:focus, .fgrid select:focus { border-color: var(--kx-link); }
+.fgrid input::placeholder { color: var(--kx-fg-4); }
+.fgrid input:hover, .fgrid select:hover { border-color: var(--kx-line-2); }
+/* A focus ring rather than a border tint alone: a 1px colour change is not a
+   3:1 focus indicator, and this control set is keyboard-driven. */
+.fgrid input:focus, .fgrid select:focus {
+  border-color: var(--kx-link);
+  box-shadow: 0 0 0 2px var(--kx-info-wash);
+}
+/* The credential is the field that arms every other one, so it is the only
+   row that carries weight. */
+#fKey {
+  font-family: var(--kx-mono); letter-spacing: .04em;
+  border-color: var(--kx-line-2);
+}
+#fKey:focus { border-color: var(--kx-link); }
 /* A field with a unit or an explanation beside it. */
 .fsplit { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .fsplit input[type="number"] { width: 68px; flex: none; }

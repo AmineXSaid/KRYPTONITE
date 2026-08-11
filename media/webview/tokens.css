@@ -74,11 +74,18 @@
   --kx-under:  #d98cbe;    /* position: the 2px tab underline                */
   --kx-link:   #4a92d8;    /* blue door, lifted for text: links, "you"       */
   --kx-action: #1a6fb5;    /* blue door: send - a fill, so it stays deep     */
-  --kx-error:  #d1476b;    /* burgundy, lifted until it can be read          */
+  /* Lifted to a measured 4.5:1 on the panel, not to taste. The first attempt
+     was set by eye and came out at 3.48:1 - readable-looking, and below AA on
+     the one string a user most needs to read. test/contrast.cjs holds it. */
+  --kx-error:  #e8748f;    /* burgundy, lifted until it measures             */
   --kx-error-deep: #78122f;/* the recess itself: fills and washes            */
-  --kx-warn:   #c96f92;    /* rose: between the pink and the burgundy        */
+  --kx-warn:   #dd93b0;    /* rose: between the pink and the burgundy        */
   --kx-info:   #4a92d8;    /* measured figures, meters, reported counts      */
-  --kx-on-accent: #141413; /* text on a filled accent - deepest surface      */
+  /* Two grounds, two inks. The turquoise is bright enough to carry the near
+     black; the door blue is deep and wants light text on it. Sharing one ink
+     across both put the send button's label at 3.50:1. */
+  --kx-on-accent: #141413; /* ink for a bright fill: turquoise              */
+  --kx-on-action: #faf9f5; /* ink for a deep fill: the blue door            */
   --kx-mcp-wash:  rgba(23, 169, 184, .16);
   --kx-info-wash: rgba(74, 146, 216, .16);
 

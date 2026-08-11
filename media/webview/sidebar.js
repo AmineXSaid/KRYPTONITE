@@ -1867,6 +1867,22 @@ function _sbRun() {
           '<label for="fName">Display Name</label><input id="fName" value="' + esc(f.name) + '" placeholder="OpenRouter">' +
           '<label for="fUrl">Base URL</label><input id="fUrl" value="' + esc(f.url) + '" placeholder="https://openrouter.ai/api/v1">' +
           '<label for="fType">Provider Type</label><select id="fType">' + opts + "</select>" +
+          // The credential comes before the model, because it is what makes the
+          // model field usable: Load asks the gateway, and no gateway answers
+          // without a key. The old order put the Load button above the field
+          // that arms it, so the first thing a new endpoint did was fail.
+          (needsKey
+            ? '<label for="fKey">API Key</label>' +
+              '<span class="f-with-btn">' +
+                '<input id="fKey" type="password" autocomplete="off" spellcheck="false" value="" placeholder="' +
+                (f.hasStoredKey ? "stored - leave blank to keep" : "paste the token") + '">' +
+              "</span>" +
+              '<span></span><span class="f-hint">' +
+                (f.hasStoredKey
+                  ? "A key is already stored. Leave blank to keep it."
+                  : "Held in VS Code SecretStorage, never written to the YAML.") +
+              "</span>"
+            : "") +
           // A typed model id is the most expensive mistake this form allows: a
           // wrong one either 404s with a message about the route, or is listed
           // by the gateway and still not servable, in which case the request
@@ -1879,10 +1895,6 @@ function _sbRun() {
             '<button type="button" class="btn sm" data-ep="models" title="Ask the gateway which models it serves">Load</button>' +
           "</span>" +
           '<span></span><span class="f-hint" id="fModelHint"></span>' +
-          (needsKey
-            ? '<label for="fKey">API Key</label><input id="fKey" type="password" autocomplete="off" spellcheck="false" value="" placeholder="' +
-              (f.hasStoredKey ? "stored - leave blank to keep" : "sk-…") + '">'
-            : "") +
           '<label for="fPath">Route</label><input id="fPath" value="' + esc(f.chatPath || "") + '" placeholder="auto - derived from Base URL">' +
           '<label for="fTimeout">Timeout</label>' +
           '<div class="fsplit">' +
