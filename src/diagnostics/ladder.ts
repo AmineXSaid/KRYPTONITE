@@ -384,7 +384,15 @@ export async function runLadder(
             e.status === 401 || e.status === 403
               ? "The credential was rejected. Check scopes, audience, and whether the token has expired."
               : e.status === 404
-              ? "Path is wrong. Set chatPath explicitly — many gateways prefix their routes."
+              ? // A 404 from a chat endpoint is more often the model than the
+                // route. Gateways that aggregate models — NVIDIA NIM, OpenRouter —
+                // list ids in /v1/models that they will not actually serve, so a
+                // name copied from that list 404s while the path is perfectly
+                // fine. Sending people to edit chatPath first cost real time.
+                `The route resolved but returned 404. Check the model id ("${profile.model}") ` +
+                "against what the gateway actually serves — an id can be listed and still not " +
+                "be servable. If the model is right, set chatPath explicitly; some gateways " +
+                "prefix their routes."
               : e.status === 400
               ? "The body shape was rejected. A transform module can reshape it."
               : /TIMEOUT/i.test(String(e.detail ?? e.message))
