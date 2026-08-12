@@ -176,6 +176,48 @@ const STATE = (over = {}) => ({ type: "stateSync", state: {
   ok("failed tool card shows the fail mark", !!d.querySelector("#log .tool-meta .tool-fail"));
 }
 
+/* ── 6g. MCP: View log actually shows the log ────────────────────────── */
+{
+  const { d, sent, inbound } = boot();
+  inbound(STATE());
+  d.getElementById("tabMcp").click();
+  inbound({
+    type: "mcpChanged",
+    servers: [{
+      name: "filesystem", state: "failed", transport: "stdio",
+      command: "npx -y @modelcontextprotocol/server-filesystem .",
+      error: "server exited (code 1): Cannot find package 'zod'",
+      toolCount: 0, tools: [], approval: "ask",
+    }],
+    warnings: [],
+  });
+  const btn = d.querySelector('[data-mcp="log"]');
+  ok("a failed server offers View log", !!btn);
+  ok("closed to begin with", btn.getAttribute("aria-expanded") === "false");
+
+  // It used to post copyText with the server's own name: a string on the
+  // clipboard, and nothing shown.
+  sent.length = 0;
+  btn.click();
+  ok("clicking asks the host for the log",
+    sent.some((m) => m.type === "mcpLog" && m.name === "filesystem"));
+  ok("and does not put anything on the clipboard", !sent.some((m) => m.type === "copyText"));
+
+  inbound({ type: "mcpLog", name: "filesystem", log: "node:internal/modules\nCannot find package 'zod'" });
+  const pre = d.querySelector(".mcp-log");
+  ok("the log is rendered", !!pre);
+  ok("with the server's own words", /Cannot find package 'zod'/.test(pre.textContent));
+  ok("and the button flips to Hide",
+    d.querySelector('[data-mcp="log"]').getAttribute("aria-expanded") === "true");
+
+  d.querySelector('[data-mcp="log"]').click();
+  ok("a second click closes it", !d.querySelector(".mcp-log"));
+
+  // Server output reaches this block, so it must not survive as markup.
+  inbound({ type: "mcpLog", name: "filesystem", log: "<img src=x onerror=alert(1)>" });
+  ok("a log cannot inject markup", d.querySelectorAll("#mcpBody img").length === 0);
+}
+
 /* ── 6f. clipboard paste ─────────────────────────────────────────────────
    FileReader is asynchronous, so this block is a promise the tally waits on at
    the bottom of the file. Everything else here is synchronous. */

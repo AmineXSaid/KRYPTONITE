@@ -130,6 +130,32 @@ console.log("\n──── ink and fill paired in the stylesheets ────"
   }
 }
 
+/* A `var(--kx-thing)` that was never defined is not a syntax error. The
+   declaration is simply dropped, so the element renders with whatever it
+   inherited and nothing anywhere says so. `--kx-border` sat in sidebar.css
+   like that, leaving a disabled MCP server's rail with no colour. */
+console.log("\n──── every token reference resolves ────");
+{
+  const SHEETS = ["tokens.css", "sidebar.css", "controlCenter.css"];
+  const read = (f) => fs.readFileSync(path.join(__dirname, "..", "media", "webview", f), "utf8");
+  const defined = new Set();
+  for (const f of SHEETS) {
+    // Custom properties are legal anywhere, not only in tokens.css: the aura
+    // sizes itself from one declared on its own element.
+    for (const m of read(f).matchAll(/(--kx-[\w-]+)\s*:/g)) defined.add(m[1]);
+  }
+  let missing = 0;
+  for (const f of SHEETS) {
+    for (const m of read(f).matchAll(/var\(\s*(--kx-[\w-]+)/g)) {
+      if (defined.has(m[1])) continue;
+      missing++;
+      ck(`${f} references undefined ${m[1]}`, 0, 1);
+    }
+  }
+  console.log(`  ${missing ? "FAIL" : "PASS"}  ${defined.size} tokens defined, ${missing} dangling reference(s)`);
+  if (!missing) pass++;
+}
+
 console.log(`\n──── ${pass} passed, ${fails.length} failed ────`);
 for (const f of fails) console.log("  FAIL  " + f);
 process.exit(fails.length ? 1 : 0);

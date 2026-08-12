@@ -1067,7 +1067,16 @@ li.doing .cbx { border-color: var(--kx-accent); }
   display: grid; grid-template-columns: 3px minmax(0, 1fr) auto;
   align-items: center; gap: 10px; padding: 10px 16px;
   border-top: 1px solid var(--kx-hairline);
+  transition: background .12s ease;
 }
+/* A connected server is the one row that gained the agent something, so it
+   gets the faintest turquoise ground rather than another badge competing for
+   attention. The hover is the same colour one step up, so the row feels
+   continuous with its own rail instead of flashing a neutral grey. */
+.mcp-row[data-state="ready"] { background: color-mix(in srgb, var(--kx-mcp) 4%, transparent); }
+.mcp-row:hover { background: color-mix(in srgb, var(--kx-mcp) 9%, transparent); }
+.mcp-row[data-state="failed"]:hover { background: color-mix(in srgb, var(--kx-error) 8%, transparent); }
+@media (prefers-reduced-motion: reduce) { .mcp-row { transition: none; } }
 /* The rail and the pill read the same field, so they cannot disagree. */
 .mcp-row .rail { align-self: stretch; border-radius: 2px; background: var(--kx-fg-5); }
 /* Turquoise, not mint. A connected MCP server is not the same claim as a
@@ -1077,7 +1086,9 @@ li.doing .cbx { border-color: var(--kx-accent); }
 .mcp-row[data-state="failed"] .rail { background: var(--kx-error); }
 .mcp-row[data-state="starting"] .rail { background: var(--kx-warn); }
 /* Declared but deliberately not started: present, and visibly inert. */
-.mcp-row[data-state="disabled"] .rail { background: var(--kx-border); }
+/* --kx-border was never a token, so this rail rendered with no colour at all
+   and a disabled server lost the one mark that lines it up with the others. */
+.mcp-row[data-state="disabled"] .rail { background: var(--kx-line-2); }
 .mcp-row[data-state="disabled"] .nm,
 .mcp-row[data-state="disabled"] .sub,
 .mcp-row[data-state="disabled"] .count { opacity: .55; }
@@ -1108,6 +1119,9 @@ li.doing .cbx { border-color: var(--kx-accent); }
 .mcp-chip {
   display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 4px;
   background: var(--kx-mcp-wash);
+  /* A hairline of the same hue: the wash alone bleeds into the panel at this
+     size, and a stack of chips reads as one block rather than several tools. */
+  border: 1px solid color-mix(in srgb, var(--kx-mcp) 22%, transparent);
   font-family: var(--kx-mono); font-size: 11px; color: var(--kx-mcp);
 }
 .mcp-more {
@@ -1123,6 +1137,15 @@ li.doing .cbx { border-color: var(--kx-accent); }
 }
 .mcp-err .t { font-size: 12px; line-height: 1.55; color: var(--kx-fg-2); text-wrap: pretty; }
 .mcp-err .acts { display: flex; gap: 8px; margin-top: 10px; }
+/* The server's own stderr. "View log" used to copy a string to the clipboard
+   and show nothing; this is the thing it was always meant to open. */
+.mcp-log {
+  margin: 10px 0 0; padding: 9px 10px; max-height: 220px; overflow: auto;
+  border-radius: 5px; background: var(--kx-bg-deep);
+  border: 1px solid var(--kx-line);
+  font-family: var(--kx-mono); font-size: 10.5px; line-height: 1.65;
+  color: var(--kx-fg-2); white-space: pre-wrap; overflow-wrap: anywhere;
+}
 
 .mcp-foot {
   margin-top: auto; flex: none;

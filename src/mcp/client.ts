@@ -101,6 +101,45 @@ export function spawnTarget(
   };
 }
 
+/**
+ * Pick the line from a crashed server's stderr that actually says what broke.
+ *
+ * This used to be `stderr.slice(-4)`, the last four lines - which for a Node
+ * crash is the bottom of a stack trace. A real failure reported as
+ * "at ModuleJob.syncLink (node:internal/modules/esm/module_job:163:33)" tells
+ * the reader nothing, while the line that mattered - "Cannot find package
+ * 'zod'" - was several frames above it and got dropped.
+ *
+ * Error lines are searched for first, stack frames are skipped, and the known
+ * npm failure modes get the sentence that resolves them, because "clear the
+ * npx cache" is not something anyone guesses from a module-loader trace.
+ */
+export function diagnoseStderr(lines: string[]): string {
+  const meaningful = lines.filter((l) => !/^\s*at /.test(l) && l.trim());
+
+  const err =
+    meaningful.find((l) => /Cannot find (package|module)/i.test(l)) ??
+    meaningful.find((l) => /^[A-Za-z]*Error[:[]/.test(l.trim())) ??
+    meaningful.find((l) => /\berror\b/i.test(l) && !/^npm warn/i.test(l)) ??
+    meaningful.slice(-2).join(" ");
+
+  let hint = "";
+  const all = lines.join("\n");
+  if (/ERR_MODULE_NOT_FOUND|Cannot find package/i.test(all)) {
+    // Seen in the wild: npx caches the package but not its dependencies, and
+    // every later run replays the same broken copy.
+    hint =
+      " The npx cache for this package is incomplete - delete it from " +
+      "%LOCALAPPDATA%\\npm-cache\\_npx (or ~/.npm/_npx) and it will reinstall.";
+  } else if (/ENOENT|is not recognized as an internal/i.test(all)) {
+    hint = " The command is not on PATH.";
+  } else if (/EACCES|permission denied/i.test(all)) {
+    hint = " The command is not executable by this user.";
+  }
+
+  return (err.trim().slice(0, 400) + hint).trim();
+}
+
 /** What the client advertises. Kept honest: we do not implement the rest. */
 const CLIENT_CAPABILITIES = { roots: { listChanged: false }, sampling: {} };
 const PROTOCOL_VERSION = "2025-06-18";
@@ -176,10 +215,8 @@ export class McpClient {
     this.proc.on("exit", (code, signal) => {
       // An exit during normal operation is a crash; after stop() it is expected.
       if (this.state === "stopped") return;
-      const tail = this.stderr.slice(-4).join(" ").trim();
-      this.fail(
-        `server exited (${signal ?? `code ${code}`})${tail ? `: ${tail.slice(0, 300)}` : ""}`
-      );
+      const why = diagnoseStderr(this.stderr);
+      this.fail(`server exited (${signal ?? `code ${code}`})${why ? `: ${why}` : ""}`);
     });
 
     this.proc.stdout.setEncoding("utf8");

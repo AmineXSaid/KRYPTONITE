@@ -16,7 +16,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { loadMcpConfig, expandVars, capOutput, makeClient, MCP_OUTPUT_CAP } from "../src/mcp/registry";
 import { McpHttpClient, McpSseClient } from "../src/mcp/http";
-import { McpClient } from "../src/mcp/client";
+import { McpClient, diagnoseStderr } from "../src/mcp/client";
 
 let pass = 0;
 let fail = 0;
@@ -421,6 +421,52 @@ const quiet = () => {};
       "and a remote row shows its url where stdio shows its command line",
       byName.remote?.command);
     await reg.stopAll();
+  }
+
+  /* ── reading a crashed server's stderr ───────────────────────────── */
+  console.log("\n──── diagnosing a crash ────");
+  {
+    // The real failure, verbatim. The panel reported the bottom stack frame -
+    // "at ModuleJob.syncLink (node:internal/modules/esm/module_job:163:33)" -
+    // because the picker took the last lines and a Node trace ends in frames.
+    const real = [
+      "node:internal/modules/package_json_reader:301",
+      "  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);",
+      "        ^",
+      "Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'zod' imported from " +
+        "C:\\Users\\x\\AppData\\Local\\npm-cache\\_npx\\a324\\node_modules\\@modelcontextprotocol\\server-filesystem\\dist\\index.js",
+      "    at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)",
+      "    at packageResolve (node:internal/modules/esm/resolve:768:81)",
+      "    at moduleResolve (node:internal/modules/esm/resolve:859:18)",
+      "    at ModuleJob.syncLink (node:internal/modules/esm/module_job:163:33)",
+    ];
+    const out = diagnoseStderr(real);
+    ck(/Cannot find package 'zod'/.test(out), "the cause is reported, not the stack frame", out.slice(0, 70));
+    ck(!/at ModuleJob/.test(out), "and stack frames are left out");
+    ck(/npm-cache/.test(out) || /npx cache/.test(out),
+      "with the fix named - nobody guesses 'clear the npx cache' from a module trace");
+  }
+  {
+    const out = diagnoseStderr(["'npx' is not recognized as an internal or external command"]);
+    ck(/not on PATH/.test(out), "a missing command says so", out);
+  }
+  {
+    const out = diagnoseStderr(["bash: ./server: Permission denied"]);
+    ck(/not executable/.test(out), "a permission failure says so", out);
+  }
+  {
+    // npm's own noise must not be mistaken for the error.
+    const out = diagnoseStderr([
+      "npm warn deprecated glob@10.5.0: Old versions of glob are not supported",
+      "TypeError: handler is not a function",
+      "    at Server.<anonymous> (/srv/index.js:12:5)",
+    ]);
+    ck(/handler is not a function/.test(out), "a real error wins over an npm warning", out);
+  }
+  {
+    ck(diagnoseStderr([]) === "", "no stderr at all is not an invented message");
+    ck(diagnoseStderr(["    at a", "    at b"]).length >= 0,
+      "output that is only stack frames does not throw");
   }
 
   /* ── the config template the Create button writes ────────────────── */

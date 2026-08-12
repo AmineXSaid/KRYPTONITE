@@ -2506,12 +2506,16 @@ function _sbRun() {
       }
 
       if (!ready && sv.error) {
+        var open = S.mcpLogs && S.mcpLogs[sv.name] !== undefined;
         rows += '<div class="mcp-err">' +
           "<div class=\"t\">" + esc(sv.error) + "</div>" +
           '<div class="acts">' +
             '<button class="btn sm primary" data-mcp="reconnect" data-name="' + esc(sv.name) + '">Reconnect</button>' +
-            '<button class="btn sm" data-mcp="log" data-name="' + esc(sv.name) + '">View log</button>' +
-          "</div></div>";
+            '<button class="btn sm" data-mcp="log" data-name="' + esc(sv.name) + '" aria-expanded="' +
+              (open ? "true" : "false") + '">' + (open ? "Hide log" : "View log") + "</button>" +
+          "</div>" +
+          (open ? '<pre class="mcp-log">' + esc(S.mcpLogs[sv.name]) + "</pre>" : "") +
+          "</div>";
       }
     }
 
@@ -2547,7 +2551,18 @@ function _sbRun() {
     // is missing by definition.
     else if (a === "open") post("mcpOpenConfig");
     else if (a === "reconnect") post("mcpReconnect", { name: b.getAttribute("data-name") });
-    else if (a === "log") post("copyText", { text: b.getAttribute("data-name") || "" });
+    else if (a === "log") {
+      // This posted `copyText` with the server's own name: it put a string on
+      // the clipboard and showed nothing at all. The stderr tail is the only
+      // place a failed start explains itself.
+      var nm = b.getAttribute("data-name") || "";
+      if (S.mcpLogs && S.mcpLogs[nm] !== undefined) {
+        delete S.mcpLogs[nm];       // a second click closes it
+        renderMcp();
+      } else {
+        post("mcpLog", { name: nm });
+      }
+    }
   }
 
   /* ───────────────────── diagnostics: skills ───────────────────── */
@@ -3234,6 +3249,12 @@ function _sbRun() {
 
       case "imageGenerated":
         addImage(m);
+        break;
+
+      case "mcpLog":
+        if (!S.mcpLogs) S.mcpLogs = {};
+        S.mcpLogs[m.name] = m.log;
+        renderMcp();
         break;
 
       case "planProposed":

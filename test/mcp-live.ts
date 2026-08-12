@@ -10,6 +10,7 @@
  *        --format=cjs --platform=node --target=node20 && node dist/mcp-live.cjs
  */
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { McpRegistry, mcpConfigPath, loadMcpConfig } from "../src/mcp/registry";
 
@@ -90,6 +91,41 @@ const cfg = mcpConfigPath(root);
 
   await reg.stopAll();
   ck(true, "and it stops without hanging");
+
+  /* ── the same config, from a folder that is not this repo ────────── */
+  console.log("\n──── started from an unrelated workspace ────");
+  {
+    // The first version of this suite only ever ran here, where node_modules
+    // holds a complete copy of the server and npx quietly prefers it. In any
+    // other workspace npx resolves through its own cache, and that cache had
+    // the package without its dependencies - so the example shipped "verified"
+    // and failed the moment it was opened anywhere else. Running from a temp
+    // directory is the whole difference between those two outcomes.
+    const away = fs.mkdtempSync(path.join(os.tmpdir(), "kx-mcp-away-"));
+    fs.mkdirSync(path.join(away, ".agent"), { recursive: true });
+    const awayCfg = path.join(away, ".agent", "mcp.json");
+    fs.writeFileSync(awayCfg, JSON.stringify({
+      mcpServers: {
+        filesystem: {
+          command: "npx",
+          args: ["-y", "@modelcontextprotocol/server-filesystem", "."],
+          approval: "ask",
+          timeoutMs: 180000,
+        },
+      },
+    }), "utf8");
+
+    const notes: string[] = [];
+    const reg2 = new McpRegistry((lvl, m) => notes.push(`[${lvl}] ${m}`));
+    await reg2.reload(awayCfg, away);
+    const s = reg2.statuses().find((x) => x.name === "filesystem");
+    ck(s?.state === "ready",
+      "the shipped example starts outside this repo too",
+      s?.state + (s?.error ? ": " + s.error : ""));
+    ck((s?.toolCount ?? 0) > 0, "and exposes its tools there", String(s?.toolCount));
+    await reg2.stopAll();
+    try { fs.rmSync(away, { recursive: true, force: true }); } catch { /* the OS will reap it */ }
+  }
 
   console.log(`\n──── ${pass} passed, ${fail} failed ────`);
   if (fail) console.log("\nserver log:\n" + lines.join("\n"));
