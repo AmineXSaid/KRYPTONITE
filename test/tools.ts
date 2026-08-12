@@ -390,6 +390,56 @@ const run = (name: string, args: any) => runTool(name, args, ctx);
   ctx.image = undefined;
   ctx.onImage = undefined;
 
+  /* ── fetch_url ───────────────────────────────────────────────────── */
+  console.log("\n──── fetch_url ────");
+  {
+    const r = await run("fetch_url", { url: "https://example.com" });
+    ck(Boolean(r.isError) && /not available/.test(r.content),
+      "refused when the context has no fetcher");
+  }
+  let fetched: Array<[string, boolean]> = [];
+  ctx.fetchUrl = async (url: string, withLinks: boolean) => {
+    fetched.push([url, withLinks]);
+    if (url.includes("boom")) throw new Error("ECONNREFUSED");
+    return "https://example.com — HTTP 200\nExample\n\nThe page body.";
+  };
+  {
+    approveAnswer = true;
+    approvals = [];
+    fetched = [];
+    const r = await run("fetch_url", { url: "https://example.com" });
+    ck(!r.isError && /The page body\./.test(r.content), "a page comes back as text", r.content.slice(0, 40));
+    ck(fetched[0][0] === "https://example.com", "the url is passed through");
+    ck(fetched[0][1] === false, "links are off unless asked for - they are noisy");
+    // Reaching the network is a side effect and the address came from the
+    // model, so it goes through the same gate as a shell command.
+    ck(approvals.length === 1 && /Fetch https:\/\/example\.com/.test(approvals[0]),
+      "and it was approved first", approvals[0]);
+  }
+  {
+    fetched = [];
+    await run("fetch_url", { url: "https://example.com", links: true });
+    ck(fetched[0][1] === true, "links can be requested");
+  }
+  {
+    approveAnswer = false;
+    fetched = [];
+    const r = await run("fetch_url", { url: "https://example.com" });
+    ck(Boolean(r.isError) && /declined/.test(r.content), "a declined fetch reports the decline");
+    ck(fetched.length === 0, "and never touches the network");
+    approveAnswer = true;
+  }
+  {
+    const r = await run("fetch_url", { url: "" });
+    ck(Boolean(r.isError) && /required/.test(r.content), "an empty url is refused");
+  }
+  {
+    const r = await run("fetch_url", { url: "https://boom.example" });
+    ck(Boolean(r.isError) && /ECONNREFUSED/.test(r.content),
+      "a network failure is reported rather than swallowed");
+  }
+  ctx.fetchUrl = undefined;
+
   /* ── schema and wiring ───────────────────────────────────────────── */
   console.log("\n──── schema ────");
   {

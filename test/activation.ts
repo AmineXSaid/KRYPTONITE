@@ -60,7 +60,39 @@ async function main() {
 
   // No folder open — the state a fresh VS Code window starts in.
   let ctx = await activateIn(undefined, "no folder");
-  ck(recorded.commands.length === 8, "1.1 all 8 commands registered", recorded.commands.join(", "));
+  // Pinned by name rather than by count. A count catches a command going
+  // missing but says nothing about which one, and every entry here has to
+  // exist on both sides: registered in code, and declared in the manifest.
+  // A command registered but not declared never reaches the palette; one
+  // declared but not registered fails the moment it is invoked.
+  const EXPECTED = [
+    "kryptonite.focusSidebar",
+    "kryptonite.openControlCenter",
+    "kryptonite.openBrowser",
+    "kryptonite.closeBrowser",
+    "kryptonite.newChat",
+    "kryptonite.runDiagnostics",
+    "kryptonite.selectEndpoint",
+    "kryptonite.newEndpoint",
+    "kryptonite.restoreCheckpoint",
+    "kryptonite.exportBundle",
+  ];
+  for (const name of EXPECTED) {
+    ck(recorded.commands.includes(name), `1.1 ${name} is registered`);
+  }
+  ck(recorded.commands.length === EXPECTED.length, "1.1 and nothing else is",
+    recorded.commands.join(", "));
+  {
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8")
+    );
+    const declared: string[] = (manifest.contributes?.commands ?? []).map((c: any) => c.command);
+    for (const name of EXPECTED) {
+      ck(declared.includes(name), `1.1 ${name} is declared in the manifest`);
+    }
+    ck(declared.length === EXPECTED.length, "1.1 and the manifest declares no others",
+      declared.join(", "));
+  }
   ck(ctx.subscriptions.length > 0, "1.1 disposables registered", String(ctx.subscriptions.length));
   await deactivate();
 

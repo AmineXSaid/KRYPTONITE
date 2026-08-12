@@ -5,6 +5,7 @@ import type { Msg } from "../providers/client";
 import { runAgent } from "../agent/loop";
 import { isUntitled, titleFrom } from "../core/sessions";
 import type { ToolContext, TodoItem } from "../agent/tools";
+import { fetchPage } from "../browser/fetchPage";
 import type { App } from "../core/app";
 import type {
   DiffDecision,
@@ -246,6 +247,23 @@ export class SessionController {
               client.generateImage(prompt, { size, signal: this.abort?.signal }),
           }
         : undefined,
+      fetchUrl: async (url: string, withLinks: boolean) => {
+        const page = await fetchPage(url, {
+          dispatcher: (client as any).dispatcher,
+          signal: this.abort?.signal,
+        });
+        const head =
+          `${page.finalUrl} — HTTP ${page.status}` +
+          (page.title ? `\n${page.title}` : "") +
+          (page.truncated ? "\n[truncated for length]" : "");
+        const links = withLinks && page.links.length
+          ? "\n\nLinks:\n" + page.links.slice(0, 60).map((l) => `- ${l.text || "(no text)"} → ${l.href}`).join("\n")
+          : "";
+        // The same 60k ceiling the other tools use, so one page cannot evict
+        // the conversation on the next turn.
+        const body = page.text.length > 60_000 ? page.text.slice(0, 60_000) : page.text;
+        return `${head}\n\n${body}${links}`;
+      },
       onImage: (abs: string, prompt: string) => {
         const rel = path.relative(root, abs).split(path.sep).join("/");
         // Buffered as well as broadcast, so a restored session shows the image

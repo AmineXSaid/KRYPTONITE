@@ -50,6 +50,13 @@ export interface ToolContext {
   };
   /** Told about a rendered image so the transcript can show it. */
   onImage?: (absPath: string, prompt: string) => void;
+  /**
+   * Read a page as text, on the active endpoint's transport.
+   *
+   * Structural again, so tools.ts pulls in no undici and the offline harness
+   * can supply a stub. Absent means no network, and the tool says so.
+   */
+  fetchUrl?: (url: string, withLinks: boolean) => Promise<string>;
 }
 
 export interface ToolResult {
@@ -295,6 +302,21 @@ export const TOOL_DEFS: ToolDef[] = [
         name: { type: "string", description: "Exact skill name from the Skills index." },
       },
       required: ["name"],
+    },
+  },
+  {
+    name: "fetch_url",
+    description:
+      "Read a web page as text. Goes out on the active endpoint's connection, so it " +
+      "reaches whatever that endpoint reaches - including behind a corporate proxy or " +
+      "a private CA. Use it for documentation, an API reference, or a link the user gave you.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "http(s) address." },
+        links: { type: "boolean", description: "Also list the page's links. Off by default; they are noisy." },
+      },
+      required: ["url"],
     },
   },
   {
@@ -752,6 +774,26 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
             skill.files.map((f) => `- ${rel}/${f}`).join("\n")
           : "";
         return { content: body + cut + extras };
+      }
+
+      case "fetch_url": {
+        if (!ctx.fetchUrl) {
+          return { content: "Fetching pages is not available in this context.", isError: true };
+        }
+        const raw = String(args?.url ?? "").trim();
+        if (!raw) return { content: "url is required.", isError: true };
+        // Reaching the network is a side effect, and the address comes from the
+        // model rather than the user, so it goes through the same gate as a
+        // shell command. The full URL is shown because that is the thing being
+        // approved.
+        const ok = await ctx.approve(`Fetch ${raw}`, "Reads the page as text. No cookies are sent.");
+        if (!ok) return { content: "The user declined that fetch.", isError: true };
+        try {
+          const p = await ctx.fetchUrl(raw, args?.links === true);
+          return { content: p };
+        } catch (e: any) {
+          return { content: `Could not fetch ${raw}: ${e?.message ?? e}`, isError: true };
+        }
       }
 
       case "generate_image": {

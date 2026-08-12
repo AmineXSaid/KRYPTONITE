@@ -143,6 +143,50 @@ export function controlCenterHtml(webview: vscode.Webview, extensionUri: vscode.
 }
 
 /**
+ * The browser surface, which is the one document that frames the open web.
+ *
+ * Its CSP has to differ from the other two, and only in the one direction it
+ * needs: `frame-src https: http:` so a page can be shown at all. Everything
+ * else stays as strict as the rest of the extension - the frame is a sealed
+ * box that cannot reach back into this document, and this document still has
+ * no `connect-src`, so nothing it holds can be sent anywhere.
+ */
+export function browserHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
+  const nonce = makeNonce();
+  const tokens = assetUri(webview, extensionUri, "media", "webview", "tokens.css");
+  const css = assetUri(webview, extensionUri, "media", "webview", "browser.css");
+  const js = assetUri(webview, extensionUri, "media", "webview", "browser.js");
+  const policy = [
+    "default-src 'none'",
+    `img-src ${webview.cspSource} data: https: http:`,
+    `font-src ${webview.cspSource}`,
+    `style-src ${webview.cspSource} 'unsafe-inline'`,
+    `script-src 'nonce-${nonce}'`,
+    "frame-src https: http:",
+  ].join("; ");
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="${policy}">
+<title>Browser</title>
+${fontFaces(extensionUri, webview)}
+<link rel="stylesheet" href="${tokens}">
+<link rel="stylesheet" href="${css}">
+</head>
+<body>
+<div id="root"></div>
+<script nonce="${nonce}">
+  window.__kx = { api: acquireVsCodeApi(), surface: "browser" };
+</script>
+<script nonce="${nonce}" src="${js}"></script>
+</body>
+</html>`;
+}
+
+/**
  * Shared by both surfaces so `localResourceRoots` is defined in one place.
  *
  * The open folders are included alongside `media` so a generated image can be

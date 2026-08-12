@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { App } from "./core/app";
 import { SidebarProvider } from "./ui/sidebar";
 import { ControlCenterPanel } from "./ui/controlCenter";
+import { BrowserPanel } from "./ui/browser";
 import type { CcSection } from "./ui/protocol";
 
 /**
@@ -38,6 +39,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     vscode.commands.registerCommand("kryptonite.openControlCenter", (section?: CcSection) => {
       ControlCenterPanel.show(instance, context.extensionUri, section);
+    }),
+
+    vscode.commands.registerCommand("kryptonite.openBrowser", (url?: string) => {
+      BrowserPanel.show(instance, context.extensionUri, url);
+    }),
+
+    // A separate command rather than only the tab's close button, so it can be
+    // bound to a key and closed without reaching for the mouse.
+    vscode.commands.registerCommand("kryptonite.closeBrowser", () => {
+      BrowserPanel.close();
     }),
 
     vscode.commands.registerCommand("kryptonite.newChat", async () => {
