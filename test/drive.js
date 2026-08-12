@@ -20,6 +20,9 @@ function boot() {
   });
   const w = dom.window;
   const sent = [];
+  // jsdom ships no TextEncoder on its window; every browser and every VS Code
+  // webview has one. Node's is the same implementation.
+  if (!w.TextEncoder) w.TextEncoder = TextEncoder;
   w.__kx = { api: { postMessage: (m) => sent.push(m), getState: () => null, setState: () => {} } };
   w.eval(crystalSrc);
   w.eval(sidebarSrc);
@@ -172,6 +175,78 @@ const STATE = (over = {}) => ({ type: "stateSync", state: {
   ok("failed tool card stops spinning", !d.querySelector("#log .tool-meta svg.kx-spin"));
   ok("failed tool card shows the fail mark", !!d.querySelector("#log .tool-meta .tool-fail"));
 }
+
+/* ── 6f. clipboard paste ─────────────────────────────────────────────────
+   FileReader is asynchronous, so this block is a promise the tally waits on at
+   the bottom of the file. Everything else here is synchronous. */
+const pasteTests = (async () => {
+  const { w, d, inbound } = boot();
+  inbound(STATE());
+  const draft = d.getElementById("draft");
+
+  // jsdom has no ClipboardEvent, and a real one's clipboardData is read-only.
+  // A plain event carrying the same surface is what the handler consumes.
+  const paste = (items, text = "") => {
+    const e = new w.Event("paste", { bubbles: true, cancelable: true });
+    e.clipboardData = { items, getData: (t) => (t === "text/plain" ? text : "") };
+    draft.dispatchEvent(e);
+    return e;
+  };
+  const fileItem = (blob) => ({ kind: "file", getAsFile: () => blob });
+  /* Poll rather than sleep. FileReader resolves on the event loop, and the
+     synchronous test blocks below this one hold the thread long enough that a
+     fixed delay can expire before the read has had a chance to run. */
+  const until = async (fn, ms = 3000) => {
+    const t0 = Date.now();
+    for (;;) {
+      if (fn()) return true;
+      if (Date.now() - t0 > ms) return false;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  };
+  const pillCount = () => d.querySelectorAll("#attachStrip .att-pill").length;
+
+  // A screenshot arrives as an image/* item with a generic name or none.
+  const png = new w.Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3])], { type: "image/png" });
+  const ev = paste([fileItem(png)]);
+  ok("a pasted image cancels the default paste", ev.defaultPrevented);
+  ok("a pasted image becomes an attachment", await until(() => pillCount() === 1));
+  const pills = d.querySelectorAll("#attachStrip .att-pill");
+  ok("shown as a thumbnail, not a generic icon",
+    pills.length === 1 && !!pills[0].querySelector("img.att-thumb"));
+  ok("named so it is identifiable", pills.length === 1 && /pasted-\d+\.png/.test(pills[0].textContent));
+  ok("and the strip is visible", !d.getElementById("attachStrip").hidden);
+
+  // A file copied from the file manager keeps its real name.
+  const named = new w.Blob([new Uint8Array([1, 2, 3])], { type: "image/png" });
+  named.name = "diagram.png";
+  paste([fileItem(named)]);
+  ok("a real filename is preserved",
+    await until(() => /diagram\.png/.test(d.getElementById("attachStrip").textContent)));
+
+  // Ordinary text is an ordinary paste - the textarea must keep it.
+  const before = pillCount();
+  const small = paste([], "just a short note");
+  ok("a small text paste is not cancelled", !small.defaultPrevented);
+  ok("and creates no attachment", pillCount() === before);
+
+  // A large paste is something to hand over, not to edit: dropping 60,000
+  // characters into the textarea makes the box unusable.
+  const big = "x".repeat(9000);
+  const bigEv = paste([], big);
+  ok("a large text paste is cancelled", bigEv.defaultPrevented);
+  ok("becomes an attachment instead", pillCount() === before + 1);
+  ok("named as text", /pasted-\d+\.txt/.test(d.getElementById("attachStrip").textContent));
+  ok("and the composer is left alone", draft.value === "");
+
+  // The picker's 10 MB limit applies here too; these bytes never pass through it.
+  const huge = { size: 11 * 1024 * 1024, type: "image/png", name: "big.png" };
+  const n = pillCount();
+  paste([fileItem(huge)]);
+  ok("an oversized paste says why",
+    await until(() => /10 MB/.test(d.getElementById("log").textContent)));
+  ok("and is refused", pillCount() === n);
+})();
 
 /* ── 6d. tool rows: filenames, previews, word-level edits ────────────── */
 {
@@ -708,6 +783,12 @@ function composer(over) {
   }
 }
 
-console.log(`\n${pass} passed, ${failures.length} failed`);
-for (const f of failures) console.log("  FAIL  " + f);
-process.exit(failures.length ? 1 : 0);
+// The clipboard block is async because FileReader is; everything else has
+// already run by the time this executes.
+pasteTests
+  .catch((e) => failures.push("clipboard block threw: " + (e && e.message)))
+  .then(() => {
+    console.log(`\n${pass} passed, ${failures.length} failed`);
+    for (const f of failures) console.log("  FAIL  " + f);
+    process.exit(failures.length ? 1 : 0);
+  });

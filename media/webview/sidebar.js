@@ -2059,10 +2059,13 @@ function _sbRun() {
     aiEl = null;
     closeToolGroup();
     var card = div("gen-img");
+    // A button, not an anchor: the click opens an editor tab through the host,
+    // it never navigates. An <a href> that is always preventDefault-ed claims
+    // otherwise, and makes the webview attempt a navigation it cannot perform.
     var body = m.src
-      ? '<a class="gi-frame" href="' + esc(m.src) + '" title="Open ' + esc(m.path) + '">' +
+      ? '<button type="button" class="gi-frame" title="Open ' + esc(m.path) + '">' +
           '<img src="' + esc(m.src) + '" alt="' + esc(m.prompt) + '" loading="lazy">' +
-        "</a>"
+        "</button>"
       : '<div class="gi-frame gi-missing">' + icon("i-file", "ic-14") + "<span>saved to disk</span></div>";
     card.innerHTML =
       body +
@@ -2707,9 +2710,6 @@ function _sbRun() {
     for (var i = 0; i < S.attachments.length; i++) {
       var a = S.attachments[i];
       var isImg = a.mediaType.indexOf("image/") === 0;
-      var thumb = isImg
-        ? '<img class="att-thumb" src="data:' + esc(a.mediaType) + ';base64,' + a.data.slice(0, 200) + '…" alt="">'
-        : icon("i-file", "ic-13");
       var size = a.size < 1024 ? a.size + " B"
         : a.size < 1048576 ? (a.size / 1024).toFixed(1) + " KB"
         : (a.size / 1048576).toFixed(1) + " MB";
@@ -2722,6 +2722,135 @@ function _sbRun() {
     }
     strip.innerHTML = html;
     strip.hidden = false;
+  }
+
+  /* ───────────────────────── clipboard ─────────────────────────
+   *
+   * A screenshot is the fastest way to show a model what is wrong, and until
+   * now the only route in was the file picker - which meant saving the
+   * screenshot to disk first, finding it, and picking it. Ctrl+V puts it
+   * straight into the composer.
+   *
+   * The same limits as the picker apply, enforced here because these bytes
+   * never pass through it.
+   */
+  var ATTACH_MAX = 10 * 1024 * 1024;   // 10 MB, matching pickAndAttach
+  var ATTACH_COUNT_MAX = 10;
+  /* Characters past which pasted text becomes a file rather than composer
+     content. A pasted log is something to hand over, not something to edit,
+     and dropping 60,000 characters into a textarea makes the box unusable and
+     hides the send button behind a scroll. */
+  var PASTE_AS_FILE = 8000;
+  var pasteSeq = 0;
+
+  /** Names for pasted content, which arrives with no useful filename. */
+  function pasteName(mediaType) {
+    var ext = ({
+      "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif",
+      "image/webp": "webp", "image/svg+xml": "svg", "text/plain": "txt",
+    })[mediaType] || "bin";
+    return "pasted-" + ++pasteSeq + "." + ext;
+  }
+
+  function addAttachment(a) {
+    if (!S.attachments) S.attachments = [];
+    if (S.attachments.length >= ATTACH_COUNT_MAX) {
+      addError("Up to " + ATTACH_COUNT_MAX + " attachments per message.");
+      return false;
+    }
+    S.attachments.push(a);
+    return true;
+  }
+
+  /** Read a Blob into the base64 shape the host and the wire already use. */
+  function readBlob(blob, name, done) {
+    if (blob.size > ATTACH_MAX) {
+      addError(
+        name + " is " + (blob.size / 1048576).toFixed(1) + " MB. The limit is 10 MB."
+      );
+      done(false);
+      return;
+    }
+    var r = new FileReader();
+    r.onload = function () {
+      // readAsDataURL gives "data:<mime>;base64,<payload>"; the wire wants only
+      // the payload, and the media type is tracked separately.
+      var s = String(r.result || "");
+      var comma = s.indexOf(",");
+      done(addAttachment({
+        name: name,
+        mediaType: blob.type || "application/octet-stream",
+        data: comma === -1 ? "" : s.slice(comma + 1),
+        size: blob.size,
+      }));
+    };
+    r.onerror = function () {
+      addError("Could not read " + name + " from the clipboard.");
+      done(false);
+    };
+    r.readAsDataURL(blob);
+  }
+
+  function onPaste(e) {
+    var cd = e.clipboardData;
+    if (!cd) return;
+
+    // Files first: a screenshot arrives as an image/* item, and a file copied
+    // from the file manager arrives the same way with a real name.
+    var blobs = [];
+    var items = cd.items || [];
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].kind !== "file") continue;
+      var f = items[i].getAsFile();
+      if (f) blobs.push(f);
+    }
+
+    if (blobs.length) {
+      // Stop the textarea from also handling this paste; some hosts would
+      // otherwise insert the file's name as text next to the attachment.
+      e.preventDefault();
+      var left = blobs.length;
+      var any = false;
+      for (var b = 0; b < blobs.length; b++) {
+        (function (blob) {
+          // A screenshot's File carries a generic name or none at all.
+          var nm = blob.name && blob.name !== "image.png" ? blob.name : pasteName(blob.type);
+          readBlob(blob, nm, function (ok) {
+            any = any || ok;
+            if (--left === 0 && any) {
+              renderAttachments();
+              syncComposer();
+            }
+          });
+        })(blobs[b]);
+      }
+      return;
+    }
+
+    // A large text paste becomes a file rather than composer content.
+    var text = cd.getData("text/plain") || "";
+    if (text.length > PASTE_AS_FILE) {
+      e.preventDefault();
+      var bytes = new TextEncoder().encode(text);
+      var b64 = "";
+      // Chunked, because String.fromCharCode.apply on a large array overflows
+      // the argument list.
+      for (var k = 0; k < bytes.length; k += 8192) {
+        b64 += String.fromCharCode.apply(null, bytes.subarray(k, k + 8192));
+      }
+      var ok = addAttachment({
+        name: pasteName("text/plain"),
+        mediaType: "text/plain",
+        data: btoa(b64),
+        size: bytes.length,
+      });
+      if (ok) {
+        renderAttachments();
+        syncComposer();
+      }
+      return;
+    }
+    // Everything else is an ordinary paste; let the textarea have it.
   }
 
   /* ───────────────────────── wiring ───────────────────────── */
@@ -2863,6 +2992,9 @@ function _sbRun() {
     $("clipBtn").addEventListener("click", function () {
       post("attachFiles");
     });
+    // On the textarea rather than the document, so a paste into some other
+    // field cannot silently become an attachment.
+    draft.addEventListener("paste", onPaste);
     $("attachStrip").addEventListener("click", function (e) {
       var btn = e.target.closest("[data-att-rm]");
       if (!btn) return;

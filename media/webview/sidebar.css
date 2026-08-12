@@ -963,7 +963,7 @@ li.doing .cbx { border-color: var(--kx-accent); }
   overflow: hidden; background: var(--kx-surface-2);
 }
 .gi-frame {
-  display: block; cursor: pointer; line-height: 0;
+  display: block; width: 100%; padding: 0; border: 0; cursor: pointer; line-height: 0;
   background: repeating-conic-gradient(var(--kx-surface-3) 0 25%, transparent 0 50%) 0 0 / 16px 16px;
 }
 .gi-frame img { display: block; width: 100%; height: auto; max-height: 420px; object-fit: contain; }
