@@ -224,6 +224,32 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 .sec-head-t .explainer { margin: 0; }
 .sec-head .btn { flex: none; white-space: nowrap; }
 
+/* ── capability sweep ── */
+.caps { margin-top: 10px; border-top: 1px solid var(--kx-hairline); padding-top: 9px; }
+.caps-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 7px; }
+.caps-bar .btn { display: inline-flex; align-items: center; gap: 6px; }
+.caps-err {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 6px;
+  font-size: 11.5px; color: var(--kx-error);
+}
+.caps-row {
+  display: grid; grid-template-columns: 16px 106px minmax(0, 1fr) 52px;
+  gap: 8px; align-items: baseline; padding: 3px 0; font-size: 11.5px;
+}
+.caps-row .cr-i { line-height: 1; }
+.caps-row .cr-n { font-weight: 600; color: var(--kx-fg-2); }
+.caps-row .cr-d { color: var(--kx-fg-2); overflow-wrap: anywhere; }
+.caps-row .cr-ms {
+  font-family: var(--kx-mono); font-size: 10.5px; color: var(--kx-fg-3); text-align: right;
+}
+.caps-row[data-s="yes"] .cr-i { color: var(--kx-accent); }
+.caps-row[data-s="yes"] .cr-n { color: var(--kx-fg); }
+.caps-row[data-s="no"] .cr-i { color: var(--kx-error); }
+.caps-row[data-s="skip"] .cr-i { color: var(--kx-fg-4); }
+/* Set against detected: a tick when they agree, a warning when they do not. */
+.cap-ok { margin-left: 6px; color: var(--kx-accent); }
+.cap-diff { margin-left: 6px; color: var(--kx-warn); }
+
 /* ── legend ──
    Opt-in, because a panel that explains itself permanently shouts at the
    people who already know. Same sentences as the header tooltips. */

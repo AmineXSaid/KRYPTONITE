@@ -240,6 +240,66 @@ export function saveEndpointFile(
   return { file, removed };
 }
 
+/**
+ * Update keys inside a profile's `capabilities:` block, in place.
+ *
+ * Deliberately a line edit rather than parse-and-rerender. `renderProfileYaml`
+ * builds a whole file from a form with fixed defaults, so routing a single
+ * toggle through it would silently discard every hand-written setting and
+ * comment in the file - including the ones somebody opened the YAML to write.
+ * Only the lines being changed are touched.
+ *
+ * Keys already present are rewritten and keep their trailing comment; keys
+ * absent are appended to the block. A file with no `capabilities:` block gets
+ * one.
+ */
+export function setCapabilities(file: string, patch: Record<string, unknown>): void {
+  const entries = Object.entries(patch);
+  if (!entries.length) return;
+
+  const src = fs.readFileSync(file, "utf8");
+  const eol = src.includes("\r\n") ? "\r\n" : "\n";
+  const lines = src.split(/\r?\n/);
+
+  const head = lines.findIndex((l) => /^capabilities\s*:/.test(l));
+  if (head === -1) {
+    const block = ["", "capabilities:", ...entries.map(([k, v]) => `  ${k}: ${yamlScalar(v)}`)];
+    fs.writeFileSync(file, lines.concat(block).join(eol), "utf8");
+    return;
+  }
+
+  // The block runs until the first line that is neither indented nor blank.
+  let end = head + 1;
+  while (end < lines.length && (lines[end].trim() === "" || /^\s+\S/.test(lines[end]))) end++;
+
+  const remaining = new Map(entries);
+  for (let i = head + 1; i < end; i++) {
+    const m = lines[i].match(/^(\s+)([A-Za-z_][\w-]*)\s*:\s*([^#]*?)\s*(#.*)?$/);
+    if (!m || !remaining.has(m[2])) continue;
+    const value = remaining.get(m[2]);
+    remaining.delete(m[2]);
+    // The trailing comment usually documents the allowed values, so it stays.
+    lines[i] = `${m[1]}${m[2]}: ${yamlScalar(value)}${m[4] ? "  " + m[4] : ""}`;
+  }
+
+  if (remaining.size) {
+    // Inserted before any trailing blank lines inside the block, so the file
+    // does not grow a gap in the middle of it.
+    let at = end;
+    while (at > head + 1 && lines[at - 1].trim() === "") at--;
+    lines.splice(at, 0, ...[...remaining].map(([k, v]) => `  ${k}: ${yamlScalar(v)}`));
+  }
+
+  fs.writeFileSync(file, lines.join(eol), "utf8");
+}
+
+function yamlScalar(v: unknown): string {
+  if (typeof v === "boolean" || typeof v === "number") return String(v);
+  const s = String(v);
+  // Quote anything YAML would otherwise read as a different type.
+  return /^[A-Za-z][\w.-]*$/.test(s) ? s : JSON.stringify(s);
+}
+
 /** Create the starter profile unless the file already exists. */
 export function createTemplateFile(dir: string): { file: string; created: boolean } {
   fs.mkdirSync(dir, { recursive: true });

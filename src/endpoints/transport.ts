@@ -64,6 +64,14 @@ const SOCKET_EXTRAS = {
 export interface TransportStats {
   handshakes: number;
   proxyHandshakes: number;
+  /**
+   * How many turns arrived carrying a separate reasoning channel.
+   *
+   * A counter rather than a flag, so capability detection can distinguish
+   * "this request reasoned" from "some request once did" by reading it either
+   * side of a probe.
+   */
+  reasoningSeen: number;
 }
 
 /**
@@ -271,7 +279,7 @@ function countWrap(base: buildConnector.connector, onConnect: () => void): build
 export function buildTransport(profile: EndpointProfile): BuiltTransport {
   const material = buildTlsMaterial(profile.tls);
   const report = [...material.report];
-  const stats: TransportStats = { handshakes: 0, proxyHandshakes: 0 };
+  const stats: TransportStats = { handshakes: 0, proxyHandshakes: 0, reasoningSeen: 0 };
 
   // `secureContext` carries the CA set and the client identity, already
   // parsed. `rejectUnauthorized` and `servername` are per-connection and stay

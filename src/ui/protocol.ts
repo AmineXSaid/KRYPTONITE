@@ -341,6 +341,14 @@ export interface SetConfigMsg { type: "setConfig"; key: ConfigKey; value: unknow
 export interface RestoreCheckpointMsg { type: "restoreCheckpoint"; hash: string }
 export interface ExportBundleMsg { type: "exportBundle" }
 export interface OpenFileMsg { type: "openFile"; path: string; lines?: [number, number] }
+/** Probe the active endpoint and report what it can actually do. */
+export interface DetectCapsMsg { type: "detectCapabilities" }
+/** Flip one capability in the active profile's YAML. */
+export interface SetCapabilityMsg { type: "setCapability"; key: string; value: boolean | string | number }
+/** Apply everything the last detection found. */
+export interface ApplyCapsMsg { type: "applyDetected" }
+/** Show an MCP server's own stderr, which is where a start failure explains itself. */
+export interface McpLogMsg { type: "mcpLog"; name: string }
 export interface OpenSettingsMsg { type: "openSettings" }
 export interface OpenYamlMsg { type: "openYaml"; profile: string }
 export interface OpenControlCenterMsg { type: "openControlCenter"; section?: CcSection }
@@ -369,7 +377,8 @@ export type InboundMessage =
   | RestoreCheckpointMsg | ExportBundleMsg | OpenFileMsg | OpenSettingsMsg
   | OpenYamlMsg | OpenControlCenterMsg | OpenSkillsFolderMsg
   | ListSessionsMsg | LoadSessionMsg | DeleteSessionMsg | SearchFilesMsg
-  | CheckEndpointMsg | McpReconnectMsg | McpReloadMsg;
+  | CheckEndpointMsg | McpReconnectMsg | McpReloadMsg
+  | DetectCapsMsg | SetCapabilityMsg | ApplyCapsMsg | McpLogMsg;
 
 export type InboundType = InboundMessage["type"];
 
@@ -402,6 +411,17 @@ export interface ImageGeneratedOut {
   prompt: string;
   src?: string;
 }
+/** Progress and results from a capability sweep. */
+export interface CapsDetectedOut {
+  type: "capsDetected";
+  running: boolean;
+  results: Array<{ name: string; supported?: boolean; detail: string; ms: number }>;
+  /** What could be written to the profile, once the sweep has finished. */
+  patch?: Record<string, unknown>;
+  error?: string;
+}
+/** A server's own stderr, which is where a failed start explains itself. */
+export interface McpLogOut { type: "mcpLog"; name: string; log: string }
 export interface PlanProposedOut { type: "planProposed"; meta: string; steps: string[] }
 export interface PermissionRequestOut {
   type: "permissionRequest";
@@ -579,7 +599,7 @@ export interface EndpointCheckDoneOut {
 
 export type OutboundMessage =
   | StateSyncOut | StreamDeltaOut | ToolStartOut | ToolEndOut | TodosUpdatedOut
-  | ImageGeneratedOut
+  | ImageGeneratedOut | CapsDetectedOut | McpLogOut
   | PlanProposedOut | PermissionRequestOut | PermissionResolvedOut
   | DiffPendingOut | DiffResolvedOut | FileTouchedOut | TurnEndOut | ErrorOut
   | TraceStartedOut | TraceUpdateOut | TraceDoneOut | TlsErrorOut

@@ -46,6 +46,16 @@ export interface CompletionRequest {
    * kept paying for output nobody was going to read.
    */
   signal?: AbortSignal;
+  /**
+   * Send what this request asks for, ignoring the profile's capability gates.
+   *
+   * Every gate below is normally correct: a profile that says `tools: false`
+   * should not have tools sent on its behalf. It is exactly wrong for a
+   * capability probe, which exists to find out whether that setting is true -
+   * gated, the answer is always "whatever the profile already claimed", and a
+   * capability switched off by a bad guess could never be switched back on.
+   */
+  probe?: boolean;
 }
 
 export interface CompletionEvent {
@@ -110,7 +120,7 @@ export function defaultChatPath(baseUrl: string, wire: Wire): string {
   } catch {
     pathname = baseUrl;
   }
-  // `/v1`, `/v1beta`, `/v2` … already present means the caller versioned it.
+  // `/v1`, `/v1beta`, `/v2` â€¦ already present means the caller versioned it.
   return /\/v\d+[a-z]*\/?$/i.test(pathname) ? leaf : `/v1${leaf}`;
 }
 
@@ -152,7 +162,11 @@ export class EndpointClient {
 
   private encode(req: CompletionRequest): { body: any; stream: boolean } {
     const caps = this.profile.capabilities;
-    const stream = req.stream !== false && caps.streaming;
+    // A probe asks the endpoint directly; the profile's own answers are the
+    // thing under test and must not filter the question.
+    const wantTools = req.probe ? true : caps.tools;
+    const wantParallel = req.probe ? true : caps.parallelToolCalls;
+    const stream = req.stream !== false && (req.probe ? true : caps.streaming);
     let body: any;
 
     if (this.profile.wire === "anthropic") {
@@ -174,7 +188,7 @@ export class EndpointClient {
           ? { system: cached ? [{ type: "text", text: system, ...mark }] : system }
           : {}),
         messages: withTailBreakpoint(packAnthropicMessages(rest), mark, cached),
-        ...(req.tools?.length && caps.tools
+        ...(req.tools?.length && wantTools
           ? {
               tools: req.tools.map((t) => ({
                 name: t.name,
@@ -210,13 +224,13 @@ export class EndpointClient {
         max_tokens: req.maxTokens ?? caps.maxOutputTokens,
         ...(req.temperature != null ? { temperature: req.temperature } : {}),
         messages: msgs.map(toOpenAiMessage),
-        ...(req.tools?.length && caps.tools
+        ...(req.tools?.length && wantTools
           ? {
               tools: req.tools.map((t) => ({
                 type: "function",
                 function: { name: t.name, description: t.description, parameters: t.parameters },
               })),
-              ...(caps.parallelToolCalls ? {} : { parallel_tool_calls: false }),
+              ...(wantParallel ? {} : { parallel_tool_calls: false }),
             }
           : {}),
       };
@@ -347,7 +361,10 @@ export class EndpointClient {
       return;
     }
 
-    const parser = this.profile.wire === "anthropic" ? anthropicStream() : openAiStream();
+    const parser =
+      this.profile.wire === "anthropic"
+        ? anthropicStream()
+        : openAiStream(() => { this.stats.reasoningSeen++; });
     // A multi-byte character can straddle a chunk boundary. Decoding each
     // chunk independently turned those into U+FFFD, so any reply containing
     // an emoji or CJK text corrupted at random points in the stream.
@@ -389,7 +406,7 @@ export class EndpointClient {
     }
   }
 
-  /* ─────────────────────────── warm-up ─────────────────────────── */
+  /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ warm-up â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
   /**
    * Open and pool a socket so the next real request skips the connect, the TLS
@@ -754,11 +771,16 @@ function openAiUsage(u: any): TokenUsage {
 /** Exposed for tests; the decoder is otherwise private to `complete()`. */
 export const __openAiStreamForTest = () => openAiStream();
 
-function openAiStream() {
+/**
+ * @param onReasoning Called once per turn that carried a reasoning channel.
+ *   Optional so the test factory above and the anthropic path need no changes.
+ */
+function openAiStream(onReasoning?: () => void) {
   const pending = new Map<number, { id: string; name: string; args: string }>();
   // Held so a reasoning-only turn can fall back to showing its working.
   let reasoning = "";
   let sawContent = false;
+  let toldReasoning = false;
   return function* (json: any): Generator<CompletionEvent> {
     // Usage is checked before the delta branch and independently of it.
     //
@@ -797,6 +819,12 @@ function openAiStream() {
     // a model that was working perfectly.
     if (typeof d.reasoning_content === "string" && d.reasoning_content) {
       reasoning += d.reasoning_content;
+      // Once per turn, not once per delta: capability detection reads this as
+      // "did this request reason", not "how much".
+      if (!toldReasoning) {
+        toldReasoning = true;
+        onReasoning?.();
+      }
     }
     for (const tc of d.tool_calls ?? []) {
       const slot = pending.get(tc.index) ?? { id: "", name: "", args: "" };

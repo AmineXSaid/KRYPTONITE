@@ -377,6 +377,10 @@ function _run() {
   var S = {
     section: "endpoints",
     workspace: { open: false, name: null },
+    /* The last capability sweep. Kept out of stateSync deliberately: it is a
+       measurement of this moment, and a stale one restored on reload would
+       claim the endpoint had been probed when it had not. */
+    caps: null,
     profiles: [],
     skills: [],
     skillWarnings: [],
@@ -456,6 +460,32 @@ function _run() {
       (hint ? '<span class="hint' + (warn ? " warn" : "") + '">' + esc(hint) + "</span>" : "") +
       "</span></div>";
   }
+  /**
+   * A capability switch that writes to the profile YAML.
+   *
+   * Separate from `toggle` because the destination is different: `toggle`
+   * posts setConfig, which is this extension's own UI state, while a
+   * capability is a claim about the endpoint and lives in the profile file.
+   * These were rendered disabled - a row of switches nobody could flip - so
+   * correcting a wrong guess meant finding and hand-editing the YAML.
+   */
+  function capToggle(key, label, hint, on, detected) {
+    var mark = "";
+    if (detected !== undefined) {
+      mark = detected === on
+        ? '<span class="cap-ok" title="Matches what the endpoint did">' + icon("i-check", "ic-11") + "</span>"
+        : '<span class="cap-diff" title="Detection disagrees with this setting">' +
+          icon("i-warn", "ic-11") + "</span>";
+    }
+    return '<div class="toggle-row">' +
+      '<button class="switch" role="switch" aria-checked="' + (on ? "true" : "false") + '"' +
+      ' data-cap="' + esc(key) + '" title="Writes capabilities.' + esc(key) +
+      ' to the profile YAML" aria-label="' + esc(label) + '"></button>' +
+      '<span class="txt"><span class="lbl">' + esc(label) + mark + "</span>" +
+      (hint ? '<span class="hint">' + esc(hint) + "</span>" : "") +
+      "</span></div>";
+  }
+
   function optGroup(name, options, current, editable) {
     var html = '<div class="opt-group">';
     for (var i = 0; i < options.length; i++) {
@@ -896,6 +926,61 @@ function _run() {
     return html;
   }
 
+  /**
+   * The capability sweep: a button, then one row per probe.
+   *
+   * Kept beside the switches it explains rather than in Diagnostics, because
+   * the point of running it is to correct one of them.
+   */
+  function capsPanel() {
+    var c = S.caps;
+    var busy = c && c.running;
+    var out = '<div class="caps">' +
+      '<div class="caps-bar">' +
+        '<button class="btn sm wait" data-act="detectCaps"' + (busy ? " disabled" : "") + ">" +
+          (busy ? spinner(13) : icon("i-refresh", "ic-13")) +
+          "<span>" + (busy ? "Probing…" : "Detect capabilities") + "</span></button>" +
+        (c && c.patch && !busy
+          ? '<button class="btn sm primary" data-act="applyCaps">Apply all</button>'
+          : "") +
+        '<span class="sp"></span>' +
+        '<span class="muted tiny">Five short requests. Costs a few tokens.</span>' +
+      "</div>";
+
+    if (c && c.error) {
+      out += '<div class="caps-err">' + icon("i-warn", "ic-11") + "<span>" + esc(c.error) + "</span></div>";
+    }
+    var rows = (c && c.results) || [];
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      var state = r.supported === true ? "yes" : r.supported === false ? "no" : "skip";
+      out += '<div class="caps-row" data-s="' + state + '">' +
+        '<span class="cr-i">' +
+          (state === "yes" ? icon("i-check", "ic-11")
+            : state === "no" ? icon("i-x", "ic-11")
+            : icon("i-warn", "ic-11")) +
+        "</span>" +
+        '<span class="cr-n">' + esc(CAP_LABEL[r.name] || r.name) + "</span>" +
+        '<span class="cr-d">' + esc(r.detail) + "</span>" +
+        '<span class="cr-ms">' + (r.ms ? r.ms + "ms" : "") + "</span>" +
+      "</div>";
+    }
+    if (busy && !rows.length) {
+      out += '<div class="caps-row" data-s="skip"><span class="cr-i">' + spinner(11) + "</span>" +
+        '<span class="cr-n">working</span><span class="cr-d">Asking the endpoint…</span>' +
+        '<span class="cr-ms"></span></div>';
+    }
+    return out + "</div>";
+  }
+
+  var CAP_LABEL = {
+    streaming: "Streaming",
+    tools: "Tool calling",
+    parallelToolCalls: "Parallel tools",
+    vision: "Vision",
+    reasoning: "Reasoning",
+  };
+
   /* ── connection ──
      Wire, auth, TLS and proxy are one question asked four ways: what happens
      to a request between the keystroke and the model. They were four tabs
@@ -955,13 +1040,28 @@ function _run() {
       ], caps ? caps.systemRole : "message", false) +
       '<div class="hint muted" style="font-size:11px;margin-top:5px">' + esc(PROFILE_TIP) + "</div></div>";
 
+    var det = {};
+    if (S.caps && S.caps.patch) det = S.caps.patch;
+
+    html += '<div class="block"><h4>Capabilities</h4>' +
+      '<div class="hint muted" style="font-size:11px;margin-bottom:7px">' +
+        "What this endpoint can do. Each switch writes to the profile YAML - " +
+        "detect them rather than guessing." + "</div>" +
+      capToggle("streaming", "Streaming", "Tokens arrive as they are produced.",
+        Boolean(caps && caps.streaming), det.streaming) +
+      capToggle("tools", "Tool calling", "The agent needs this; without it it falls back to a text protocol.",
+        Boolean(caps && caps.tools), det.tools) +
+      capToggle("vision", "Vision / image blocks", "Required before an image can be attached.",
+        Boolean(caps && caps.vision), det.vision) +
+      capToggle("parallelToolCalls", "Parallel tool calls", "Several tools in one turn.",
+        Boolean(caps && caps.parallelToolCalls), det.parallelToolCalls) +
+      capsPanel() +
+      "</div>";
+
     html += '<div class="block"><h4>Decoding</h4>' +
-      toggle("sse", "Streaming SSE parsing", caps && caps.streaming ? "Enabled for this profile." : "Disabled for this profile.", Boolean(caps && caps.streaming), false, PROFILE_TIP) +
       toggle("crlf", "CRLF normalization", "Gateways vary on line endings.", true, false, ENGINE_TIP) +
       toggle("reassembly", "Split tool-call reassembly", "Arguments arriving across deltas are rejoined.", true, false, ENGINE_TIP) +
       toggle("toolBlocks", "Tool call content blocks", "", true, false, ENGINE_TIP) +
-      toggle("vision", "Vision / image blocks", "", Boolean(caps && caps.vision), false, PROFILE_TIP) +
-      toggle("parallelTools", "Parallel tool calls", "", Boolean(caps && caps.parallelToolCalls), false, PROFILE_TIP) +
       "</div>";
 
     html += '<div class="block"><h4>Transform module</h4>' +
@@ -1377,6 +1477,14 @@ function _run() {
   function onPaneClick(e) {
     var t;
 
+    if ((t = e.target.closest("[data-cap]"))) {
+      post("setCapability", {
+        key: t.getAttribute("data-cap"),
+        value: t.getAttribute("aria-checked") !== "true",
+      });
+      return;
+    }
+
     if ((t = e.target.closest("[data-toggle]"))) {
       var key = t.getAttribute("data-toggle");
       var next = t.getAttribute("aria-checked") !== "true";
@@ -1468,6 +1576,8 @@ function _run() {
     switch (action) {
       case "newEndpoint": post("newEndpoint"); break;
       case "health": post("healthCheck"); break;
+      case "detectCaps": S.caps = { running: true, results: [] }; render(); post("detectCapabilities"); break;
+      case "applyCaps": post("applyDetected"); break;
       case "mcpReload": post("mcpReload"); break;
       case "trace": S.tracing = true; S.rungs = []; render(); post("runTrace"); break;
       case "reloadSkills": post("reloadSkills"); setFlash("reloadSkills"); break;
@@ -1544,6 +1654,11 @@ function _run() {
           for (var k in HEALTH_BUSY) HEALTH_BUSY[k] = false;
           render();
         }, 40000);
+        break;
+
+      case "capsDetected":
+        S.caps = m;
+        render();
         break;
 
       case "healthResult":

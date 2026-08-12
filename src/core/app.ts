@@ -21,9 +21,11 @@ import {
   saveEndpointFile,
   deleteEndpointFile,
   createTemplateFile,
+  setCapabilities,
   secretKeyFor,
   PROFILE_ID_RE,
 } from "./profileFiles";
+import { detectCapabilities } from "../endpoints/detect";
 // Aliased: `App.checkEndpoint` is the message handler, this is the probe it runs.
 import { checkEndpoint as runEndpointCheck, draftProfile, listModels } from "../endpoints/check";
 import { SessionController } from "../ui/session";
@@ -921,6 +923,48 @@ export class App {
    * Probes run together, and each is bounded well under the profile timeout: a
    * health row that takes two minutes to say "slow" is not a health row.
    */
+  /**
+   * Probe the active endpoint and report what it can actually do.
+   *
+   * Results stream in as each probe finishes, because the sweep is four short
+   * completions and a model that thinks before answering can make that ten
+   * seconds - long enough that a panel showing nothing looks stuck.
+   */
+  private lastDetected?: Record<string, unknown>;
+
+  async detectCaps(): Promise<void> {
+    const profile = this.activeProfile();
+    if (!profile) {
+      this.broadcast({ type: "capsDetected", running: false, results: [], error: "Select an endpoint profile first." });
+      return;
+    }
+    this.lastDetected = undefined;
+    this.broadcast({ type: "capsDetected", running: true, results: [] });
+    try {
+      const client = this.clientFor(profile);
+      const report = await detectCapabilities(profile, client);
+      this.lastDetected = report.patch as Record<string, unknown>;
+      this.broadcast({
+        type: "capsDetected",
+        running: false,
+        results: report.results,
+        patch: report.patch as Record<string, unknown>,
+      });
+      this.log(
+        "info",
+        `${profile.name}: detected ` +
+          report.results.map((r) => `${r.name}=${r.supported ?? "?"}`).join(" ")
+      );
+    } catch (e: any) {
+      this.broadcast({
+        type: "capsDetected",
+        running: false,
+        results: [],
+        error: String(e?.message ?? e),
+      });
+    }
+  }
+
   async healthCheck(): Promise<void> {
     const ready = this.profiles.filter((p) => p.name);
     if (!ready.length) return;
@@ -1133,6 +1177,50 @@ export class App {
         const root = this.requireRoot();
         await this.mcp.restart(msg.name, root);
         this.broadcast({ type: "mcpChanged", servers: this.mcp.statuses(), warnings: this.mcp.warnings });
+        return;
+      }
+
+      case "mcpLog": {
+        // "View log" used to post `copyText` with the server's own name: it put
+        // a string on the clipboard and showed nothing. The stderr tail is the
+        // only place a failed start explains itself, and the registry has kept
+        // it all along.
+        const log = this.mcp.logTail(msg.name);
+        this.broadcast({
+          type: "mcpLog",
+          name: msg.name,
+          log: log || "The server printed nothing to stderr.",
+        });
+        return;
+      }
+
+      case "detectCapabilities": {
+        await this.detectCaps();
+        return;
+      }
+
+      case "setCapability": {
+        const profile = this.activeProfile();
+        if (!profile?.sourceFile) throw new Error("Select an endpoint profile first.");
+        setCapabilities(profile.sourceFile, { [msg.key]: msg.value });
+        this.log("info", `${profile.name}: capabilities.${msg.key} = ${msg.value}`);
+        // The watcher would pick this up on its own, but waiting for a
+        // file-system event to redraw a switch the user just clicked reads as
+        // a dropped click.
+        await this.reload("capability changed", { keepClients: false });
+        return;
+      }
+
+      case "applyDetected": {
+        const profile = this.activeProfile();
+        if (!profile?.sourceFile) throw new Error("Select an endpoint profile first.");
+        if (!this.lastDetected) throw new Error("Run detection first.");
+        setCapabilities(profile.sourceFile, this.lastDetected);
+        this.log(
+          "info",
+          `${profile.name}: applied detected capabilities (${Object.keys(this.lastDetected).join(", ")}).`
+        );
+        await this.reload("capabilities detected", { keepClients: false });
         return;
       }
 
