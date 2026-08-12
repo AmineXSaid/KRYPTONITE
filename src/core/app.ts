@@ -17,6 +17,7 @@ import { McpRegistry, mcpConfigPath } from "../mcp/registry";
 import { ShadowRepo } from "../checkpoint/shadow";
 import { DiagnosticsService, rungLabel } from "../diagnostics/service";
 import { SessionStore } from "./sessions";
+import { loadInstructions, ProjectInstructions, INSTRUCTIONS_CAP } from "./instructions";
 import {
   saveEndpointFile,
   deleteEndpointFile,
@@ -141,6 +142,8 @@ const REAL_CONFIG_KEYS = new Set([
 export class App {
   readonly output: vscode.OutputChannel;
   readonly sessions: SessionStore;
+  /** The workspace's standing instructions, when it has any. */
+  instructions?: ProjectInstructions;
   readonly diagnostics = new DiagnosticsService();
   /** MCP servers from .agent/mcp.json. Empty until the first reload. */
   readonly mcp = new McpRegistry((level, msg) => this.log(level, msg));
@@ -172,6 +175,7 @@ export class App {
   private status: vscode.StatusBarItem;
   private watcher?: vscode.FileSystemWatcher;
   private skillWatcher?: vscode.FileSystemWatcher;
+  private instructionsWatcher?: vscode.FileSystemWatcher;
   private warmTimer?: NodeJS.Timeout;
   private selectionTimer?: NodeJS.Timeout;
   private disposables: vscode.Disposable[] = [];
@@ -212,6 +216,7 @@ export class App {
     }
 
     await this.reload("activation");
+    this.reloadInstructions();
     this.installWatcher();
     this.installSelectionListener();
     this.updateStatus();
@@ -261,6 +266,8 @@ export class App {
     this.watcher = undefined;
     this.skillWatcher?.dispose();
     this.skillWatcher = undefined;
+    this.instructionsWatcher?.dispose();
+    this.instructionsWatcher = undefined;
     const root = this.root;
     if (!root) return;
     const profileDir = this.cfg().get<string>("profileDirectory", ".agent/endpoints");
@@ -279,6 +286,12 @@ export class App {
       void this.reload("watcher");
     });
     this.skillWatcher = bind(`${skillsDir}/**`, () => void this.reloadSkillsOnly("watcher"));
+    // Its own watcher rather than a glob folded into the skills one: the
+    // instructions file is not inside the skills directory, and re-reading
+    // every skill because a paragraph changed would cost a directory walk for
+    // nothing.
+    const instructionsFile = this.cfg().get<string>("instructionsFile", ".agent/instructions.md");
+    this.instructionsWatcher = bind(instructionsFile, () => this.reloadInstructions());
   }
 
   /**
@@ -296,6 +309,7 @@ export class App {
   async dispose(): Promise<void> {
     this.session.dispose();
     this.skillWatcher?.dispose();
+    this.instructionsWatcher?.dispose();
     if (this.warmTimer) clearTimeout(this.warmTimer);
     // Transcript writes are asynchronous now, so make sure the last one lands.
     await this.sessions.flush();
@@ -541,7 +555,33 @@ export class App {
    * nothing.
    */
   systemPrompt(phase: Phase = this.phase): string {
-    return systemPromptFor(this.enabledSkills(), phase);
+    return systemPromptFor(this.enabledSkills(), phase, this.instructions?.block);
+  }
+
+  /**
+   * Re-read the workspace's instructions file.
+   *
+   * Cheap enough to do on every change and on every reload: it is one small
+   * file, and the alternative is a stale rule surviving the edit that was
+   * meant to fix it. Logged only when the result changes, so a watcher firing
+   * on an unrelated save does not fill the log with the same line.
+   */
+  reloadInstructions(): void {
+    const rel = this.cfg().get<string>("instructionsFile", ".agent/instructions.md");
+    const next = loadInstructions(this.root, rel);
+    const before = this.instructions?.block;
+    this.instructions = next;
+    if (next?.block === before) return;
+    if (next) {
+      this.log(
+        "info",
+        `Instructions: ${next.path} loaded (${next.size} characters` +
+          (next.truncated ? `, truncated to ${INSTRUCTIONS_CAP}` : "") +
+          ")"
+      );
+    } else if (before) {
+      this.log("info", `Instructions: ${rel} is gone; the project prompt is back to the default.`);
+    }
   }
 
   setRunning(running: boolean): void {

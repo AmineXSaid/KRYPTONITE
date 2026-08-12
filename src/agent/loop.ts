@@ -343,6 +343,13 @@ export interface AgentRunOptions {
   userMessage: string;
   maxIterations?: number;
   signal?: AbortSignal;
+  /**
+   * The workspace's own standing instructions, already formatted.
+   *
+   * Passed in rather than read here so the cache pre-warm and the real request
+   * build the same head from the same string. This file has no filesystem.
+   */
+  instructions?: string;
   // CHANGED: added. Defaults to "act" so existing callers are unaffected.
   phase?: "plan" | "act";
   /**
@@ -378,8 +385,16 @@ export interface AgentRunOptions {
  * They have to be byte-identical: a prefix that differs by a single character
  * shares no cache entry, and a pre-warm that misses is pure cost.
  */
-export function systemPromptFor(skills: Skill[], phase: "plan" | "act"): string {
-  return [SYSTEM, skillIndex(skills), phase === "plan" ? PLAN_ADDENDUM : ""]
+export function systemPromptFor(
+  skills: Skill[],
+  phase: "plan" | "act",
+  instructions?: string
+): string {
+  // The project's instructions sit after the engine's own rules and before the
+  // phase addendum. After, because a workspace convention is a refinement of
+  // how to work rather than a replacement for it; before, because the plan
+  // addendum is the one thing in here that must have the last word.
+  return [SYSTEM, skillIndex(skills), instructions ?? "", phase === "plan" ? PLAN_ADDENDUM : ""]
     .filter(Boolean)
     .join("\n\n");
 }
@@ -389,7 +404,7 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
   const caps = client.profile.capabilities;
   // CHANGED: the plan addendum joins the system prompt in plan phase.
   const phase = opts.phase ?? "act";
-  const system = systemPromptFor(ctx.skills, phase);
+  const system = systemPromptFor(ctx.skills, phase, opts.instructions);
 
   // CHANGED: in plan phase the model is only offered the read-only tools, so a
   // write is impossible rather than merely discouraged.

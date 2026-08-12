@@ -322,6 +322,10 @@ export class SessionController {
         userMessage: text,
         signal: this.abort.signal,
         phase,
+        // Read fresh off App rather than captured at construction: the file has
+        // a watcher, and an edit made mid-conversation should reach the very
+        // next turn rather than the next window.
+        instructions: this.app.instructions?.block,
         mcpTools: this.app.mcp.toolDefs(),
         // Assistant replies and tool results land in the transcript as the loop
         // produces them, so tool calls survive into the next turn's context and
