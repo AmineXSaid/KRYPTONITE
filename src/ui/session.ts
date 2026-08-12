@@ -5,7 +5,9 @@ import type { Msg } from "../providers/client";
 import { runAgent } from "../agent/loop";
 import { isUntitled, titleFrom } from "../core/sessions";
 import type { ToolContext, TodoItem } from "../agent/tools";
-import { fetchPage } from "../browser/fetchPage";
+import { fetchPage, normaliseUrl } from "../browser/fetchPage";
+import { CdpBrowser, findBrowser, listBrowsers } from "../browser/cdp";
+import { navigate, snapshot, screenshot, click, type, scroll, goBack, renderSnapshot } from "../browser/page";
 import type { App } from "../core/app";
 import type {
   DiffDecision,
@@ -44,6 +46,15 @@ export class SessionController {
   private alwaysAllowEdits = false;
 
   private abort?: AbortController;
+  /**
+   * One browser per session, launched on first use.
+   *
+   * Launching costs a second or two, so it is not done until the model asks
+   * for it, and it is kept alive between tool calls - a browser that closed
+   * after every call would lose the login it just performed, which is the
+   * whole reason to have one.
+   */
+  private cdp?: CdpBrowser;
   private pending = new Map<string, PendingApproval>();
   private replay: ReplayableEvent[] = [];
   private turnDiffs = new Map<string, TurnDiffs>();
@@ -247,6 +258,9 @@ export class SessionController {
               client.generateImage(prompt, { size, signal: this.abort?.signal }),
           }
         : undefined,
+      // Present only when a browser is actually installed, which is what keeps
+      // the tool out of the model's list rather than offering one that fails.
+      browser: findBrowser() ? (action, a) => this.driveBrowser(action, a, root) : undefined,
       fetchUrl: async (url: string, withLinks: boolean) => {
         const page = await fetchPage(url, {
           dispatcher: (client as any).dispatcher,
@@ -530,6 +544,99 @@ export class SessionController {
   }
 
   /** Abort the run and deny everything waiting on the user. */
+  /**
+   * The model's browser, one action per call.
+   *
+   * A screenshot is written into the workspace and announced like a generated
+   * image, so it appears in the transcript. The model is told the path rather
+   * than handed the pixels: it may not have vision, and a base64 PNG in a tool
+   * result would burn the context window for something it cannot read.
+   */
+  private async driveBrowser(
+    action: string,
+    a: Record<string, unknown>,
+    root: string
+  ): Promise<string> {
+    if (action === "close") {
+      await this.cdp?.close();
+      this.cdp = undefined;
+      return "Browser closed.";
+    }
+
+    if (!this.cdp) {
+      const found = listBrowsers();
+      if (!found.length) {
+        throw new Error(
+          "No Chromium-family browser is installed. Kryptonite drives Chrome, Edge, " +
+          "Brave, Vivaldi or Chromium - whichever the machine already has - and bundles " +
+          "none of them. Install one, or set KRYPTONITE_BROWSER to its executable. " +
+          "fetch_url still works without any browser."
+        );
+      }
+      const pick = found[0];
+      this.cdp = new CdpBrowser(pick.path);
+      await this.cdp.launch({ viewport: { width: 1280, height: 800 } });
+      this.app.log(
+        "info",
+        `Browser: driving ${pick.name} (${pick.path})` +
+          (found.length > 1 ? `. Also available: ${found.slice(1).map((f) => f.name).join(", ")}.` : "")
+      );
+    }
+    const cdp = this.cdp;
+
+    switch (action) {
+      case "open": {
+        const url = normaliseUrl(String(a.url ?? ""));
+        await navigate(cdp, url);
+        return renderSnapshot(await snapshot(cdp));
+      }
+      case "read":
+        return renderSnapshot(await snapshot(cdp));
+      case "click": {
+        const ref = String(a.ref ?? "");
+        if (!ref) throw new Error("ref is required for click.");
+        await click(cdp, ref);
+        return "Clicked " + ref + ".\n\n" + renderSnapshot(await snapshot(cdp));
+      }
+      case "type": {
+        const ref = String(a.ref ?? "");
+        if (!ref) throw new Error("ref is required for type.");
+        await type(cdp, ref, String(a.text ?? ""), {
+          submit: a.submit === true,
+          clear: a.clear === true,
+        });
+        return "Typed into " + ref + ".\n\n" + renderSnapshot(await snapshot(cdp));
+      }
+      case "scroll":
+        await scroll(cdp, Number(a.dy ?? 600));
+        return renderSnapshot(await snapshot(cdp));
+      case "back":
+        await goBack(cdp);
+        return renderSnapshot(await snapshot(cdp));
+      case "screenshot": {
+        const png = await screenshot(cdp);
+        const rel = `.agent/screenshots/page-${Date.now()}.png`;
+        const abs = path.join(root, ...rel.split("/"));
+        fs.mkdirSync(path.dirname(abs), { recursive: true });
+        fs.writeFileSync(abs, png);
+        const ev: ReplayableEvent = {
+          type: "imageGenerated",
+          path: rel,
+          prompt: "Browser screenshot",
+        };
+        this.buffer(ev);
+        this.app.broadcast(ev);
+        const s = await snapshot(cdp);
+        return (
+          `Screenshot saved to ${rel} and shown to the user (${Math.round(png.length / 1024)} KB).\n` +
+          `It is of: ${s.title || s.url}`
+        );
+      }
+      default:
+        throw new Error(`Unknown browser action "${action}".`);
+    }
+  }
+
   interrupt(): void {
     this.abort?.abort();
     for (const [id, entry] of this.pending) {
@@ -659,6 +766,11 @@ export class SessionController {
     // untouched conversation would walk "Untitled" up to "Untitled 7" for
     // someone who just pressed the button a few times.
     const rotate = this.history.length > 0;
+    // The browser belongs to the conversation that opened it: carrying a
+    // logged-in session into a fresh chat would surprise anyone who pressed
+    // New chat expecting a clean slate.
+    void this.cdp?.close();
+    this.cdp = undefined;
     this.reset(rotate, rotate ? this.app.sessions.nextUntitled() : this.title);
   }
 
@@ -696,6 +808,10 @@ export class SessionController {
 
   dispose(): void {
     this.interruptQuietly();
+    // A headless Chrome outliving the window that started it is a process the
+    // user never sees and cannot find. It goes when the extension goes.
+    void this.cdp?.close();
+    this.cdp = undefined;
   }
 }
 

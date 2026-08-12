@@ -390,6 +390,75 @@ const run = (name: string, args: any) => runTool(name, args, ctx);
   ctx.image = undefined;
   ctx.onImage = undefined;
 
+  /* ── browser ─────────────────────────────────────────────────────── */
+  console.log("\n──── browser ────");
+  {
+    const r = await run("browser", { action: "read" });
+    ck(Boolean(r.isError) && /No browser is available/.test(r.content),
+      "refused when no browser is installed");
+    ck(/fetch_url/.test(r.content), "and it points at the tool that still works");
+  }
+  let acted: Array<[string, any]> = [];
+  ctx.browser = async (action: string, a: Record<string, unknown>) => {
+    acted.push([action, a]);
+    if (action === "boom") throw new Error("the browser closed");
+    return `did ${action}`;
+  };
+  {
+    // Reading what is already on screen is not a side effect. Gating it would
+    // mean an approval prompt for every glance, which trains people to click
+    // through the ones that matter.
+    approveAnswer = true;
+    approvals = [];
+    acted = [];
+    const r = await run("browser", { action: "read" });
+    ck(!r.isError && /did read/.test(r.content), "read works");
+    ck(approvals.length === 0, "and is not gated - it changes nothing");
+  }
+  for (const [action, extra] of [
+    ["open", { url: "https://example.com" }],
+    ["click", { ref: "ref_3" }],
+    ["type", { ref: "ref_4", text: "hello" }],
+  ] as Array<[string, any]>) {
+    approvals = [];
+    acted = [];
+    const r = await run("browser", { action, ...extra });
+    ck(!r.isError, `${action} works`);
+    ck(approvals.length === 1, `${action} is gated - it acts on the world`, approvals[0]);
+  }
+  {
+    // The approval has to say what is about to be typed, or it is consent to
+    // nothing in particular.
+    approvals = [];
+    await run("browser", { action: "type", ref: "ref_1", text: "my secret query" });
+    ck(/my secret query/.test(approvals[0]), "the type prompt shows the text", approvals[0]);
+  }
+  {
+    approveAnswer = false;
+    acted = [];
+    const r = await run("browser", { action: "open", url: "https://example.com" });
+    ck(Boolean(r.isError) && /declined/.test(r.content), "a declined action reports the decline");
+    ck(acted.length === 0, "and never reaches the browser");
+    approveAnswer = true;
+  }
+  {
+    const r = await run("browser", {});
+    ck(Boolean(r.isError) && /action is required/.test(r.content), "a missing action is refused");
+  }
+  {
+    const r = await run("browser", { action: "boom" });
+    ck(Boolean(r.isError) && /the browser closed/.test(r.content),
+      "a browser failure is reported rather than swallowed");
+  }
+  {
+    // Closing is not gated: it only ever reduces what is running.
+    approvals = [];
+    acted = [];
+    const r = await run("browser", { action: "close" });
+    ck(!r.isError && approvals.length === 0, "close is not gated");
+  }
+  ctx.browser = undefined;
+
   /* ── fetch_url ───────────────────────────────────────────────────── */
   console.log("\n──── fetch_url ────");
   {

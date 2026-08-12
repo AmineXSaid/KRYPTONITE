@@ -57,6 +57,11 @@ export interface ToolContext {
    * can supply a stub. Absent means no network, and the tool says so.
    */
   fetchUrl?: (url: string, withLinks: boolean) => Promise<string>;
+  /**
+   * Drive a real browser. Absent when none is installed, which is what makes
+   * the tool withhold itself rather than fail on every call.
+   */
+  browser?: (action: string, args: Record<string, unknown>) => Promise<string>;
 }
 
 export interface ToolResult {
@@ -302,6 +307,34 @@ export const TOOL_DEFS: ToolDef[] = [
         name: { type: "string", description: "Exact skill name from the Skills index." },
       },
       required: ["name"],
+    },
+  },
+  {
+    name: "browser",
+    description:
+      "Drive a real browser. Use this when a page needs JavaScript, a login, or a click " +
+      "to reveal what you need - fetch_url only reads static HTML. Always `read` before " +
+      "`click` or `type`: refs are assigned by each read and anything that navigated has " +
+      "new ones. Screenshots let you see the page; the ref list is what you act on.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: ["open", "read", "click", "type", "scroll", "screenshot", "back", "close"],
+          description:
+            "open: go to a url. read: the page text plus every clickable ref. " +
+            "click/type: act on a ref. scroll: move the viewport. screenshot: see it. " +
+            "back: previous page. close: shut the browser down when finished.",
+        },
+        url: { type: "string", description: "For open." },
+        ref: { type: "string", description: "For click and type, from the last read." },
+        text: { type: "string", description: "For type." },
+        submit: { type: "boolean", description: "For type: press Enter afterwards." },
+        clear: { type: "boolean", description: "For type: empty the field first." },
+        dy: { type: "number", description: "For scroll: pixels, negative to go up." },
+      },
+      required: ["action"],
     },
   },
   {
@@ -774,6 +807,38 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
             skill.files.map((f) => `- ${rel}/${f}`).join("\n")
           : "";
         return { content: body + cut + extras };
+      }
+
+      case "browser": {
+        if (!ctx.browser) {
+          return {
+            content:
+              "No browser is available. Kryptonite drives the Chrome or Edge already " +
+              "installed on this machine; none was found. Use fetch_url for static pages.",
+            isError: true,
+          };
+        }
+        const action = String(args?.action ?? "").trim();
+        if (!action) return { content: "action is required.", isError: true };
+
+        // Opening a page and acting on one are different risks. Reading what is
+        // already on screen is not a side effect and would be approval fatigue;
+        // navigating somewhere new, clicking, and typing all are.
+        const gated: Record<string, string | undefined> = {
+          open: `Open ${args?.url ?? ""} in the browser`,
+          click: `Click ${args?.ref ?? ""} in the browser`,
+          type: `Type into ${args?.ref ?? ""}: ${String(args?.text ?? "").slice(0, 80)}`,
+        };
+        if (gated[action]) {
+          const ok = await ctx.approve(gated[action]!, "The browser is driven by the model.");
+          if (!ok) return { content: "The user declined that browser action.", isError: true };
+        }
+
+        try {
+          return { content: await ctx.browser(action, args ?? {}) };
+        } catch (e: any) {
+          return { content: `browser ${action}: ${e?.message ?? e}`, isError: true };
+        }
       }
 
       case "fetch_url": {
