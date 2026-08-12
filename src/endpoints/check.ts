@@ -154,6 +154,7 @@ const DRAFT_CAPS: Capabilities = {
   contextWindow: 128000,
   maxOutputTokens: 4096,
   tokenCounting: "heuristic",
+  maxImageBytes: 1_500_000,
   parallelToolCalls: false,
   // A pre-save check probes reachability, not throughput. Caching is opt-in
   // per saved profile, and a warm-up write here would be charged against a

@@ -29,11 +29,25 @@ export interface ElementRef {
   disabled?: boolean;
 }
 
+/** A picture on the page, and whatever its author said it was. */
+export interface ImageRef {
+  /** alt, or title, or aria-label - whichever the author actually wrote. */
+  text: string;
+  w: number;
+  h: number;
+  /** Requested but never arrived, so it is not in the screenshot either. */
+  broken?: boolean;
+}
+
 export interface PageSnapshot {
   url: string;
   title: string;
   text: string;
   elements: ElementRef[];
+  /** Described images in view. Empty on a page that has none. */
+  images: ImageRef[];
+  /** How many in view carry no description at all. */
+  undescribed: number;
 }
 
 /**
@@ -89,12 +103,53 @@ const COLLECT = String.raw`
     });
     if (out.length >= 300) break;
   }
+  // Pictures. innerText does not include alt text, so without this a gallery
+  // of eight captioned photographs reads as an empty page - the author wrote
+  // a description of every one and none of it reaches the model.
+  const images = [];
+  let undescribed = 0;
+  for (const im of document.querySelectorAll('img')) {
+    const cs = getComputedStyle(im);
+    if (cs.visibility === 'hidden' || cs.display === 'none' || Number(cs.opacity) === 0) continue;
+
+    const alt = (im.getAttribute('alt') || '').trim();
+    // alt="" is the author saying "this one is decoration, ignore it", which
+    // is different from an image with no alt attribute at all: that one is
+    // undescribed content, and worth counting so the model knows to look.
+    if (im.hasAttribute('alt') && alt === '') continue;
+    const label = (alt || (im.getAttribute('title') || '').trim() ||
+      (im.getAttribute('aria-label') || '').trim()).replace(/\s+/g, ' ').slice(0, 160);
+
+    // A broken image collapses to the line box of its own alt text - Chrome
+    // drops the width and height it was given - so the size gate below would
+    // discard every one of them. They are worth a line anyway: a description
+    // of something that is definitively *not* in the screenshot explains a gap
+    // that the screenshot cannot.
+    if (im.complete && im.naturalWidth === 0) {
+      if (label && images.length < 40) images.push({ text: label, w: 0, h: 0, broken: true });
+      continue;
+    }
+
+    const r = im.getBoundingClientRect();
+    // Icons, spacers and tracking pixels are not what anyone means by an image.
+    if (r.width < 32 || r.height < 32) continue;
+    if (r.bottom < 0 || r.right < 0) continue;
+    if (r.top > innerHeight || r.left > innerWidth) continue;
+
+    if (!label) { undescribed++; continue; }
+    if (images.length < 40) {
+      images.push({ text: label, w: Math.round(r.width), h: Math.round(r.height) });
+    }
+  }
+
   const body = document.body ? document.body.innerText : '';
   return JSON.stringify({
     url: location.href,
     title: document.title,
     text: body.replace(/\n{3,}/g, '\n\n').slice(0, 40000),
     elements: out,
+    images: images,
+    undescribed: undescribed,
   });
 })()
 `;
@@ -138,11 +193,54 @@ export async function snapshot(cdp: CdpBrowser): Promise<PageSnapshot> {
     title: String(parsed?.title ?? ""),
     text: String(parsed?.text ?? ""),
     elements: Array.isArray(parsed?.elements) ? parsed.elements : [],
+    images: Array.isArray(parsed?.images) ? parsed.images : [],
+    undescribed: Number(parsed?.undescribed ?? 0) || 0,
   };
 }
 
-export async function screenshot(cdp: CdpBrowser): Promise<Buffer> {
-  const res = await cdp.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }, 30_000);
+export interface PageImage {
+  bytes: Buffer;
+  mediaType: "image/png" | "image/jpeg";
+}
+
+/**
+ * Above this a png is worth a second look; below it, it is already small and
+ * re-encoding could only cost sharpness. Measured, not guessed: a page of
+ * prose is a 50 KB png that jpeg makes *bigger*, while a page of photographs
+ * is a 1.2 MB png that jpeg turns into 425 KB of the same picture.
+ */
+const RECONSIDER_ABOVE = 200 * 1024;
+
+/**
+ * A screenshot small enough to send.
+ *
+ * png first, always, because most of what a model looks at is a page of text
+ * and small text is the one thing jpeg is worst at. But a photograph in png is
+ * a megabyte, and a megabyte becomes 1.4 MB of base64 in a JSON body headed
+ * for a gateway that may well have an opinion about request size. So a large
+ * png earns a second capture as jpeg, and whichever is smaller wins - the
+ * decision is made on the two files that actually exist rather than on a guess
+ * about what kind of page this is.
+ */
+export async function screenshot(cdp: CdpBrowser): Promise<PageImage> {
+  const png = await capture(cdp, { format: "png" });
+  if (png.length <= RECONSIDER_ABOVE) return { bytes: png, mediaType: "image/png" };
+
+  try {
+    const jpeg = await capture(cdp, { format: "jpeg", quality: 80 });
+    if (jpeg.length < png.length) return { bytes: jpeg, mediaType: "image/jpeg" };
+  } catch {
+    // A browser that will not encode jpeg is not a reason to lose the png.
+  }
+  return { bytes: png, mediaType: "image/png" };
+}
+
+async function capture(cdp: CdpBrowser, opts: Record<string, unknown>): Promise<Buffer> {
+  const res = await cdp.send(
+    "Page.captureScreenshot",
+    { captureBeyondViewport: false, ...opts },
+    30_000
+  );
   if (!res?.data) throw new Error("The browser returned no image.");
   return Buffer.from(String(res.data), "base64");
 }
@@ -237,6 +335,33 @@ export function renderSnapshot(s: PageSnapshot, opts: { maxText?: number } = {})
     `${s.title || "(untitled)"}\n${s.url}\n\n` +
     `Interactive elements - click or type using the ref:\n` +
     (lines.length ? lines.join("\n") : "  (none found)") +
+    imageSection(s) +
     `\n\nPage text:\n${text}`
   );
+}
+
+/**
+ * The pictures, described by whoever wrote the page.
+ *
+ * Omitted entirely when there are none, so a page of prose is not taxed a
+ * heading for something it does not have. The undescribed count earns its
+ * place by being the one line that tells a model its reading is incomplete:
+ * "6 more with no description" is the cue to take a screenshot, and without it
+ * an image-only page looks like an empty one.
+ */
+function imageSection(s: PageSnapshot): string {
+  const shown = s.images ?? [];
+  const undescribed = s.undescribed ?? 0;
+  if (!shown.length && !undescribed) return "";
+  const rows = shown.map((im) =>
+    im.broken
+      ? `  ${JSON.stringify(im.text)} (failed to load)`
+      : `  ${im.w}x${im.h} ${JSON.stringify(im.text)}`
+  );
+  if (undescribed) {
+    rows.push(
+      `  ${undescribed} more with no description - screenshot to see ${undescribed === 1 ? "it" : "them"}`
+    );
+  }
+  return `\n\nImages in view:\n${rows.join("\n")}`;
 }

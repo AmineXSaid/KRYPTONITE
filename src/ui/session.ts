@@ -4,7 +4,7 @@ import * as crypto from "node:crypto";
 import type { Msg } from "../providers/client";
 import { runAgent } from "../agent/loop";
 import { isUntitled, titleFrom } from "../core/sessions";
-import type { ToolContext, TodoItem } from "../agent/tools";
+import type { ToolContext, TodoItem, ToolImage } from "../agent/tools";
 import { fetchPage, normaliseUrl } from "../browser/fetchPage";
 import { CdpBrowser, findBrowser, listBrowsers } from "../browser/cdp";
 import { navigate, snapshot, screenshot, click, type, scroll, goBack, renderSnapshot } from "../browser/page";
@@ -260,7 +260,10 @@ export class SessionController {
         : undefined,
       // Present only when a browser is actually installed, which is what keeps
       // the tool out of the model's list rather than offering one that fails.
-      browser: findBrowser() ? (action, a) => this.driveBrowser(action, a, root) : undefined,
+      browser: findBrowser()
+        ? (action, a) =>
+            this.driveBrowser(action, a, root, profile.capabilities.vision === true)
+        : undefined,
       fetchUrl: async (url: string, withLinks: boolean) => {
         const page = await fetchPage(url, {
           dispatcher: (client as any).dispatcher,
@@ -548,15 +551,21 @@ export class SessionController {
    * The model's browser, one action per call.
    *
    * A screenshot is written into the workspace and announced like a generated
-   * image, so it appears in the transcript. The model is told the path rather
-   * than handed the pixels: it may not have vision, and a base64 PNG in a tool
-   * result would burn the context window for something it cannot read.
+   * image, so it appears in the transcript, *and* handed back as pixels so the
+   * model can actually look at it. Every other action answers in text, because
+   * the accessibility tree is what you click on and a picture cannot be.
+   *
+   * The pixels are withheld from an endpoint that does not declare vision. That
+   * is not caution: a gateway without it answers a base64 blob with a 400, so
+   * sending one would break the tool for everyone it cannot help. Those
+   * profiles get what they got before - the path, and a line saying why.
    */
   private async driveBrowser(
     action: string,
     a: Record<string, unknown>,
-    root: string
-  ): Promise<string> {
+    root: string,
+    vision: boolean
+  ): Promise<string | { text: string; images?: ToolImage[] }> {
     if (action === "close") {
       await this.cdp?.close();
       this.cdp = undefined;
@@ -614,8 +623,11 @@ export class SessionController {
         await goBack(cdp);
         return renderSnapshot(await snapshot(cdp));
       case "screenshot": {
-        const png = await screenshot(cdp);
-        const rel = `.agent/screenshots/page-${Date.now()}.png`;
+        const shot = await screenshot(cdp);
+        const png = shot.bytes;
+        const rel =
+          `.agent/screenshots/page-${Date.now()}` +
+          (shot.mediaType === "image/jpeg" ? ".jpg" : ".png");
         const abs = path.join(root, ...rel.split("/"));
         fs.mkdirSync(path.dirname(abs), { recursive: true });
         fs.writeFileSync(abs, png);
@@ -627,10 +639,20 @@ export class SessionController {
         this.buffer(ev);
         this.app.broadcast(ev);
         const s = await snapshot(cdp);
-        return (
-          `Screenshot saved to ${rel} and shown to the user (${Math.round(png.length / 1024)} KB).\n` +
-          `It is of: ${s.title || s.url}`
-        );
+        const of = `It is of: ${s.title || s.url}`;
+        const saved = `Screenshot saved to ${rel} and shown to the user (${Math.round(png.length / 1024)} KB).`;
+        if (!vision) {
+          return (
+            `${saved}\n${of}\n` +
+            `The image itself is not attached: this endpoint profile does not declare ` +
+            `vision, so you cannot be shown it. Set capabilities.vision: true in the ` +
+            `profile if the gateway supports images, or work from browser read instead.`
+          );
+        }
+        return {
+          text: `${saved}\n${of}\nThe image follows.`,
+          images: [{ mediaType: shot.mediaType, data: png.toString("base64") }],
+        };
       }
       default:
         throw new Error(`Unknown browser action "${action}".`);

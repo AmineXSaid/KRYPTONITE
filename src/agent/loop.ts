@@ -1,5 +1,6 @@
 import type { EndpointClient, Msg, ToolCall, ToolDef } from "../providers/client";
-import { TOOL_DEFS, runTool, ToolContext } from "./tools";
+import { imageDimensions } from "../providers/client";
+import { TOOL_DEFS, runTool, ToolContext, ToolResult } from "./tools";
 import { skillIndex, Skill } from "../skills/loader";
 
 export interface AgentEvent {
@@ -195,12 +196,47 @@ export function estimateTokens(text: string): number {
  */
 const tokenCache = new WeakMap<Msg, number>();
 
-function messageTokens(m: Msg): number {
+/**
+ * What an image costs a model, which is a count of pixels and not of bytes.
+ *
+ * Both major wires price an image by its dimensions - roughly width times
+ * height over 750 - so the same photograph costs the same whether it arrived
+ * as a 1.2 MB png or the 170 KB jpeg of the identical picture.
+ *
+ * Measuring the base64 instead, which is what serialising the content block
+ * does, is not a small error: one 1280x800 screenshot is about 1,400 tokens
+ * and about 570 KB of base64, so counting the characters overstates it by a
+ * factor of a hundred. On a 32k gateway that is the difference between a
+ * screenshot costing four percent of the window and appearing to cost five
+ * times the whole of it - at which point `fitToWindow` throws the entire
+ * conversation away to make room for something that already fits.
+ *
+ * Only the header is decoded. It is the first few bytes, and decoding half a
+ * megabyte of base64 to read six of them would be its own kind of waste.
+ */
+const IMAGE_TOKENS_UNKNOWN = 1_600;
+
+function imageBlockTokens(b: { mediaType: string; data: string }): number {
+  const d = imageDimensions(Buffer.from(b.data.slice(0, 4096), "base64"));
+  if (!d || !d.width || !d.height) return IMAGE_TOKENS_UNKNOWN;
+  return Math.ceil((d.width * d.height) / 750);
+}
+
+function contentTokens(content: Msg["content"]): number {
+  if (typeof content === "string") return estimateTokens(content);
+  let n = 0;
+  for (const b of content) {
+    n += b.type === "image" ? imageBlockTokens(b) : estimateTokens(b.text);
+  }
+  return n;
+}
+
+/** Exported for the tests that pin what an image is allowed to cost. */
+export function messageTokens(m: Msg): number {
   const hit = tokenCache.get(m);
   if (hit !== undefined) return hit;
-  const body = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
   const n =
-    estimateTokens(body) + (m.toolCalls ? estimateTokens(JSON.stringify(m.toolCalls)) : 0) + 8;
+    contentTokens(m.content) + (m.toolCalls ? estimateTokens(JSON.stringify(m.toolCalls)) : 0) + 8;
   tokenCache.set(m, n);
   return n;
 }
@@ -229,6 +265,75 @@ export function fitToWindow(messages: Msg[], limit: number, reserve: number): Ms
     content: "[Earlier turns were dropped to stay within the context window. Ask if you need something from them.]",
   };
   return [...head, note, ...tail];
+}
+
+/**
+ * What is said in place of a picture that had to go.
+ *
+ * Deliberately a sentence and not a silence. A model that finds an image
+ * missing without explanation will either hallucinate what was in it or repeat
+ * the work that produced it; told plainly, it can decide whether that page is
+ * still worth looking at.
+ */
+export const IMAGE_EVICTED =
+  "[An earlier image was dropped here to keep this request inside the endpoint's " +
+  "image budget. Take another screenshot if you still need to see that page.]";
+
+/**
+ * Hold the request body under the endpoint's image budget, newest first.
+ *
+ * Images are the only thing in a conversation whose weight on the wire has
+ * nothing to do with its weight in the context window: a screenshot is about
+ * 1,400 tokens and about 200 KB, so ten of them barely dent a 200k window and
+ * still add up to a two megabyte POST. `fitToWindow` is therefore no help
+ * here - by its accounting nothing is wrong - and a gateway with a body cap
+ * answers with a 413 that names nothing in particular.
+ *
+ * Oldest go first because a screenshot ages badly: the page has usually been
+ * navigated away from, and the one the model is reasoning about is the one it
+ * just took. That last one is kept whatever it weighs. A cap that could
+ * discard the picture a model asked for one step earlier would turn a size
+ * problem into a correctness problem.
+ *
+ * Returns the input untouched when everything fits, which is nearly always,
+ * and never mutates it: the transcript keeps its images so a later turn with
+ * more room can still send them.
+ */
+export function fitImages(messages: Msg[], budget: number): Msg[] {
+  // A profile is hand-written YAML spread over the defaults, so this can
+  // arrive as a string or as nothing at all. An unreadable budget means no
+  // eviction rather than total eviction: a 413 is visible and says what it
+  // is, while pictures silently going missing because of a typo is the kind
+  // of thing nobody diagnoses.
+  const cap = Number.isFinite(budget) ? Math.max(0, Number(budget)) : Number.POSITIVE_INFINITY;
+
+  let total = 0;
+  for (const m of messages) {
+    if (typeof m.content === "string") continue;
+    for (const b of m.content) if (b.type === "image") total += b.data.length;
+  }
+  if (total <= cap) return messages;
+
+  const out = messages.slice();
+  let kept = 0;
+  let newest = true;
+  for (let i = out.length - 1; i >= 0; i--) {
+    const m = out[i];
+    if (typeof m.content === "string") continue;
+    if (!m.content.some((b) => b.type === "image")) continue;
+
+    const content = m.content.map((b) => {
+      if (b.type !== "image") return b;
+      if (newest || kept + b.data.length <= cap) {
+        newest = false;
+        kept += b.data.length;
+        return b;
+      }
+      return { type: "text" as const, text: IMAGE_EVICTED };
+    });
+    out[i] = { ...m, content };
+  }
+  return out;
 }
 
 export interface AgentRunOptions {
@@ -329,7 +434,14 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
       yield { type: "steer", text: typeof steer.content === "string" ? steer.content : "" };
     }
 
-    const fitted = fitToWindow(messages, caps.contextWindow, caps.maxOutputTokens + 512);
+    // Images first, then the window. The order matters: an evicted picture
+    // becomes one short line, so trimming afterwards sees the sizes that are
+    // actually going out and throws away less history to make room.
+    const fitted = fitToWindow(
+      fitImages(messages, caps.maxImageBytes),
+      caps.contextWindow,
+      caps.maxOutputTokens + 512
+    );
     // The pre-flight number is an estimate - chars/3.6 - and it is emitted only
     // so the meter is not blank on the first turn. `exact: false` says so, and
     // the panel refuses to print an estimated figure. As soon as the endpoint
@@ -464,7 +576,7 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
           // runTool converts its own failures into results; this is belt and
           // braces so a rejection cannot escape as an unhandled one while it
           // sits in the array waiting to be awaited.
-          runTool(c.name, c.arguments, ctx).catch((e: any) => ({
+          runTool(c.name, c.arguments, ctx).catch((e: any): ToolResult => ({
             content: String(e?.message ?? e),
             isError: true,
           }))
@@ -480,10 +592,23 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
         type: "tool_end",
         tool: { name: call.name, args: call.arguments, result: result.content, isError: result.isError },
       };
+      // Text alone stays a plain string. That is not only for tidiness: it is
+      // the shape every wire has always been handed, and a tool that returns
+      // no pixels must not start producing a different request body.
+      const body = result.content.slice(0, 60_000);
       const toolMsg: Msg = {
         role: "tool",
         toolCallId: call.id,
-        content: result.content.slice(0, 60_000),
+        content: result.images?.length
+          ? [
+              { type: "text", text: body },
+              ...result.images.map((im) => ({
+                type: "image" as const,
+                mediaType: im.mediaType,
+                data: im.data,
+              })),
+            ]
+          : body,
       };
       messages.push(toolMsg);
       opts.onMessage?.(toolMsg);

@@ -52,7 +52,19 @@ function _sbRun() {
       '<circle cx="17.5" cy="8.5" r="2.4" ' + S6 + ' stroke-width="1.6"/>' +
       '<path d="M7 8v8M17.5 11v1.2a4 4 0 01-4 4H9.4" ' + S6 + ' stroke-width="1.6"/></symbol>' +
     '<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 11-2.4-5.7M20 3.5V9h-5.5" ' + S6 + ' stroke-width="1.6"/></symbol>' +
-    '<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6h6l2 3h10v10H3z" ' + S6 + ' stroke-width="1.5"/></symbol>';
+    '<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6h6l2 3h10v10H3z" ' + S6 + ' stroke-width="1.5"/></symbol>' +
+    /* Not an icon: the header's ornament, and the only decorative mark in the
+       product. A hairline rule broken by a single cut stone - the crystal's
+       geometry at a twentieth of its size, so it belongs to the mark at the
+       other end of the header without competing with it. Portrait, like the
+       crystal, and stroked rather than filled, because the house rule is that
+       the only glow in the panel lives inside the artwork itself. */
+    '<symbol id="i-facet" viewBox="0 0 10 22">' +
+      '<path d="M5 .8V7.4M5 14.6v6.6" ' + S6 + ' stroke-width=".9" stroke-linecap="round"/>' +
+      '<path d="M5 8.1 7.7 11 5 13.9 2.3 11Z" stroke="currentColor" fill="currentColor" ' +
+        'fill-opacity=".16" stroke-width=".9" stroke-linejoin="round"/>' +
+      '<path d="M2.3 11h5.4" ' + S6 + ' stroke-width=".7" stroke-opacity=".7"/>' +
+    '</symbol>';
 
   /* Ladder rung name -> the short label the design shows. */
   var RUNG_LABELS = {
@@ -775,9 +787,12 @@ function _sbRun() {
           // that used to sit above it is VS Code's view header, blanked in
           // package.json rather than competing with this.
           '<span class="kx-wordmark">Kryptonite</span><span class="sp"></span>' +
-          // Context usage belongs up here, not in the footer: it is status, not
-          // a control, and moving it up shortens the composer.
-          '<span class="kx-ctx tnum" id="ctxHead" title="Context used"></span>' +
+          // The running token count used to sit here. It was the one thing in
+          // the panel that changed on every frame, in the one strip that should
+          // hold still, and it said nothing the footer meter does not already
+          // say next to the number it fills. What is left is an ornament that
+          // separates the identity from the controls.
+          icon("i-facet", "kx-mark") +
           '<button class="icon-btn" id="newBtn" title="New chat" aria-label="New chat">' + icon("i-plus") + '</button>' +
           '<button class="icon-btn" id="histBtn" title="History" aria-label="Chat history" aria-haspopup="menu" aria-expanded="false">' + icon("i-clock") + '</button>' +
           '<button class="icon-btn" id="moreBtn" title="More" aria-label="More actions" aria-haspopup="menu" aria-expanded="false">' + icon("i-dots") + '</button>' +
@@ -2137,9 +2152,6 @@ function _sbRun() {
     // Sky while the bar is only a reading; amber and then coral once the
     // number stops being information and starts being a problem.
     $("ctxFill").setAttribute("data-level", pct >= 90 ? "full" : pct >= 75 ? "warn" : "ok");
-    // Header carries the bare number; the footer keeps the meter it fills.
-    // Same rule in the header.
-    $("ctxHead").textContent = exact && used ? fmtK(used) : "";
 
     var active = activeProfile();
     var name = active ? active.id : "No endpoint";

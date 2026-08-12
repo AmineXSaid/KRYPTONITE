@@ -748,7 +748,12 @@ function _run() {
         ["Timeout", a.timeoutMs + " ms"],
         ["Retries", String(a.retries)],
         ["Context window", a.capabilities ? String(a.capabilities.contextWindow) : "-"],
-        ["Max output", a.capabilities ? String(a.capabilities.maxOutputTokens) : "-"]
+        ["Max output", a.capabilities ? String(a.capabilities.maxOutputTokens) : "-"],
+        // Only when the endpoint can be sent pictures at all. On a text-only
+        // profile this is a budget for something that never happens.
+        ["Image budget", a.capabilities && a.capabilities.vision
+          ? Math.round((a.capabilities.maxImageBytes || 0) / 1024) + " KB per request"
+          : "-"]
       ]) + '<div style="margin-top:9px">' +
         optGroup("tokenCounting",
           [["heuristic", "heuristic"], ["api", "api"]],
@@ -906,7 +911,11 @@ function _run() {
         rows += '<div class="tr"><span></span><span class="err-line" style="grid-column:2/6">' +
           esc(sv.error) + "</span></div>";
       }
-      if (ready && sv.tools.length) {
+      // Guarded, like the sub-objects filled in on stateSync above: a server
+      // row missing its tool list is a missing chip row, but reading `.length`
+      // off it throws inside render() and takes the whole pane with it - every
+      // section, not just this one.
+      if (ready && sv.tools && sv.tools.length) {
         rows += '<div class="tr"><span></span><span style="grid-column:2/6"><span class="chips">' +
           sv.tools.map(function (t) { return '<span class="chip">' + esc(t) + "</span>"; }).join("") +
           "</span></span></div>";

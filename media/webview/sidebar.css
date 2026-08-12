@@ -76,9 +76,14 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   font-family: var(--kx-display); font-size: 12.5px; font-weight: 700;
   letter-spacing: .11em; text-transform: uppercase; color: var(--kx-fg);
 }
-.kx-ctx {
-  font-family: var(--kx-mono); font-size: 10px; flex: none;
-  color: var(--kx-fg-3);
+/* The header ornament, standing where the running token count used to.
+   Decorative and nothing else: aria-hidden, no title, no hover state, and
+   deliberately far enough down in weight that the eye passes over it on the
+   way to the buttons. The portrait box is what keeps it from reading as a
+   fourth icon button next to the three real ones. */
+.kx-mark {
+  width: 13px; height: 19px; flex: none;
+  color: var(--kx-fg-3); opacity: .5;
 }
 .icon-btn {
   width: 26px; height: 26px; display: grid; place-items: center; border-radius: 5px;

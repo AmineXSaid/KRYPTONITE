@@ -60,13 +60,37 @@ export interface ToolContext {
   /**
    * Drive a real browser. Absent when none is installed, which is what makes
    * the tool withhold itself rather than fail on every call.
+   *
+   * May answer with pixels as well as text. Whether it does is the caller's
+   * decision, not this module's: only the caller knows whether the endpoint
+   * declares vision, and a base64 PNG sent to a gateway without it is a 400
+   * rather than a degraded answer.
    */
-  browser?: (action: string, args: Record<string, unknown>) => Promise<string>;
+  browser?: (
+    action: string,
+    args: Record<string, unknown>
+  ) => Promise<string | { text: string; images?: ToolImage[] }>;
+}
+
+/** An image a tool hands back to the model. `data` is base64, no data: prefix. */
+export interface ToolImage {
+  mediaType: string;
+  data: string;
 }
 
 export interface ToolResult {
   content: string;
   isError?: boolean;
+  /**
+   * Pixels for the model, alongside `content` rather than instead of it.
+   *
+   * A tool result that carries these becomes a multi-part message on the wire.
+   * Nothing here reaches the transcript - what the *user* sees is posted
+   * separately, through `onImage`, because the two audiences want different
+   * things: the user wants the picture in the log, the model wants it in the
+   * context window, and neither should be inferred from the other.
+   */
+  images?: ToolImage[];
 }
 
 /**
@@ -315,7 +339,12 @@ export const TOOL_DEFS: ToolDef[] = [
       "Drive a real browser. Use this when a page needs JavaScript, a login, or a click " +
       "to reveal what you need - fetch_url only reads static HTML. Always `read` before " +
       "`click` or `type`: refs are assigned by each read and anything that navigated has " +
-      "new ones. Screenshots let you see the page; the ref list is what you act on.",
+      "new ones. `read` gives you the text, the refs you act on, and a line for each " +
+      "described picture in view; `screenshot` gives you the picture itself, and is the " +
+      "only way to judge what neither can carry - a chart, a diagram, a layout, an " +
+      "undescribed photograph, where something sits on the page. Read first and look when " +
+      "it leaves you guessing, rather than on every step: a screenshot stays in the " +
+      "context window for the rest of the conversation.",
     parameters: {
       type: "object",
       properties: {
@@ -835,7 +864,10 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
         }
 
         try {
-          return { content: await ctx.browser(action, args ?? {}) };
+          const out = await ctx.browser(action, args ?? {});
+          return typeof out === "string"
+            ? { content: out }
+            : { content: out.text, images: out.images };
         } catch (e: any) {
           return { content: `browser ${action}: ${e?.message ?? e}`, isError: true };
         }
