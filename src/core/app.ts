@@ -19,6 +19,14 @@ import { DiagnosticsService, rungLabel } from "../diagnostics/service";
 import { SessionStore } from "./sessions";
 import { loadInstructions, ProjectInstructions, INSTRUCTIONS_CAP } from "./instructions";
 import {
+  renderEditorContext,
+  EditorContext,
+  EMPTY_CONTEXT,
+  ActiveFile,
+  ProblemRef,
+  Severity,
+} from "./editorContext";
+import {
   saveEndpointFile,
   deleteEndpointFile,
   createTemplateFile,
@@ -176,6 +184,10 @@ export class App {
   private watcher?: vscode.FileSystemWatcher;
   private skillWatcher?: vscode.FileSystemWatcher;
   private instructionsWatcher?: vscode.FileSystemWatcher;
+  private editorTimer?: NodeJS.Timeout;
+  private editorContext: EditorContext = EMPTY_CONTEXT;
+  /** Last published render, so an unchanged screen does not re-broadcast. */
+  private editorRendered = "";
   private warmTimer?: NodeJS.Timeout;
   private selectionTimer?: NodeJS.Timeout;
   private disposables: vscode.Disposable[] = [];
@@ -219,6 +231,7 @@ export class App {
     this.reloadInstructions();
     this.installWatcher();
     this.installSelectionListener();
+    this.installEditorContextListener();
     this.updateStatus();
     this.status.show();
   }
@@ -250,6 +263,146 @@ export class App {
       endLine: editor.selection.end.line + 1,
     };
     this.broadcast({ type: "selectionChanged", selection: this.selection });
+  }
+
+  /**
+   * Watch everything that changes what is on screen.
+   *
+   * Four events rather than one because they are genuinely different: the
+   * focused editor, the split layout, the tab bar, and the compiler's opinion
+   * of the file. All four funnel into one debounced publish, because a build
+   * finishing fires diagnostics for hundreds of files at once and re-rendering
+   * the composer per file would be visible as jank.
+   */
+  private installEditorContextListener(): void {
+    const bump = () => {
+      if (this.editorTimer) clearTimeout(this.editorTimer);
+      this.editorTimer = setTimeout(() => this.publishEditorContext(), 250);
+    };
+    this.disposables.push(
+      vscode.window.onDidChangeActiveTextEditor(bump),
+      vscode.window.onDidChangeVisibleTextEditors(bump),
+      vscode.window.tabGroups?.onDidChangeTabs?.(bump) ?? new vscode.Disposable(() => {}),
+      vscode.languages.onDidChangeDiagnostics(bump),
+      // The cursor moving is part of the picture, and the selection listener
+      // is already debounced separately for a different payload.
+      vscode.window.onDidChangeTextEditorSelection(bump)
+    );
+    this.publishEditorContext();
+  }
+
+  /**
+   * Snapshot the editor, and tell the panel only when it actually changed.
+   *
+   * The equality check is on the rendered string rather than the object: it is
+   * the thing that reaches the model and the thing the indicator shows, and
+   * two snapshots that render identically are the same fact however different
+   * their line numbers.
+   */
+  private publishEditorContext(): void {
+    const next = this.snapshotEditor();
+    const rendered = renderEditorContext(next);
+    if (rendered === this.editorRendered) return;
+    this.editorContext = next;
+    this.editorRendered = rendered;
+    this.broadcast({
+      type: "editorContextChanged",
+      file: next.active?.path ?? null,
+      language: next.active?.language ?? null,
+      errors: next.problems.filter((p) => p.severity === "error").length,
+      warnings: next.problems.filter((p) => p.severity === "warning").length,
+      tabs: next.tabs.length,
+    });
+  }
+
+  /** The rendered block, for the turn that is about to go out. */
+  editorContextBlock(): string {
+    if (this.cfg().get<boolean>("editorContext", true) === false) return "";
+    // Re-snapshotted rather than served from the cache: the debounce means the
+    // stored copy can be up to 250ms stale, and the one moment it matters is
+    // the moment the user presses Enter.
+    return renderEditorContext(this.snapshotEditor());
+  }
+
+  private relative(uri: vscode.Uri): string {
+    const root = this.root;
+    if (!root || uri.scheme !== "file") return uri.path.split("/").pop() ?? uri.toString();
+    const rel = path.relative(root, uri.fsPath).split(path.sep).join("/");
+    return rel.startsWith("..") ? uri.fsPath : rel;
+  }
+
+  private snapshotEditor(): EditorContext {
+    const editor = vscode.window.activeTextEditor;
+    const active: ActiveFile | undefined =
+      editor && editor.document.uri.scheme === "file"
+        ? {
+            path: this.relative(editor.document.uri),
+            language: editor.document.languageId,
+            lines: editor.document.lineCount,
+            cursorLine: editor.selection.active.line + 1,
+            dirty: editor.document.isDirty,
+          }
+        : undefined;
+
+    const visible = (vscode.window.visibleTextEditors ?? [])
+      .filter((e) => e.document.uri.scheme === "file")
+      .map((e) => this.relative(e.document.uri));
+
+    // Tab inputs are a union - a diff, a notebook, a webview, a terminal - and
+    // only the plain text ones have a single uri worth naming. The rest are
+    // skipped rather than guessed at.
+    const tabs: string[] = [];
+    for (const group of vscode.window.tabGroups?.all ?? []) {
+      for (const tab of group.tabs) {
+        const input: any = tab.input;
+        const uri: vscode.Uri | undefined = input?.uri;
+        if (!uri || uri.scheme !== "file") continue;
+        const rel = this.relative(uri);
+        if (!tabs.includes(rel)) tabs.push(rel);
+      }
+    }
+
+    const problems: ProblemRef[] = [];
+    let errors = 0;
+    let warnings = 0;
+    const files = new Set<string>();
+    for (const [uri, diags] of vscode.languages.getDiagnostics()) {
+      if (uri.scheme !== "file" || !diags.length) continue;
+      const isActive = active !== undefined && this.relative(uri) === active.path;
+      let counted = false;
+      for (const d of diags) {
+        const severity: Severity | undefined =
+          d.severity === vscode.DiagnosticSeverity.Error
+            ? "error"
+            : d.severity === vscode.DiagnosticSeverity.Warning
+              ? "warning"
+              : undefined;
+        // Hints and information are the editor talking to itself - a spelling
+        // suggestion, a "this can be simplified". They are not problems.
+        if (!severity) continue;
+        if (isActive) {
+          problems.push({
+            line: d.range.start.line + 1,
+            col: d.range.start.character + 1,
+            severity,
+            message: d.message,
+            source: d.source || undefined,
+            code:
+              d.code === undefined || d.code === null
+                ? undefined
+                : String(typeof d.code === "object" ? (d.code as any).value : d.code),
+          });
+        } else {
+          if (severity === "error") errors++;
+          else warnings++;
+          counted = true;
+        }
+      }
+      if (counted) files.add(uri.fsPath);
+    }
+    problems.sort((a, b) => a.line - b.line || a.col - b.col);
+
+    return { active, visible, tabs, problems, workspace: { errors, warnings, files: files.size } };
   }
 
   /** Rebuilt whenever the configured directories change. */

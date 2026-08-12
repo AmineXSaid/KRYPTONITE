@@ -90,9 +90,22 @@ export const window: any = {
   showTextDocument: async () => ({ revealRange: () => {}, selection: null }),
   onDidChangeTextEditorSelection: () => new Disposable(),
   onDidChangeActiveTextEditor: () => new Disposable(),
+  onDidChangeVisibleTextEditors: () => new Disposable(),
   activeTextEditor: undefined,
+  visibleTextEditors: [],
+  // The editor-context snapshot reads all three of these. An empty editor is
+  // the state a headless run is actually in, so the stub says so rather than
+  // omitting them and making the snapshot throw.
+  tabGroups: { all: [], onDidChangeTabs: () => new Disposable() },
   registerWebviewViewProvider: () => new Disposable(),
 };
+
+export const languages: any = {
+  getDiagnostics: () => [],
+  onDidChangeDiagnostics: () => new Disposable(),
+};
+
+export const DiagnosticSeverity = { Error: 0, Warning: 1, Information: 2, Hint: 3 };
 
 export const commands: any = {
   registerCommand: (id: string) => { recorded.commands.push(id); return new Disposable(); },

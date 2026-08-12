@@ -209,7 +209,15 @@ export class SessionController {
     }
     for (const n of notes) this.app.broadcast({ type: "error", message: n });
 
-    const composed = [text, ...parts].filter(Boolean).join("\n\n");
+    // What is on screen goes last, after the user's own words and anything
+    // they attached. Order is the cheapest way to say what matters: the thing
+    // they typed is the request, and this is the room it was typed in.
+    //
+    // It rides in the user message rather than the system prompt because the
+    // system prompt is a cache key and this text changes whenever the cursor
+    // moves. At the head it would miss the cache on every turn.
+    const editorBlock = this.app.editorContextBlock();
+    const composed = [text, ...parts, editorBlock].filter(Boolean).join("\n\n");
     const attachImages = vision ? images : [];
     const userMsg: Msg =
       attachImages.length > 0

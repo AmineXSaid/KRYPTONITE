@@ -170,6 +170,8 @@ function _sbRun() {
     todos: [],
     sessions: [],
     selection: null,
+    /** Last editorContextChanged from the host; null until the first one. */
+    editor: null,
     context: null,
     models: [],
     /* local-only */
@@ -827,6 +829,13 @@ function _sbRun() {
               '<div class="sel-pill" id="selPill" hidden>' + icon("i-file", "ic-13") +
                 '<span id="selText"></span><span class="sp"></span>' +
                 '<button class="tb-btn" id="selClear" title="Dismiss selection" aria-label="Dismiss selection" style="width:18px;height:18px">' + icon("i-x", "ic-9") + '</button>' +
+              '</div>' +
+              // The automatic one, above the attachments and visibly unlike
+              // them: no dismiss button, because it is a readout of where the
+              // cursor is and cannot be dismissed - only moved away from.
+              '<div class="ed-pill" id="edPill" hidden>' + icon("i-file", "ic-11") +
+                '<span class="nm ell" id="edName"></span>' +
+                '<span class="prob" id="edProb" hidden></span>' +
               '</div>' +
               '<div class="att-strip" id="attachStrip" hidden></div>' +
               '<textarea id="draft" rows="1" aria-label="Message" placeholder="Ask Kryptonite anything…   ( / skills · @ files )"></textarea>' +
@@ -2702,6 +2711,10 @@ function _sbRun() {
     todoEl = null;
     renderTodos(S.todos);
     renderSelection();
+    // Survives a full re-render: the host pushes this on its own schedule, so
+    // a stateSync that dropped it would blank the chip until the cursor next
+    // moved, which on a still editor could be a long time.
+    renderEditorChip();
     renderTitle();
     renderFooter();
     renderTls();
@@ -2722,6 +2735,37 @@ function _sbRun() {
     if (!S.selection) { pill.hidden = true; return; }
     $("selText").textContent =
       "Selection: " + S.selection.file + " L" + S.selection.startLine + "–L" + S.selection.endLine;
+    pill.hidden = false;
+  }
+
+  /**
+   * The file the editor is on, which the model is told about automatically.
+   *
+   * Kept visibly distinct from the attachment chips below it. An attachment is
+   * something the user chose and can remove; this is a readout of where their
+   * cursor is, and offering a dismiss button on it would promise a control
+   * that does not exist. It goes quiet the moment focus leaves a real file, so
+   * the composer says nothing rather than something stale.
+   */
+  function renderEditorChip() {
+    var pill = $("edPill");
+    var e = S.editor;
+    if (!e || !e.file) { pill.hidden = true; return; }
+    var nm = $("edName");
+    nm.textContent = e.file;
+    nm.title = e.file + (e.language ? " · " + e.language : "");
+    var prob = $("edProb");
+    var n = (e.errors || 0) + (e.warnings || 0);
+    if (n) {
+      // Errors win the colour when there are both: one error matters more
+      // than nine warnings, and two numbers here would be noise.
+      prob.textContent = e.errors ? e.errors + (e.warnings ? "+" : "") : String(e.warnings);
+      prob.setAttribute("data-err", e.errors ? "1" : "0");
+      prob.title = e.errors + " error(s), " + e.warnings + " warning(s) in this file";
+      prob.hidden = false;
+    } else {
+      prob.hidden = true;
+    }
     pill.hidden = false;
   }
 
@@ -3440,6 +3484,11 @@ function _sbRun() {
       case "selectionChanged":
         S.selection = m.selection;
         renderSelection();
+        break;
+
+      case "editorContextChanged":
+        S.editor = m;
+        renderEditorChip();
         break;
 
       case "attachmentsReady":

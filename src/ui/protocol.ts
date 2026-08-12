@@ -527,6 +527,21 @@ export interface McpChangedOut {
   servers: McpServerDto[];
   warnings: string[];
 }
+/**
+ * What is on screen, for the composer's automatic indicator.
+ *
+ * Deliberately not the same payload the model gets. The model needs the
+ * problems themselves; the panel needs a chip, so it gets counts.
+ */
+export interface EditorContextChangedOut {
+  type: "editorContextChanged";
+  /** Workspace-relative, or null when no file editor is focused. */
+  file: string | null;
+  language: string | null;
+  errors: number;
+  warnings: number;
+  tabs: number;
+}
 export interface CheckpointsListedOut {
   type: "checkpointsListed";
   checkpoints: CheckpointDto[];
@@ -605,6 +620,7 @@ export type OutboundMessage =
   | TraceStartedOut | TraceUpdateOut | TraceDoneOut | TlsErrorOut
   | ProfilesReloadedOut | SkillsReloadedOut | ContextUsageOut
   | AttachmentsReadyOut | SelectionChangedOut | SessionSwitchedOut | SessionsListedOut
+  | EditorContextChangedOut
   | CheckpointsListedOut | CheckpointRestoredOut | BundleExportedOut
   | ConfigChangedOut | PhaseChangedOut | EndpointChangedOut | StatusChangedOut
   | LogLineOut | NavigateOut | FileResultsOut | CaBundlePickedOut

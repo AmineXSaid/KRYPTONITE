@@ -53,6 +53,12 @@ const vscode = {
     registerWebviewViewProvider: () => ({ dispose() {} }),
     onDidChangeTextEditorSelection: () => ({ dispose() {} }),
     onDidChangeActiveTextEditor: () => ({ dispose() {} }),
+    // The editor-context snapshot reads these three. A headless run genuinely
+    // has no editor and no tabs, so the stub answers with the empty case
+    // rather than omitting them and failing activation.
+    onDidChangeVisibleTextEditors: () => ({ dispose() {} }),
+    visibleTextEditors: [],
+    tabGroups: { all: [], onDidChangeTabs: () => ({ dispose() {} }) },
     showInformationMessage: async () => undefined,
     showErrorMessage: async () => undefined,
     showWarningMessage: async () => undefined,
@@ -64,6 +70,12 @@ const vscode = {
     registerCommand: (id, fn) => { commands.set(id, fn); return { dispose() {} }; },
     executeCommand: async () => {},
   },
+  languages: {
+    getDiagnostics: () => [],
+    onDidChangeDiagnostics: () => ({ dispose() {} }),
+  },
+  DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
+  Disposable: class { constructor(fn) { this.fn = fn || (() => {}); } dispose() { this.fn(); } },
   env: { clipboard: { writeText: async () => {} } },
 };
 

@@ -837,6 +837,20 @@ li.doing .cbx { border-color: var(--kx-accent); }
   color: var(--kx-fg-2);
   border-bottom: 1px solid var(--kx-line);
 }
+/* The automatic one. Quieter than the selection pill and quieter still than an
+   attachment chip, because nobody chose it: it reports where the cursor is,
+   and a readout that shouts competes with the message being written. */
+.ed-pill {
+  display: flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 11px;
+  color: var(--kx-fg-3);
+  border-bottom: 1px solid var(--kx-line);
+}
+.ed-pill .nm { min-width: 0; }
+.ed-pill .prob {
+  flex: none; font-family: var(--kx-mono); font-size: 10px; padding: 0 5px;
+  border-radius: 3px; background: var(--kx-surface-3); color: var(--kx-fg-2);
+}
+.ed-pill .prob[data-err="1"] { color: var(--kx-error); }
 /* The textarea must never show a scrollbar when empty. `rows=1` plus a fixed
    min-height gives the resting state; `overflow: hidden` prevents the scrollbar
    until autoGrow flips it to `auto` once the content exceeds one line. */
