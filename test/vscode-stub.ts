@@ -14,8 +14,11 @@ export const recorded = {
   error: [] as string[],
   output: [] as string[],
   commands: [] as string[],
+  executed: [] as Array<{ id: string; args: unknown[] }>,
   secrets: new Map<string, string>(),
   state: new Map<string, unknown>(),
+  /** Survives `reset()`, the way real globalState survives a window reload. */
+  global: new Map<string, unknown>(),
 };
 
 export function reset(root?: string) {
@@ -24,8 +27,11 @@ export function reset(root?: string) {
   recorded.error.length = 0;
   recorded.output.length = 0;
   recorded.commands.length = 0;
+  recorded.executed.length = 0;
   recorded.secrets.clear();
   recorded.state.clear();
+  // recorded.global is deliberately not cleared: globalState outlives a window,
+  // and clearing it here would hide every "only do this once" bug.
   (workspace as any).workspaceFolders = root
     ? [{ uri: Uri.file(root), name: "ws", index: 0 }]
     : undefined;
@@ -48,6 +54,9 @@ const cfgStore = new Map<string, unknown>([
   ["approvalMode", "ask"],
   ["caBundlePath", ""],
 ]);
+
+/** Exposed so a case can set a setting the extension reads at activation. */
+export const __cfg = cfgStore;
 
 export const workspace: any = {
   workspaceFolders: undefined,
@@ -87,7 +96,12 @@ export const window: any = {
 
 export const commands: any = {
   registerCommand: (id: string) => { recorded.commands.push(id); return new Disposable(); },
-  executeCommand: async () => undefined,
+  // Recorded rather than discarded: some behaviour is only observable as
+  // "which workbench command did it ask VS Code to run".
+  executeCommand: async (id: string, ...args: unknown[]) => {
+    recorded.executed.push({ id, args });
+    return undefined;
+  },
 };
 
 export const env: any = { clipboard: { writeText: async () => {} } };
@@ -123,9 +137,11 @@ export function makeContext(storageRoot: string, extensionPath: string) {
       get: (k: string, d?: unknown) => (recorded.state.has(k) ? recorded.state.get(k) : d),
       update: async (k: string, v: unknown) => { recorded.state.set(k, v); },
     },
+    // Really stores. A no-op globalState makes anything "do this once" look
+    // like it never remembers, which is the opposite of the behaviour.
     globalState: {
-      get: (k: string, d?: unknown) => d,
-      update: async () => {},
+      get: (k: string, d?: unknown) => (recorded.global.has(k) ? recorded.global.get(k) : d),
+      update: async (k: string, v: unknown) => { recorded.global.set(k, v); },
     },
   } as any;
 }

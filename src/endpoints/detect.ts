@@ -55,7 +55,7 @@ const PONG_TOOL = {
   },
 };
 
-/** A 1Ã—1 transparent PNG: the smallest thing that is unambiguously an image. */
+/** A one-pixel transparent PNG: the smallest thing that is unambiguously an image. */
 export const TINY_PNG =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 

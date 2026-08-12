@@ -41,6 +41,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       ControlCenterPanel.show(instance, context.extensionUri, section);
     }),
 
+    vscode.commands.registerCommand("kryptonite.moveToRight", async () => {
+      await setSidebarSide("right", context);
+    }),
+
+    vscode.commands.registerCommand("kryptonite.moveToLeft", async () => {
+      await setSidebarSide("left", context);
+    }),
+
     vscode.commands.registerCommand("kryptonite.openBrowser", (url?: string) => {
       BrowserPanel.show(instance, context.extensionUri, url);
     }),
@@ -82,6 +90,63 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   context.subscriptions.push({ dispose: () => void instance.dispose() });
+
+  // After the commands are registered, and not awaited: the window should not
+  // wait on a layout preference to finish activating.
+  void applySidebarSide(context);
+}
+
+/**
+ * Which side of the window the sidebar sits on.
+ *
+ * VS Code has no way for an extension to place its own view container on the
+ * right. A `viewsContainers.activitybar` contribution goes to the Primary Side
+ * Bar, and the only commands that move anything are the two that move that
+ * whole bar - there is no per-view equivalent. So this is honest about its
+ * scope: it moves the Primary Side Bar, taking Explorer, Search and everything
+ * else with it. That is what "sidebar on the right" means in VS Code, and it is
+ * the same thing the built-in setting does.
+ *
+ * The alternative - the Secondary Side Bar on the far right - can only be
+ * reached by dragging the container there by hand. Nothing in the API does it.
+ */
+export const SIDEBAR_STATE_KEY = "kryptonite.sidebarSideApplied";
+/** Kept equal to the manifest's default; a test asserts they have not drifted. */
+export const SIDEBAR_DEFAULT: "left" | "right" | "keep" = "right";
+
+export async function setSidebarSide(
+  side: "left" | "right",
+  context: vscode.ExtensionContext
+): Promise<void> {
+  await vscode.commands.executeCommand(
+    side === "right" ? "workbench.action.moveSideBarRight" : "workbench.action.moveSideBarLeft"
+  );
+  await context.globalState.update(SIDEBAR_STATE_KEY, side);
+}
+
+/**
+ * Apply the configured side, once per change of that setting.
+ *
+ * Deliberately not on every activation. Someone who drags the bar back should
+ * find it where they left it, and an extension that silently re-moves it on
+ * each window is one people uninstall. Recording what was last applied means
+ * this fires when the preference actually changes and stays quiet otherwise.
+ */
+export async function applySidebarSide(context: vscode.ExtensionContext): Promise<void> {
+  // The fallback matches the manifest default deliberately. VS Code returns
+  // the declared default and this argument never fires, so the two silently
+  // disagreeing would only show up somewhere the manifest is not loaded.
+  const want = vscode.workspace
+    .getConfiguration("kryptonite")
+    .get<"left" | "right" | "keep">("sidebarPosition", SIDEBAR_DEFAULT);
+  if (want === "keep") return;
+  if (context.globalState.get<string>(SIDEBAR_STATE_KEY) === want) return;
+  try {
+    await setSidebarSide(want, context);
+  } catch {
+    // An older VS Code without these commands is not a reason to fail
+    // activation; the extension works perfectly well on either side.
+  }
 }
 
 /**

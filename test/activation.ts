@@ -14,7 +14,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { activate, deactivate } from "../src/extension";
-import { recorded, reset, makeContext } from "./vscode-stub";
+import * as extension from "../src/extension";
+import { recorded, reset, makeContext, __cfg } from "./vscode-stub";
 
 let pass = 0;
 let fail = 0;
@@ -68,6 +69,8 @@ async function main() {
   const EXPECTED = [
     "kryptonite.focusSidebar",
     "kryptonite.openControlCenter",
+    "kryptonite.moveToRight",
+    "kryptonite.moveToLeft",
     "kryptonite.openBrowser",
     "kryptonite.closeBrowser",
     "kryptonite.newChat",
@@ -92,6 +95,100 @@ async function main() {
     }
     ck(declared.length === EXPECTED.length, "1.1 and the manifest declares no others",
       declared.join(", "));
+  }
+
+  /* ── house typography ──────────────────────────────────────────────
+     No em-dashes anywhere that ships. This keeps coming back because it is
+     the natural thing to type in prose, and it has to be caught here rather
+     than by re-reading every file by eye. */
+  {
+    const root = path.join(__dirname, "..");
+    const roots = [path.join(root, "src"), path.join(root, "media", "webview")];
+    const files: string[] = [path.join(root, "package.json")];
+    const walk = (dir: string) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) walk(p);
+        else if (/\.(ts|js|css|json)$/.test(e.name)) files.push(p);
+      }
+    };
+    for (const r of roots) if (fs.existsSync(r)) walk(r);
+
+    const offenders: string[] = [];
+    for (const f of files) {
+      const text = fs.readFileSync(f, "utf8");
+      const i = text.indexOf("—");
+      if (i === -1) continue;
+      const line = text.slice(0, i).split("\n").length;
+      offenders.push(`${path.relative(root, f)}:${line}`);
+    }
+    ck(offenders.length === 0, `1.1 no em-dash in ${files.length} shipped files`,
+      offenders.slice(0, 5).join(", "));
+  }
+
+  /* ── sidebar side ──────────────────────────────────────────────────
+     VS Code has no per-view "move to the right", only the pair that moves the
+     whole Primary Side Bar, so this asserts the command actually issued.
+     The once-only rule matters more than the move: an extension that re-moved
+     the bar on every window would undo a deliberate drag every morning. */
+  {
+    const { setSidebarSide, applySidebarSide, SIDEBAR_STATE_KEY } = extension;
+    const fakeCtx: any = {
+      globalState: {
+        get: (k: string, d?: unknown) => (recorded.global.has(k) ? recorded.global.get(k) : d),
+        update: async (k: string, v: unknown) => { recorded.global.set(k, v); },
+      },
+    };
+
+    recorded.executed.length = 0;
+    recorded.global.clear();
+    await setSidebarSide("right", fakeCtx);
+    ck(recorded.executed.some((e) => e.id === "workbench.action.moveSideBarRight"),
+      "1.1 moving right issues the workbench command",
+      recorded.executed.map((e) => e.id).join(", "));
+    ck(recorded.global.get(SIDEBAR_STATE_KEY) === "right", "1.1 and records what it applied");
+
+    recorded.executed.length = 0;
+    await setSidebarSide("left", fakeCtx);
+    ck(recorded.executed.some((e) => e.id === "workbench.action.moveSideBarLeft"),
+      "1.1 and moving left issues the other one");
+
+    // Already applied: activation must not touch the layout again.
+    recorded.global.set(SIDEBAR_STATE_KEY, "right");
+    recorded.executed.length = 0;
+    await applySidebarSide(fakeCtx);
+    ck(recorded.executed.length === 0,
+      "1.1 the side is applied once, so dragging it back afterwards sticks",
+      recorded.executed.map((e) => e.id).join(", "));
+
+    // Changing the preference makes it apply again.
+    __cfg.set("sidebarPosition", "right");
+    recorded.global.set(SIDEBAR_STATE_KEY, "left");
+    recorded.executed.length = 0;
+    await applySidebarSide(fakeCtx);
+    ck(recorded.executed.some((e) => e.id === "workbench.action.moveSideBarRight"),
+      "1.1 but changing the setting applies it again",
+      recorded.executed.map((e) => e.id).join(", "));
+
+    // "keep" is the escape hatch for anyone who wants their layout left alone.
+    __cfg.set("sidebarPosition", "keep");
+    recorded.global.clear();
+    recorded.executed.length = 0;
+    await applySidebarSide(fakeCtx);
+    ck(recorded.executed.length === 0, "1.1 keep never touches the layout");
+    __cfg.delete("sidebarPosition");
+
+    // The code's fallback and the manifest's default have to agree. VS Code
+    // always returns the declared default, so a drift between them would only
+    // surface somewhere the manifest is not loaded, which is the worst place
+    // to discover it.
+    const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8"));
+    ck(
+      manifest.contributes.configuration.properties["kryptonite.sidebarPosition"].default ===
+        extension.SIDEBAR_DEFAULT,
+      "1.1 the manifest default and the code fallback agree",
+      `${manifest.contributes.configuration.properties["kryptonite.sidebarPosition"].default} vs ${extension.SIDEBAR_DEFAULT}`
+    );
   }
   ck(ctx.subscriptions.length > 0, "1.1 disposables registered", String(ctx.subscriptions.length));
   await deactivate();

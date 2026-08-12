@@ -2,7 +2,7 @@
   "name": "kryptonite",
   "displayName": "KRYPTONITE",
   "description": "A coding agent for endpoints that don't behave. mTLS, corporate CAs, token exchange, air-gapped.",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "publisher": "local",
   "license": "MIT",
   "icon": "media/logo.png",
@@ -50,6 +50,14 @@
       {
         "command": "kryptonite.openControlCenter",
         "title": "KRYPTONITE: Open Control Center"
+      },
+      {
+        "command": "kryptonite.moveToRight",
+        "title": "KRYPTONITE: Move sidebar to the right"
+      },
+      {
+        "command": "kryptonite.moveToLeft",
+        "title": "KRYPTONITE: Move sidebar to the left"
       },
       {
         "command": "kryptonite.openBrowser",
@@ -111,6 +119,16 @@
           ],
           "default": "ask",
           "description": "When tools run without confirming: ask = every side effect; edits-auto = file edits auto, shell commands ask; full-auto = never ask."
+        },
+        "kryptonite.sidebarPosition": {
+          "type": "string",
+          "enum": [
+            "right",
+            "left",
+            "keep"
+          ],
+          "default": "right",
+          "markdownDescription": "Which side the Primary Side Bar sits on. VS Code has no way to move a single view container, so this moves the whole bar, so Explorer and Search come with it. Applied once when the setting changes, so dragging it back afterwards sticks. `keep` never touches your layout."
         },
         "kryptonite.caBundlePath": {
           "type": "string",

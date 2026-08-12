@@ -235,7 +235,7 @@ export function renderSnapshot(s: PageSnapshot, opts: { maxText?: number } = {})
   const text = s.text.length > cap ? s.text.slice(0, cap) + "\n… (truncated)" : s.text;
   return (
     `${s.title || "(untitled)"}\n${s.url}\n\n` +
-    `Interactive elements — click or type using the ref:\n` +
+    `Interactive elements - click or type using the ref:\n` +
     (lines.length ? lines.join("\n") : "  (none found)") +
     `\n\nPage text:\n${text}`
   );

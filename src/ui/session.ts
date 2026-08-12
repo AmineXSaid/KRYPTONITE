@@ -267,7 +267,7 @@ export class SessionController {
           signal: this.abort?.signal,
         });
         const head =
-          `${page.finalUrl} — HTTP ${page.status}` +
+          `${page.finalUrl} - HTTP ${page.status}` +
           (page.title ? `\n${page.title}` : "") +
           (page.truncated ? "\n[truncated for length]" : "");
         const links = withLinks && page.links.length
