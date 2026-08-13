@@ -1,6 +1,7 @@
 import type { EndpointClient, Msg, ToolCall, ToolDef } from "../providers/client";
 import { imageDimensions } from "../providers/client";
 import { ThinkSplitter, parseXmlToolCall } from "./reply";
+import { UNTRUSTED_RULE } from "./untrusted";
 
 /**
  * Openings worth withholding until we know what they are.
@@ -42,7 +43,9 @@ Work in small verified steps: read before you edit, edit one thing, then check t
 
 State what you are doing, briefly, as you do it. Do not narrate tool mechanics.
 
-When you are finished, say what changed and what the user should verify.`;
+When you are finished, say what changed and what the user should verify.
+
+${UNTRUSTED_RULE}`;
 
 // CHANGED: added. The tools that cannot alter the workspace. In plan phase the
 // tool set is filtered to these, so a plan is researched rather than executed.

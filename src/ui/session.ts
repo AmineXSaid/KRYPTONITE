@@ -11,6 +11,7 @@ import {
   navigate, snapshot, screenshot, click, type, scroll, goBack, goForward,
   hover, pressKey, setValue, runJs, waitFor, resize, findRefs, renderSnapshot,
 } from "../browser/page";
+import { wrapUntrusted } from "../agent/untrusted";
 import type { App } from "../core/app";
 import type {
   DiffDecision,
@@ -58,6 +59,8 @@ export class SessionController {
    * whole reason to have one.
    */
   private cdp?: CdpBrowser;
+  /** Where the last page read came from, for the untrusted-content fence. */
+  private browserUrl = "";
   private pending = new Map<string, PendingApproval>();
   private replay: ReplayableEvent[] = [];
   private turnDiffs = new Map<string, TurnDiffs>();
@@ -272,8 +275,18 @@ export class SessionController {
       // Present only when a browser is actually installed, which is what keeps
       // the tool out of the model's list rather than offering one that fails.
       browser: findBrowser()
-        ? (action, a) =>
-            this.driveBrowser(action, a, root, profile.capabilities.vision === true)
+        ? async (action, a) => {
+            const out = await this.driveBrowser(
+              action, a, root, profile.capabilities.vision === true
+            );
+            // Fenced here, at the one place every action funnels through,
+            // rather than at each of the eighteen return sites. A nineteenth
+            // action added later is covered without anyone remembering to.
+            const src = this.browserUrl || "the browser";
+            return typeof out === "string"
+              ? wrapUntrusted(out, src)
+              : { ...out, text: wrapUntrusted(out.text, src) };
+          }
         : undefined,
       fetchUrl: async (url: string, withLinks: boolean) => {
         const page = await fetchPage(url, {
@@ -290,7 +303,10 @@ export class SessionController {
         // The same 60k ceiling the other tools use, so one page cannot evict
         // the conversation on the next turn.
         const body = page.text.length > 60_000 ? page.text.slice(0, 60_000) : page.text;
-        return `${head}\n\n${body}${links}`;
+        // Somebody else wrote this. The header stays outside the fence so the
+        // model can see where it came from without having to trust the fence
+        // to tell it.
+        return `${head}\n\n${wrapUntrusted(`${body}${links}`, page.finalUrl)}`;
       },
       onImage: (abs: string, prompt: string) => {
         const rel = path.relative(root, abs).split(path.sep).join("/");
@@ -621,19 +637,28 @@ export class SessionController {
     }
     const cdp = this.cdp;
 
+    /* Every snapshot goes through here so the origin the content came from is
+       recorded alongside it. The fence names that origin, and an origin the
+       user did not expect is the clearest signal a page is hostile. */
+    const snap = async () => {
+      const s = await snapshot(cdp);
+      this.browserUrl = s.url;
+      return renderSnapshot(s);
+    };
+
     switch (action) {
       case "open": {
         const url = normaliseUrl(String(a.url ?? ""));
         await navigate(cdp, url);
-        return renderSnapshot(await snapshot(cdp));
+        return await snap();
       }
       case "read":
-        return renderSnapshot(await snapshot(cdp));
+        return await snap();
       case "click": {
         const ref = String(a.ref ?? "");
         if (!ref) throw new Error("ref is required for click.");
         await click(cdp, ref);
-        return "Clicked " + ref + ".\n\n" + renderSnapshot(await snapshot(cdp));
+        return "Clicked " + ref + ".\n\n" + await snap();
       }
       case "type": {
         const ref = String(a.ref ?? "");
@@ -642,17 +667,17 @@ export class SessionController {
           submit: a.submit === true,
           clear: a.clear === true,
         });
-        return "Typed into " + ref + ".\n\n" + renderSnapshot(await snapshot(cdp));
+        return "Typed into " + ref + ".\n\n" + await snap();
       }
       case "scroll":
         await scroll(cdp, Number(a.dy ?? 600));
-        return renderSnapshot(await snapshot(cdp));
+        return await snap();
       case "back":
         await goBack(cdp);
-        return renderSnapshot(await snapshot(cdp));
+        return await snap();
       case "forward":
         await goForward(cdp);
-        return renderSnapshot(await snapshot(cdp));
+        return await snap();
       case "find": {
         const q = String(a.text ?? "").trim();
         if (!q) throw new Error("text is required for find: it is the thing to look for.");
@@ -670,14 +695,14 @@ export class SessionController {
       }
       case "hover":
         await hover(cdp, String(a.ref ?? ""));
-        return "Hovered " + a.ref + ".\n\n" + renderSnapshot(await snapshot(cdp));
+        return "Hovered " + a.ref + ".\n\n" + await snap();
       case "set": {
         const now = await setValue(cdp, String(a.ref ?? ""), String(a.text ?? ""));
-        return `Set ${a.ref} to ${JSON.stringify(now)}.\n\n` + renderSnapshot(await snapshot(cdp));
+        return `Set ${a.ref} to ${JSON.stringify(now)}.\n\n` + await snap();
       }
       case "key":
         await pressKey(cdp, String(a.key ?? a.text ?? ""));
-        return `Pressed ${a.key ?? a.text}.\n\n` + renderSnapshot(await snapshot(cdp));
+        return `Pressed ${a.key ?? a.text}.\n\n` + await snap();
       case "eval": {
         const expr = String(a.expression ?? a.text ?? "").trim();
         if (!expr) throw new Error("expression is required for eval.");
@@ -728,7 +753,7 @@ export class SessionController {
           text: a.text ? String(a.text) : undefined,
           selector: a.selector ? String(a.selector) : undefined,
         });
-        return out + "\n\n" + renderSnapshot(await snapshot(cdp));
+        return out + "\n\n" + await snap();
       }
       case "resize": {
         const w = Number(a.width ?? 1280);
@@ -747,7 +772,7 @@ export class SessionController {
           `Viewport is now ${got.asked}x${Math.round(h)}` +
           (got.mobile ? ", emulating a phone" : "") +
           (scheme ? `, asking for the ${scheme} theme` : "") +
-          "." + note + "\n\n" + renderSnapshot(await snapshot(cdp))
+          "." + note + "\n\n" + await snap()
         );
       }
       case "screenshot": {
