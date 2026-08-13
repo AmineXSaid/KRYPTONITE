@@ -1174,6 +1174,22 @@ function _sbRun() {
     if (!aiFrame) aiFrame = requestAnimationFrame(typeStep);
   }
 
+  /**
+   * Everything streamed so far was the model thinking. Take it off screen.
+   *
+   * The bubble is removed rather than emptied. An empty bubble is a visible
+   * rectangle that then has to be filled again, and the whole point is that
+   * the user should never have seen the working in the first place - the
+   * closest we can get to that, once it has been sent, is for it to leave
+   * without a trace and the answer to arrive in a fresh one.
+   */
+  function resetAi() {
+    if (!aiEl) return;
+    if (aiFrame) { cancelAnimationFrame(aiFrame); aiFrame = null; }
+    if (aiEl.parentNode) aiEl.parentNode.removeChild(aiEl);
+    aiEl = null;
+  }
+
   /* ───────────────────────── tool cards ───────────────────────── */
 
   /**
@@ -3294,6 +3310,10 @@ function _sbRun() {
         startStream();
         appendAi(m.text);
         syncComposer();
+        break;
+
+      case "streamReset":
+        resetAi();
         break;
 
       case "toolStart":

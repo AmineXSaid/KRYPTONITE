@@ -355,6 +355,14 @@ export class SessionController {
             }
             break;
           }
+          case "text_reset": {
+            // What is on screen was thinking. Drop it from the replay buffer
+            // too, or a reload would faithfully restore the mistake.
+            planBuffer = "";
+            this.replay = this.replay.filter((e) => e.type !== "streamDelta");
+            this.app.broadcast({ type: "streamReset" });
+            break;
+          }
           case "tool_start": {
             const out: ReplayableEvent = {
               type: "toolStart",

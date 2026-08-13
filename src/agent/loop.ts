@@ -1,10 +1,34 @@
 import type { EndpointClient, Msg, ToolCall, ToolDef } from "../providers/client";
 import { imageDimensions } from "../providers/client";
+import { ThinkSplitter, parseXmlToolCall } from "./reply";
+
+/**
+ * Openings worth withholding until we know what they are.
+ *
+ * A fence or a bare object might be a tool call written as prose; so might an
+ * XML `<tool_call>` or `<function=…>`, which is what the Hermes and Qwen
+ * families emit. Once a delta has been yielded it is on screen and cannot be
+ * taken back without a visible flicker, so these are held for the few
+ * characters it takes to decide.
+ */
+const HOLD_RE = /^(```|<\/?(?:tool_call|function)\b|[^A-Za-z\s]{0,12}\{)/i;
+
+/** The same XML call, found anywhere rather than only at the start. */
+const XML_CALL_RE = /<(?:tool_call\s*>|function\s*=)/i;
 import { TOOL_DEFS, runTool, ToolContext, ToolResult } from "./tools";
 import { skillIndex, Skill } from "../skills/loader";
 
 export interface AgentEvent {
-  type: "text" | "tool_start" | "tool_end" | "turn_end" | "error" | "context" | "steer";
+  /**
+   * `text_reset` says that everything streamed so far in this turn was the
+   * model thinking out loud, and the surface showing it should drop it. It
+   * cannot be avoided by buffering: when the opening `<think>` is the prompt's
+   * prefill, nothing distinguishes reasoning from a reply until the closing
+   * tag arrives, which can be a thousand characters in.
+   */
+  type:
+    | "text" | "text_reset" | "tool_start" | "tool_end"
+    | "turn_end" | "error" | "context" | "steer";
   text?: string;
   tool?: { name: string; args: any; result?: string; isError?: boolean };
   error?: string;
@@ -472,6 +496,10 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
 
     let text = "";
     const calls: ToolCall[] = [];
+    // Thinking is filtered out of the stream rather than after it. A reasoning
+    // model's working is often longer than its answer, and rendering it and
+    // then removing it is a paragraph that appears and vanishes.
+    const think = new ThinkSplitter();
 
     /* A reply that opens with `{` or a fence might be a tool call the model
        wrote as prose. It is withheld until we know, because once a delta has
@@ -492,13 +520,25 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
       })) {
         if (opts.signal?.aborted) return;
         if (ev.type === "text") {
-          text += ev.text;
+          const split = think.push(ev.text ?? "");
+          // The opening tag was the prefill and never arrived, so what is
+          // already on screen turns out to have been thinking. Tell the panel
+          // to drop it; nothing else can, because it has already been sent.
+          if (split.reset) {
+            text = "";
+            pending = "";
+            decided = false;
+            holding = false;
+            yield { type: "text_reset" };
+          }
+          if (!split.visible) continue;
+          text += split.visible;
           if (!decided) {
-            pending += ev.text;
+            pending += split.visible;
             const t = pending.trimStart();
             // Wait for enough to judge, but never past the first newline.
             if (t.length >= 8 || t.includes("\n")) {
-              holding = /^(```|[^A-Za-z\s]{0,12}\{)/.test(t);
+              holding = HOLD_RE.test(t);
               decided = true;
               if (!holding) {
                 yield { type: "text", text: pending };
@@ -530,10 +570,22 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
       return;
     }
 
+    /* Release whatever the splitter was holding. An unterminated `<think>`
+       ends here with its contents counted as thinking, and a tag fragment held
+       back at the last chunk boundary is finally safe to emit. */
+    {
+      const tail = think.end();
+      if (tail) {
+        text += tail;
+        if (!decided || holding) pending += tail;
+        else yield { type: "text", text: tail };
+      }
+    }
+
     /* A reply short enough to end before the hold decision was made still has
        everything sitting in `pending`. Decide now, or it is dropped. */
     if (!decided && pending) {
-      holding = /^(```|[^A-Za-z\s]{0,12}\{)/.test(pending.trimStart());
+      holding = HOLD_RE.test(pending.trimStart());
       decided = true;
       if (!holding) {
         yield { type: "text", text: pending };
@@ -546,22 +598,51 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
        it and drop the JSON from the transcript entirely - the tool card that
        follows is the honest rendering of what happened. Otherwise release the
        buffered text unchanged. */
+    const known = new Set(availableTools.map((t) => t.name));
+    const adopt = (r: { name: string; arguments: any }) => {
+      calls.push({
+        id: `text_${i}_${Date.now().toString(36)}`,
+        name: r.name,
+        arguments: r.arguments,
+      });
+    };
+
     if (holding) {
+      // JSON first, because it is the stricter parser: it demands the reply be
+      // essentially nothing but the call. The XML dialects are tried after.
       const recovered = calls.length
         ? undefined
-        : parseTextToolCall(text, new Set(availableTools.map((t) => t.name)));
+        : parseTextToolCall(text, known) ?? parseXmlToolCall(text, known);
       if (recovered) {
-        calls.push({
-          id: `text_${i}_${Date.now().toString(36)}`,
-          name: recovered.name,
-          arguments: recovered.arguments,
-        });
+        adopt(recovered);
         // The assistant turn keeps no visible content: the call *was* the reply.
         text = "";
       } else if (pending) {
         yield { type: "text", text: pending };
       }
       pending = "";
+    } else if (!calls.length && XML_CALL_RE.test(text)) {
+      // The model wrote a sentence and *then* a tool call, so the hold never
+      // engaged and the markup is already on screen. Take it back: the panel
+      // clears, the prose before the call is re-sent, and the call runs.
+      const xml = parseXmlToolCall(text, known);
+      if (xml) {
+        const at = text.search(XML_CALL_RE);
+        const prose = text.slice(0, at).trimEnd();
+        yield { type: "text_reset" };
+        if (prose) yield { type: "text", text: prose };
+        text = prose;
+        adopt(xml);
+      }
+    }
+
+    /* A turn that was nothing but thinking. The endpoint's own reasoning
+       channel already has this rule in the client; a model that spends its
+       whole budget in `<think>` deserves the same treatment rather than
+       rendering as an empty bubble. */
+    if (!calls.length && !text.trim() && think.onlyThought) {
+      text = think.thinking.trim();
+      yield { type: "text", text };
     }
 
     if (!calls.length) {

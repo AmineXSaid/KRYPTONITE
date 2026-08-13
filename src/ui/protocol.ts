@@ -386,6 +386,13 @@ export type InboundType = InboundMessage["type"];
 
 export interface StateSyncOut { type: "stateSync"; state: StateSync }
 export interface StreamDeltaOut { type: "streamDelta"; text: string }
+/**
+ * Discard the assistant bubble streamed so far: it was the model thinking.
+ *
+ * Not replayable, and it prunes the replay buffer instead. A reload should
+ * restore the corrected transcript, not the mistake followed by its retraction.
+ */
+export interface StreamResetOut { type: "streamReset" }
 export interface ToolStartOut {
   type: "toolStart";
   // `args` is model-authored JSON of arbitrary shape; the UI only summarises it.
@@ -613,7 +620,7 @@ export interface EndpointCheckDoneOut {
 }
 
 export type OutboundMessage =
-  | StateSyncOut | StreamDeltaOut | ToolStartOut | ToolEndOut | TodosUpdatedOut
+  | StateSyncOut | StreamDeltaOut | StreamResetOut | ToolStartOut | ToolEndOut | TodosUpdatedOut
   | ImageGeneratedOut | CapsDetectedOut | McpLogOut
   | PlanProposedOut | PermissionRequestOut | PermissionResolvedOut
   | DiffPendingOut | DiffResolvedOut | FileTouchedOut | TurnEndOut | ErrorOut
