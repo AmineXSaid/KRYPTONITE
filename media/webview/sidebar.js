@@ -1772,6 +1772,11 @@ function _sbRun() {
     var draft = $("draft");
     var blocked = !S.workspace.open || !hasEndpoint();
     draft.disabled = blocked;
+    // The aura reads this. Kept as an attribute rather than a class so the
+    // CSS can say what it means - a composer that is streaming - instead of
+    // naming a state twice in two vocabularies.
+    var composer = draft.closest(".composer");
+    if (composer) composer.setAttribute("data-streaming", S.running ? "1" : "0");
     // syncComposer runs on every render and overwrites the placeholder set at
     // mount, so this is the string that actually shows. It said "/ commands"
     // after `/` was changed to list skills - the mount was updated and this was

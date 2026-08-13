@@ -12,8 +12,11 @@
    those variables here would not have worked anyway â€” VS Code sets them as an
    inline style on <html>, which beats any :root rule in a stylesheet.)
 
-   No glows, no text-shadows, no gradient fills. The only glow in the product
-   lives inside the crystal artwork and the thinking aura.
+   No glows, no text-shadows, no gradient fills. Three exceptions, each one
+   deliberate and each one written down where it is defined: the crystal
+   artwork, the thinking aura, and the composer's rim - which is off entirely
+   at rest and only lights while the input has focus or the model is
+   streaming.
    â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 
@@ -822,15 +825,77 @@ li.doing .cbx { border-color: var(--kx-accent); }
 .qp-empty { padding: 8px 9px; font-size: 11.5px; color: var(--kx-fg-2); }
 
 /* #4 â€” one card, one control row. */
+/* ── the composer, and its aura ───────────────────────────────────────────
+   The one animated gradient in the product, and the third exception to the
+   no-glow rule at the top of this file alongside the crystal and the thinking
+   aura. It exists because the composer is where a turn begins and ends, and a
+   rim that turns while the model is working says "still going" in the one
+   place the eye already is.
+
+   Two rules keep it from becoming decoration:
+
+   - It is never on at rest. Focus turns it on, streaming turns it on; an idle
+     composer is a flat surface with a hairline border, exactly as before.
+   - It never replaces the focus ring. The ring is a 3:1 accessibility
+     affordance; a spinning gradient is not one, and someone who has asked for
+     reduced motion would be left with no focus indicator at all. Both are
+     drawn, and the ring is on top.
+
+   The angle is a registered custom property because a plain `--angle` is an
+   unanimatable string - the browser cannot interpolate between "0deg" and
+   "360deg" without being told it is an <angle>, so the whole thing would
+   simply snap at the end of each cycle. */
+@property --kx-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
 .composer {
   background: var(--kx-surface); border-radius: 10px; overflow: hidden;
   border: 1px solid rgba(222, 220, 209, .15);
 }
-/* A 1px border tint is not a 3:1 focus indicator on its own. The ring is what
-   makes the composer's focus visible without moving anything. */
+
+/* Two background layers rather than a pseudo-element: the surface is painted
+   to the padding box and the gradient to the border box, so the gradient is
+   visible only through a border that has been made transparent. It needs no
+   extra element, no stacking context, and - the reason it was chosen - no
+   change to `overflow: hidden`, which is what keeps the pills and the toolbar
+   clipped to the composer's rounded corners. The pseudo-element version has
+   to drop that clip to avoid clipping itself, and the children lose their
+   corners with it.
+
+   The border stays 1px so nothing moves when the aura turns on. */
+.composer:focus-within,
+.composer[data-streaming="1"] {
+  border-color: transparent;
+  background:
+    linear-gradient(var(--kx-surface), var(--kx-surface)) padding-box,
+    conic-gradient(
+      from var(--kx-angle),
+      var(--kx-accent), var(--kx-link), var(--kx-under), var(--kx-accent)
+    ) border-box;
+  animation: kx-aura-spin 4.2s linear infinite;
+}
+/* Streaming is the louder of the two: the model is doing something the user is
+   waiting on, and the composer is where they are already looking. */
+.composer[data-streaming="1"] { animation-duration: 2.4s; }
+
+@keyframes kx-aura-spin { to { --kx-angle: 360deg; } }
+
+/* A 1px border tint is not a 3:1 focus indicator on its own, and neither is a
+   gradient - parts of any sweep will be low-contrast against the surface. The
+   ring is the affordance, and it is drawn whether or not the aura is, which
+   is what makes the aura safe to be decoration. */
 .composer:focus-within {
-  border-color: var(--kx-link);
   box-shadow: 0 0 0 2px var(--kx-info-wash);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Held still rather than removed. The rim still marks both states; it simply
+     stops turning, which is the part that was objected to. */
+  .composer:focus-within,
+  .composer[data-streaming="1"] { animation: none; }
 }
 .sel-pill {
   display: flex; align-items: center; gap: 7px; padding: 7px 10px; font-size: 11.5px;
