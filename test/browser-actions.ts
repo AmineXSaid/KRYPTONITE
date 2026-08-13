@@ -61,6 +61,21 @@ const PAGE = `<!doctype html><html><head><title>Actions</title></head><body>
 </script>
 </body></html>`;
 
+const ARTICLE = `<!doctype html><html><head><title>The Article</title>
+<style>.hidden{display:none}</style></head><body>
+<nav>Home About Contact Sign in Subscribe</nav>
+<main>
+  <article>
+    <h1>A headline worth reading</h1>
+    <p>First paragraph of the actual body text.</p>
+    <p>Second   paragraph    with    loose   spacing.</p>
+    <div aria-hidden="true">Decorative junk nobody should read.</div>
+  </article>
+</main>
+<footer>Copyright, terms, cookies, privacy</footer>
+<script>var noise = "script body should not appear";</script>
+</body></html>`;
+
 const SECOND = `<!doctype html><html><head><title>Second</title></head><body><h1>Second</h1></body></html>`;
 
 (async () => {
@@ -77,6 +92,7 @@ const SECOND = `<!doctype html><html><head><title>Second</title></head><body><h1
     if (u === "/api/gone") return res.writeHead(503).end("no");
     if (u === "/missing.png") return res.writeHead(404).end("no");
     if (u === "/second") return res.writeHead(200, { "content-type": "text/html" }).end(SECOND);
+    if (u === "/article") return res.writeHead(200, { "content-type": "text/html" }).end(ARTICLE);
     res.writeHead(200, { "content-type": "text/html" }).end(PAGE);
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
@@ -241,6 +257,49 @@ const SECOND = `<!doctype html><html><head><title>Second</title></head><body><h1
       ok("and nothing matches nothing", page.findRefs(s, "").length === 0);
     }
 
+
+
+    /* ── reading rather than acting ────────────────────────────────── */
+    console.log("\n──── page text ────");
+    {
+      await page.navigate(cdp, base + "/article");
+      const out = await page.pageText(cdp);
+      ok("the header names the title", /^Title: The Article$/m.test(out), out.split("\n")[0]);
+      ok("and the url", /^URL: http/m.test(out));
+      // Which container it chose is worth reporting: it is the single
+      // decision most likely to be wrong on an unfamiliar site.
+      ok("and which container it read", /^Source: <article>$/m.test(out),
+        (out.match(/^Source:.*$/m) || [""])[0]);
+      ok("the body is there", /First paragraph of the actual body text/.test(out));
+
+      // Everything that is not the article.
+      ok("navigation is dropped", !/Subscribe/.test(out));
+      ok("the footer is dropped", !/cookies, privacy/.test(out));
+      ok("script bodies are dropped", !/script body should not appear/.test(out));
+      ok("aria-hidden content is dropped", !/Decorative junk/.test(out));
+      ok("whitespace is collapsed", !/    /.test(out.split("---")[1] || ""));
+
+      // Reading must not modify the page it read.
+      const navStill = await page.runJs(cdp, "String(!!document.querySelector('nav'))");
+      ok("and the page itself is untouched", navStill === "true", navStill);
+    }
+    {
+      // No article container at all: fall back to the body rather than
+      // returning nothing.
+      await page.navigate(cdp, base + "/");
+      const out = await page.pageText(cdp);
+      ok("a page with no article still yields text", /Actions/.test(out));
+      ok("reported as the body", /^Source: <body>$/m.test(out),
+        (out.match(/^Source:.*$/m) || [""])[0]);
+    }
+    {
+      // The article, not the Actions page: that one's extracted text is
+      // shorter than the cap, so it would prove nothing.
+      await page.navigate(cdp, base + "/article");
+      const out = await page.pageText(cdp, 40);
+      ok("a long page is capped", out.length < 400, String(out.length));
+      ok("with the truncation stated, not silent", /truncated at 40 of \d+/.test(out));
+    }
 
     /* ── the page moving under the agent ───────────────────────────── */
     console.log("\n──── origin re-verification ────");

@@ -10,7 +10,7 @@ import { CdpBrowser, findBrowser, listBrowsers } from "../browser/cdp";
 import {
   navigate, snapshot, screenshot, click, type, scroll, goBack, goForward,
   hover, pressKey, setValue, runJs, waitFor, resize, findRefs, renderSnapshot,
-  assertSameOrigin,
+  assertSameOrigin, pageText,
 } from "../browser/page";
 import { wrapUntrusted } from "../agent/untrusted";
 import type { App } from "../core/app";
@@ -663,6 +663,13 @@ export class SessionController {
       }
       case "read":
         return await snap();
+      case "text": {
+        // Recorded like any other read: the fence needs an origin, and a text
+        // read is exactly the kind of untrusted content it exists for.
+        const s = await snapshot(cdp);
+        this.browserUrl = s.url;
+        return await pageText(cdp);
+      }
       case "click": {
         const ref = String(a.ref ?? "");
         if (!ref) throw new Error("ref is required for click.");

@@ -351,12 +351,15 @@ export const TOOL_DEFS: ToolDef[] = [
         action: {
           type: "string",
           enum: [
-            "open", "read", "find", "click", "hover", "type", "set", "key", "scroll",
+            "open", "read", "text", "find", "click", "hover", "type", "set", "key", "scroll",
             "screenshot", "eval", "console", "network", "wait", "resize",
             "back", "forward", "close",
           ],
           description:
-            "open: go to a url. read: page text plus every clickable ref. find: the refs " +
+            "open: go to a url. read: page text plus every clickable ref. " +
+            "text: the article, without the navigation and without refs - use it when you " +
+            "are reading rather than acting, since a long page's ref list is pure noise " +
+            "if you are not going to click anything. find: the refs " +
             "matching a query, without re-reading the whole page. click/hover/type act on " +
             "a ref. set: choose a <select> option or toggle a checkbox, which typing " +
             "cannot do. key: press Enter, Escape, Tab, an arrow - wherever focus is. " +

@@ -358,6 +358,67 @@ export async function runJs(cdp: CdpBrowser, expression: string): Promise<string
   }
 }
 
+/**
+ * The page as prose, for reading rather than acting on.
+ *
+ * `read` answers "what can I click"; this answers "what does it say". The
+ * difference matters on an article, where the accessibility tree is a hundred
+ * navigation links wrapped around the six paragraphs anyone came for, and the
+ * refs are all noise.
+ *
+ * Chooses a container rather than taking the body, because a body includes the
+ * chrome. Where several candidates match, the longest wins - a site with both
+ * a `<main>` shell and an `<article>` inside it should give up the article,
+ * and which of the two is the wrapper cannot be known from the selector alone.
+ */
+export async function pageText(cdp: CdpBrowser, maxChars = 40_000): Promise<string> {
+  const raw = await evaluate(
+    cdp,
+    String.raw`
+(() => {
+  const SEL = ['article', 'main', '[role=main]', '[class*=articleBody]',
+    '[class*=article-body]', '[class*=post-content]', '[class*=entry-content]',
+    '[class*=content-body]', '.content', '#content'];
+
+  let best = null, bestSel = 'body', bestLen = -1;
+  for (const sel of SEL) {
+    let nodes = [];
+    try { nodes = [...document.querySelectorAll(sel)]; } catch (e) { continue; }
+    for (const n of nodes) {
+      const len = (n.textContent || '').trim().length;
+      if (len > bestLen) { best = n; bestSel = sel; bestLen = len; }
+    }
+    if (best) break;
+  }
+  if (!best) { best = document.body; bestSel = 'body'; }
+
+  // Cloned so the page is not modified by being read. Stripping in place
+  // would delete the user's navigation out of their own browser.
+  const copy = best.cloneNode(true);
+  for (const el of copy.querySelectorAll(
+    'script, style, noscript, nav, footer, [aria-hidden=true], [hidden]'
+  )) el.remove();
+
+  const text = (copy.innerText || copy.textContent || '')
+    .replace(/[ \t ]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  return JSON.stringify({ title: document.title, url: location.href, sel: bestSel, text: text });
+})()`
+  );
+  const p = typeof raw === "string" ? JSON.parse(raw) : raw;
+  const text = String(p?.text ?? "");
+  const cut = text.length > maxChars;
+  return (
+    `Title: ${p?.title ?? ""}\n` +
+    `URL: ${p?.url ?? ""}\n` +
+    `Source: <${p?.sel ?? "body"}>\n` +
+    `---\n` +
+    (cut ? `${text.slice(0, maxChars)}\n… truncated at ${maxChars} of ${text.length} characters` : text)
+  );
+}
+
 /** The current address, read cheaply enough to check before every action. */
 export async function currentUrl(cdp: CdpBrowser): Promise<string> {
   try {
