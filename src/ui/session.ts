@@ -10,6 +10,7 @@ import { CdpBrowser, findBrowser, listBrowsers } from "../browser/cdp";
 import {
   navigate, snapshot, screenshot, click, type, scroll, goBack, goForward,
   hover, pressKey, setValue, runJs, waitFor, resize, findRefs, renderSnapshot,
+  assertSameOrigin,
 } from "../browser/page";
 import { wrapUntrusted } from "../agent/untrusted";
 import type { App } from "../core/app";
@@ -645,6 +646,14 @@ export class SessionController {
       this.browserUrl = s.url;
       return renderSnapshot(s);
     };
+
+    /* Refuse a mutating action if the page moved since it was read. Placed
+       here rather than inside each branch so a new mutating action cannot be
+       added without it - the list below is the exhaustive set of things that
+       change the page rather than merely look at it. */
+    if (["click", "type", "set", "key", "hover"].includes(action)) {
+      await assertSameOrigin(cdp, this.browserUrl);
+    }
 
     switch (action) {
       case "open": {

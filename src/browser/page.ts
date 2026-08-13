@@ -358,6 +358,53 @@ export async function runJs(cdp: CdpBrowser, expression: string): Promise<string
   }
 }
 
+/** The current address, read cheaply enough to check before every action. */
+export async function currentUrl(cdp: CdpBrowser): Promise<string> {
+  try {
+    return String((await evaluate(cdp, "location.href")) ?? "");
+  } catch {
+    return "";
+  }
+}
+
+/** Scheme and host, which is the unit a trust decision is actually made in. */
+export function originOf(url: string): string {
+  try {
+    const u = new URL(url);
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Refuse to act if the page moved between being read and being acted on.
+ *
+ * A ref is minted against one page. If the tab navigates before the click
+ * lands, the ref either resolves to a different element or the coordinates
+ * land on somebody else's page - and the model has no way to know, because it
+ * is reasoning about the page it was shown. That gap is a real attack: a page
+ * that redirects on a timer can have the agent click something on a site it
+ * never agreed to visit.
+ *
+ * Compared by origin rather than by full URL on purpose. A single-page app
+ * rewriting its path is not a trust change and must not be blocked; a hop to
+ * another host is, and must be.
+ */
+export async function assertSameOrigin(cdp: CdpBrowser, expected: string): Promise<void> {
+  if (!expected) return;
+  const now = await currentUrl(cdp);
+  const before = originOf(expected);
+  const after = originOf(now);
+  if (!before || !after || before === after) return;
+  throw new Error(
+    `The page navigated from ${before} to ${after} after it was read, so this ` +
+    `action was refused: the element it targets belongs to a page that is no ` +
+    `longer open. Read the page again and decide whether ${after} is somewhere ` +
+    `you meant to be.`
+  );
+}
+
 /** Move the pointer over an element without clicking, to reveal what hovers. */
 export async function hover(cdp: CdpBrowser, ref: string): Promise<void> {
   const { x, y } = await locate(cdp, ref);

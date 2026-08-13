@@ -241,6 +241,45 @@ const SECOND = `<!doctype html><html><head><title>Second</title></head><body><h1
       ok("and nothing matches nothing", page.findRefs(s, "").length === 0);
     }
 
+
+    /* ── the page moving under the agent ───────────────────────────── */
+    console.log("\n──── origin re-verification ────");
+    {
+      ok("an unparseable url yields no origin", page.originOf("not a url") === "");
+      ok("scheme and host make the origin",
+        page.originOf("https://a.test:8443/x?y#z") === "https://a.test:8443");
+      // A single-page app rewriting its path is not a trust change. Blocking
+      // that would break every real app while stopping nothing.
+      ok("a path change is the same origin",
+        page.originOf("https://a.test/one") === page.originOf("https://a.test/two"));
+      ok("a host change is not",
+        page.originOf("https://a.test/x") !== page.originOf("https://b.test/x"));
+    }
+    {
+      await page.navigate(cdp, base + "/");
+      const here = await page.currentUrl(cdp);
+      ok("the current url is readable", here.startsWith(base), here);
+      let threw = "";
+      try { await page.assertSameOrigin(cdp, here); } catch (e: any) { threw = e.message; }
+      ok("acting on the page you read is allowed", threw === "", threw);
+
+      // The real race: the ref was minted on one origin, the tab is now on
+      // another. 127.0.0.1 and localhost are different hosts to a URL parser,
+      // which is exactly the distinction being enforced.
+      const elsewhere = base.replace("127.0.0.1", "localhost");
+      try { await page.assertSameOrigin(cdp, elsewhere + "/"); } catch (e: any) { threw = e.message; }
+      ok("acting after the page moved is refused", threw !== "");
+      ok("and the refusal names both origins",
+        /localhost/.test(threw) && /127\.0\.0\.1/.test(threw), threw.slice(0, 90));
+      ok("and tells the model what to do next", /Read the page again/.test(threw));
+
+      // No recorded origin means nothing has been read yet; refusing then
+      // would block the first action of every session.
+      let none = "";
+      try { await page.assertSameOrigin(cdp, ""); } catch (e: any) { none = e.message; }
+      ok("an empty expectation does not block anything", none === "", none);
+    }
+
     /* ── the live view ─────────────────────────────────────────────── */
     console.log("\n──── screencast ────");
     {
