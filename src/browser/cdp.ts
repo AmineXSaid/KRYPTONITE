@@ -106,6 +106,30 @@ function exists(p: string): boolean {
   try { return fs.existsSync(p); } catch { return false; }
 }
 
+/**
+ * A console argument, as text.
+ *
+ * `console.log({a: 1})` arrives as a RemoteObject with no value - the object
+ * lives in the page and would need a second round trip to read. `preview` is
+ * what DevTools shows in that case, so it is what is used here; without it
+ * every logged object reads as "Object" and the line is worthless.
+ */
+function describeRemote(a: any): string {
+  if (!a) return "";
+  if (a.type === "string") return String(a.value ?? "");
+  if ("value" in a && a.value !== undefined) return String(a.value);
+  if (a.unserializableValue) return String(a.unserializableValue);
+  const p = a.preview;
+  if (p?.properties) {
+    const body = p.properties
+      .slice(0, 8)
+      .map((q: any) => `${q.name}: ${q.value}`)
+      .join(", ");
+    return p.subtype === "array" ? `[${body}]` : `{${body}}`;
+  }
+  return a.description ?? a.className ?? a.type ?? "";
+}
+
 /** The one that will be driven, or undefined when the machine has none. */
 export function findBrowser(env: NodeJS.ProcessEnv = process.env): string | undefined {
   return listBrowsers(env)[0]?.path;
@@ -118,6 +142,37 @@ interface Pending {
   method: string;
 }
 
+/** One line the page wrote to its console, or threw. */
+export interface ConsoleEntry {
+  level: "log" | "info" | "warning" | "error" | "debug";
+  text: string;
+  /** Where it came from, when the page said. */
+  source?: string;
+}
+
+/** One request the page made. */
+export interface NetEntry {
+  method: string;
+  url: string;
+  status?: number;
+  /** "document", "script", "xhr", "fetch", "image", … */
+  kind?: string;
+  /** Present instead of a status when the request never completed. */
+  failed?: string;
+  ms?: number;
+}
+
+/**
+ * How much of each is kept.
+ *
+ * A single page load can log thousands of lines and make hundreds of requests,
+ * and the point of these buffers is to answer "what went wrong just now". Old
+ * entries are dropped rather than the buffer growing without limit, because
+ * this lives in the extension host for as long as the browser is open.
+ */
+const CONSOLE_CAP = 200;
+const NET_CAP = 300;
+
 export class CdpBrowser {
   private proc?: ChildProcess;
   private ws?: WebSocket;
@@ -127,6 +182,11 @@ export class CdpBrowser {
   /** The page we drive. Every command is scoped to this session. */
   private sessionId?: string;
   private events = new Map<string, Array<(p: any) => void>>();
+  private consoleBuf: ConsoleEntry[] = [];
+  /** Keyed by requestId so a response can find the request that started it. */
+  private netBuf = new Map<string, NetEntry>();
+  private netStart = new Map<string, number>();
+  private castOn = false;
 
   readonly executable: string;
 
@@ -238,12 +298,170 @@ export class CdpBrowser {
     this.sessionId = sessionId;
     await this.send("Page.enable", {});
     await this.send("Runtime.enable", {});
+    // Log and Network are what turn this from a thing that clicks into a thing
+    // that can say why a page is broken. Both are pure listeners: enabling
+    // them costs nothing until something happens.
+    await this.send("Log.enable", {}).catch(() => {});
+    await this.send("Network.enable", {}).catch(() => {});
+    this.watchDiagnostics();
     await this.send("Emulation.setDeviceMetricsOverride", {
       width: viewport?.width ?? 1280,
       height: viewport?.height ?? 800,
       deviceScaleFactor: 1,
       mobile: false,
     });
+  }
+
+  /**
+   * Buffer what the page says and what it asks for.
+   *
+   * Console output arrives on two different domains and neither is a superset
+   * of the other: `Runtime.consoleAPICalled` is what the page's own code
+   * logged, while `Log.entryAdded` is what the browser itself reported - a
+   * blocked mixed-content request, a CSP violation, a 404 on an image. An
+   * agent debugging a page needs both, and they are merged here rather than
+   * asked for separately.
+   */
+  private watchDiagnostics(): void {
+    const pushLog = (e: ConsoleEntry) => {
+      this.consoleBuf.push(e);
+      if (this.consoleBuf.length > CONSOLE_CAP) this.consoleBuf.shift();
+    };
+
+    this.on("Runtime.consoleAPICalled", (p) => {
+      const level: ConsoleEntry["level"] =
+        p?.type === "error" ? "error"
+          : p?.type === "warning" ? "warning"
+            : p?.type === "debug" ? "debug"
+              : p?.type === "info" ? "info" : "log";
+      pushLog({ level, text: (p?.args ?? []).map(describeRemote).join(" ").slice(0, 2000) });
+    });
+
+    // An uncaught exception never reaches consoleAPICalled, and it is the one
+    // line most worth having.
+    this.on("Runtime.exceptionThrown", (p) => {
+      const d = p?.exceptionDetails;
+      const text = d?.exception?.description ?? d?.text ?? "Uncaught exception";
+      pushLog({
+        level: "error",
+        text: String(text).split("\n").slice(0, 3).join("\n").slice(0, 2000),
+        source: d?.url,
+      });
+    });
+
+    this.on("Log.entryAdded", (p) => {
+      const e = p?.entry;
+      if (!e) return;
+      const level: ConsoleEntry["level"] =
+        e.level === "error" ? "error" : e.level === "warning" ? "warning" : "info";
+      pushLog({ level, text: String(e.text ?? "").slice(0, 2000), source: e.url });
+    });
+
+    this.on("Network.requestWillBeSent", (p) => {
+      if (!p?.requestId) return;
+      this.netBuf.set(p.requestId, {
+        method: p.request?.method ?? "GET",
+        url: String(p.request?.url ?? "").slice(0, 500),
+        kind: p.type,
+      });
+      this.netStart.set(p.requestId, Date.now());
+      this.trimNet();
+    });
+    this.on("Network.responseReceived", (p) => {
+      const e = this.netBuf.get(p?.requestId);
+      if (!e) return;
+      e.status = p?.response?.status;
+      e.kind = p?.type ?? e.kind;
+      const t0 = this.netStart.get(p.requestId);
+      if (t0) e.ms = Date.now() - t0;
+    });
+    this.on("Network.loadingFailed", (p) => {
+      const e = this.netBuf.get(p?.requestId);
+      if (!e) return;
+      e.failed = String(p?.errorText ?? "failed");
+      const t0 = this.netStart.get(p.requestId);
+      if (t0) e.ms = Date.now() - t0;
+    });
+  }
+
+  private trimNet(): void {
+    while (this.netBuf.size > NET_CAP) {
+      const first = this.netBuf.keys().next().value;
+      if (first === undefined) break;
+      this.netBuf.delete(first);
+      this.netStart.delete(first);
+    }
+  }
+
+  /**
+   * Stream what the page looks like, frame by frame.
+   *
+   * The browser is headless, which is the right default - a window appearing
+   * over the editor every time the agent looks something up is worse than not
+   * seeing it. But "worse than not seeing it" is not "never seeing it", and
+   * until now there was no way to watch what the agent was doing at all.
+   *
+   * This is a screencast rather than an iframe on purpose. A frame of a real
+   * site is refused by X-Frame-Options on anything with a login, and even when
+   * it loads it is a *different* page from the one the agent is driving -
+   * different cookies, different session, different scroll position. These are
+   * the actual pixels of the actual page.
+   *
+   * Each frame must be acknowledged or the browser stops sending them, which
+   * is what makes this back-pressured rather than a firehose.
+   */
+  startScreencast(onFrame: (jpegBase64: string) => void, maxWidth = 1280): void {
+    if (this.castOn) return;
+    this.castOn = true;
+    this.on("Page.screencastFrame", (p) => {
+      if (!p?.data) return;
+      try { onFrame(p.data); } catch { /* a listener must not kill the socket */ }
+      // Acked even when the listener threw: a missing ack stops the stream.
+      if (p.sessionId !== undefined) {
+        void this.send("Page.screencastFrameAck", { sessionId: p.sessionId }).catch(() => {});
+      }
+    });
+    void this.send("Page.startScreencast", {
+      format: "jpeg",
+      // Low enough to stream, high enough to read UI text. This is a preview,
+      // not the screenshot the model reasons about - that one is still a png.
+      quality: 60,
+      maxWidth,
+      maxHeight: Math.round((maxWidth * 800) / 1280),
+      everyNthFrame: 1,
+    }).catch(() => { this.castOn = false; });
+  }
+
+  stopScreencast(): void {
+    if (!this.castOn) return;
+    this.castOn = false;
+    void this.send("Page.stopScreencast", {}).catch(() => {});
+  }
+
+  get casting(): boolean {
+    return this.castOn;
+  }
+
+  /** Everything the page has said since the last clear, oldest first. */
+  consoleLines(): ConsoleEntry[] {
+    return [...this.consoleBuf];
+  }
+
+  /** Every request since the last clear, in the order they were started. */
+  networkLines(): NetEntry[] {
+    return [...this.netBuf.values()];
+  }
+
+  /**
+   * Forget both buffers.
+   *
+   * Called on navigation: "what went wrong on this page" is the question, and
+   * carrying the previous page's 404s into it makes the answer useless.
+   */
+  clearDiagnostics(): void {
+    this.consoleBuf.length = 0;
+    this.netBuf.clear();
+    this.netStart.clear();
   }
 
   private onMessage(raw: string): void {

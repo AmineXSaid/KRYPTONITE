@@ -138,6 +138,11 @@ const REAL_CONFIG_KEYS = new Set([
   "activeProfile",
   "approvalMode",
   "caBundlePath",
+  // A real setting rather than UI state, because it changes how the browser is
+  // launched rather than how the panel draws itself, and someone who wants a
+  // visible browser wants it in every window.
+  "browserHeaded",
+  "editorContext",
 ]);
 
 /**
@@ -949,6 +954,8 @@ export class App {
       caBundlePath: this.cfg().get<string>("caBundlePath", ""),
       profileDirectory: this.cfg().get<string>("profileDirectory", ".agent/endpoints"),
       skillsDirectory: this.cfg().get<string>("skillsDirectory", ".agent/skills"),
+      browserHeaded: this.cfg().get<boolean>("browserHeaded", false),
+      editorContext: this.cfg().get<boolean>("editorContext", true),
       ui: { ...this.uiConfig },
     };
   }
@@ -1656,7 +1663,14 @@ export class App {
 
   private async setConfig(key: string, value: unknown): Promise<void> {
     if (REAL_CONFIG_KEYS.has(key)) {
-      await this.cfg().update(key, value, vscode.ConfigurationTarget.Workspace);
+      // The two booleans among them arrive from the panel as strings, because
+      // the toggle group is built from string values. Stored as written they
+      // would make `get<boolean>` return the string "false", which is truthy.
+      const stored =
+        key === "browserHeaded" || key === "editorContext"
+          ? value === true || value === "true"
+          : value;
+      await this.cfg().update(key, stored, vscode.ConfigurationTarget.Workspace);
       if (key === "profileDirectory" || key === "skillsDirectory" || key === "caBundlePath") {
         clearAuthCache();
         await this.reload(`setConfig ${key}`);

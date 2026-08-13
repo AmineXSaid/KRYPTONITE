@@ -1319,6 +1319,18 @@ function _run() {
         ], S.config.approvalMode, true) +
         '<div class="hint muted" style="font-size:11px;margin-top:6px">' +
         "ask: every side effect · edits-auto: file edits run, commands ask · full-auto: never ask</div>") +
+      /* The browser the agent drives is a real Chromium, and by default you
+         cannot see it. Headless is still right most of the time - a window
+         opening over the editor on every lookup is worse than not watching -
+         but "what is it actually doing" deserves an answer that is not a
+         settings file. */
+      card("Browser window",
+        optGroup("browserHeaded", [
+          ["false", "headless"], ["true", "window"]
+        ], S.config.browserHeaded ? "true" : "false", true) +
+        '<div class="hint muted" style="font-size:11px;margin-top:6px">' +
+        "headless: no window, screenshots only · window: a real Chromium you can watch " +
+        "and drive yourself. Applies the next time the browser starts.</div>") +
       "</div>";
 
     html += '<div class="block" style="margin-top:14px"><h4>Behaviour</h4>' +

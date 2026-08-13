@@ -7,7 +7,10 @@ import { isUntitled, titleFrom } from "../core/sessions";
 import type { ToolContext, TodoItem, ToolImage } from "../agent/tools";
 import { fetchPage, normaliseUrl } from "../browser/fetchPage";
 import { CdpBrowser, findBrowser, listBrowsers } from "../browser/cdp";
-import { navigate, snapshot, screenshot, click, type, scroll, goBack, renderSnapshot } from "../browser/page";
+import {
+  navigate, snapshot, screenshot, click, type, scroll, goBack, goForward,
+  hover, pressKey, setValue, runJs, waitFor, resize, findRefs, renderSnapshot,
+} from "../browser/page";
 import type { App } from "../core/app";
 import type {
   DiffDecision,
@@ -604,7 +607,12 @@ export class SessionController {
       }
       const pick = found[0];
       this.cdp = new CdpBrowser(pick.path);
-      await this.cdp.launch({ viewport: { width: 1280, height: 800 } });
+      // Headless is still the default - a window appearing over the editor
+      // every time the agent looks something up is worse than not seeing it.
+      // But there was previously no way to watch it at all, and "what is it
+      // actually doing" is a fair question to want answered.
+      const headed = this.app.configDto().browserHeaded;
+      await this.cdp.launch({ headed, viewport: { width: 1280, height: 800 } });
       this.app.log(
         "info",
         `Browser: driving ${pick.name} (${pick.path})` +
@@ -642,6 +650,106 @@ export class SessionController {
       case "back":
         await goBack(cdp);
         return renderSnapshot(await snapshot(cdp));
+      case "forward":
+        await goForward(cdp);
+        return renderSnapshot(await snapshot(cdp));
+      case "find": {
+        const q = String(a.text ?? "").trim();
+        if (!q) throw new Error("text is required for find: it is the thing to look for.");
+        const hits = findRefs(await snapshot(cdp), q);
+        if (!hits.length) {
+          return `Nothing on the page matches ${JSON.stringify(q)}. Read the page to see what is there.`;
+        }
+        return (
+          `${hits.length} match${hits.length === 1 ? "" : "es"} for ${JSON.stringify(q)}:\n` +
+          hits
+            .slice(0, 40)
+            .map((e) => `  [${e.ref}] ${e.role}${e.name ? " " + JSON.stringify(e.name) : ""}`)
+            .join("\n")
+        );
+      }
+      case "hover":
+        await hover(cdp, String(a.ref ?? ""));
+        return "Hovered " + a.ref + ".\n\n" + renderSnapshot(await snapshot(cdp));
+      case "set": {
+        const now = await setValue(cdp, String(a.ref ?? ""), String(a.text ?? ""));
+        return `Set ${a.ref} to ${JSON.stringify(now)}.\n\n` + renderSnapshot(await snapshot(cdp));
+      }
+      case "key":
+        await pressKey(cdp, String(a.key ?? a.text ?? ""));
+        return `Pressed ${a.key ?? a.text}.\n\n` + renderSnapshot(await snapshot(cdp));
+      case "eval": {
+        const expr = String(a.expression ?? a.text ?? "").trim();
+        if (!expr) throw new Error("expression is required for eval.");
+        const out = await runJs(cdp, expr);
+        return out.length > 20_000 ? out.slice(0, 20_000) + "\n… (truncated)" : out;
+      }
+      case "console": {
+        const all = cdp.consoleLines();
+        const lines = a.errorsOnly ? all.filter((l) => l.level === "error") : all;
+        if (!lines.length) {
+          return a.errorsOnly
+            ? "The page has logged no errors."
+            : "The page has logged nothing since it loaded.";
+        }
+        return (
+          `${lines.length} console line${lines.length === 1 ? "" : "s"}:\n` +
+          lines
+            .slice(-80)
+            .map((l) => `  [${l.level}] ${l.text}${l.source ? `  (${l.source})` : ""}`)
+            .join("\n")
+        );
+      }
+      case "network": {
+        const all = cdp.networkLines();
+        const rows = a.errorsOnly
+          ? all.filter((r) => r.failed || (r.status ?? 0) >= 400)
+          : all;
+        if (!rows.length) {
+          return a.errorsOnly ? "Every request succeeded." : "The page has made no requests.";
+        }
+        return (
+          `${rows.length} request${rows.length === 1 ? "" : "s"}` +
+          (a.errorsOnly ? " that failed" : "") + ":\n" +
+          rows
+            .slice(-60)
+            .map(
+              (r) =>
+                `  ${r.failed ? "ERR" : String(r.status ?? "…").padStart(3)} ` +
+                `${r.method} ${r.url}` +
+                `${r.kind ? ` [${r.kind}]` : ""}${r.ms !== undefined ? ` ${r.ms}ms` : ""}` +
+                `${r.failed ? ` - ${r.failed}` : ""}`
+            )
+            .join("\n")
+        );
+      }
+      case "wait": {
+        const out = await waitFor(cdp, {
+          text: a.text ? String(a.text) : undefined,
+          selector: a.selector ? String(a.selector) : undefined,
+        });
+        return out + "\n\n" + renderSnapshot(await snapshot(cdp));
+      }
+      case "resize": {
+        const w = Number(a.width ?? 1280);
+        const h = Number(a.height ?? 800);
+        const scheme = a.scheme === "dark" || a.scheme === "light" ? a.scheme : undefined;
+        const got = await resize(cdp, w, h, scheme);
+        // The mismatch is a finding about the page, not a failure of the call,
+        // and stating it is what stops it being read as one.
+        const note =
+          got.actual !== got.asked
+            ? ` The page laid out at ${got.actual}px rather than ${got.asked}: it has no` +
+              ` <meta name="viewport">, so it falls back to a ${got.actual}px layout the way` +
+              ` a real phone does. That is a responsive-design bug on the page.`
+            : "";
+        return (
+          `Viewport is now ${got.asked}x${Math.round(h)}` +
+          (got.mobile ? ", emulating a phone" : "") +
+          (scheme ? `, asking for the ${scheme} theme` : "") +
+          "." + note + "\n\n" + renderSnapshot(await snapshot(cdp))
+        );
+      }
       case "screenshot": {
         const shot = await screenshot(cdp);
         const png = shot.bytes;

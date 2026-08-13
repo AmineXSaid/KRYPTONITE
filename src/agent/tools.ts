@@ -350,18 +350,39 @@ export const TOOL_DEFS: ToolDef[] = [
       properties: {
         action: {
           type: "string",
-          enum: ["open", "read", "click", "type", "scroll", "screenshot", "back", "close"],
+          enum: [
+            "open", "read", "find", "click", "hover", "type", "set", "key", "scroll",
+            "screenshot", "eval", "console", "network", "wait", "resize",
+            "back", "forward", "close",
+          ],
           description:
-            "open: go to a url. read: the page text plus every clickable ref. " +
-            "click/type: act on a ref. scroll: move the viewport. screenshot: see it. " +
-            "back: previous page. close: shut the browser down when finished.",
+            "open: go to a url. read: page text plus every clickable ref. find: the refs " +
+            "matching a query, without re-reading the whole page. click/hover/type act on " +
+            "a ref. set: choose a <select> option or toggle a checkbox, which typing " +
+            "cannot do. key: press Enter, Escape, Tab, an arrow - wherever focus is. " +
+            "scroll: move the viewport. screenshot: see it. eval: run JavaScript and get " +
+            "the value back. console: what the page logged and threw. network: the " +
+            "requests it made, with statuses. wait: block until text or a selector " +
+            "appears, or the network goes quiet. resize: change the viewport, and " +
+            "optionally ask for the dark theme. back/forward: history. close when done.",
         },
         url: { type: "string", description: "For open." },
-        ref: { type: "string", description: "For click and type, from the last read." },
-        text: { type: "string", description: "For type." },
+        ref: { type: "string", description: "For click, hover, type and set, from the last read." },
+        text: { type: "string", description: "For type, set (the value), find (the query), and wait." },
         submit: { type: "boolean", description: "For type: press Enter afterwards." },
         clear: { type: "boolean", description: "For type: empty the field first." },
         dy: { type: "number", description: "For scroll: pixels, negative to go up." },
+        key: { type: "string", description: "For key: enter, escape, tab, arrowdown, …" },
+        expression: { type: "string", description: "For eval: JavaScript evaluated in the page." },
+        selector: { type: "string", description: "For wait: a CSS selector to wait for." },
+        errorsOnly: { type: "boolean", description: "For console and network: only failures." },
+        width: { type: "number", description: "For resize." },
+        height: { type: "number", description: "For resize." },
+        scheme: {
+          type: "string",
+          enum: ["light", "dark"],
+          description: "For resize: which colour scheme to claim.",
+        },
       },
       required: ["action"],
     },
@@ -857,6 +878,14 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
           open: `Open ${args?.url ?? ""} in the browser`,
           click: `Click ${args?.ref ?? ""} in the browser`,
           type: `Type into ${args?.ref ?? ""}: ${String(args?.text ?? "").slice(0, 80)}`,
+          // Setting a control and pressing a key are side effects on the page
+          // in exactly the way clicking is; reading is not, and hovering only
+          // reveals what a mouse passing over would.
+          set: `Set ${args?.ref ?? ""} to: ${String(args?.text ?? "").slice(0, 80)}`,
+          key: `Press ${String(args?.key ?? "")} in the browser`,
+          // Arbitrary script in the page can do anything a click can and more,
+          // so it is gated even though it is often only a read.
+          eval: `Run JavaScript in the page: ${String(args?.expression ?? "").slice(0, 120)}`,
         };
         if (gated[action]) {
           const ok = await ctx.approve(gated[action]!, "The browser is driven by the model.");

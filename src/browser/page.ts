@@ -177,6 +177,8 @@ export async function navigate(cdp: CdpBrowser, url: string, timeoutMs = 30_000)
     cdp.on("Page.domContentEventFired", off);
     setTimeout(off, timeoutMs);
   });
+  // The previous page's console and requests are not evidence about this one.
+  cdp.clearDiagnostics();
   const res = await cdp.send("Page.navigate", { url }, timeoutMs);
   if (res.errorText) throw new Error(`${url}: ${res.errorText}`);
   await done;
@@ -318,6 +320,241 @@ export async function scroll(cdp: CdpBrowser, dy: number): Promise<void> {
 export async function goBack(cdp: CdpBrowser): Promise<void> {
   await evaluate(cdp, "history.back(); true");
   await new Promise((r) => setTimeout(r, 600));
+}
+
+export async function goForward(cdp: CdpBrowser): Promise<void> {
+  await evaluate(cdp, "history.forward(); true");
+  await new Promise((r) => setTimeout(r, 600));
+}
+
+/**
+ * Run an expression in the page and bring the answer back.
+ *
+ * The escape hatch for everything the structured actions do not cover: reading
+ * a computed style, checking a global, counting matches. `returnByValue` means
+ * the result has to survive being serialised, so a DOM node comes back as an
+ * empty object - callers are expected to return a string or a number.
+ */
+export async function runJs(cdp: CdpBrowser, expression: string): Promise<string> {
+  // Wrapped so a bare expression and a statement both work: a model writing
+  // `document.title` and one writing `return document.title` both mean the
+  // same thing, and refusing one of them is a papercut with no upside.
+  const wrapped = /\breturn\b/.test(expression)
+    ? `(() => { ${expression} })()`
+    : `(${expression})`;
+  let value: unknown;
+  try {
+    value = await evaluate(cdp, wrapped);
+  } catch {
+    // Fall back to running it as statements, for input that is neither.
+    value = await evaluate(cdp, `(() => { ${expression} })()`);
+  }
+  if (value === undefined) return "undefined";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 1) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+/** Move the pointer over an element without clicking, to reveal what hovers. */
+export async function hover(cdp: CdpBrowser, ref: string): Promise<void> {
+  const { x, y } = await locate(cdp, ref);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "none", buttons: 0 });
+  await new Promise((r) => setTimeout(r, 250));
+}
+
+/** Named keys the model is likely to ask for, and what CDP wants for them. */
+const KEYS: Record<string, { code: string; key: string; vk: number; text?: string }> = {
+  enter: { code: "Enter", key: "Enter", vk: 13, text: "\r" },
+  tab: { code: "Tab", key: "Tab", vk: 9, text: "\t" },
+  escape: { code: "Escape", key: "Escape", vk: 27 },
+  backspace: { code: "Backspace", key: "Backspace", vk: 8 },
+  delete: { code: "Delete", key: "Delete", vk: 46 },
+  arrowup: { code: "ArrowUp", key: "ArrowUp", vk: 38 },
+  arrowdown: { code: "ArrowDown", key: "ArrowDown", vk: 40 },
+  arrowleft: { code: "ArrowLeft", key: "ArrowLeft", vk: 37 },
+  arrowright: { code: "ArrowRight", key: "ArrowRight", vk: 39 },
+  pageup: { code: "PageUp", key: "PageUp", vk: 33 },
+  pagedown: { code: "PageDown", key: "PageDown", vk: 34 },
+  home: { code: "Home", key: "Home", vk: 36 },
+  end: { code: "End", key: "End", vk: 35 },
+};
+
+/**
+ * Press a key at the page, wherever focus happens to be.
+ *
+ * Distinct from `type`, which targets a ref and inserts text. Escape closes a
+ * dialog, Tab moves focus, ArrowDown walks a combobox - none of which is text
+ * going into a field, and none of which `Input.insertText` can express.
+ */
+export async function pressKey(cdp: CdpBrowser, name: string): Promise<void> {
+  const k = KEYS[name.trim().toLowerCase()];
+  if (!k) {
+    throw new Error(
+      `Unknown key "${name}". Known: ${Object.keys(KEYS).join(", ")}. ` +
+      `Use type for ordinary text.`
+    );
+  }
+  for (const type of ["keyDown", "keyUp"] as const) {
+    await cdp.send("Input.dispatchKeyEvent", {
+      type,
+      key: k.key,
+      code: k.code,
+      windowsVirtualKeyCode: k.vk,
+      nativeVirtualKeyCode: k.vk,
+      text: type === "keyDown" ? k.text : undefined,
+    });
+  }
+  await new Promise((r) => setTimeout(r, 250));
+}
+
+/**
+ * Set a form control that typing cannot reach.
+ *
+ * A `<select>` ignores keystrokes, and a checkbox has no text to insert. Both
+ * are set through the DOM and told to announce it: a framework listening for
+ * `change` never hears a property assignment on its own, so the page would
+ * look right and behave as though nothing had happened.
+ */
+export async function setValue(cdp: CdpBrowser, ref: string, value: string): Promise<string> {
+  const out = await evaluate(
+    cdp,
+    `(() => {
+      const el = document.querySelector('[data-kx-ref=${JSON.stringify(ref)}]');
+      if (!el) return "missing";
+      const tag = el.tagName.toLowerCase();
+      const v = ${JSON.stringify(value)};
+      if (tag === 'select') {
+        const opts = [...el.options];
+        const hit = opts.find(o => o.value === v) || opts.find(o => o.text.trim() === v) ||
+          opts.find(o => o.text.toLowerCase().includes(v.toLowerCase()));
+        if (!hit) return "nooption:" + opts.map(o => o.text.trim()).slice(0, 20).join(" | ");
+        el.value = hit.value;
+      } else if (el.type === 'checkbox' || el.type === 'radio') {
+        el.checked = !(v === 'false' || v === '0' || v === 'off' || v === 'unchecked');
+      } else {
+        el.value = v;
+      }
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return "ok:" + (el.type === 'checkbox' || el.type === 'radio' ? String(el.checked) : el.value);
+    })()`
+  );
+  const s = String(out ?? "");
+  if (s === "missing") {
+    throw new Error(
+      `${ref} is no longer on the page. Read the page again - refs are assigned per read.`
+    );
+  }
+  if (s.startsWith("nooption:")) {
+    throw new Error(`No option matching "${value}". The options are: ${s.slice(9)}`);
+  }
+  return s.slice(3);
+}
+
+/**
+ * Wait for the page to say something, rather than for a fixed delay.
+ *
+ * A sleep long enough to be safe is always too long, and a sleep short enough
+ * to be quick is sometimes wrong. Polls twice a second for text appearing, a
+ * selector matching, or the network going quiet.
+ */
+export async function waitFor(
+  cdp: CdpBrowser,
+  what: { text?: string; selector?: string; idleMs?: number },
+  timeoutMs = 15_000
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  const label = what.text
+    ? `text ${JSON.stringify(what.text)}`
+    : what.selector
+      ? `selector ${JSON.stringify(what.selector)}`
+      : "the network to go quiet";
+
+  while (Date.now() < deadline) {
+    if (what.text) {
+      const hit = await evaluate(
+        cdp,
+        `(document.body ? document.body.innerText : "").includes(${JSON.stringify(what.text)})`
+      );
+      if (hit === true) return `Found ${label}.`;
+    } else if (what.selector) {
+      const hit = await evaluate(
+        cdp,
+        `Boolean(document.querySelector(${JSON.stringify(what.selector)}))`
+      );
+      if (hit === true) return `Found ${label}.`;
+    } else {
+      // Quiet means nothing started in the last stretch. Requests already in
+      // flight are not tracked here; this is the cheap version and it answers
+      // the question that is usually being asked - "has it stopped loading".
+      const before = cdp.networkLines().length;
+      await new Promise((r) => setTimeout(r, what.idleMs ?? 700));
+      if (cdp.networkLines().length === before) return "The network went quiet.";
+      continue;
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error(`Waited ${Math.round(timeoutMs / 1000)}s and never saw ${label}.`);
+}
+
+/**
+ * Resize the viewport, optionally asking the page for its dark theme.
+ *
+ * Returns the width the page *actually* ended up laying out at, which is not
+ * always the one asked for. Below 768 the page is told it is a phone, so media
+ * queries and touch behave as they would on one - and a page with no
+ * `<meta name="viewport">` responds to that exactly as a real phone does, by
+ * falling back to a 980px layout viewport and scaling it down. That is correct
+ * emulation and a genuine finding about the page, but a caller who asked for
+ * 400 and is silently given 980 will draw the wrong conclusion, so the number
+ * is reported rather than assumed.
+ */
+export async function resize(
+  cdp: CdpBrowser,
+  width: number,
+  height: number,
+  scheme?: "light" | "dark"
+): Promise<{ asked: number; actual: number; mobile: boolean }> {
+  const asked = Math.max(200, Math.round(width));
+  const mobile = asked < 768;
+  await cdp.send("Emulation.setDeviceMetricsOverride", {
+    width: asked,
+    height: Math.max(200, Math.round(height)),
+    deviceScaleFactor: 1,
+    mobile,
+  });
+  if (scheme) {
+    await cdp.send("Emulation.setEmulatedMedia", {
+      features: [{ name: "prefers-color-scheme", value: scheme }],
+    }).catch(() => {});
+  }
+  await new Promise((r) => setTimeout(r, 250));
+  let actual = asked;
+  try {
+    const n = await evaluate(cdp, "innerWidth");
+    if (typeof n === "number" && n > 0) actual = n;
+  } catch {
+    // A page mid-navigation cannot be asked; the requested width is the best
+    // answer available and is very nearly always the right one.
+  }
+  return { asked, actual, mobile };
+}
+
+/**
+ * The refs whose role or name matches, so a long page can be acted on without
+ * re-reading all of it.
+ */
+export function findRefs(s: PageSnapshot, query: string): ElementRef[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const words = q.split(/\s+/);
+  return s.elements.filter((e) => {
+    const hay = `${e.role} ${e.name} ${e.value ?? ""}`.toLowerCase();
+    return words.every((w) => hay.includes(w));
+  });
 }
 
 /** The element list, rendered for a model to read and choose from. */

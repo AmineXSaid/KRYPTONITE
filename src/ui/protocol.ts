@@ -182,6 +182,10 @@ export interface ConfigDto {
   /** Workspace-relative, surfaced in Control Center explainers. */
   profileDirectory: string;
   skillsDirectory: string;
+  /** Show the agent's browser in a real window rather than running it headless. */
+  browserHeaded: boolean;
+  /** Send what is on screen with each message. */
+  editorContext: boolean;
   ui: UiConfigDto;
 }
 
