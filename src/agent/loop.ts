@@ -302,6 +302,17 @@ export function fitToWindow(messages: Msg[], limit: number, reserve: number): Ms
  * the work that produced it; told plainly, it can decide whether that page is
  * still worth looking at.
  */
+/**
+ * Stands in for a tool call the user interrupted before it ran.
+ *
+ * Phrased for the model rather than for a log: on the next turn it will see
+ * this where it expected an answer, and "the user stopped it" is the fact that
+ * stops it retrying the same call as though the tool had merely failed.
+ */
+export const INTERRUPTED_RESULT =
+  "The user interrupted this turn before this tool ran. It did not execute and " +
+  "nothing changed. Do not assume it succeeded or retry it without being asked.";
+
 export const IMAGE_EVICTED =
   "[An earlier image was dropped here to keep this request inside the endpoint's " +
   "image budget. Take another screenshot if you still need to see that page.]";
@@ -684,7 +695,27 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
 
     for (let ci = 0; ci < calls.length; ci++) {
       const call = calls[ci];
-      if (opts.signal?.aborted) return;
+      if (opts.signal?.aborted) {
+        // Every tool call the model made has to be answered, including the
+        // ones the user interrupted. A transcript holding a tool call with no
+        // result is not merely untidy - the Anthropic wire rejects it, so the
+        // conversation cannot be resumed at all, and the damage is discovered
+        // one turn later when the next message fails rather than here.
+        //
+        // The assistant turn carrying these calls was already appended above,
+        // which is what makes this reachable. Bailing out before that point
+        // leaves nothing to orphan and needs no repair.
+        for (let rest = ci; rest < calls.length; rest++) {
+          const missed: Msg = {
+            role: "tool",
+            toolCallId: calls[rest].id,
+            content: INTERRUPTED_RESULT,
+          };
+          messages.push(missed);
+          opts.onMessage?.(missed);
+        }
+        return;
+      }
       yield { type: "tool_start", tool: { name: call.name, args: call.arguments } };
       const result = running ? await running[ci] : await runTool(call.name, call.arguments, ctx);
       yield {
