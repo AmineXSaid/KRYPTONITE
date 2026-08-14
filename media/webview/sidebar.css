@@ -927,14 +927,59 @@ li.doing .cbx { border-color: var(--kx-accent); }
    specificity, so the composer had no visible keyboard focus at all. The
    composer's frame carries it instead, which is why the outline is dropped
    here rather than restored. */
+/* ── the draft, and the layer that colours it ─────────────────────────────
+   A textarea cannot colour its own text, and a contenteditable would have to
+   reimplement the caret, selection, IME and undo. So the textarea keeps all
+   four and gives up only its paint: its glyphs are transparent and an
+   identical block behind it draws them, with the tokens marked.
+
+   Every metric below is duplicated between the two on purpose. Font, size,
+   line-height, padding, wrapping and word-breaking must agree exactly or the
+   colouring slides off the characters it belongs to - and it drifts further
+   with every line, so a short draft looks fine and a long one is visibly
+   broken. They are kept adjacent so a change to one is a change to both. */
+.draft-wrap { position: relative; }
+
+#draft,
+.draft-mirror {
+  font-family: var(--kx-ui); font-size: 13px; line-height: 1.5;
+  padding: 12px 12px 8px;
+  white-space: pre-wrap; overflow-wrap: break-word; word-break: normal;
+  letter-spacing: normal;
+}
+
 #draft {
   display: block; width: 100%; background: transparent; border: none; outline: none; resize: none;
-  font-family: var(--kx-ui); font-size: 13px; line-height: 1.5;
-  color: var(--kx-fg); padding: 12px 12px 8px;
   min-height: 36px; max-height: 120px; overflow: hidden;
+  position: relative;
+  /* The glyphs come from the mirror; the caret and the selection do not, so
+     both are named explicitly rather than inherited from a transparent
+     foreground. */
+  color: transparent;
+  caret-color: var(--kx-fg);
 }
+#draft::selection { background: var(--kx-info-wash); color: var(--kx-fg); }
 #draft::placeholder { color: var(--kx-fg-4); }
+/* A disabled composer has nothing to colour, so it paints its own text and
+   the mirror steps out of the way. */
 #draft:disabled { color: var(--kx-fg-3); }
+/* The mirror precedes the textarea in the DOM, so this cannot be a sibling
+   selector - it has to ask the wrapper. */
+.draft-wrap:has(#draft:disabled) .draft-mirror { display: none; }
+
+.draft-mirror {
+  position: absolute; inset: 0;
+  pointer-events: none; overflow: hidden;
+  color: var(--kx-fg);
+}
+/* The three things the panel will act on. Anything else stays plain: every
+   extra colour here competes with the sentence being written. */
+.draft-mirror .tk-skill { color: var(--kx-under); font-weight: 600; }
+.draft-mirror .tk-file { color: var(--kx-link); }
+/* Colour only. A different family or size here would advance the text by a
+   different amount than the textarea does, and every character after the
+   first backtick would sit off its own glyph. */
+.draft-mirror .tk-code { color: var(--kx-accent); }
 
 /* â”€â”€ attachment pills â”€â”€ */
 .att-strip {

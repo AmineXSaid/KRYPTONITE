@@ -854,7 +854,15 @@ function _sbRun() {
                 '<span class="prob" id="edProb" hidden></span>' +
               '</div>' +
               '<div class="att-strip" id="attachStrip" hidden></div>' +
-              '<textarea id="draft" rows="1" aria-label="Message" placeholder="Ask Kryptonite anything…   ( / skills · @ files )"></textarea>' +
+              // The textarea keeps the caret, the selection, IME and undo; a
+              // contenteditable would have to reimplement all four and get
+              // them wrong. What it cannot do is colour its own text, so a
+              // mirror sits behind it holding the same string with the tokens
+              // marked, and the input above it is painted transparent.
+              '<div class="draft-wrap">' +
+                '<div class="draft-mirror" id="draftMirror" aria-hidden="true"></div>' +
+                '<textarea id="draft" rows="1" aria-label="Message" placeholder="Ask Kryptonite anything…   ( / skills · @ files )"></textarea>' +
+              '</div>' +
               '<div class="toolbar">' +
                 // #4 - the control row carries controls only. The keycap that
                 // used to sit here was chrome describing chrome; the shortcut
@@ -995,6 +1003,38 @@ function _sbRun() {
     }
     syncComposer();
     if (!silent) post("setPhase", { phase: phase });
+  }
+
+  /**
+   * Repaint the layer behind the input so the draft is coloured as it is typed.
+   *
+   * Three things are marked, and only three, because every extra colour here
+   * competes with the message being written: the skill a leading slash names,
+   * the files an @ mention attaches, and inline code. All three are things the
+   * panel will *act* on, so seeing them recognised is feedback rather than
+   * decoration - a mistyped skill name simply stays uncoloured.
+   *
+   * The trailing newline matters: a textarea ending in one renders an extra
+   * blank line that the mirror would not, and the two would disagree about
+   * their height by exactly one line.
+   */
+  function renderDraftMirror() {
+    var mirror = $("draftMirror");
+    if (!mirror) return;
+    var draft = $("draft");
+    var raw = draft.value;
+
+    var html = esc(raw)
+      // A skill only counts at the very start, which is where the picker
+      // accepts one; "see /usr/bin" further along is a path, not a command.
+      .replace(/^(\/[a-z0-9][\w-]*)/i, '<span class="tk-skill">$1</span>')
+      // @path, stopping at whitespace. The trailing slash of a folder is kept.
+      .replace(/(^|\s)(@[\w./\\-]+)/g, '$1<span class="tk-file">$2</span>')
+      // Inline code, non-greedy and never across a line break.
+      .replace(/`([^`\n]+)`/g, '<span class="tk-code">`$1`</span>');
+
+    mirror.innerHTML = html + (raw.slice(-1) === "\n" ? "<br>" : "");
+    mirror.scrollTop = draft.scrollTop;
   }
 
   /* ───────────────────────── tips ───────────────────────── */
@@ -1990,6 +2030,18 @@ function _sbRun() {
     if (S.modelOpen) {
       var rows = [];
       var current = activeProfile();
+      // Auto first, and only when there is a choice to make. With one profile
+      // "let the extension pick" and "pick that one" are the same instruction,
+      // and offering both invites the user to wonder what the difference is.
+      var pinned = (S.config && S.config.activeProfile) || "";
+      if (S.models.length > 1) {
+        rows.push({
+          auto: true,
+          model: "Auto",
+          desc: "Follow the first healthy endpoint",
+          active: pinned === ""
+        });
+      }
       for (var i = 0; i < S.models.length; i++) {
         var g = S.models[i];
         rows.push({ group: g.group });
@@ -2085,6 +2137,11 @@ function _sbRun() {
           icon(isDir ? "i-folder" : "i-file", "ic-13") +
           '<span class="n ell">@' + esc(r.file) + (isDir ? "/" : "") + "</span>" +
           '<span class="d">' + esc(r.badge) + "</span></button>";
+      } else if (r.auto) {
+        html += '<button class="qp-row" role="option" data-active="' + on + '" data-i="' + idx + '">' +
+          '<span class="qp-check">' + (r.active ? icon("i-check", "ic-13") : "") + "</span>" +
+          '<span class="n">' + esc(r.model) + "</span>" +
+          '<span class="d ell">' + esc(r.desc) + "</span></button>";
       } else {
         html += '<button class="qp-row" role="option" data-active="' + on + '" data-i="' + idx + '">' +
           '<span class="qp-check">' + (r.active ? icon("i-check", "ic-13") : "") + "</span>" +
@@ -2116,6 +2173,11 @@ function _sbRun() {
       // directory" from "a file with no extension".
       var suffix = r.badge === "folder" ? "/ " : " ";
       draft.value = draft.value.replace(/@([\w./-]*)$/, "@" + r.file + suffix);
+    } else if (r.auto) {
+      // An empty activeProfile is what "auto" already meant to the host; the
+      // picker just had no way to say it.
+      post("selectModel", { endpoint: "", model: "" });
+      S.modelOpen = false;
     } else {
       post("selectModel", { endpoint: r.endpoint, model: r.model });
       S.modelOpen = false;
@@ -2303,7 +2365,10 @@ function _sbRun() {
     var name = active ? active.id : "No endpoint";
     $("epName").textContent = S.tlsError ? name + " - TLS error" : name;
     $("epInd").setAttribute("data-err", S.tlsError ? "1" : "0");
-    $("modelName").textContent = active ? active.model : "No model";
+    var pinnedTo = (S.config && S.config.activeProfile) || "";
+    $("modelName").textContent = active
+      ? (pinnedTo === "" && S.models.length > 1 ? "Auto · " + active.model : active.model)
+      : "No model";
   }
 
   /* ─────────────────────── diagnostics: TLS ─────────────────────── */
@@ -3174,7 +3239,16 @@ function _sbRun() {
     });
 
     var draft = $("draft");
-    draft.addEventListener("input", function () { syncComposer(); detectQuickPick(); });
+    draft.addEventListener("input", function () {
+      syncComposer();
+      detectQuickPick();
+      renderDraftMirror();
+    });
+    // A long draft scrolls inside a fixed-height box; the mirror has to follow
+    // or the colouring slides off the text it belongs to.
+    draft.addEventListener("scroll", function () {
+      $("draftMirror").scrollTop = draft.scrollTop;
+    });
     draft.addEventListener("keydown", onDraftKey);
     // Pay the connection, credential, and prompt-cache costs of the next turn
     // while the user is still typing, instead of after they press Enter. The

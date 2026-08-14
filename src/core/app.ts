@@ -1288,6 +1288,12 @@ export class App {
       case "selectModel": {
         // The picker switches profiles. It never rewrites YAML, so it can only
         // ever offer a profile's own model.
+        //
+        // An empty endpoint is the picker's "Auto": it clears the pin rather
+        // than naming a profile, and `activeProfile` has always meant "the
+        // first valid one" when empty. Nothing new is stored - the setting
+        // already had this state, and there was simply no way to ask for it
+        // without editing settings.json.
         await this.cfg().update("activeProfile", msg.endpoint, vscode.ConfigurationTarget.Workspace);
         await this.reload("model picker");
         this.broadcast({ type: "configChanged", config: this.configDto() });
