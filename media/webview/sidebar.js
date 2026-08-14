@@ -53,6 +53,11 @@ function _sbRun() {
       '<path d="M7 8v8M17.5 11v1.2a4 4 0 01-4 4H9.4" ' + S6 + ' stroke-width="1.6"/></symbol>' +
     '<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 11-2.4-5.7M20 3.5V9h-5.5" ' + S6 + ' stroke-width="1.6"/></symbol>' +
     '<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6h6l2 3h10v10H3z" ' + S6 + ' stroke-width="1.5"/></symbol>' +
+    /* The approval control. A shield rather than a lock: a lock says "you
+       cannot", and this says "something is standing between the agent and the
+       workspace" - which is a guard, not a barrier. */
+    '<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7.5 3v6c0 4.2-3 7.6-7.5 9-4.5-1.4-7.5-4.8-7.5-9V6z" ' +
+      S6 + ' stroke-width="1.5" stroke-linejoin="round"/></symbol>' +
     /* Not an icon: the header's ornament, and the only decorative mark in the
        product. A hairline rule broken by a single cut stone - the crystal's
        geometry at a twentieth of its size, so it belongs to the mark at the
@@ -825,6 +830,17 @@ function _sbRun() {
           '<div id="log" aria-live="polite"></div>' +
           '<div class="composer-wrap">' +
             '<div class="qp" id="qp" role="listbox" hidden></div>' +
+            // One line, above the input, rotating. It is where someone
+            // finds out a feature exists at all: nothing else in the panel
+            // advertises skills, phases or the browser, and a feature
+            // nobody knows about may as well not ship.
+            '<div class="tipbar" id="tipBar" hidden>' +
+              '<span class="tip-k">Tip</span>' +
+              '<span class="tip-t" id="tipText"></span>' +
+              '<span class="sp"></span>' +
+              '<button class="tip-x" id="tipNext" title="Another tip" aria-label="Another tip">' +
+                icon("i-refresh", "ic-11") + '</button>' +
+            '</div>' +
             '<div class="composer">' +
               '<div class="sel-pill" id="selPill" hidden>' + icon("i-file", "ic-13") +
                 '<span id="selText"></span><span class="sp"></span>' +
@@ -863,6 +879,14 @@ function _sbRun() {
               '<span id="ctxText" class="tnum">0 / 0</span>' +
               '<span id="ctxBar"><i id="ctxFill"></i></span><span>·</span>' +
               '<span class="ep" id="epInd" data-err="0"><span class="dot"></span><span class="nm ell" id="epName">No endpoint</span></span>' +
+              '<span class="sp"></span>' +
+              // The approval mode, where the user can see and change it.
+              // It governs every side effect the agent has, and it lived
+              // only in the Control Center and settings.json.
+              '<button class="perm" id="permBtn" aria-haspopup="menu" aria-expanded="false">' +
+                icon("i-shield", "ic-11") + '<span class="nm" id="permName">Ask each time</span>' +
+              '</button>' +
+              '<div class="popover perm-pop" id="permPop" role="menu" hidden></div>' +
             '</div>' +
           '</div>' +
         '</section>' +
@@ -972,6 +996,86 @@ function _sbRun() {
     syncComposer();
     if (!silent) post("setPhase", { phase: phase });
   }
+
+  /* ───────────────────────── tips ───────────────────────── */
+
+  /**
+   * What this panel can do that is not visible from looking at it.
+   *
+   * Every line names a real feature and says how to reach it. A tip that
+   * cannot be acted on immediately is an advertisement, and an advertisement
+   * inside a tool someone is trying to work in is noise.
+   */
+  var TIPS = [
+    "Type <b>/</b> to run a skill - the index costs nothing until one is used.",
+    "<b>Shift+Tab</b> cycles Ask, Plan and Act. Ask reads and answers; it cannot edit.",
+    "<b>@</b> attaches a file by name, or a folder if you end it with a slash.",
+    "Paste an image straight into the box - it reaches the model when the endpoint has vision.",
+    "Ask the model to open a browser: it can click, read the console, and see the page.",
+    "Put standing rules in <b>.agent/instructions.md</b> and they join every prompt.",
+    "<b>Esc</b> stops a running turn, and the conversation stays resumable.",
+    "Every turn is snapshotted - <b>Restore checkpoint</b> undoes a whole turn, not one file.",
+    "The <b>Diagnostics</b> tab walks eight rungs and stops at the first real failure.",
+    "Drop a <b>SKILL.md</b> into .agent/skills and it appears under / straight away."
+  ];
+
+  function renderTip(advance) {
+    var bar = $("tipBar");
+    if (!bar) return;
+    if (advance || S.tipIndex === undefined) {
+      S.tipIndex = S.tipIndex === undefined
+        ? Math.floor(Math.random() * TIPS.length)
+        : (S.tipIndex + 1) % TIPS.length;
+    }
+    // innerHTML is safe here and only here: TIPS is a constant in this file
+    // and never carries anything a model or a page produced.
+    $("tipText").innerHTML = TIPS[S.tipIndex];
+    bar.hidden = false;
+  }
+
+  /* ───────────────────────── permissions ───────────────────────── */
+
+  /* The three modes, in the order they surrender control. Each line says what
+     happens rather than naming the setting: "edits-auto" is a value in a JSON
+     file, "file edits run, commands ask" is a decision someone can make. */
+  var PERMS = [
+    ["ask", "Ask each time", "Every side effect waits for you."],
+    ["edits-auto", "Auto-edit", "File edits run. Shell commands still ask."],
+    ["full-auto", "Allow all", "Runs everything without asking."]
+  ];
+
+  function permLabel(mode) {
+    for (var i = 0; i < PERMS.length; i++) if (PERMS[i][0] === mode) return PERMS[i][1];
+    return "Ask each time";
+  }
+
+  function renderPerm() {
+    var mode = (S.config && S.config.approvalMode) || "ask";
+    var nm = $("permName");
+    if (nm) nm.textContent = permLabel(mode);
+    var btn = $("permBtn");
+    if (btn) btn.setAttribute("data-mode", mode);
+    var pop = $("permPop");
+    if (!pop || pop.hidden) return;
+    var html = "";
+    for (var i = 0; i < PERMS.length; i++) {
+      var on = PERMS[i][0] === mode;
+      html += '<button class="pop-row" role="menuitem" data-perm="' + esc(PERMS[i][0]) + '">' +
+        '<span class="perm-check">' + (on ? icon("i-check", "ic-13") : "") + "</span>" +
+        '<span class="col"><span class="t">' + esc(PERMS[i][1]) + "</span>" +
+        '<span class="m">' + esc(PERMS[i][2]) + "</span></span></button>";
+    }
+    pop.innerHTML = html;
+  }
+
+  function togglePerm(open) {
+    var pop = $("permPop");
+    if (!pop) return;
+    pop.hidden = open === undefined ? !pop.hidden : !open;
+    $("permBtn").setAttribute("aria-expanded", pop.hidden ? "false" : "true");
+    renderPerm();
+  }
+
 
   /* ─────────────────────── transcript primitives ─────────────────────── */
 
@@ -2744,6 +2848,8 @@ function _sbRun() {
     todoEl = null;
     renderTodos(S.todos);
     renderSelection();
+    renderTip(false);
+    renderPerm();
     // Survives a full re-render: the host pushes this on its own schedule, so
     // a stateSync that dropped it would blank the chip until the cursor next
     // moved, which on a still editor could be a long time.
@@ -3016,6 +3122,7 @@ function _sbRun() {
     });
     document.addEventListener("click", function (e) {
       if (!e.target.closest(".kx-header")) closePops();
+      if (!e.target.closest("#permBtn") && !e.target.closest("#permPop")) togglePerm(false);
       if (S.modelOpen && !e.target.closest("#modelBtn") && !e.target.closest("#qp")) {
         S.modelOpen = false;
         renderQuickPick();
@@ -3109,6 +3216,21 @@ function _sbRun() {
         syncComposer();
       }
     });
+    $("tipNext").addEventListener("click", function () { renderTip(true); });
+
+    $("permBtn").addEventListener("click", function (e) {
+      e.stopPropagation();
+      togglePerm();
+    });
+    $("permPop").addEventListener("click", function (e) {
+      var b = e.target.closest("[data-perm]");
+      if (!b) return;
+      // Straight to the host: approvalMode is a real setting, so the panel
+      // shows what it is rather than keeping a second copy of the truth.
+      post("setConfig", { key: "approvalMode", value: b.getAttribute("data-perm") });
+      togglePerm(false);
+    });
+
     $("selClear").addEventListener("click", function () {
       S.selection = null;
       renderSelection();
@@ -3567,6 +3689,9 @@ function _sbRun() {
 
       case "configChanged":
         S.config = m.config;
+        // The footer shows the approval mode, so it has to follow a change
+        // made anywhere else - the Control Center, or settings.json by hand.
+        renderPerm();
         break;
 
       case "phaseChanged":
