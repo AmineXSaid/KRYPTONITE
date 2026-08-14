@@ -364,6 +364,18 @@ export interface McpLogMsg { type: "mcpLog"; name: string }
 export interface OpenSettingsMsg { type: "openSettings" }
 export interface OpenYamlMsg { type: "openYaml"; profile: string }
 export interface OpenControlCenterMsg { type: "openControlCenter"; section?: CcSection }
+/**
+ * Run one of the editor-side features from the composer.
+ *
+ * The slash commands `/fix`, `/doc`, `/explain` and `/tests` are the same
+ * features as the lightbulb and the CodeLens, reached from the keyboard. They
+ * carry no arguments on purpose: the host resolves the target from the active
+ * editor, so there is one definition of "this" rather than two that drift.
+ */
+export interface EditorCommandMsg {
+  type: "editorCommand";
+  command: "fix" | "doc" | "explain" | "tests" | "commit";
+}
 export interface OpenSkillsFolderMsg { type: "openSkillsFolder" }
 export interface ListSessionsMsg { type: "listSessions" }
 export interface LoadSessionMsg { type: "loadSession"; id: string }
@@ -387,7 +399,7 @@ export type InboundMessage =
   | CopyTextMsg | NewEndpointMsg | SaveEndpointMsg | DeleteEndpointMsg
   | ToggleSkillMsg | ReloadSkillsMsg | ReloadProfilesMsg | SetConfigMsg
   | RestoreCheckpointMsg | ExportBundleMsg | OpenFileMsg | OpenSettingsMsg
-  | OpenYamlMsg | OpenControlCenterMsg | OpenSkillsFolderMsg
+  | OpenYamlMsg | OpenControlCenterMsg | EditorCommandMsg | OpenSkillsFolderMsg
   | ListSessionsMsg | LoadSessionMsg | DeleteSessionMsg | SearchFilesMsg
   | CheckEndpointMsg | McpReconnectMsg | McpReloadMsg
   | DetectCapsMsg | SetCapabilityMsg | ApplyCapsMsg | McpLogMsg;

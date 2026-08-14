@@ -3,6 +3,10 @@ import { App } from "./core/app";
 import { SidebarProvider } from "./ui/sidebar";
 import { ControlCenterPanel } from "./ui/controlCenter";
 import { BrowserPanel } from "./ui/browser";
+import { ProposedContent, QuickEdit } from "./ui/quickEdit";
+import { registerEditorFeatures } from "./providers/editorFeatures";
+import { registerCommitMessage } from "./providers/commitMessage";
+import { registerInlineCompletion } from "./providers/inlineCompletion";
 import type { CcSection } from "./ui/protocol";
 
 /**
@@ -29,6 +33,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       // scratch every time the user visits Explorer mid-stream.
       webviewOptions: { retainContextWhenHidden: true },
     })
+  );
+
+  // The editor-side features: quick fixes, CodeLens, doc comments, commit
+  // messages. They share one model path and one edit applier, which is why
+  // they are constructed together rather than each reaching for their own.
+  const proposed = new ProposedContent();
+  context.subscriptions.push(
+    proposed,
+    vscode.workspace.registerTextDocumentContentProvider(ProposedContent.scheme, proposed),
+    ...registerEditorFeatures(instance, new QuickEdit(instance, proposed)),
+    registerCommitMessage(instance),
+    registerInlineCompletion(instance)
   );
 
   context.subscriptions.push(

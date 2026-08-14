@@ -12,6 +12,7 @@ import { clearAuthCache, authCacheReport } from "../endpoints/auth";
 import { clearSecureContexts } from "../endpoints/transport";
 import { EndpointClient } from "../providers/client";
 import { systemPromptFor } from "../agent/loop";
+import { runOneShot, OneShotOptions } from "../agent/oneShot";
 import { loadSkills, Skill, skillIndex } from "../skills/loader";
 import { McpRegistry, mcpConfigPath } from "../mcp/registry";
 import { ShadowRepo } from "../checkpoint/shadow";
@@ -703,6 +704,25 @@ export class App {
       client.warmAuth(),
       client.warmCache(this.systemPrompt()),
     ]);
+  }
+
+  /**
+   * One prompt in, one string out, off the active profile.
+   *
+   * The editor features - quick fix, doc comment, CodeLens, commit message -
+   * all need the model without needing the conversation. Routing them through
+   * `session.send` would put a commit message in the user's transcript and
+   * then charge for it on every subsequent turn.
+   *
+   * This deliberately does not check `session.running`. These are short calls
+   * the user triggered from the editor, and refusing one because a chat turn
+   * is in flight would make the feature feel broken for the entire length of
+   * an unrelated conversation.
+   */
+  async oneShot(prompt: string, opts: OneShotOptions = {}): Promise<string> {
+    const profile = this.activeProfile();
+    if (!profile) throw new Error("No endpoint is selected.");
+    return runOneShot(this.clientFor(profile), prompt, opts);
   }
 
   /**
@@ -1534,6 +1554,23 @@ export class App {
       case "openControlCenter":
         await vscode.commands.executeCommand("kryptonite.openControlCenter", msg.section);
         return;
+
+      case "editorCommand": {
+        // The slash commands are the lightbulb's features reached from the
+        // keyboard, so they run the same commands rather than reimplementing
+        // them. Mapped explicitly instead of interpolating the name into a
+        // command id, which would let the webview invoke anything registered.
+        const map = {
+          fix: "kryptonite.fixProblem",
+          doc: "kryptonite.documentSymbol",
+          explain: "kryptonite.explainSelection",
+          tests: "kryptonite.writeTests",
+          commit: "kryptonite.generateCommitMessage",
+        } as const;
+        const id = map[msg.command];
+        if (id) await vscode.commands.executeCommand(id);
+        return;
+      }
 
       case "openSkillsFolder": {
         const root = this.requireRoot();

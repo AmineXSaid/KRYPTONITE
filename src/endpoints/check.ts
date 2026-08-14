@@ -162,6 +162,9 @@ const DRAFT_CAPS: Capabilities = {
   promptCaching: "none",
   cacheTtl: "5m",
   parallelToolExecution: true,
+  // Nothing on the pre-save path completes code, and claiming otherwise here
+  // would switch ghost text on for a profile the user has not saved yet.
+  fim: false,
 };
 
 /**

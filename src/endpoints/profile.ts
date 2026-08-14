@@ -101,6 +101,19 @@ export interface Capabilities {
    * the workspace. Off means the old strictly-sequential behaviour.
    */
   parallelToolExecution: boolean;
+  /**
+   * This endpoint can complete code at the cursor quickly enough to be worth
+   * showing as ghost text.
+   *
+   * Defaults false, and that is a judgement about what this extension is for
+   * rather than caution. Inline completion wants a sub-500ms round trip and a
+   * fill-in-the-middle model. This extension exists for corporate gateways,
+   * air-gapped deployments and mTLS endpoints, which typically offer neither -
+   * so it is the feature most likely to feel broken on exactly the endpoints
+   * the product targets. Anyone whose gateway can carry it turns it on and
+   * gets it; nobody else pays for a laggy suggestion they did not ask for.
+   */
+  fim: boolean;
 }
 
 /**
@@ -177,6 +190,7 @@ const DEFAULT_CAPS: Capabilities = {
   promptCaching: "none",
   cacheTtl: "5m",
   parallelToolExecution: true,
+  fim: false,
 };
 
 export class ProfileError extends Error {

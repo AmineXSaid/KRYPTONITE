@@ -19,6 +19,12 @@ export const recorded = {
   state: new Map<string, unknown>(),
   /** Survives `reset()`, the way real globalState survives a window reload. */
   global: new Map<string, unknown>(),
+  /** Custom URI schemes the extension served content for. */
+  schemes: [] as string[],
+  /** Language providers registered, so a case can call one directly. */
+  providers: [] as Array<{ kind: string; provider: any }>,
+  /** Extensions the host should claim exist, keyed by id. */
+  extensions: new Map<string, unknown>(),
 };
 
 export function reset(root?: string) {
@@ -30,6 +36,9 @@ export function reset(root?: string) {
   recorded.executed.length = 0;
   recorded.secrets.clear();
   recorded.state.clear();
+  recorded.schemes.length = 0;
+  recorded.providers.length = 0;
+  recorded.extensions.clear();
   // recorded.global is deliberately not cleared: globalState outlives a window,
   // and clearing it here would hide every "only do this once" bug.
   (workspace as any).workspaceFolders = root
@@ -74,6 +83,12 @@ export const workspace: any = {
   openTextDocument: async (u: any) => ({ uri: u, getText: () => "" }),
   findFiles: async () => [],
   fs: { readFile: async () => new Uint8Array() },
+  registerTextDocumentContentProvider: (scheme: string) => {
+    recorded.schemes.push(scheme);
+    return new Disposable();
+  },
+  applyEdit: async () => true,
+  asRelativePath: (u: any) => String(u?.fsPath ?? u),
 };
 
 export const window: any = {
@@ -103,7 +118,64 @@ export const window: any = {
 export const languages: any = {
   getDiagnostics: () => [],
   onDidChangeDiagnostics: () => new Disposable(),
+  registerCodeActionsProvider: (_s: unknown, p: unknown) => {
+    recorded.providers.push({ kind: "codeActions", provider: p });
+    return new Disposable();
+  },
+  registerCodeLensProvider: (_s: unknown, p: unknown) => {
+    recorded.providers.push({ kind: "codeLens", provider: p });
+    return new Disposable();
+  },
+  registerInlineCompletionItemProvider: (_s: unknown, p: unknown) => {
+    recorded.providers.push({ kind: "inlineCompletion", provider: p });
+    return new Disposable();
+  },
 };
+
+/**
+ * Only what the editor features construct. `Empty` is a real kind rather than
+ * a placeholder: an action with no kind never appears in the lightbulb.
+ */
+export const CodeActionKind = {
+  Empty: { value: "" },
+  QuickFix: { value: "quickfix" },
+  RefactorRewrite: { value: "refactor.rewrite" },
+};
+export class CodeAction {
+  diagnostics?: unknown[];
+  command?: unknown;
+  constructor(public title: string, public kind?: unknown) {}
+}
+export class CodeLens {
+  constructor(public range: unknown, public command?: unknown) {}
+}
+export class WorkspaceEdit {
+  edits: Array<{ uri: unknown; range: unknown; text: string }> = [];
+  replace(uri: unknown, range: unknown, text: string) {
+    this.edits.push({ uri, range, text });
+  }
+}
+export const ProgressLocation = { Notification: 15, SourceControl: 1, Window: 10 };
+export const extensions: any = {
+  getExtension: (id: string) => recorded.extensions.get(id),
+};
+
+/** The real EventEmitter's contract, which several providers depend on. */
+export class EventEmitter<T> {
+  private handlers: Array<(e: T) => void> = [];
+  event = (h: (e: T) => void) => {
+    this.handlers.push(h);
+    return new Disposable(() => {
+      this.handlers = this.handlers.filter((x) => x !== h);
+    });
+  };
+  fire(e: T) {
+    for (const h of [...this.handlers]) h(e);
+  }
+  dispose() {
+    this.handlers.length = 0;
+  }
+}
 
 export const DiagnosticSeverity = { Error: 0, Warning: 1, Information: 2, Hint: 3 };
 
@@ -129,7 +201,30 @@ export class ThemeColor {
 export const StatusBarAlignment = { Left: 1, Right: 2 };
 export const ConfigurationTarget = { Global: 1, Workspace: 2, WorkspaceFolder: 3 };
 export const ViewColumn = { One: 1, Two: 2, Active: -1, Beside: -2 };
-export class Range { constructor(public a: number, public b: number, public c: number, public d: number) {} }
+export class Position {
+  constructor(public line: number, public character: number) {}
+}
+/**
+ * The real Range takes either four numbers or two Positions, and code that
+ * reads `.start.line` off one built the other way is a bug the stub should
+ * catch rather than hide. So it accepts both, like the real one.
+ */
+export class Range {
+  start: Position;
+  end: Position;
+  constructor(a: number | Position, b: number | Position, c?: number, d?: number) {
+    if (typeof a === "number") {
+      this.start = new Position(a, b as number);
+      this.end = new Position(c ?? a, d ?? (b as number));
+    } else {
+      this.start = a;
+      this.end = b as Position;
+    }
+  }
+  get isEmpty(): boolean {
+    return this.start.line === this.end.line && this.start.character === this.end.character;
+  }
+}
 export class Selection extends Range {}
 export const TextEditorRevealType = { InCenter: 2 };
 export { Disposable };

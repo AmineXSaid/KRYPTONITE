@@ -77,6 +77,14 @@ async function main() {
     "kryptonite.newEndpoint",
     "kryptonite.restoreCheckpoint",
     "kryptonite.exportBundle",
+    // The editor-side features. These are also invoked as CodeLens and code
+    // action targets, where a missing registration surfaces as a link that
+    // does nothing rather than as an error.
+    "kryptonite.fixProblem",
+    "kryptonite.documentSymbol",
+    "kryptonite.explainSelection",
+    "kryptonite.writeTests",
+    "kryptonite.generateCommitMessage",
   ];
   for (const name of EXPECTED) {
     ck(recorded.commands.includes(name), `1.1 ${name} is registered`);

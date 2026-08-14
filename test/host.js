@@ -46,6 +46,12 @@ const vscode = {
     }),
     openTextDocument: async () => ({}),
     findFiles: async () => [],
+    // The editor-side features register a content provider for the diff
+    // preview and read the config to decide whether they are on at all.
+    registerTextDocumentContentProvider: () => ({ dispose() {} }),
+    onDidChangeConfiguration: () => ({ dispose() {} }),
+    asRelativePath: (u) => String((u && u.fsPath) || u),
+    applyEdit: async () => true,
   },
   window: {
     createOutputChannel: () => ({ appendLine() {}, dispose() {}, show() {} }),
@@ -73,6 +79,22 @@ const vscode = {
   languages: {
     getDiagnostics: () => [],
     onDidChangeDiagnostics: () => ({ dispose() {} }),
+    registerCodeActionsProvider: () => ({ dispose() {} }),
+    registerCodeLensProvider: () => ({ dispose() {} }),
+    registerInlineCompletionItemProvider: () => ({ dispose() {} }),
+  },
+  CodeActionKind: {
+    Empty: { value: "" },
+    QuickFix: { value: "quickfix" },
+    RefactorRewrite: { value: "refactor.rewrite" },
+  },
+  ProgressLocation: { Notification: 15, SourceControl: 1, Window: 10 },
+  extensions: { getExtension: () => undefined },
+  EventEmitter: class {
+    constructor() { this.handlers = []; }
+    event = (h) => { this.handlers.push(h); return { dispose: () => {} }; };
+    fire(e) { for (const h of this.handlers) h(e); }
+    dispose() { this.handlers.length = 0; }
   },
   DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
   Disposable: class { constructor(fn) { this.fn = fn || (() => {}); } dispose() { this.fn(); } },

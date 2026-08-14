@@ -113,7 +113,17 @@ function _sbRun() {
   /* Extension features, not skills. `/` lists the workspace's SKILL.md files
      first and these underneath - see slashItems(). `/skill:` is gone: every
      skill now has its own row, which is what it was a stand-in for. */
+  /* The first four act on the editor rather than on the chat: they are the
+     same features as the lightbulb and the CodeLens, reached from the
+     keyboard, and they take their target from wherever the cursor is. They sit
+     at the top because they are the ones with a reason to be typed mid
+     sentence. */
   var CMDS = [
+    ["/fix", "Fix the problems where the cursor is"],
+    ["/doc", "Document the function where the cursor is"],
+    ["/explain", "Explain the selection"],
+    ["/tests", "Write tests for the selection"],
+    ["/commit", "Write a commit message for the staged change"],
     ["/clear", "Clear conversation history"],
     ["/doctor", "Run TLS connection diagnostics"],
     ["/endpoints", "Manage endpoint profiles"],
@@ -123,6 +133,14 @@ function _sbRun() {
     ["/skills", "Open the skills panel"],
     ["/help", "Show available commands"]
   ];
+
+  /* Slash command to host command. A lookup rather than string interpolation
+     on the host side: the webview should not be able to name an arbitrary
+     command and have the extension run it. */
+  var EDITOR_CMDS = {
+    "/fix": "fix", "/doc": "doc", "/explain": "explain",
+    "/tests": "tests", "/commit": "commit"
+  };
 
   var REVIEW_PROMPT =
     "Review the changes currently in the workspace. Read the modified files, " +
@@ -2218,6 +2236,14 @@ function _sbRun() {
   }
 
   function runSlash(cmd, draft) {
+    // The editor-side ones first. They resolve their own target from the
+    // active editor, so there is nothing to put in the composer and nothing
+    // to send.
+    if (EDITOR_CMDS[cmd]) {
+      draft.value = "";
+      post("editorCommand", { command: EDITOR_CMDS[cmd] });
+      return;
+    }
     switch (cmd) {
       case "/clear":
         draft.value = ""; post("newChat"); break;
