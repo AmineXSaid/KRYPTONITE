@@ -179,6 +179,86 @@ function boot() {
   ok("and the text is still shown, escaped", /alert\(2\)/.test($("bStage").textContent));
 }
 
+/* ── the agent's browser: launcher and live view ────────────────────────── */
+{
+  const { d, w, sent, inbound: send } = boot();
+  const sentTypes = () => sent.map((m) => m.type);
+  const click = (sel) => {
+    const el = d.querySelector(sel);
+    if (el) el.dispatchEvent(new w.MouseEvent("click", { bubbles: true }));
+    return !!el;
+  };
+  const JPEG = "/9j/4AAQSkZJRgABAQEAYABgAAD/2Q==";
+
+  ok("the panel offers a third view for the agent's browser", !!d.getElementById("bAgentView"));
+  click("#bAgentView");
+  ok("selecting it marks the segment",
+    d.getElementById("bAgentView").getAttribute("aria-pressed") === "true");
+
+  // Nothing running: a launcher, not an empty box.
+  ok("with no browser it shows a launcher", !!d.querySelector(".launch-card"));
+  ok("saying plainly that none is running",
+    /No browser running/.test(d.querySelector(".launch-card h2").textContent));
+  // Starting a browser puts a process on someone's machine. The copy says so
+  // rather than presenting it as a toggle.
+  ok("and what pressing the button will do",
+    /headless by default/.test(d.querySelector(".launch-card p").textContent));
+  ok("there is one obvious action", (d.querySelector("#aStart").textContent || "").trim() === "Launch browser");
+  ok("and nothing to close yet", !d.querySelector("#aClose"));
+
+  click("#aStart");
+  ok("pressing it asks the host to start one", sentTypes().includes("agentStart"));
+  // The browser takes a second or two to come up; a blank stage in the
+  // meantime reads as a failure.
+  ok("and it waits visibly", !!d.querySelector(".live-wait"));
+
+  send({ type: "agentState", running: true, live: true, url: "https://shop.internal/p/4417", title: "Product 4417" });
+  send({ type: "agentFrame", data: JPEG });
+  const img = d.querySelector(".live-frame img");
+  ok("a frame is rendered", !!img);
+  ok("as a data uri, never a remote src", (img.getAttribute("src") || "").startsWith("data:image/jpeg;base64,"),
+    "the webview must never fetch from the page's origin");
+  ok("the strip names the page", /Product 4417/.test(d.querySelector(".live-t").textContent));
+  ok("and carries the address in full", /shop\.internal/.test(d.querySelector(".live-t").getAttribute("title")));
+
+  // The failure this exists to prevent: a stopped stream that keeps showing
+  // its last frame. A stale picture and a current one look identical.
+  click("#aStop");
+  ok("stopping asks the host to stop", sentTypes().includes("agentStop"));
+  send({ type: "agentState", running: true, live: false, url: "", title: "" });
+  ok("the stale frame is dropped, not left on screen", !d.querySelector(".live-frame img"));
+  ok("and the launcher returns", !!d.querySelector(".launch-card"));
+  ok("now offering to watch the browser that is still up",
+    (d.querySelector("#aStart").textContent || "").trim() === "Watch it");
+  ok("and to close it", !!d.querySelector("#aClose"));
+
+  send({ type: "agentState", running: false, live: false, url: "", title: "" });
+  ok("closing it returns to the first state",
+    /No browser running/.test(d.querySelector(".launch-card h2").textContent));
+  ok("with no close button, since there is nothing to close", !d.querySelector("#aClose"));
+
+  send({ type: "agentError", message: "No Chromium-family browser is installed." });
+  ok("a launch failure is explained", /could not start/i.test(d.querySelector(".blank-in.err h2").textContent));
+  ok("with the reason verbatim",
+    /No Chromium-family browser/.test(d.querySelector(".blank-in.err p").textContent));
+}
+
+/* ── typography ─────────────────────────────────────────────────────────── */
+{
+  const CSS = fs.readFileSync(path.join(__dirname, "..", "media", "webview", "browser.css"), "utf8");
+  // Form controls do not inherit a font. Without this line every button and
+  // input in the panel falls back to the platform default - measured as Arial
+  // - while everything around them is set in the house sans. It reads as
+  // "slightly wrong" long before anyone can name it.
+  ok("form controls inherit the panel's font",
+    /button,\s*input,\s*select,\s*textarea\s*\{[^}]*font:\s*inherit/.test(CSS));
+  ok("headings use the display cut", /\.launch-card h2\s*\{[^}]*var\(--kx-display\)/.test(CSS));
+  ok("body copy uses the text cut", /body\s*\{[^}]*var\(--kx-ui\)/.test(CSS));
+  // The address bar is the one deliberate exception: an address is data, and a
+  // proportional font makes a url harder to scan.
+  ok("the address bar stays monospace", /\.addr input\s*\{[^}]*var\(--kx-mono\)/.test(CSS));
+}
+
 console.log(`\n${pass} passed, ${failures.length} failed`);
 for (const f of failures) console.log("  FAIL  " + f);
 process.exit(failures.length ? 1 : 0);

@@ -33,6 +33,8 @@ export class BrowserPanel {
 
   private disposables: vscode.Disposable[] = [];
   private inFlight?: AbortController;
+  /** True while frames are being streamed into this panel. */
+  private live = false;
 
   private constructor(
     private readonly panel: vscode.WebviewPanel,
@@ -50,6 +52,16 @@ export class BrowserPanel {
       panel.webview.onDidReceiveMessage((raw: any) => void this.onMessage(raw))
     );
     panel.onDidDispose(() => this.dispose(), null, this.disposables);
+    // A hidden panel is not watching. Streaming into it burns CPU encoding
+    // frames nobody sees, which is the failure mode this whole design was
+    // meant to avoid.
+    panel.onDidChangeViewState(() => {
+      if (!panel.visible && this.live) {
+        this.app.session.stopLiveView();
+        this.live = false;
+        this.post({ type: "agentState", running: this.app.session.browserRunning, live: false, url: "", title: "" });
+      }
+    }, null, this.disposables);
   }
 
   static show(app: App, extensionUri: vscode.Uri, url?: string): void {
@@ -90,6 +102,44 @@ export class BrowserPanel {
         return;
       case "browserStop":
         this.inFlight?.abort();
+        return;
+
+      /* The agent's own browser, streamed in. Distinct from the iframe: these
+         are the actual pixels of the actual page the model is driving, with
+         its cookies and its scroll position, and they arrive from sites that
+         refuse to be framed at all. */
+      case "agentStart":
+        try {
+          const where = await this.app.session.startLiveView((jpeg) => {
+            this.post({ type: "agentFrame", data: jpeg });
+          });
+          this.live = true;
+          this.post({ type: "agentState", running: true, live: true, ...where });
+        } catch (e: any) {
+          this.post({ type: "agentError", message: String(e?.message ?? e) });
+        }
+        return;
+
+      case "agentStop":
+        this.app.session.stopLiveView();
+        this.live = false;
+        this.post({ type: "agentState", running: this.app.session.browserRunning, live: false, url: "", title: "" });
+        return;
+
+      case "agentClose":
+        this.app.session.stopLiveView();
+        this.live = false;
+        await this.app.session.closeBrowser();
+        this.post({ type: "agentState", running: false, live: false, url: "", title: "" });
+        return;
+
+      case "agentGoto":
+        try {
+          const where = await this.app.session.browserGoto(String(msg.url ?? ""));
+          this.post({ type: "agentState", running: true, live: this.live, ...where });
+        } catch (e: any) {
+          this.post({ type: "agentError", message: String(e?.message ?? e) });
+        }
         return;
       case "browserExternal":
         try {
@@ -154,6 +204,13 @@ export class BrowserPanel {
   private dispose(): void {
     BrowserPanel.current = undefined;
     this.inFlight?.abort();
+    // The browser itself is the session's and outlives this panel - closing it
+    // here would end a login the agent is mid-way through. Only the stream
+    // stops, because there is nothing left to stream into.
+    if (this.live) {
+      this.live = false;
+      try { this.app.session.stopLiveView(); } catch { /* already gone */ }
+    }
     for (const d of this.disposables.splice(0)) {
       try {
         d.dispose();

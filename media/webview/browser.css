@@ -7,6 +7,13 @@ body {
   font-family: var(--kx-ui); font-size: 12px;
   color: var(--kx-fg); background: var(--kx-bg);
 }
+/* Form controls do not inherit a font. Without this every button and input in
+   this panel fell back to the platform default - measured as Arial - while
+   everything around them was set in the house sans, which is the sort of thing
+   that reads as "slightly wrong" long before anyone can name it. The sidebar
+   has always had this line; this file never did. */
+button, input, select, textarea { font: inherit; color: inherit; }
+
 #root, .bw { height: 100%; }
 .bw { display: flex; flex-direction: column; min-height: 0; }
 
@@ -149,3 +156,78 @@ body {
 }
 
 *:focus-visible { outline: 2px solid var(--kx-accent); outline-offset: 1px; border-radius: 4px; }
+
+/* ── the agent's browser ──────────────────────────────────────────────────
+   Two states with one job between them: say whether a browser exists, and
+   show it if it does. Everything here is sized around the fact that the panel
+   is usually narrow and beside an editor rather than filling a screen. */
+
+/* The launcher. A single card, centred, with one obvious action - a browser
+   starting is a process appearing on someone's machine, and the copy says so
+   rather than presenting it as a toggle. */
+.launch {
+  flex: 1; min-height: 0; display: grid; place-items: center;
+  padding: 24px;
+  /* A soft ground so the card reads as raised without a shadow. The panel
+     forbids glows; a two-stop radial at 4% is a gradient, not a glow. */
+  background:
+    radial-gradient(60% 55% at 50% 38%, rgba(34, 201, 214, .05), transparent 70%),
+    var(--kx-bg);
+}
+.launch-card {
+  max-width: 380px; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  padding: 30px 26px;
+  background: var(--kx-surface);
+  border: 1px solid var(--kx-line); border-radius: 12px;
+}
+.launch-orb { line-height: 0; }
+/* The display cut, matching the panel's other headings. The text face is for
+   running prose; a heading set in it reads a shade softer than every other
+   heading in the product. */
+.launch-card h2 {
+  margin: 0; font-family: var(--kx-display);
+  font-size: 15px; font-weight: 600; letter-spacing: -0.01em;
+  color: var(--kx-fg);
+}
+.launch-card p {
+  margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--kx-fg-3);
+}
+.launch-row { display: flex; gap: 8px; margin-top: 2px; }
+.launch-row .btn { font-size: 12px; padding: 7px 14px; border-radius: 6px; }
+
+/* Live. The frame is the content, so it gets the room, and the strip beneath
+   it carries the address - a picture of a page does not say where it is. */
+.live { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--kx-bg-deep); }
+.live-frame {
+  flex: 1; min-height: 0; display: grid; place-items: center; padding: 10px;
+  overflow: hidden;
+}
+/* Contained rather than stretched: the frame arrives at the browser's aspect,
+   and filling a narrow panel with it would distort every page shown. */
+.live-frame img {
+  max-width: 100%; max-height: 100%; object-fit: contain;
+  border: 1px solid var(--kx-line); border-radius: 6px;
+  background: #fff;
+}
+.live-wait {
+  display: flex; align-items: center; gap: 9px;
+  font-size: 12px; color: var(--kx-fg-3);
+}
+.live-bar {
+  flex: none; display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px; font-size: 11.5px; color: var(--kx-fg-2);
+  border-top: 1px solid var(--kx-line); background: var(--kx-surface);
+}
+.live-bar .sp { flex: 1; }
+.live-bar .live-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The one moving thing here, and it is load-bearing: a still frame and a dead
+   stream look identical, so the dot is what says the picture is current. */
+.live-dot {
+  flex: none; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--kx-accent);
+  animation: kxlive 1.8s ease-in-out infinite;
+}
+@keyframes kxlive { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+.btn.small { font-size: 11px; padding: 3px 9px; }

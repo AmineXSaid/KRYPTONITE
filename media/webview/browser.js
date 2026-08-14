@@ -40,6 +40,10 @@
     /* Set when the frame has not reported a load in time. Sites that refuse
        framing produce no error event of any kind, so silence is the signal. */
     frameBlocked: false,
+    /* The agent's own browser: whether one is up, where it is, and the most
+       recent frame of it. `frame` is a base64 jpeg, replaced in place - the
+       previous one is never worth keeping. */
+    agent: { running: false, url: "", title: "", frame: null, error: "", live: false },
   };
   var frameTimer = null;
 
@@ -71,6 +75,26 @@
       "</svg>";
   }
 
+  /**
+   * The mark on the launcher card.
+   *
+   * Defined here rather than pulled from crystal.js, because this panel does
+   * not load that script and adding one for a single decorative glyph would
+   * be a script tag per ornament. It borrows the language - a faceted stone
+   * inside a ring - without borrowing the file.
+   */
+  function orb() {
+    return '<svg width="54" height="54" viewBox="0 0 54 54" fill="none" aria-hidden="true">' +
+      '<circle cx="27" cy="27" r="24" stroke="var(--kx-line-2)" stroke-width="1"/>' +
+      '<circle cx="27" cy="27" r="18" stroke="var(--kx-accent)" stroke-width="1" opacity=".45"/>' +
+      '<path d="M27 15 L37 27 L27 39 L17 27 Z" stroke="var(--kx-accent)" stroke-width="1.2" ' +
+        'stroke-linejoin="round" fill="var(--kx-accent)" fill-opacity=".10"/>' +
+      '<path d="M17 27 H37" stroke="var(--kx-accent)" stroke-width=".8" opacity=".6"/>' +
+      '<path d="M22 27 L27 15 L32 27" stroke="var(--kx-accent)" stroke-width=".8" opacity=".6" ' +
+        'stroke-linejoin="round"/>' +
+      "</svg>";
+  }
+
   function mount() {
     $("root").innerHTML =
       '<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>' + ICONS + "</defs></svg>" +
@@ -84,6 +108,7 @@
           '<div class="seg" role="group" aria-label="View">' +
             '<button class="seg-b" id="bLive" aria-pressed="true">Live</button>' +
             '<button class="seg-b" id="bRead" aria-pressed="false">Reader</button>' +
+            '<button class="seg-b" id="bAgentView" aria-pressed="false" title="Watch the browser the agent drives">Agent</button>' +
           "</div>" +
           '<button class="nav" id="bAgent" title="Send this page to the chat" aria-label="Send to chat">' + icon("b-agent", "ic-15") + "</button>" +
           '<button class="nav" id="bExt" title="Open in your system browser" aria-label="Open externally">' + icon("b-ext", "ic-14") + "</button>" +
@@ -93,8 +118,72 @@
       "</div>";
   }
 
+  /**
+   * The agent's browser: a launcher when none is running, live frames when one
+   * is.
+   *
+   * Deliberately not an iframe. These are the actual pixels of the actual page
+   * the model is driving - same cookies, same session, same scroll position -
+   * and they arrive from sites that refuse framing outright, which is most of
+   * the ones worth automating.
+   */
+  function renderAgent(stage) {
+    var a = S.agent;
+
+    if (a.error) {
+      stage.innerHTML = '<div class="blank"><div class="blank-in err">' +
+        "<h2>The browser could not start</h2><p>" + esc(a.error) + "</p></div></div>";
+      return;
+    }
+
+    if (!a.live) {
+      // The launcher. One button, and an honest account of what pressing it
+      // does - a browser starting is a process appearing on someone's machine,
+      // which is not a thing to do silently.
+      stage.innerHTML =
+        '<div class="launch">' +
+          '<div class="launch-card">' +
+            '<div class="launch-orb">' + orb() + "</div>" +
+            "<h2>" + (a.running ? "A browser is already running" : "No browser running") + "</h2>" +
+            "<p>" + (a.running
+              ? "The agent has one open. Watch it live, or close it and free the process."
+              : "Start a Chromium the agent drives. It opens headless by default, so nothing appears over your editor - this panel is where you see it.") +
+            "</p>" +
+            '<div class="launch-row">' +
+              '<button class="btn primary" id="aStart">' +
+                (a.running ? "Watch it" : "Launch browser") + "</button>" +
+              (a.running ? '<button class="btn" id="aClose">Close browser</button>' : "") +
+            "</div>" +
+          "</div>" +
+        "</div>";
+      return;
+    }
+
+    // Live. The frame fills the stage and keeps its aspect; the strip under it
+    // says where the page actually is, because a picture of a page does not.
+    stage.innerHTML =
+      '<div class="live">' +
+        '<div class="live-frame">' +
+          (a.frame
+            ? '<img id="aFrame" alt="The page the agent is viewing" src="data:image/jpeg;base64,' + a.frame + '">'
+            : '<div class="live-wait">' + spinner(18) + "<span>waiting for the first frame…</span></div>") +
+        "</div>" +
+        '<div class="live-bar">' +
+          '<span class="live-dot"></span>' +
+          '<span class="live-t ell" title="' + esc(a.url) + '">' +
+            esc(a.title || a.url || "about:blank") + "</span>" +
+          '<span class="sp"></span>' +
+          '<button class="btn small" id="aStop">Stop watching</button>' +
+        "</div>" +
+      "</div>";
+  }
+
   function renderStage() {
     var stage = $("bStage");
+
+    // The agent view is its own thing: it has no address of its own and must
+    // render before the checks below, which are all about the address bar.
+    if (S.view === "agent") { renderAgent(stage); return; }
 
     // Before anything else: a rejected address is an error in both views, and
     // showing a blank frame instead would look like the site failed to load.
@@ -192,6 +281,7 @@
     $("bBusy").innerHTML = S.loading ? spinner(13) : "";
     $("bLive").setAttribute("aria-pressed", S.view === "live" ? "true" : "false");
     $("bRead").setAttribute("aria-pressed", S.view === "reader" ? "true" : "false");
+    $("bAgentView").setAttribute("aria-pressed", S.view === "agent" ? "true" : "false");
     var agent = $("bAgent");
     agent.disabled = !(S.page && S.page.text);
     $("bExt").disabled = !S.url;
@@ -301,6 +391,22 @@
     });
     $("bLive").addEventListener("click", function () { setView("live"); });
     $("bRead").addEventListener("click", function () { setView("reader"); });
+    $("bAgentView").addEventListener("click", function () { setView("agent"); });
+
+    /* The launcher's controls are inside the stage and the stage is rebuilt on
+       every frame, so binding them individually would attach a new listener
+       sixty times a second. Delegated once instead. */
+    $("bStage").addEventListener("click", function (e) {
+      if (e.target.closest("#aStart")) {
+        S.agent.error = "";
+        S.agent.live = true;      // show the spinner while the browser starts
+        render();
+        post("agentStart");
+        return;
+      }
+      if (e.target.closest("#aStop")) { post("agentStop"); return; }
+      if (e.target.closest("#aClose")) { post("agentClose"); return; }
+    });
     $("bExt").addEventListener("click", function () { post("browserExternal", { url: S.url }); });
     $("bAgent").addEventListener("click", function () {
       if (!S.page || !S.page.text) return;
@@ -318,6 +424,33 @@
     var m = event.data;
     if (!m || !m.type) return;
     switch (m.type) {
+      case "agentFrame":
+        // Replaced in place: the previous frame is never worth keeping, and
+        // holding them would be a memory leak measured in megabytes a minute.
+        S.agent.frame = m.data;
+        S.agent.live = true;
+        if (S.view === "agent") renderStage();
+        break;
+
+      case "agentState":
+        // Two independent facts: whether a browser exists, and whether frames
+        // are flowing into this panel. Tracking only the first left a stopped
+        // stream showing its last frame, which is the one thing a live view
+        // must never do - a stale picture and a current one look identical.
+        S.agent.running = Boolean(m.running);
+        S.agent.live = Boolean(m.live);
+        S.agent.url = m.url || "";
+        S.agent.title = m.title || "";
+        if (!S.agent.live) S.agent.frame = null;
+        render();
+        break;
+
+      case "agentError":
+        S.agent.error = String(m.message || "");
+        S.agent.live = false;
+        render();
+        break;
+
       case "browserLoading":
         S.loading = true;
         S.error = "";

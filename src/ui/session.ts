@@ -587,6 +587,87 @@ export class SessionController {
   }
 
   /** Abort the run and deny everything waiting on the user. */
+
+  /**
+   * The browser this session drives, launched on first use.
+   *
+   * Extracted so the panel can start one too. It used to be reachable only
+   * from inside a tool call, which meant the only way to see a browser was to
+   * ask the model to go and look at something.
+   */
+  private async ensureBrowser(): Promise<CdpBrowser> {
+    if (this.cdp) return this.cdp;
+    const found = listBrowsers();
+    if (!found.length) {
+      throw new Error(
+        "No Chromium-family browser is installed. Kryptonite drives Chrome, Edge, " +
+        "Brave, Vivaldi or Chromium - whichever the machine already has - and bundles " +
+        "none of them. Install one, or set KRYPTONITE_BROWSER to its executable. " +
+        "fetch_url still works without any browser."
+      );
+    }
+    const pick = found[0];
+    const cdp = new CdpBrowser(pick.path);
+    // Headless is still the default - a window appearing over the editor every
+    // time the agent looks something up is worse than not seeing it. The panel
+    // is the answer to "what is it actually doing" that does not require one.
+    const headed = this.app.configDto().browserHeaded;
+    await cdp.launch({ headed, viewport: { width: 1280, height: 800 } });
+    this.cdp = cdp;
+    this.app.log(
+      "info",
+      `Browser: driving ${pick.name} (${pick.path})` +
+        (found.length > 1 ? `. Also available: ${found.slice(1).map((f) => f.name).join(", ")}.` : "")
+    );
+    return cdp;
+  }
+
+  /** True while a browser is up, whoever started it. */
+  get browserRunning(): boolean {
+    return Boolean(this.cdp?.running);
+  }
+
+  /** Where that browser is, for the panel's address bar. */
+  async browserWhere(): Promise<{ url: string; title: string }> {
+    if (!this.cdp) return { url: "", title: "" };
+    try {
+      const s = await snapshot(this.cdp);
+      this.browserUrl = s.url;
+      return { url: s.url, title: s.title };
+    } catch {
+      return { url: this.browserUrl, title: "" };
+    }
+  }
+
+  /**
+   * Stream the agent's browser into the panel.
+   *
+   * Frames rather than an iframe: these are the actual pixels of the actual
+   * page the agent is driving, with its cookies and its scroll position, and
+   * they arrive from sites that refuse to be framed at all.
+   */
+  async startLiveView(onFrame: (jpeg: string) => void): Promise<{ url: string; title: string }> {
+    const cdp = await this.ensureBrowser();
+    cdp.startScreencast(onFrame, 900);
+    return this.browserWhere();
+  }
+
+  stopLiveView(): void {
+    this.cdp?.stopScreencast();
+  }
+
+  /** Point the agent's browser somewhere, from the panel's address bar. */
+  async browserGoto(url: string): Promise<{ url: string; title: string }> {
+    const cdp = await this.ensureBrowser();
+    await navigate(cdp, normaliseUrl(url));
+    return this.browserWhere();
+  }
+
+  async closeBrowser(): Promise<void> {
+    await this.cdp?.close();
+    this.cdp = undefined;
+  }
+
   /**
    * The model's browser, one action per call.
    *
@@ -612,31 +693,7 @@ export class SessionController {
       return "Browser closed.";
     }
 
-    if (!this.cdp) {
-      const found = listBrowsers();
-      if (!found.length) {
-        throw new Error(
-          "No Chromium-family browser is installed. Kryptonite drives Chrome, Edge, " +
-          "Brave, Vivaldi or Chromium - whichever the machine already has - and bundles " +
-          "none of them. Install one, or set KRYPTONITE_BROWSER to its executable. " +
-          "fetch_url still works without any browser."
-        );
-      }
-      const pick = found[0];
-      this.cdp = new CdpBrowser(pick.path);
-      // Headless is still the default - a window appearing over the editor
-      // every time the agent looks something up is worse than not seeing it.
-      // But there was previously no way to watch it at all, and "what is it
-      // actually doing" is a fair question to want answered.
-      const headed = this.app.configDto().browserHeaded;
-      await this.cdp.launch({ headed, viewport: { width: 1280, height: 800 } });
-      this.app.log(
-        "info",
-        `Browser: driving ${pick.name} (${pick.path})` +
-          (found.length > 1 ? `. Also available: ${found.slice(1).map((f) => f.name).join(", ")}.` : "")
-      );
-    }
-    const cdp = this.cdp;
+    const cdp = await this.ensureBrowser();
 
     /* Every snapshot goes through here so the origin the content came from is
        recorded alongside it. The fence names that origin, and an origin the
