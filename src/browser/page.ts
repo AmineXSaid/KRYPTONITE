@@ -29,6 +29,14 @@ export interface ElementRef {
   /** For links: where it goes, relative or absolute as the page wrote it. */
   href?: string;
   disabled?: boolean;
+  /**
+   * Outside the viewport as the page currently sits.
+   *
+   * Still listed and still clickable - `locate` scrolls to it first - but
+   * separated in the rendering, because "what I can see" and "what is further
+   * down" are different answers to a question about a screenshot.
+   */
+  off?: boolean;
 }
 
 /** A picture on the page, and whatever its author said it was. */
@@ -67,15 +75,35 @@ const COLLECT = String.raw`
     '[role="menuitem"], [role="option"], [role="switch"], [contenteditable="true"], [onclick]';
   const out = [];
   let n = 0;
+  // Everything interactive on the page, not only what is in the viewport.
+  //
+  // This used to stop at the fold, on the reasoning that scrolling is an
+  // explicit action. For a person that is right; for a model reading a page it
+  // is a handicap, because the only way to discover a control further down was
+  // to scroll by a guessed number of pixels and read again, repeatedly, with
+  // no way to know when to stop. A long page's form was effectively invisible.
+  //
+  // Clicking one costs nothing extra: locate() already scrolls the element
+  // into view before it takes coordinates, so a ref below the fold has always
+  // been clickable once you had it. What was missing was being told it exists.
+  // (No backticks in this comment: it lives inside a template literal.)
+  const raw = [];
   for (const el of document.querySelectorAll(SEL)) {
     const r = el.getBoundingClientRect();
     if (r.width < 1 || r.height < 1) continue;
     const cs = getComputedStyle(el);
     if (cs.visibility === 'hidden' || cs.display === 'none' || Number(cs.opacity) === 0) continue;
-    // Off-screen in either direction. Scrolling is a separate, explicit action.
-    if (r.bottom < 0 || r.right < 0) continue;
-    if (r.top > innerHeight || r.left > innerWidth) continue;
+    const off = r.bottom < 0 || r.right < 0 || r.top > innerHeight || r.left > innerWidth;
+    raw.push({ el: el, r: r, off: off });
+  }
+  // What is on screen first, so the 300 cap can never drop a visible control
+  // in favour of one four thousand pixels down. Sort is stable, so document
+  // order survives within each group.
+  raw.sort(function (a, b) { return (a.off ? 1 : 0) - (b.off ? 1 : 0); });
 
+  for (const item of raw) {
+    const el = item.el;
+    const r = item.r;
     const ref = 'ref_' + (++n);
     el.setAttribute('data-kx-ref', ref);
 
@@ -103,6 +131,7 @@ const COLLECT = String.raw`
       w: Math.round(r.width), h: Math.round(r.height),
       value: (el.value !== undefined && el.type !== 'password') ? String(el.value).slice(0, 120) : undefined,
       disabled: Boolean(el.disabled),
+      off: item.off,
     });
     if (out.length >= 300) break;
   }
@@ -680,7 +709,7 @@ export function findRefs(s: PageSnapshot, query: string): ElementRef[] {
  */
 export function renderSnapshot(s: PageSnapshot, opts: { maxText?: number } = {}): string {
   const cap = opts.maxText ?? 1_500;
-  const lines = s.elements.map((e) => {
+  const line = (e: ElementRef): string => {
     const bits = [`[${e.ref}]`, e.role];
     if (e.name) bits.push(JSON.stringify(e.name));
     if (e.value) bits.push(`value=${JSON.stringify(e.value)}`);
@@ -700,7 +729,14 @@ export function renderSnapshot(s: PageSnapshot, opts: { maxText?: number } = {})
     }
     if (e.disabled) bits.push("(disabled)");
     return "  " + bits.join(" ");
-  });
+  };
+
+  // Split rather than merged, because the difference matters when a screenshot
+  // is also in play: everything in the first list is in the picture, and
+  // nothing in the second is. Clicking works either way.
+  const inView = s.elements.filter((e) => !e.off);
+  const below = s.elements.filter((e) => e.off);
+
   const text =
     s.text.length > cap
       ? s.text.slice(0, cap) + "\n… (truncated; use the text action for the whole page)"
@@ -708,7 +744,11 @@ export function renderSnapshot(s: PageSnapshot, opts: { maxText?: number } = {})
   return (
     `${s.title || "(untitled)"}\n${s.url}\n\n` +
     `Interactive elements - click or type using the ref:\n` +
-    (lines.length ? lines.join("\n") : "  (none found)") +
+    (inView.length ? inView.map(line).join("\n") : "  (none in view)") +
+    (below.length
+      ? `\n\nFurther down the page, not currently visible - clicking one scrolls to it:\n` +
+        below.map(line).join("\n")
+      : "") +
     imageSection(s) +
     `\n\nPage text:\n${text}`
   );

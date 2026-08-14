@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { ToolDef } from "../providers/client";
 import type { Skill } from "../skills/loader";
+import { BROWSER_ACTIONS } from "../browser/actions";
 
 const pexec = promisify(execFile);
 
@@ -350,11 +351,11 @@ export const TOOL_DEFS: ToolDef[] = [
       properties: {
         action: {
           type: "string",
-          enum: [
-            "open", "read", "text", "find", "click", "hover", "type", "set", "key", "scroll",
-            "screenshot", "eval", "console", "network", "wait", "resize",
-            "back", "forward", "close",
-          ],
+          // Generated from the implementation's own list rather than repeated.
+          // Drift between the two is silent in both directions: an action here
+          // with no branch there throws at the model, and a branch with no
+          // entry here is a capability the model is never told it has.
+          enum: [...BROWSER_ACTIONS],
           description:
             "open: go to a url. read: page text plus every clickable ref. " +
             "text: the article, without the navigation and without refs - use it when you " +
