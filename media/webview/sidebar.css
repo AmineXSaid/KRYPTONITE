@@ -1037,6 +1037,22 @@ li.doing .cbx { border-color: var(--kx-accent); }
 #sendBtn[data-ready="1"] { background: var(--kx-action); color: var(--kx-on-action); }
 #sendBtn[data-mode="stop"] { background: var(--kx-surface-3); color: var(--kx-fg); }
 
+/* ── the welcome screen's resume chips ────────────────────────────────────
+   Two lines rather than one: the title says which conversation it was, and
+   the age and message count say whether it is worth going back to. A title
+   alone reads identically for a thread with one message and one with forty. */
+.chips.resume { flex-direction: column; gap: 6px; width: 100%; max-width: 340px; }
+.resume-btn {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 9px 11px; text-align: left;
+  color: var(--kx-fg-2);
+}
+.resume-btn svg { flex: none; color: var(--kx-fg-4); }
+.resume-btn .col { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.resume-btn .t { font-size: 12.5px; color: var(--kx-fg); }
+.resume-btn .m { font-size: 11px; color: var(--kx-fg-3); }
+.resume-btn:hover svg { color: var(--kx-link); }
+
 /* ── the tip strip ────────────────────────────────────────────────────────
    Above the composer, below the transcript: the one place the eye already
    passes on its way to the input. Quiet enough to ignore on the hundredth

@@ -1039,18 +1039,39 @@ function _sbRun() {
     "Drop a <b>SKILL.md</b> into .agent/skills and it appears under / straight away."
   ];
 
+  /* How long one tip holds the strip.
+     Short enough that a panel left open all day shows more than one, long
+     enough that it is never moving while being read - a line that changes
+     under the eye is worse than a line nobody reads. */
+  var TIP_PERIOD_MS = 15 * 60 * 1000;
+
+  /* Derived from the clock rather than stored, so it advances on its own and
+     two panels open side by side agree. `tipNudge` is the manual button's
+     offset on top of it. */
+  function tipIndex() {
+    return (Math.floor(Date.now() / TIP_PERIOD_MS) + (S.tipNudge || 0)) % TIPS.length;
+  }
+
   function renderTip(advance) {
     var bar = $("tipBar");
     if (!bar) return;
-    if (advance || S.tipIndex === undefined) {
-      S.tipIndex = S.tipIndex === undefined
-        ? Math.floor(Math.random() * TIPS.length)
-        : (S.tipIndex + 1) % TIPS.length;
-    }
+    if (advance) S.tipNudge = (S.tipNudge || 0) + 1;
+    var i = tipIndex();
     // innerHTML is safe here and only here: TIPS is a constant in this file
     // and never carries anything a model or a page produced.
-    $("tipText").innerHTML = TIPS[S.tipIndex];
+    $("tipText").innerHTML = TIPS[i];
+    S.tipShown = i;
     bar.hidden = false;
+  }
+
+  /* The strip has to change while the panel simply sits there, so the period
+     is watched rather than waited for: checking the bucket each minute costs
+     nothing and survives the machine sleeping, which a 15-minute timer would
+     not. */
+  function watchTips() {
+    setInterval(function () {
+      if (tipIndex() !== S.tipShown) renderTip(false);
+    }, 60 * 1000);
   }
 
   /* ───────────────────────── permissions ───────────────────────── */
@@ -1143,15 +1164,43 @@ function _sbRun() {
         '</div>'));
       return;
     }
-    logEl.appendChild(div("welcome",
-      crystal(46, "crystal") +
-      "<h2>How can I help?</h2>" +
-      "<p>Kryptonite is connected and ready. Ask anything, or pick a starting point.</p>" +
-      '<div class="chips">' +
-        '<button class="chip-btn" data-sug="Add retry logic to fetch_json()">Add retry logic to fetch_json()</button>' +
-        '<button class="chip-btn" data-sug="Write tests for api.py">Write tests for api.py</button>' +
-        '<button class="chip-btn" data-act="doctor">Run TLS diagnostics</button>' +
-      '</div>'));
+    /* The three chips here used to be invented examples - "Add retry logic to
+       fetch_json()", a function nobody in this workspace has. They read as
+       features of a demo rather than of the tool, and pressing one typed a
+       sentence about somebody else's code.
+
+       What is actually useful on a blank screen is the work already in
+       progress, so the chips are the most recent conversations. On a genuinely
+       first run there are none, and then the welcome says so and offers
+       nothing - an empty row of buttons is worse than no row. */
+    var recent = [];
+    for (var ri = 0; ri < S.sessions.length && recent.length < 3; ri++) {
+      var sess = S.sessions[ri];
+      // Skip the conversation being written into - it is the empty screen the
+      // user is looking at, and offering to resume it goes nowhere. Skip the
+      // untouched ones too: an "Untitled" with no messages is not a thread
+      // anyone remembers starting.
+      if (sess.active || !sess.count || /^Untitled( \d+)?$/.test(sess.title || "")) continue;
+      recent.push(sess);
+    }
+
+    var body = crystal(46, "crystal") + "<h2>How can I help?</h2>";
+    if (!recent.length) {
+      body += "<p>Kryptonite is connected and ready. Ask anything to begin.</p>";
+    } else {
+      body += "<p>Kryptonite is connected and ready. Ask anything, or pick up where you left off.</p>" +
+        '<div class="chips resume">';
+      for (var rj = 0; rj < recent.length; rj++) {
+        var r = recent[rj];
+        var n = r.count === 1 ? "1 message" : r.count + " messages";
+        body += '<button class="chip-btn resume-btn" data-session="' + esc(r.id) + '">' +
+          icon("i-clock", "ic-11") +
+          '<span class="col"><span class="t ell">' + esc(r.title) + "</span>" +
+          '<span class="m">' + esc(r.when) + " · " + n + "</span></span></button>";
+      }
+      body += "</div>";
+    }
+    logEl.appendChild(div("welcome", body));
   }
 
   /* The rail is a ::before on .msg-user, so everything else has to sit in a
@@ -3198,6 +3247,11 @@ function _sbRun() {
         }
         return;
       }
+      // The welcome screen's resume chips. The history popover has its own
+      // handler for these, scoped to itself, so the transcript needs its own
+      // rather than inheriting one.
+      var resume = e.target.closest("[data-session]");
+      if (resume) { post("loadSession", { id: resume.getAttribute("data-session") }); return; }
       var sug = e.target.closest("[data-sug]");
       if (sug) { sendText(sug.getAttribute("data-sug")); return; }
       var act = e.target.closest("[data-act]");
@@ -3261,6 +3315,7 @@ function _sbRun() {
       }
     });
     $("tipNext").addEventListener("click", function () { renderTip(true); });
+    watchTips();
 
     $("permBtn").addEventListener("click", function (e) {
       e.stopPropagation();

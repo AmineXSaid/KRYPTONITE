@@ -254,6 +254,124 @@ function boot() {
   b.dom.window.close();
 }
 
+
+/* ── the welcome screen ─────────────────────────────────────────────────── */
+{
+  const bootWith = (sessions) => {
+    const b = boot();
+    b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+      type: "stateSync", state: {
+        workspace: { open: true, name: "r" }, running: false, phase: "act",
+        status: { state: "ok", label: "OK" }, endpoint: "gw",
+        profiles: [{ id: "gw", status: "ready", active: true, model: "m", wire: "openai",
+          baseUrl: "https://x", capabilities: { contextWindow: 128000 } }],
+        skills: [], skillWarnings: [],
+        config: { approvalMode: "ask", activeProfile: "", caBundlePath: "", ui: {} },
+        tlsError: null, rungs: [], tracing: false, todos: [], checkpoints: [],
+        sessions, selection: null, context: null, models: [], logs: [],
+        session: { id: "cur", title: "Untitled", messages: [] },
+      },
+    } }));
+    return b;
+  };
+  const sess = (id, title, count, when = "2h ago", active = false) => ({ id, title, count, when, active });
+
+  // A genuinely first run: nothing to resume, so nothing is offered. An empty
+  // row of buttons is worse than no row.
+  {
+    const b = bootWith([sess("cur", "Untitled", 0, "now", true)]);
+    const w = b.d.querySelector(".welcome");
+    ok("a first run still welcomes", /How can I help/.test(w.textContent));
+    ok("and offers nothing to resume", w.querySelectorAll("[data-session]").length === 0);
+    ok("saying so in the copy", /Ask anything to begin/.test(w.textContent), w.textContent.slice(0, 90));
+    // The invented examples are gone. Asserted on the markup rather than the
+    // words, because the comment recording why they went still names them.
+    ok("no fabricated suggestion buttons remain",
+      !/data-sug="Add retry|data-sug="Write tests/.test(SRC),
+      "they described code no workspace has");
+    b.dom.window.close();
+  }
+
+  // Three or more prior conversations: exactly three, newest first.
+  {
+    const b = bootWith([
+      sess("cur", "Untitled", 0, "now", true),
+      sess("a", "Fix the TLS handshake", 12),
+      sess("b", "Rename the aura tokens", 4),
+      sess("c", "Add Ask mode", 30),
+      sess("d", "Older still", 7),
+    ]);
+    const chips = [...b.d.querySelectorAll(".welcome [data-session]")];
+    ok("at most three are offered", chips.length === 3, String(chips.length));
+    ok("in the order given", chips.map((c) => c.getAttribute("data-session")).join(",") === "a,b,c",
+      chips.map((c) => c.getAttribute("data-session")).join(","));
+    ok("each names the conversation", /Fix the TLS handshake/.test(chips[0].textContent));
+    // A title alone reads the same for a thread of one message and one of forty.
+    ok("and says how big and how old it is",
+      /12 messages/.test(chips[0].textContent) && /2h ago/.test(chips[0].textContent),
+      chips[0].textContent);
+    ok("the copy invites resuming", /pick up where you left off/.test(b.d.querySelector(".welcome").textContent));
+
+    b.sent.length = 0;
+    chips[1].dispatchEvent(new b.w.MouseEvent("click", { bubbles: true }));
+    const load = b.sent.filter((m) => m.type === "loadSession");
+    ok("clicking one loads it", load.length === 1 && load[0].id === "b", JSON.stringify(load));
+    b.dom.window.close();
+  }
+
+  // Fewer than three: show what there is, not padding.
+  {
+    const b = bootWith([sess("cur", "Untitled", 0, "now", true), sess("a", "Only one", 3)]);
+    ok("one prior conversation shows one chip",
+      b.d.querySelectorAll(".welcome [data-session]").length === 1);
+    b.dom.window.close();
+  }
+  {
+    const b = bootWith([
+      sess("cur", "Untitled", 0, "now", true), sess("a", "First", 3), sess("b", "Second", 9),
+    ]);
+    ok("two show two", b.d.querySelectorAll(".welcome [data-session]").length === 2);
+    b.dom.window.close();
+  }
+
+  // The conversation being looked at, and never-used ones, are not offers.
+  {
+    const b = bootWith([
+      sess("cur", "Untitled", 0, "now", true),
+      sess("x", "Untitled 2", 0),
+      sess("y", "Untitled 3", 0),
+      sess("real", "A real thread", 5),
+    ]);
+    const chips = [...b.d.querySelectorAll(".welcome [data-session]")];
+    ok("empty untitled sessions are not offered", chips.length === 1, String(chips.length));
+    ok("only the real one is", chips[0].getAttribute("data-session") === "real");
+    ok("and never the conversation already open",
+      !chips.some((c) => c.getAttribute("data-session") === "cur"));
+    b.dom.window.close();
+  }
+}
+
+/* ── tips rotate on a period ────────────────────────────────────────────── */
+{
+  ok("a tip period is defined", /TIP_PERIOD_MS\s*=/.test(SRC));
+  // Derived from the clock, not stored: it advances with no interaction, and
+  // two panels open side by side show the same tip.
+  ok("the index comes from the clock",
+    /function tipIndex\(\)[\s\S]{0,160}Math\.floor\(Date\.now\(\) \/ TIP_PERIOD_MS\)/.test(SRC));
+  ok("with the manual button as an offset on top", /tipNudge/.test(SRC));
+  ok("and something watches for the period turning over", /function watchTips\(\)/.test(SRC));
+  ok("checked on a shorter interval than the period itself",
+    /60 \* 1000/.test(SRC), "so a machine waking from sleep catches up");
+
+  const b = boot();
+  b.sync("ask");
+  const shown = b.d.getElementById("tipText").textContent;
+  ok("a tip is on screen", shown.trim().length > 20);
+  b.click("#tipNext");
+  ok("the button still moves it on", b.d.getElementById("tipText").textContent !== shown);
+  b.dom.window.close();
+}
+
 if (failures.length) for (const f of failures) console.log("FAIL  " + f);
 console.log(`\n──── ${pass} passed, ${failures.length} failed ────`);
 process.exitCode = failures.length ? 1 : 0;
