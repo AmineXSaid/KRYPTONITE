@@ -57,19 +57,7 @@ function _sbRun() {
        cannot", and this says "something is standing between the agent and the
        workspace" - which is a guard, not a barrier. */
     '<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7.5 3v6c0 4.2-3 7.6-7.5 9-4.5-1.4-7.5-4.8-7.5-9V6z" ' +
-      S6 + ' stroke-width="1.5" stroke-linejoin="round"/></symbol>' +
-    /* Not an icon: the header's ornament, and the only decorative mark in the
-       product. A hairline rule broken by a single cut stone - the crystal's
-       geometry at a twentieth of its size, so it belongs to the mark at the
-       other end of the header without competing with it. Portrait, like the
-       crystal, and stroked rather than filled, because the house rule is that
-       the only glow in the panel lives inside the artwork itself. */
-    '<symbol id="i-facet" viewBox="0 0 10 22">' +
-      '<path d="M5 .8V7.4M5 14.6v6.6" ' + S6 + ' stroke-width=".9" stroke-linecap="round"/>' +
-      '<path d="M5 8.1 7.7 11 5 13.9 2.3 11Z" stroke="currentColor" fill="currentColor" ' +
-        'fill-opacity=".16" stroke-width=".9" stroke-linejoin="round"/>' +
-      '<path d="M2.3 11h5.4" ' + S6 + ' stroke-width=".7" stroke-opacity=".7"/>' +
-    '</symbol>';
+      S6 + ' stroke-width="1.5" stroke-linejoin="round"/></symbol>';
 
   /* Ladder rung name -> the short label the design shows. */
   var RUNG_LABELS = {
@@ -794,12 +782,6 @@ function _sbRun() {
           // that used to sit above it is VS Code's view header, blanked in
           // package.json rather than competing with this.
           '<span class="kx-wordmark">Kryptonite</span><span class="sp"></span>' +
-          // The running token count used to sit here. It was the one thing in
-          // the panel that changed on every frame, in the one strip that should
-          // hold still, and it said nothing the footer meter does not already
-          // say next to the number it fills. What is left is an ornament that
-          // separates the identity from the controls.
-          icon("i-facet", "kx-mark") +
           '<button class="icon-btn" id="newBtn" title="New chat" aria-label="New chat">' + icon("i-plus") + '</button>' +
           '<button class="icon-btn" id="histBtn" title="History" aria-label="Chat history" aria-haspopup="menu" aria-expanded="false">' + icon("i-clock") + '</button>' +
           '<button class="icon-btn" id="moreBtn" title="More" aria-label="More actions" aria-haspopup="menu" aria-expanded="false">' + icon("i-dots") + '</button>' +
@@ -884,8 +866,6 @@ function _sbRun() {
               '</div>' +
             '</div>' +
             '<div class="footer">' +
-              '<span id="ctxText" class="tnum">0 / 0</span>' +
-              '<span id="ctxBar"><i id="ctxFill"></i></span><span>·</span>' +
               '<span class="ep" id="epInd" data-err="0"><span class="dot"></span><span class="nm ell" id="epName">No endpoint</span></span>' +
               '<span class="sp"></span>' +
               // The approval mode, where the user can see and change it.
@@ -2345,22 +2325,12 @@ function _sbRun() {
 
   /* ───────────────────────── footer ───────────────────────── */
 
+  /* The footer says which endpoint is answering, and nothing else.
+     The context readout that used to live here - a figure and a meter - was
+     removed on request. The number is still tracked and still reported on
+     each turn's footer line; it simply no longer sits under the composer,
+     where it changed on every frame directly beneath the thing being typed. */
   function renderFooter() {
-    var used = S.context ? S.context.used : 0;
-    var limit = S.context ? S.context.limit : 0;
-    // A figure is printed only when the gateway reported real token usage.
-    // The fallback is a chars/3.6 estimate that drifts about a tenth of a k
-    // per message, and a number that is quietly wrong is worse than the meter
-    // alone - so when it is not exact, only the meter speaks.
-    var exact = S.context ? S.context.exact === true : false;
-    $("ctxText").textContent = exact ? fmtK(used) + " / " + fmtK(limit) : "";
-    $("ctxText").title = exact ? "Reported by the endpoint" : "";
-    var pct = limit ? Math.min(100, (used / limit) * 100) : 0;
-    $("ctxFill").style.width = pct + "%";
-    // Sky while the bar is only a reading; amber and then coral once the
-    // number stops being information and starts being a problem.
-    $("ctxFill").setAttribute("data-level", pct >= 90 ? "full" : pct >= 75 ? "warn" : "ok");
-
     var active = activeProfile();
     var name = active ? active.id : "No endpoint";
     $("epName").textContent = S.tlsError ? name + " - TLS error" : name;

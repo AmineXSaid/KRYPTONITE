@@ -79,15 +79,6 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   font-family: var(--kx-display); font-size: 12.5px; font-weight: 700;
   letter-spacing: .11em; text-transform: uppercase; color: var(--kx-fg);
 }
-/* The header ornament, standing where the running token count used to.
-   Decorative and nothing else: aria-hidden, no title, no hover state, and
-   deliberately far enough down in weight that the eye passes over it on the
-   way to the buttons. The portrait box is what keeps it from reading as a
-   fourth icon button next to the three real ones. */
-.kx-mark {
-  width: 13px; height: 19px; flex: none;
-  color: var(--kx-fg-3); opacity: .5;
-}
 .icon-btn {
   width: 26px; height: 26px; display: grid; place-items: center; border-radius: 5px;
   color: var(--kx-fg-2);
@@ -765,7 +756,7 @@ li.doing .cbx { border-color: var(--kx-accent); }
 @media (prefers-reduced-motion: reduce) {
   .rad .rays, .rad .ki, .rad .shock, .rad .em { display: none; }
   .rad .crystal { animation: none; opacity: 1; }
-  .chev, #ctxFill { transition: none; }
+  .chev { transition: none; }
 }
 .stream .g { font-family: var(--kx-prose); font-size: 13px; }
 .stream .m {
@@ -1106,16 +1097,6 @@ li.doing .cbx { border-color: var(--kx-accent); }
 .perm-pop .pop-row { align-items: flex-start; gap: 7px; }
 .perm-pop .perm-check { flex: none; width: 13px; margin-top: 1px; color: var(--kx-accent); }
 .perm-pop .col { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-#ctxBar {
-  width: 70px; height: 3px; flex: none; border-radius: 2px; overflow: hidden;
-  background: var(--kx-divider);
-}
-/* Sky: the meter reports a measurement, it does not assert health. On the
-   neutral foreground it read as chrome rather than as data. */
-#ctxFill { display: block; height: 100%; width: 0; background: var(--kx-info); transition: width .6s; }
-/* Near the ceiling it stops being a measurement and becomes a warning. */
-#ctxFill[data-level="warn"] { background: var(--kx-warn); }
-#ctxFill[data-level="full"] { background: var(--kx-error); }
 .ep { display: flex; align-items: center; gap: 5px; min-width: 0; }
 .ep .dot { width: 5px; height: 5px; flex: none; border-radius: 50%; background: var(--kx-accent); }
 .ep[data-err="1"] { color: var(--kx-error); }

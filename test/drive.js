@@ -579,21 +579,21 @@ const pasteTests = (async () => {
   ok("1.5 transcript hydrated", /hello/.test(log.textContent) && /hi/.test(log.textContent));
   ok("1.5 composer enabled with a ready endpoint", d.getElementById("draft").disabled === false);
   ok("1.5 todos hydrated", /step one/.test(d.getElementById("root").textContent));
-  // The meter fills from an estimate, but the figure is printed only when the
-  // gateway reported real usage — an estimate that drifts is worse than no
-  // number. So hydration proves itself through the bar, not the text.
-  ok("1.5 context meter fills", parseFloat(d.getElementById("ctxFill").style.width) > 0);
-  ok("1.5 estimated usage prints no figure", d.getElementById("ctxText").textContent === "");
+  // The context readout under the composer was removed on request. What has
+  // to keep working is that the message carrying it no longer throws - a
+  // renderer reaching for an element that is gone takes the whole panel with
+  // it, and this is the only place that message is exercised.
+  ok("1.5 the footer names the endpoint", /gw/.test(d.getElementById("epName").textContent));
 }
 
-/* 1.5b — an endpoint-reported count does print */
+/* 1.5b — a usage report is accepted even though nothing renders it */
 {
   const { d, inbound } = boot();
   inbound(STATE());
   inbound({ type: "contextUsage", used: 12000, limit: 128000, exact: true });
-  ok("1.5b exact usage prints a figure", d.getElementById("ctxText").textContent.trim().length > 0);
-  ok("1.5b figure is attributed", /endpoint/i.test(d.getElementById("ctxText").title));
-  ok("1.5b meter fills for exact usage", parseFloat(d.getElementById("ctxFill").style.width) > 0);
+  ok("1.5b a usage message does not break the panel",
+    d.getElementById("draft").disabled === false);
+  ok("1.5b and the footer still stands", !!d.getElementById("epName"));
 }
 
 /* 1.6 — a second stateSync replaces, never duplicates */
