@@ -106,6 +106,40 @@ console.log("\n──── where it lands in the prompt ────");
   ck(systemPromptFor([], "act", "") === bare, "and so is an empty string");
 }
 
+
+console.log("\n──── the model is told what it is ────");
+{
+  // Asked "what are you", a model with nothing to go on answers from its
+  // training - and open weights are very often tuned on transcripts of the
+  // big hosted assistants, so a model served from a gateway will claim to be
+  // one of them. The extension knows better and now says so.
+  const bare = systemPromptFor([], "act");
+  ck(!/You are the model/.test(bare), "no identity is claimed when none is known");
+
+  const withId = systemPromptFor([], "act", undefined, {
+    model: "stepfun-ai/step-3.7-flash",
+    endpoint: "nvidia",
+  });
+  ck(/You are the model `stepfun-ai\/step-3\.7-flash`/.test(withId),
+    "the real model id is stated");
+  ck(/endpoint "nvidia"/.test(withId), "along with the endpoint serving it");
+  ck(/do not guess at a brand name/.test(withId),
+    "and it is told not to guess a brand from its training");
+
+  // The one that caused the report: nothing we send may name a vendor, or the
+  // model reaches for the only brand in its context.
+  ck(!/Anthropic/.test(withId), "the prompt names no vendor of its own");
+  ck(!/Claude/.test(withId), "and never says Claude");
+  ck(!/Anthropic|Claude/.test(systemPromptFor([], "plan")), "in plan phase either");
+  ck(!/Anthropic|Claude/.test(systemPromptFor([], "ask")), "nor in ask");
+
+  // Still a stable prefix: the id changes only when the profile does, and a
+  // profile change invalidates the cache anyway.
+  ck(systemPromptFor([], "act", undefined, { model: "m", endpoint: "e" }) ===
+     systemPromptFor([], "act", undefined, { model: "m", endpoint: "e" }),
+    "and the same profile builds the same bytes");
+}
+
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(`\n──── ${pass} passed, ${fail} failed ────`);
 process.exitCode = fail ? 1 : 0;

@@ -446,16 +446,41 @@ export interface AgentRunOptions {
 export function systemPromptFor(
   skills: Skill[],
   phase: AgentPhase,
-  instructions?: string
+  instructions?: string,
+  identity?: { model: string; endpoint: string }
 ): string {
   // The project's instructions sit after the engine's own rules and before the
   // phase addendum. After, because a workspace convention is a refinement of
   // how to work rather than a replacement for it; before, because the plan
   // addendum is the one thing in here that must have the last word.
   const addendum = phase === "plan" ? PLAN_ADDENDUM : phase === "ask" ? ASK_ADDENDUM : "";
-  return [SYSTEM, skillIndex(skills), instructions ?? "", addendum]
+  return [SYSTEM, identityLine(identity), skillIndex(skills), instructions ?? "", addendum]
     .filter(Boolean)
     .join("\n\n");
+}
+
+/**
+ * Tell the model what it is.
+ *
+ * Asked "what are you", a model with nothing to go on answers from its
+ * training, and open weights are very often tuned on transcripts of the big
+ * hosted assistants - so a model served from a gateway will cheerfully claim
+ * to be one of them. That is not a lie the model is choosing to tell; it is
+ * the only answer it has.
+ *
+ * The extension knows better: the profile names the model and the endpoint it
+ * is being served from. Stating it costs one line and replaces a guess with a
+ * fact. It sits in the stable head, which is safe because it changes only when
+ * the profile does - and a profile change invalidates the cache anyway.
+ */
+function identityLine(identity?: { model: string; endpoint: string }): string {
+  if (!identity?.model) return "";
+  return (
+    `You are the model \`${identity.model}\`, served through the endpoint ` +
+    `"${identity.endpoint}" and running inside the Kryptonite extension for VS Code. ` +
+    `If you are asked what model you are, answer with that and do not guess at a ` +
+    `brand name from your training.`
+  );
 }
 
 export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEvent> {
@@ -463,7 +488,10 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
   const caps = client.profile.capabilities;
   // CHANGED: the plan addendum joins the system prompt in plan phase.
   const phase = opts.phase ?? "act";
-  const system = systemPromptFor(ctx.skills, phase, opts.instructions);
+  const system = systemPromptFor(ctx.skills, phase, opts.instructions, {
+    model: client.profile.model,
+    endpoint: client.profile.name,
+  });
 
   // CHANGED: in plan phase the model is only offered the read-only tools, so a
   // write is impossible rather than merely discouraged.
