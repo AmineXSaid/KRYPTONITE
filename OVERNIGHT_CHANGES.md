@@ -127,59 +127,33 @@ coverage for `controlCenter.js`, which immediately found an unguarded
 
 ---
 
-## Not done
+## Tier 1 — all done, later
 
-Nine Tier 1 items are **not started**. No half-built code was left behind and
-nothing was reverted — I did not begin any of them. Plans below.
+Every Tier 1 item on this list was still unbuilt when this file was written.
+They have since been built, tested and shipped. The plans that used to live
+here were followed closely enough that repeating them would just be describing
+the code, so what follows is what each one turned into and where it lives.
 
-I stopped adding features while I could still write this file and package
-cleanly. Three features carrying real tests are worth more than nine with the
-build red, and the brief said so explicitly.
-
-### #2 Ghost-text completions — the largest, and the one I'd think hardest about
-Plan: `registerInlineCompletionItemProvider({ pattern: "**" })` for breadth.
-Debounce ~250ms on `onDidChangeTextDocument`, key an LRU cache on
-`(uri, version, prefixHash)`, and hand the `CancellationToken` straight to
-`EndpointClient.complete({ signal })` — the client already takes an
-`AbortSignal`, so cancellation is wired end to end.
-
-**Read this before building it.** Inline completion wants sub-500ms round trips
-and a fill-in-the-middle endpoint. This extension exists for corporate gateways
-that typically offer neither. It is the feature most likely to feel broken on
-precisely the endpoints the product targets. If built, gate it behind
-`capabilities.fim` (a new capability, defaulting false) and a `kryptonite.inlineCompletion`
-setting defaulting **off**, so it is opt-in for people whose endpoint can carry it.
-
-### #5 Background streaming across conversation switches
-Today `SessionController` holds a **single** `this.abort`, so the design is
-genuinely absent. Plan: replace it with `Map<sessionId, {abort, buffer, history}>`,
-move the replay buffer in beside it, and make `loadSession`/`newChat` swap the
-active key rather than call `interruptQuietly()`. The webview needs to render
-from the buffer for whichever id it is showing. Test: start a turn, switch away,
-switch back, assert the full text arrived — the brief is right that this needs
-an explicit test, and it is why I did not attempt it in the time left.
-
-### #9/#10/#11 CodeLens, code actions, doc comments
-One cluster sharing an "invoke the model outside a chat turn and apply an edit"
-path that does not exist yet. Build that first: a small `oneShot(prompt)` helper
-on `App` returning a string, plus a `WorkspaceEdit` applier with a diff preview.
-Then the three providers are thin. #10 is the highest value of the three now
-that diagnostics are already gathered — `editorContext.ts` produces exactly the
-`ProblemRef` a "Fix with Kryptonite" action needs.
-
-### #12 Slash commands
-`/` in the composer already opens a picker listing **skills**. `/fix`, `/tests`,
-`/explain`, `/doc` must merge into that picker rather than shadow it, or one of
-the two silently stops working. Plan: give the picker two groups (commands,
-skills), and implement each command as a prompt template that reuses the editor
-context from #2 above — `/fix` with no argument should mean "the diagnostics
-already in the turn".
-
-### #13 Commit message generation
-Plan: `vscode.extensions.getExtension("vscode.git").exports.getAPI(1)`, take
-`repo.state.indexChanges`, cap the diff (a 5,000-line diff is not a prompt),
-call the one-shot helper from the #9 cluster, and set `repo.inputBox.value`.
-Needs the same non-chat model path, which is why it is grouped with them.
+- **#2 Ghost-text completions** — `src/providers/inlineCompletion.ts`, with the
+  parts worth testing in `src/agent/completion.ts`. Off behind two gates, as
+  the warning here said it should be: `capabilities.fim` on the profile and
+  `kryptonite.inlineCompletion` in settings, both defaulting false. Either one
+  off and not a single request is sent. 54 tests.
+- **#5 Background streaming across conversation switches** — the single
+  `this.abort` is gone. A turn now carries its own abort, its own replay
+  buffer, and a reference to the transcript array it is appending to, so
+  switching chats moves what is on screen and nothing else. 21 tests, driven
+  against a real SSE server because the failure it guards is a race.
+- **#9/#10/#11 CodeLens, code actions, doc comments** — the shared "invoke the
+  model outside a chat turn and apply an edit" path this file said to build
+  first is `src/agent/oneShot.ts` plus `src/ui/quickEdit.ts`. The three
+  providers on top of it are thin, exactly as predicted. 58 tests.
+- **#12 Slash commands** — merged into the existing picker as a second group
+  rather than shadowing it. A skill named `fix` and the command `/fix` both
+  survive; that is the case the test file exists for. 27 tests.
+- **#13 Commit message generation** — `src/providers/commitMessage.ts`, through
+  the Git extension API rather than by shelling out, so it knows which
+  repository is in front of the user and can reach the commit box at all.
 
 ### Tier 2 — not reached
 Not attempted, so nothing to revert. Two notes worth keeping:
