@@ -814,9 +814,9 @@ function _sbRun() {
           '<button class="kx-tab" id="tabMcp" role="tab" aria-selected="false" aria-controls="viewMcp">MCP<span class="tab-count" id="mcpCount" hidden></span></button>' +
           '<button class="kx-tab" id="tabDiag" role="tab" aria-selected="false" aria-controls="viewDiag">Diagnostics<span class="tab-count" id="tabCount" hidden></span></button>' +
         '</nav>' +
-        '<div class="plan-banner" id="planBanner" hidden>' +
-          '<span class="dot"></span><span class="lbl">Plan phase</span>' +
-          '<span class="sub">read-only tools · no edits applied</span>' +
+        '<div class="plan-banner" id="planBanner" data-phase="plan" hidden>' +
+          '<span class="dot"></span><span class="lbl" id="planBannerLbl">Plan phase</span>' +
+          '<span class="sub" id="planBannerSub">read-only tools · no edits applied</span>' +
         '</div>' +
         '<section class="view" id="viewSession" role="tabpanel" aria-labelledby="tabSession">' +
           // The conversation's name. Placeholder until the model has been asked
@@ -846,6 +846,7 @@ function _sbRun() {
                 // keyboard user finds it and everyone else is not taxed for it.
                 '<div class="seg" id="phaseSeg" role="group" title="Shift+Tab to switch phase"' +
                   ' aria-label="Phase - press Shift+Tab to switch">' +
+                  '<button data-phase="ask" data-on="0" title="Answer a question. Nothing is edited.">Ask</button>' +
                   '<button data-phase="plan" data-on="0">Plan</button>' +
                   '<button data-phase="act" data-on="1">Act</button>' +
                 '</div>' +
@@ -956,7 +957,18 @@ function _sbRun() {
     for (var i = 0; i < segs.length; i++) {
       segs[i].setAttribute("data-on", segs[i].getAttribute("data-phase") === phase ? "1" : "0");
     }
-    $("planBanner").hidden = phase !== "plan";
+    // One banner, two read-only phases. Both make the same promise - nothing
+    // in the workspace changes - and saying it twice in two colours would be
+    // two ways to read one fact.
+    var banner = $("planBanner");
+    banner.hidden = phase === "act";
+    if (!banner.hidden) {
+      banner.setAttribute("data-phase", phase);
+      $("planBannerLbl").textContent = phase === "ask" ? "Ask phase" : "Plan phase";
+      $("planBannerSub").textContent = phase === "ask"
+        ? "reading only · nothing is edited"
+        : "read-only tools · no edits applied";
+    }
     syncComposer();
     if (!silent) post("setPhase", { phase: phase });
   }
@@ -3156,7 +3168,8 @@ function _sbRun() {
     }
     if (e.key === "Tab" && e.shiftKey) {
       e.preventDefault();
-      applyPhase(S.phase === "plan" ? "act" : "plan");
+      var order = ["ask", "plan", "act"];
+      applyPhase(order[(order.indexOf(S.phase) + 1) % order.length]);
       return;
     }
     if (e.key === "Enter" && !e.shiftKey) {

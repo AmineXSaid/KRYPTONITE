@@ -15,7 +15,15 @@ import type { Msg } from "../providers/client";
 
 /* ────────────────────────────── primitives ────────────────────────────── */
 
-export type Phase = "plan" | "act";
+/**
+ * What the model is for, this turn.
+ *
+ * `act` builds. `plan` designs without building. `ask` answers a question and
+ * changes nothing - the mode for "what does this do", "where is X handled",
+ * "is this safe", where any edit at all would be an unwanted side effect of
+ * curiosity.
+ */
+export type Phase = "plan" | "act" | "ask";
 export type Surface = "sidebar" | "cc";
 
 export type CcSection =

@@ -161,6 +161,10 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
   color: var(--kx-active);
 }
+/* The banner takes the phase's own colour, so the strip and the segment that
+   turned it on are visibly the same fact rather than two unrelated markers. */
+.plan-banner[data-phase="ask"] .dot { background: var(--kx-ask); }
+.plan-banner[data-phase="ask"] .lbl { color: var(--kx-ask); }
 .plan-banner .sub { font-size: 11.5px; color: var(--kx-fg-2); }
 
 .view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -972,6 +976,10 @@ li.doing .cbx { border-color: var(--kx-accent); }
 .seg button[data-on="1"] { background: var(--kx-surface-3); }
 .seg button[data-phase="plan"][data-on="1"] { color: var(--kx-under); font-weight: 700; }
 .seg button[data-phase="act"][data-on="1"] { color: var(--kx-accent); font-weight: 700; }
+/* Ask takes the amber. It reads as "held" next to Act's mint go and Plan's
+   violet - which is what the mode is: the model is reading and answering, and
+   nothing it does can reach the workspace. */
+.seg button[data-phase="ask"][data-on="1"] { color: var(--kx-ask); font-weight: 700; }
 
 
 .hint { font-size: 10px; flex: none; color: var(--kx-fg-3); }

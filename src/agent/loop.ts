@@ -95,6 +95,23 @@ End your reply with a fenced block exactly like:
 Those steps are the build order for Act - outcomes, not keystrokes. "Ship the capture screen with a live packet list" beats "create src/capture.ts".`;
 
 /**
+ * Ask is the mode for a question, and the promise it makes is that asking one
+ * costs nothing. Plan refuses to build but still produces a document; Ask
+ * refuses to produce anything at all except an answer.
+ *
+ * Deliberately short. A long addendum here would push the model towards
+ * writing an essay, and the failure mode of this mode is length: someone who
+ * asked where retries are handled wants a file and a line, not a tour.
+ */
+export const ASK_ADDENDUM = `You are in ASK mode. Answer the question and change nothing.
+
+Read whatever you need - files, the workspace, a page. No tool here can edit, write, or run a command, so ground your answer in what you actually read rather than in what you remember.
+
+Answer at the length the question deserves. Point at specific files and lines. If the answer is one sentence, give one sentence; do not pad it into a report.
+
+If the user asks you to change something, say what you would change and where, then tell them to switch to Act and say "go".`;
+
+/**
  * Recover a tool call a model emitted as plain text.
  *
  * Small instruct models - `llama-3.2-3b`, most 7B-and-under chat tunes - accept
@@ -309,6 +326,9 @@ export function fitToWindow(messages: Msg[], limit: number, reserve: number): Ms
  * this where it expected an answer, and "the user stopped it" is the fact that
  * stops it retrying the same call as though the tool had merely failed.
  */
+/** Mirrors `Phase` in the UI protocol; declared here so the agent owns it. */
+export type AgentPhase = "plan" | "act" | "ask";
+
 export const INTERRUPTED_RESULT =
   "The user interrupted this turn before this tool ran. It did not execute and " +
   "nothing changed. Do not assume it succeeded or retry it without being asked.";
@@ -389,7 +409,7 @@ export interface AgentRunOptions {
    */
   instructions?: string;
   // CHANGED: added. Defaults to "act" so existing callers are unaffected.
-  phase?: "plan" | "act";
+  phase?: AgentPhase;
   /**
    * Tools from connected MCP servers, already namespaced and schema-mapped.
    * Appended to the built-ins, and withheld in plan phase along with every
@@ -425,14 +445,15 @@ export interface AgentRunOptions {
  */
 export function systemPromptFor(
   skills: Skill[],
-  phase: "plan" | "act",
+  phase: AgentPhase,
   instructions?: string
 ): string {
   // The project's instructions sit after the engine's own rules and before the
   // phase addendum. After, because a workspace convention is a refinement of
   // how to work rather than a replacement for it; before, because the plan
   // addendum is the one thing in here that must have the last word.
-  return [SYSTEM, skillIndex(skills), instructions ?? "", phase === "plan" ? PLAN_ADDENDUM : ""]
+  const addendum = phase === "plan" ? PLAN_ADDENDUM : phase === "ask" ? ASK_ADDENDUM : "";
+  return [SYSTEM, skillIndex(skills), instructions ?? "", addendum]
     .filter(Boolean)
     .join("\n\n");
 }
@@ -455,8 +476,14 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
   // tokens on every request and invites the model to reach for it.
   const builtins = ctx.image ? TOOL_DEFS : TOOL_DEFS.filter((t) => t.name !== "generate_image");
 
+  // Ask is gated exactly as Plan is, and for the same reason: the mode's whole
+  // promise is that using it cannot change anything, and a promise enforced by
+  // asking the model nicely is not a promise. MCP tools are withheld from both
+  // because MCP has no way to declare a tool read-only, so there is nothing to
+  // check - a question that quietly filed an issue would break it.
+  const readOnlyPhase = phase === "plan" || phase === "ask";
   const availableTools: ToolDef[] =
-    phase === "plan"
+    readOnlyPhase
       ? builtins.filter((t) => READ_ONLY.has(t.name))
       : [...builtins, ...(opts.mcpTools ?? [])];
 
