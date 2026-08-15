@@ -30,6 +30,20 @@ export interface LaunchOptions {
   /** Milliseconds to wait for the browser to announce its debugging port. */
   startupMs?: number;
   viewport?: { width: number; height: number };
+  /**
+   * Where the browser keeps its profile.
+   *
+   * Given a path, the profile lives there and survives the process. Omitted, a
+   * throwaway is minted in the temp directory and deleted on close, which was
+   * the only behaviour for a long time.
+   *
+   * Persisting is about the session, not about how the browser looks to a
+   * server. A browser the agent drives exists so a login can be performed once
+   * and used afterwards; a profile that is destroyed on every close means the
+   * login is destroyed with it, and the next launch starts at a sign-in page.
+   * It does not defeat bot detection and is not meant to.
+   */
+  profileDir?: string;
 }
 
 export interface FoundBrowser {
@@ -178,7 +192,10 @@ export class CdpBrowser {
   private ws?: WebSocket;
   private pending = new Map<number, Pending>();
   private nextId = 1;
+  /** Set only for a throwaway profile: it is what close() deletes. */
   private userDataDir?: string;
+  /** Where the profile actually is, throwaway or not. */
+  private profileDir?: string;
   /** The page we drive. Every command is scoped to this session. */
   private sessionId?: string;
   private events = new Map<string, Array<(p: any) => void>>();
@@ -209,11 +226,20 @@ export class CdpBrowser {
   async launch(opts: LaunchOptions = {}): Promise<void> {
     if (this.running) return;
     const budget = opts.startupMs ?? 30_000;
-    this.userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "kx-cdp-"));
+    if (opts.profileDir) {
+      fs.mkdirSync(opts.profileDir, { recursive: true });
+      this.profileDir = opts.profileDir;
+      // Left alone on close: `userDataDir` is the one that gets deleted, and a
+      // persistent profile that is deleted is not persistent.
+      this.userDataDir = undefined;
+    } else {
+      this.userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "kx-cdp-"));
+      this.profileDir = this.userDataDir;
+    }
 
     const args = [
       "--remote-debugging-port=0",
-      `--user-data-dir=${this.userDataDir}`,
+      `--user-data-dir=${this.profileDir}`,
       "--no-first-run",
       "--no-default-browser-check",
       "--disable-background-networking",

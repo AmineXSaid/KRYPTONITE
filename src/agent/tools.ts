@@ -35,6 +35,15 @@ export interface ToolContext {
    * free of the mcp/ dependency - tools.ts is the one file both the agent loop
    * and the harness import.
    */
+  /**
+   * Web search, through whichever provider is configured.
+   *
+   * Its own hook rather than a `fetchUrl` call, because a search API needs
+   * headers - a key, an accept - and `fetchUrl` is a page reader that returns
+   * rendered text. Returns the rendered results, already formatted for the
+   * model. Absent in harnesses that have no network.
+   */
+  search?: (query: string, limit: number) => Promise<string>;
   mcp?: {
     has(name: string): boolean;
     needsApproval(name: string): boolean;
@@ -929,7 +938,7 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
       }
 
       case "web_search": {
-        if (!ctx.fetchUrl) {
+        if (!ctx.search) {
           return { content: "Searching is not available in this context.", isError: true };
         }
         const query = String(args?.query ?? "").trim();
@@ -938,20 +947,14 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
 
         // The same gate as fetch_url: it reaches the network, and the query
         // came from the model rather than from the user.
-        const ok = await ctx.approve(`Search the web for ${JSON.stringify(query)}`,
-          "Queries DuckDuckGo over HTTP on the active endpoint's connection.");
+        const ok = await ctx.approve(
+          `Search the web for ${JSON.stringify(query)}`,
+          "Queries the configured search provider over HTTP on the active endpoint's connection."
+        );
         if (!ok) return { content: "The user declined that search.", isError: true };
 
         try {
-          // `false` for links: the results are the links, and the page's own
-          // navigation would drown them.
-          const page = await ctx.fetchUrl(searchUrl(query), false);
-          const results = parseResults(page, limit);
-          if (!results.length) {
-            const wall = looksLikeBotWall(SEARCH_URL, page);
-            if (wall) return { content: botWallAdvice(wall, SEARCH_URL), isError: true };
-          }
-          return { content: renderResults(query, results) };
+          return { content: await ctx.search(query, limit) };
         } catch (e: any) {
           return { content: `The search failed: ${String(e?.message ?? e)}`, isError: true };
         }

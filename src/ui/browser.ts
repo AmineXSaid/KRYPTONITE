@@ -86,6 +86,24 @@ export class BrowserPanel {
     if (url) void BrowserPanel.current.open(url);
   }
 
+  /**
+   * Open on the agent's browser, already watching.
+   *
+   * Called when the model starts a browser. Revealing the panel alone was not
+   * enough and looked worse than not revealing it: the panel came up on the
+   * Live tab showing "Type a URL above to browse" while the chat beside it
+   * filled with screenshots of a page the agent was already on. Two windows
+   * onto the same session, disagreeing.
+   *
+   * So the panel is told which view to be in and to start streaming. The
+   * webview asks for the stream itself rather than the host pushing one,
+   * because the webview is what knows whether it is visible.
+   */
+  static showAgent(app: App, extensionUri: vscode.Uri): void {
+    BrowserPanel.show(app, extensionUri);
+    BrowserPanel.current?.post({ type: "showAgent" });
+  }
+
   /** Closing is a command as well as a tab button, so it can be bound. */
   static close(): void {
     BrowserPanel.current?.panel.dispose();

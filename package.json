@@ -103,6 +103,10 @@
         "command": "kryptonite.generateCommitMessage",
         "title": "KRYPTONITE: Generate commit message",
         "icon": "$(sparkle)"
+      },
+      {
+        "command": "kryptonite.watchAgentBrowser",
+        "title": "KRYPTONITE: Watch the agent browser"
       }
     ],
     "configuration": {
@@ -167,6 +171,36 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "Suggest code at the cursor as ghost text. Off by default: this needs a fast fill-in-the-middle endpoint, which most corporate gateways are not. The active profile must also set `capabilities.fim: true`."
+        },
+        "kryptonite.searchProvider": {
+          "type": "string",
+          "enum": [
+            "duckduckgo",
+            "brave",
+            "google",
+            "bing"
+          ],
+          "default": "duckduckgo",
+          "markdownDescription": "Which service `web_search` queries. `duckduckgo` needs no key and is the default. The others need `#kryptonite.searchApiKey#`, and Google also needs `#kryptonite.searchEngineId#`. A provider named without its credential falls back to `duckduckgo` rather than failing."
+        },
+        "kryptonite.searchApiKey": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "API key for the search provider. Supports `${env:NAME}` and `${file:path}`, the same as an endpoint profile, so the key need not sit here in the clear."
+        },
+        "kryptonite.searchEngineId": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Google Programmable Search engine id (`cx`). Google only."
+        },
+        "kryptonite.browserProfile": {
+          "type": "string",
+          "enum": [
+            "persistent",
+            "fresh"
+          ],
+          "default": "persistent",
+          "markdownDescription": "`persistent` keeps the agent browser's cookies and history between launches, so a login it performs survives closing the window. `fresh` starts from an empty temp profile every time, which is the old behaviour. Neither affects bot detection."
         }
       }
     },

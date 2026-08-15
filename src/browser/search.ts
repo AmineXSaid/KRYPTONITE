@@ -33,17 +33,118 @@ export interface SearchResult {
 }
 
 /**
- * DuckDuckGo's HTML endpoint.
+ * Where a search actually goes.
  *
- * Chosen because it answers a plain GET with plain HTML and no key, which is
- * the only option that works in an air-gapped-ish deployment where nobody is
- * going to be issued an API key for anything. The lite host is markup a parser
- * can rely on rather than an application.
+ * Copilot and Claude use a search API, and an API is better in every way that
+ * matters: JSON instead of markup that changes, a rate limit that is stated
+ * rather than discovered, and terms that permit the use. So a provider is
+ * configurable, and the ones worth naming are here.
+ *
+ * The default is the keyless one, and that is not a compromise - it is the
+ * case this extension exists for. Its users are behind corporate gateways and
+ * in air-gapped deployments, and the person who cannot get an API key issued
+ * for a new service is exactly the person who needs search to work out of the
+ * box. A key makes it better; the absence of one must not make it useless.
  */
+export type SearchProvider = "duckduckgo" | "brave" | "google" | "bing";
+
+export interface ProviderConfig {
+  provider: SearchProvider;
+  /** From SecretStorage. Absent for duckduckgo, required by the rest. */
+  apiKey?: string;
+  /** Google's programmable-search engine id. Google only. */
+  engineId?: string;
+}
+
+/** The keyless endpoint, and the default. Plain GET, plain HTML, no key. */
 export const SEARCH_URL = "https://html.duckduckgo.com/html/";
 
+export interface SearchRequest {
+  url: string;
+  headers: Record<string, string>;
+  /** How to read the answer. HTML is scraped; the rest return JSON. */
+  kind: "html" | "brave" | "google" | "bing";
+}
+
+/**
+ * Build the request for the configured provider.
+ *
+ * Falls back to the keyless endpoint whenever a provider is named without the
+ * credential it needs. A misconfigured key should degrade to a working search,
+ * not to no search - the failure mode of the alternative is that someone types
+ * a key wrong and web search silently stops existing.
+ */
+export function buildSearch(query: string, cfg: ProviderConfig, limit = 8): SearchRequest {
+  const q = encodeURIComponent(query);
+  const n = Math.min(20, Math.max(1, limit));
+
+  if (cfg.provider === "brave" && cfg.apiKey) {
+    return {
+      url: `https://api.search.brave.com/res/v1/web/search?q=${q}&count=${n}`,
+      headers: { accept: "application/json", "x-subscription-token": cfg.apiKey },
+      kind: "brave",
+    };
+  }
+  if (cfg.provider === "google" && cfg.apiKey && cfg.engineId) {
+    return {
+      url:
+        `https://www.googleapis.com/customsearch/v1?key=${encodeURIComponent(cfg.apiKey)}` +
+        `&cx=${encodeURIComponent(cfg.engineId)}&q=${q}&num=${Math.min(10, n)}`,
+      headers: { accept: "application/json" },
+      kind: "google",
+    };
+  }
+  if (cfg.provider === "bing" && cfg.apiKey) {
+    return {
+      url: `https://api.bing.microsoft.com/v7.0/search?q=${q}&count=${n}`,
+      headers: { accept: "application/json", "Ocp-Apim-Subscription-Key": cfg.apiKey },
+      kind: "bing",
+    };
+  }
+
+  return { url: `${SEARCH_URL}?q=${q}`, headers: { accept: "text/html" }, kind: "html" };
+}
+
+/** Kept for the callers and tests that only ever wanted the keyless URL. */
 export function searchUrl(query: string): string {
   return `${SEARCH_URL}?q=${encodeURIComponent(query)}`;
+}
+
+/**
+ * One shape out of four wire formats.
+ *
+ * Every branch is defensive about missing fields. These are third-party
+ * responses, and a provider that changes a field name should cost a result,
+ * not throw inside a tool call.
+ */
+export function parseProvider(kind: SearchRequest["kind"], body: string, limit = 8): SearchResult[] {
+  if (kind === "html") return parseResults(body, limit);
+
+  let json: any;
+  try {
+    json = JSON.parse(body);
+  } catch {
+    return [];
+  }
+
+  const rows: any[] =
+    kind === "brave" ? json?.web?.results ?? []
+    : kind === "google" ? json?.items ?? []
+    : json?.webPages?.value ?? [];
+
+  const out: SearchResult[] = [];
+  for (const r of rows) {
+    const url = String(r?.url ?? r?.link ?? "");
+    const title = String(r?.title ?? r?.name ?? "").trim();
+    if (!title || !/^https?:\/\//i.test(url)) continue;
+    out.push({
+      title,
+      url,
+      snippet: String(r?.description ?? r?.snippet ?? r?.extra_snippets?.[0] ?? "").replace(/<[^>]*>/g, "").trim(),
+    });
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 /** Strip tags and decode the handful of entities that actually appear. */

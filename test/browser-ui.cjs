@@ -206,6 +206,19 @@ function boot() {
   ok("selecting it marks the segment",
     d.getElementById("bAgentView").getAttribute("aria-pressed") === "true");
 
+  // The host says "the model just started a browser". The panel must land on
+  // that view and start watching - revealing it on the Live tab's empty state
+  // while the chat beside it fills with screenshots is two windows onto one
+  // session, disagreeing.
+  {
+    const b = boot();
+    b.inbound({ type: "showAgent" });
+    ok("showAgent switches to the agent view",
+      b.d.getElementById("bAgentView").getAttribute("aria-pressed") === "true");
+    ok("and asks the host to stream", b.sent.some((m) => m.type === "agentStart"));
+    ok("showing that it is waiting", !!b.d.querySelector(".live-wait"));
+  }
+
   // Nothing running: a launcher, not an empty box.
   ok("with no browser it shows a launcher", !!d.querySelector(".launch-card"));
   // Starting a browser puts a process on someone's machine. The copy still

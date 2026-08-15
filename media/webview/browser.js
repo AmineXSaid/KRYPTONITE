@@ -481,6 +481,19 @@
     var m = event.data;
     if (!m || !m.type) return;
     switch (m.type) {
+      case "showAgent":
+        // The model started a browser. Land on it and start watching, rather
+        // than sitting on the Live tab's empty state while the chat beside
+        // this panel fills with screenshots of a page we are already on.
+        S.view = "agent";
+        S.agent.error = "";
+        if (!S.agent.live) {
+          S.agent.live = true;   // the spinner, until the first frame lands
+          post("agentStart");
+        }
+        render();
+        break;
+
       case "agentFrame":
         // Replaced in place: the previous frame is never worth keeping, and
         // holding them would be a memory leak measured in megabytes a minute.

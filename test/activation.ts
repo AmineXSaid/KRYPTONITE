@@ -85,6 +85,9 @@ async function main() {
     "kryptonite.explainSelection",
     "kryptonite.writeTests",
     "kryptonite.generateCommitMessage",
+    // Distinct from openBrowser: lands on the agent's view and starts
+    // watching, which is what the model launching a browser calls for.
+    "kryptonite.watchAgentBrowser",
   ];
   for (const name of EXPECTED) {
     ck(recorded.commands.includes(name), `1.1 ${name} is registered`);

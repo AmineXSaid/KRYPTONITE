@@ -65,6 +65,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       BrowserPanel.show(instance, context.extensionUri, url);
     }),
 
+    // Distinct from openBrowser: this one lands on the agent's view and starts
+    // watching, which is what "the model just launched a browser" calls for.
+    vscode.commands.registerCommand("kryptonite.watchAgentBrowser", () => {
+      BrowserPanel.showAgent(instance, context.extensionUri);
+    }),
+
     // A separate command rather than only the tab's close button, so it can be
     // bound to a key and closed without reaching for the mouse.
     vscode.commands.registerCommand("kryptonite.closeBrowser", () => {

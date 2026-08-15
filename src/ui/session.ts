@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
+import { request } from "undici";
 import type { Msg } from "../providers/client";
 import { runAgent } from "../agent/loop";
 import { isUntitled, titleFrom, sanitizeTitle } from "../core/sessions";
@@ -8,6 +9,9 @@ import type { ToolContext, TodoItem, ToolImage } from "../agent/tools";
 import { fetchPage, normaliseUrl } from "../browser/fetchPage";
 import { CdpBrowser, findBrowser, listBrowsers } from "../browser/cdp";
 import { runBrowserAction } from "../browser/actions";
+import {
+  buildSearch, parseProvider, renderResults, looksLikeBotWall, botWallAdvice,
+} from "../browser/search";
 // Still used directly by the panel's own controls, which drive the browser
 // without going through a model turn.
 import { navigate, snapshot } from "../browser/page";
@@ -366,6 +370,39 @@ export class SessionController {
               : { ...out, text: wrapUntrusted(out.text, src) };
           }
         : undefined,
+      // Search goes out on the same dispatcher as the model's own requests,
+      // which is the point: it reaches whatever that endpoint reaches, through
+      // the corporate proxy and the private CA. A hosted search API cannot do
+      // that, and it is the reason this is worth having rather than a key to
+      // somebody else's service.
+      search: async (query: string, limit: number) => {
+        const cfg = this.app.searchConfig();
+        const req = buildSearch(query, cfg, limit);
+        const res = await request(req.url, {
+          method: "GET",
+          headers: req.headers,
+          dispatcher: (client as any).dispatcher,
+          signal: turn.abort.signal,
+          maxRedirections: 3,
+        });
+        const body = await res.body.text();
+        if (res.statusCode >= 400) {
+          // Naming the provider matters: a 401 from Brave means a bad key, and
+          // a model told only "search failed" will retry it forever.
+          throw new Error(
+            `${cfg.provider} answered HTTP ${res.statusCode}. ` +
+            (res.statusCode === 401 || res.statusCode === 403
+              ? "The API key is missing or rejected; check kryptonite.searchApiKey."
+              : "Try again, or switch kryptonite.searchProvider.")
+          );
+        }
+        const results = parseProvider(req.kind, body, limit);
+        if (!results.length) {
+          const wall = looksLikeBotWall(req.url, body);
+          if (wall) return botWallAdvice(wall, req.url);
+        }
+        return renderResults(query, results);
+      },
       fetchUrl: async (url: string, withLinks: boolean) => {
         const page = await fetchPage(url, {
           dispatcher: (client as any).dispatcher,
@@ -705,7 +742,15 @@ export class SessionController {
     // time the agent looks something up is worse than not seeing it. The panel
     // is the answer to "what is it actually doing" that does not require one.
     const headed = this.app.configDto().browserHeaded;
-    await cdp.launch({ headed, viewport: { width: 1280, height: 800 } });
+    // A profile that survives the window, so a login the agent performs once
+    // is still there next time. Stored beside the extension's other state
+    // rather than in the workspace, because it holds cookies and nobody wants
+    // those in a repository.
+    await cdp.launch({
+      headed,
+      viewport: { width: 1280, height: 800 },
+      profileDir: this.app.browserProfileDir(),
+    });
     this.cdp = cdp;
     this.app.log(
       "info",

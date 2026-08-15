@@ -7,7 +7,9 @@ import {
   EndpointProfile,
   ProfileError,
   Capabilities,
+  interpolate,
 } from "../endpoints/profile";
+import type { ProviderConfig } from "../browser/search";
 import { clearAuthCache, authCacheReport } from "../endpoints/auth";
 import { clearSecureContexts } from "../endpoints/transport";
 import { EndpointClient } from "../providers/client";
@@ -767,6 +769,50 @@ export class App {
   }
 
   /**
+   * Which search provider to use, and the credential for it.
+   *
+   * The key goes through `interpolate`, the same helper the endpoint profiles
+   * use, so it can be written as `${env:BRAVE_KEY}` or `${file:...}` and never
+   * has to sit in settings.json in the clear. That is already the convention
+   * everywhere else a secret appears in this extension.
+   */
+  searchConfig(): ProviderConfig {
+    const cfg = this.cfg();
+    const provider = cfg.get<string>("searchProvider", "duckduckgo");
+    const rawKey = cfg.get<string>("searchApiKey", "");
+    let apiKey = "";
+    try {
+      apiKey = rawKey ? interpolate(rawKey, this.secrets) : "";
+    } catch {
+      // A key that cannot be resolved is a key we do not have. `buildSearch`
+      // falls back to the keyless provider rather than failing the search.
+    }
+    return {
+      provider: (["duckduckgo", "brave", "google", "bing"].includes(provider)
+        ? provider
+        : "duckduckgo") as ProviderConfig["provider"],
+      apiKey: apiKey || undefined,
+      engineId: cfg.get<string>("searchEngineId", "") || undefined,
+    };
+  }
+
+  /**
+   * Where the agent's browser keeps its profile, or undefined for a throwaway.
+   *
+   * Persisting it is about the session rather than about how the browser looks
+   * to a server: the reason to have a browser the agent drives is that a login
+   * can be performed once and used afterwards, and a profile deleted on every
+   * close takes the login with it. It does not affect bot detection.
+   *
+   * Under globalStorage, not the workspace: it holds cookies, and cookies do
+   * not belong in a repository.
+   */
+  browserProfileDir(): string | undefined {
+    if (this.cfg().get<string>("browserProfile", "persistent") === "fresh") return undefined;
+    return path.join(this.context.globalStorageUri.fsPath, "browser-profile");
+  }
+
+  /**
    * Put the browser panel on screen, beside the editor.
    *
    * Called when the agent starts a browser, because "launch the browser" that
@@ -779,7 +825,7 @@ export class App {
    * file keeps knowing nothing about the panel classes.
    */
   async revealBrowser(): Promise<void> {
-    await vscode.commands.executeCommand("kryptonite.openBrowser");
+    await vscode.commands.executeCommand("kryptonite.watchAgentBrowser");
   }
 
   async openPreview(abs: string): Promise<void> {

@@ -17,6 +17,7 @@
 import {
   searchUrl, parseResults, renderResults, unwrapUrl,
   looksLikeBotWall, botWallAdvice, SEARCH_URL,
+  buildSearch, parseProvider,
 } from "../src/browser/search";
 
 let pass = 0;
@@ -103,6 +104,67 @@ function eq(name: string, actual: unknown, expected: unknown): void {
   const none = renderResults("nothing at all", []);
   ok("no results is not an error", /no results/i.test(none), none);
   ok("and suggests a way forward", /different words|browser open/i.test(none), none);
+}
+
+/* ── choosing a provider ────────────────────────────────────────────────── */
+{
+  const dd = buildSearch("cats", { provider: "duckduckgo" });
+  eq("the default needs no key", dd.kind, "html");
+  ok("and hits the keyless endpoint", dd.url.startsWith(SEARCH_URL), dd.url);
+
+  const brave = buildSearch("cats", { provider: "brave", apiKey: "K" }, 5);
+  eq("brave is a json api", brave.kind, "brave");
+  ok("carrying the key in a header", brave.headers["x-subscription-token"] === "K");
+  ok("and the count", brave.url.includes("count=5"), brave.url);
+  ok("the key never reaches the url", !brave.url.includes("K"), brave.url);
+
+  const g = buildSearch("cats", { provider: "google", apiKey: "K", engineId: "E" });
+  eq("google is a json api", g.kind, "google");
+  ok("with the engine id", g.url.includes("cx=E"), g.url);
+
+  const bing = buildSearch("cats", { provider: "bing", apiKey: "K" });
+  eq("bing is a json api", bing.kind, "bing");
+  ok("carrying the key in a header", bing.headers["Ocp-Apim-Subscription-Key"] === "K");
+
+  // A provider named without its credential must degrade to a working search.
+  // The alternative is that one mistyped setting silently removes web search.
+  eq("brave without a key falls back", buildSearch("x", { provider: "brave" }).kind, "html");
+  eq("google without an engine id falls back",
+    buildSearch("x", { provider: "google", apiKey: "K" }).kind, "html");
+  eq("bing without a key falls back", buildSearch("x", { provider: "bing" }).kind, "html");
+
+  ok("the limit is clamped", buildSearch("x", { provider: "brave", apiKey: "K" }, 999).url.includes("count=20"));
+}
+
+/* ── reading four wire formats ──────────────────────────────────────────── */
+{
+  eq("brave results are read",
+    parseProvider("brave", JSON.stringify({
+      web: { results: [{ title: "T", url: "https://a.example", description: "D" }] },
+    })),
+    [{ title: "T", url: "https://a.example", snippet: "D" }]);
+
+  eq("google results are read",
+    parseProvider("google", JSON.stringify({
+      items: [{ title: "T", link: "https://b.example", snippet: "D" }],
+    })),
+    [{ title: "T", url: "https://b.example", snippet: "D" }]);
+
+  eq("bing results are read",
+    parseProvider("bing", JSON.stringify({
+      webPages: { value: [{ name: "T", url: "https://c.example", snippet: "D" }] },
+    })),
+    [{ title: "T", url: "https://c.example", snippet: "D" }]);
+
+  // These are third-party responses. A changed field name should cost a
+  // result, not throw inside a tool call.
+  eq("malformed json yields nothing", parseProvider("brave", "not json"), []);
+  eq("a missing results array yields nothing", parseProvider("brave", "{}"), []);
+  eq("a row with no url is dropped",
+    parseProvider("brave", JSON.stringify({ web: { results: [{ title: "T" }] } })), []);
+  eq("a row with no title is dropped",
+    parseProvider("google", JSON.stringify({ items: [{ link: "https://x.example" }] })), []);
+  eq("html goes through the scraper", parseProvider("html", ""), []);
 }
 
 /* ── recognising a bot wall ─────────────────────────────────────────────── */

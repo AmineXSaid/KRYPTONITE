@@ -80,7 +80,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
   text-align: center;
 }
 .addr input:focus, .addr input:not(:placeholder-shown) { text-align: left; }
-.addr input::placeholder { color: var(--kx-fg-4, var(--kx-fg-3)); }
+/* The placeholder is a sentence, not an address. Set in mono it came out
+   looking letter-spaced and stretched - "T y p e  a  U R L" - because a
+   monospace face pads every narrow glyph to the same advance. The value it
+   replaces stays mono, where even advances are the point. */
+.addr input::placeholder {
+  color: var(--kx-fg-4, var(--kx-fg-3));
+  font-family: var(--kx-ui); letter-spacing: 0;
+}
 .addr input:focus {
   outline: none;
   border-color: var(--kx-line-2);
