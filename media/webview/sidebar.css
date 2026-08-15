@@ -464,6 +464,30 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .tool-group[data-open="0"] .tool-group-body { display: none; }
 .tool-group[data-open="1"] .tool-group-head .chev { transform: rotate(90deg); }
 
+/* ── the model's working ───────────────────────────────────────────────────
+   Quieter than a tool group on purpose. A tool call changed something and is
+   worth a bordered object; reasoning changed nothing and is worth a line you
+   can open. It used to be rendered as the reply, which put four paragraphs of
+   "the user provided X, which could be..." above a two-line answer. */
+.think { margin-bottom: 12px; }
+.think-head {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 4px 2px; border-radius: 5px;
+  color: var(--kx-fg-4);
+}
+.think-head:hover { color: var(--kx-fg-2); background: var(--kx-hover); }
+.think-head .n { font-family: var(--kx-ui); font-size: 11.5px; }
+.think[data-open="1"] .think-head .chev { transform: rotate(90deg); }
+.think[data-open="0"] .think-body { display: none; }
+/* Set in the reading face at a smaller size, and indented behind a rule: it
+   reads as an aside to the answer, which is what it is. */
+.think-body {
+  margin: 4px 0 0; padding: 2px 0 2px 12px;
+  border-left: 2px solid var(--kx-line);
+  font-family: var(--kx-prose); font-size: 12px; line-height: 1.6;
+  color: var(--kx-fg-4); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+
 .tool { margin-bottom: 0; }
 .tool-head {
   display: flex; align-items: center; gap: 8px; width: 100%;
@@ -1081,25 +1105,36 @@ li.doing .cbx { border-color: var(--kx-accent); }
 }
 .tipbar .tip-x:hover { background: var(--kx-hover); color: var(--kx-fg-2); }
 
+/* What is left of the footer: one dot for the endpoint's health.
+   The name used to be printed here - "NVIDIA" under every conversation - which
+   is a label for a fact that only matters when it is wrong, and the dot
+   already says when it is wrong. The name is in the tooltip and in the model
+   picker, which is where anyone goes to change it. */
 .footer {
-  display: flex; align-items: center; gap: 8px; padding: 8px 2px 0;
+  display: flex; align-items: center; gap: 8px; padding: 6px 2px 0;
   font-size: 12px; color: var(--kx-fg-2);
   font-variant-numeric: tabular-nums;
   position: relative;
 }
+.footer .ep { cursor: default; }
 
 /* ── the approval control ─────────────────────────────────────────────────
-   It governs every side effect the agent has, and it lived only in the
-   Control Center and settings.json - which is to say, nowhere anyone looks
-   while working. Sized and coloured as a status readout rather than a button,
-   because most of the time it is one. */
+   Inside the composer now, on the control row with the phase and the model.
+   Those three together are the whole answer to "what happens when I press
+   send": what it may do, which model does it, and whether it asks first.
+   Under the box, in a footer, it was a setting nobody looked at.
+
+   Shaped to match the model button beside it rather than the phase segment,
+   because like the model it is a current value you can change, not one of
+   three states you pick between. */
 .perm {
   display: flex; align-items: center; gap: 5px; flex: none;
-  padding: 2px 7px; border-radius: 5px;
-  font-size: 11px; color: var(--kx-fg-3);
-  border: 1px solid transparent;
+  min-height: 24px; padding: 0 8px; border-radius: 6px;
+  font-size: 11.5px; color: var(--kx-fg-3);
+  border: 1px solid transparent; background: none;
 }
-.perm:hover { background: var(--kx-hover); color: var(--kx-fg-2); }
+.perm .ic-11 { color: currentColor; }
+.perm:hover { background: var(--kx-hover); color: var(--kx-fg); }
 .perm[aria-expanded="true"] { background: var(--kx-hover); border-color: var(--kx-line); }
 /* Only the mode that stops asking is coloured. "Ask each time" is the
    default and needs no marking; "Allow all" is a state someone should be
@@ -1107,8 +1142,11 @@ li.doing .cbx { border-color: var(--kx-accent); }
 .perm[data-mode="edits-auto"] { color: var(--kx-ask); }
 .perm[data-mode="full-auto"] { color: var(--kx-error); }
 
+/* Opens upward, over the transcript, anchored to the composer rather than to
+   the old footer. Left-aligned because the button it belongs to now sits on
+   the left of the control row. */
 .perm-pop {
-  top: auto; bottom: 26px; right: 0; left: auto; width: 250px;
+  top: auto; bottom: 52px; left: 10px; right: auto; width: 250px;
 }
 .perm-pop .pop-row { align-items: flex-start; gap: 7px; }
 .perm-pop .perm-check { flex: none; width: 13px; margin-top: 1px; color: var(--kx-accent); }

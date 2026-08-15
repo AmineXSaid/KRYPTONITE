@@ -108,6 +108,17 @@ function serve() {
       ).join("");
       res.writeHead(200, { "content-type": "text/html" });
       res.end(`<!doctype html><html><head><title>Huge</title></head><body>${links}</body></html>`);
+    } else if (url.startsWith("/sorry/")) {
+      // Google's bot wall, near enough. This is the page that came back in the
+      // transcript that prompted the work: the model received twenty lines of
+      // it, could not tell it from a page that genuinely says that, and
+      // apologised and gave up.
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(`<!doctype html><html><head><title>Error 429</title></head><body>
+        <h1>About this page</h1>
+        <p>Our systems have detected unusual traffic from your computer network.
+        This page checks to see if it is really you sending the requests.</p>
+        <a href="#">Why did this happen?</a></body></html>`);
     } else if (url.startsWith("/api/missing")) {
       res.writeHead(404);
       res.end("no");
@@ -522,6 +533,30 @@ void (async () => {
       // affordable, and it should be watched rather than merely bounded.
       console.log(`      an 800-link page reads as ${r.length} characters across ${refs} refs`);
       await run("open", { url: base });
+    }
+
+    /* ── a bot wall is named, not pasted ──────────────────────────────── */
+    {
+      const r = textOf(await run("open", { url: base + "sorry/index?continue=x" }));
+      // The raw page must not come back. Handing the model the wall verbatim
+      // is what made it apologise and stop, which is the right answer to that
+      // text and the wrong answer to the situation.
+      ok("the wall is not pasted into the reply",
+        !/Why did this happen/.test(r), r.slice(0, 300));
+      ok("it is named as a bot check", /bot check/i.test(r), r.slice(0, 300));
+      ok("and said not to be the page asked for",
+        /not the page that was asked for/.test(r), r.slice(0, 300));
+      ok("retrying is ruled out", /will not help/.test(r), r.slice(0, 400));
+      // Without this the model concludes the web is unavailable.
+      ok("the tool that does work is named", /web_search/.test(r), r.slice(0, 400));
+      // And a read of the same page must say the same thing, not fall back to
+      // the raw snapshot.
+      const again = textOf(await run("read"));
+      ok("a read of the same page agrees", /bot check/i.test(again), again.slice(0, 200));
+
+      await run("open", { url: base });
+      ok("an ordinary page is unaffected",
+        /Kryptonite fixture/.test(textOf(await run("read"))));
     }
 
     /* ── nothing answers empty ────────────────────────────────────────── */

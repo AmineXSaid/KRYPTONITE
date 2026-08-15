@@ -59,7 +59,15 @@ export interface CompletionRequest {
 }
 
 export interface CompletionEvent {
-  type: "text" | "tool_call" | "done" | "usage";
+  /**
+   * `reasoning` is the model showing its working, which is not its answer.
+   *
+   * It used to be yielded as `text`, which put four paragraphs of "the user
+   * provided X, which could be..." into the transcript at the same weight as
+   * the reply - and on an agentic turn every intermediate step produces
+   * reasoning and no content, so it happened on every step.
+   */
+  type: "text" | "reasoning" | "tool_call" | "done" | "usage";
   text?: string;
   toolCall?: ToolCall;
   usage?: TokenUsage;
@@ -837,9 +845,9 @@ export const __openAiStreamForTest = () => openAiStream();
  */
 function openAiStream(onReasoning?: () => void) {
   const pending = new Map<number, { id: string; name: string; args: string }>();
-  // Held so a reasoning-only turn can fall back to showing its working.
+  // Accumulated per step and flushed on finish_reason, so the panel receives
+  // one block of working rather than a token-by-token stream of it.
   let reasoning = "";
-  let sawContent = false;
   let toldReasoning = false;
   return function* (json: any): Generator<CompletionEvent> {
     // Usage is checked before the delta branch and independently of it.
@@ -868,10 +876,7 @@ function openAiStream(onReasoning?: () => void) {
     }
     const d = json.choices?.[0]?.delta;
     if (!d) return;
-    if (d.content) {
-      sawContent = true;
-      yield { type: "text", text: d.content };
-    }
+    if (d.content) yield { type: "text", text: d.content };
     // Reasoning models stream their thinking on a separate field and only then
     // - if the budget lasts - produce content. Dropping it meant a turn that
     // spent its whole budget reasoning rendered as an empty reply, and the
@@ -899,13 +904,17 @@ function openAiStream(onReasoning?: () => void) {
         yield { type: "tool_call", toolCall: { id: slot.id, name: slot.name, arguments: safeJson(slot.args) } };
       }
       pending.clear();
-      // Only as a fallback. A model that produced an answer keeps its answer;
-      // one that produced nothing else shows its working rather than a blank
-      // bubble, which is indistinguishable from a broken endpoint.
-      if (!sawContent && reasoning.trim()) {
-        yield { type: "text", text: reasoning.trim() };
-        sawContent = true;
-      }
+      // The working, on its own channel. This used to be yielded as `text`,
+      // which is how four paragraphs of "the user provided X, which could
+      // be..." ended up in the transcript looking like the reply - on every
+      // step of an agentic turn, since a step that calls a tool produces
+      // reasoning and no content by definition.
+      //
+      // Still emitted rather than dropped: a turn that spent its whole budget
+      // reasoning and said nothing is otherwise a blank bubble, which is
+      // indistinguishable from a broken endpoint. The surface decides how
+      // loudly to show it; that is not this layer's call.
+      if (reasoning.trim()) yield { type: "reasoning", text: reasoning.trim() };
       reasoning = "";
     }
   };

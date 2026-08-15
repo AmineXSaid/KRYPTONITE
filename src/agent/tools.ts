@@ -5,6 +5,9 @@ import { promisify } from "node:util";
 import type { ToolDef } from "../providers/client";
 import type { Skill } from "../skills/loader";
 import { BROWSER_ACTIONS } from "../browser/actions";
+import {
+  searchUrl, parseResults, renderResults, looksLikeBotWall, botWallAdvice, SEARCH_URL,
+} from "../browser/search";
 
 const pexec = promisify(execFile);
 
@@ -404,6 +407,25 @@ export const TOOL_DEFS: ToolDef[] = [
         links: { type: "boolean", description: "Also list the page's links. Off by default; they are noisy." },
       },
       required: ["url"],
+    },
+  },
+  {
+    name: "web_search",
+    description:
+      "Search the web and get back titles, addresses and snippets. Use this whenever " +
+      "you need to find something rather than read a page you already have the address " +
+      "for - it is the only thing here that works for search. Do NOT drive the browser " +
+      "at google.com, bing.com or duckduckgo.com: a search page served to an automated " +
+      "browser is a bot check, not results. This goes out over HTTP on the active " +
+      "endpoint's connection, so it reaches whatever that endpoint reaches, and it is " +
+      "not subject to that check. Follow up with browser open or fetch_url on a result.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "What to search for, in plain words." },
+        limit: { type: "number", description: "How many results to return. Default 8, max 20." },
+      },
+      required: ["query"],
     },
   },
   {
@@ -903,6 +925,35 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
             : { content: out.text, images: out.images };
         } catch (e: any) {
           return { content: `browser ${action}: ${e?.message ?? e}`, isError: true };
+        }
+      }
+
+      case "web_search": {
+        if (!ctx.fetchUrl) {
+          return { content: "Searching is not available in this context.", isError: true };
+        }
+        const query = String(args?.query ?? "").trim();
+        if (!query) return { content: "query is required.", isError: true };
+        const limit = Math.min(20, Math.max(1, Number(args?.limit ?? 8) || 8));
+
+        // The same gate as fetch_url: it reaches the network, and the query
+        // came from the model rather than from the user.
+        const ok = await ctx.approve(`Search the web for ${JSON.stringify(query)}`,
+          "Queries DuckDuckGo over HTTP on the active endpoint's connection.");
+        if (!ok) return { content: "The user declined that search.", isError: true };
+
+        try {
+          // `false` for links: the results are the links, and the page's own
+          // navigation would drown them.
+          const page = await ctx.fetchUrl(searchUrl(query), false);
+          const results = parseResults(page, limit);
+          if (!results.length) {
+            const wall = looksLikeBotWall(SEARCH_URL, page);
+            if (wall) return { content: botWallAdvice(wall, SEARCH_URL), isError: true };
+          }
+          return { content: renderResults(query, results) };
+        } catch (e: any) {
+          return { content: `The search failed: ${String(e?.message ?? e)}`, isError: true };
         }
       }
 

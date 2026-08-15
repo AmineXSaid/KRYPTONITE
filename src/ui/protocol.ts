@@ -644,7 +644,7 @@ export interface EndpointCheckDoneOut {
 }
 
 export type OutboundMessage =
-  | StateSyncOut | StreamDeltaOut | StreamResetOut | ToolStartOut | ToolEndOut | TodosUpdatedOut
+  | StateSyncOut | StreamDeltaOut | ThinkingOut | StreamResetOut | ToolStartOut | ToolEndOut | TodosUpdatedOut
   | ImageGeneratedOut | CapsDetectedOut | McpLogOut
   | PlanProposedOut | PermissionRequestOut | PermissionResolvedOut
   | DiffPendingOut | DiffResolvedOut | FileTouchedOut | TurnEndOut | ErrorOut
@@ -665,8 +665,17 @@ export type OutboundType = OutboundMessage["type"];
  * Events buffered by the SessionController for turn replay. A webview that
  * reloads mid-run receives `stateSync` and then these, in order.
  */
+/**
+ * The model showing its working.
+ *
+ * Its own event rather than a `streamDelta`, because it is not the answer.
+ * Rendered as a collapsed strip: available when someone wants to know why the
+ * model did what it did, and out of the way when they do not.
+ */
+export interface ThinkingOut { type: "thinking"; text: string }
+
 export type ReplayableEvent =
-  | StreamDeltaOut | ToolStartOut | ToolEndOut
+  | StreamDeltaOut | ThinkingOut | ToolStartOut | ToolEndOut
   | TodosUpdatedOut | ImageGeneratedOut
   | PermissionRequestOut | ContextUsageOut | SteerAcceptedOut;
 

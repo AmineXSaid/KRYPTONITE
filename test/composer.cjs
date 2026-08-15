@@ -65,9 +65,20 @@ function boot() {
 {
   const b = boot();
   b.sync("ask");
-  ok("the footer shows the mode in force", b.d.getElementById("permName").textContent === "Ask each time",
+  // The control sits in the composer's toolbar now, beside the phase and the
+  // model, where there is room for a word rather than a sentence.
+  ok("the composer shows the mode in force", b.d.getElementById("permName").textContent === "Ask",
     b.d.getElementById("permName").textContent);
+  ok("and the full sentence is still reachable",
+    /Ask each time - Every side effect waits for you\./.test(b.d.getElementById("permBtn").title),
+    b.d.getElementById("permBtn").title);
+  ok("it lives on the control row, not under the box",
+    !!b.d.querySelector(".toolbar #permBtn"));
   ok("and carries it for styling", b.d.getElementById("permBtn").getAttribute("data-mode") === "ask");
+  // The endpoint name was a label for a fact that only matters when it is
+  // wrong, printed under every conversation. The dot says when it is wrong.
+  ok("the endpoint name is not printed", b.d.getElementById("epName").hidden);
+  ok("but is still carried for the tooltip", !!b.d.getElementById("epInd").title);
   ok("the menu starts closed", b.d.getElementById("permPop").hidden);
 
   ok("clicking opens it", b.click("#permBtn") && !b.d.getElementById("permPop").hidden);
@@ -95,9 +106,12 @@ function boot() {
     type: "configChanged",
     config: { approvalMode: "full-auto", activeProfile: "", caBundlePath: "", ui: {} },
   } }));
-  ok("a change made elsewhere reaches the footer",
-    b.d.getElementById("permName").textContent === "Allow all",
+  ok("a change made elsewhere reaches the composer",
+    b.d.getElementById("permName").textContent === "Auto",
     b.d.getElementById("permName").textContent);
+  ok("and the tooltip follows it",
+    /Allow all/.test(b.d.getElementById("permBtn").title),
+    b.d.getElementById("permBtn").title);
 
   b.click("#permBtn");
   b.d.body.dispatchEvent(new b.w.MouseEvent("click", { bubbles: true }));

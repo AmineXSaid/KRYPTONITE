@@ -3,7 +3,7 @@ import * as path from "node:path";
 import * as crypto from "node:crypto";
 import type { Msg } from "../providers/client";
 import { runAgent } from "../agent/loop";
-import { isUntitled, titleFrom } from "../core/sessions";
+import { isUntitled, titleFrom, sanitizeTitle } from "../core/sessions";
 import type { ToolContext, TodoItem, ToolImage } from "../agent/tools";
 import { fetchPage, normaliseUrl } from "../browser/fetchPage";
 import { CdpBrowser, findBrowser, listBrowsers } from "../browser/cdp";
@@ -449,6 +449,12 @@ export class SessionController {
             }
             break;
           }
+          case "reasoning": {
+            // Buffered like anything else, so a reloaded or backgrounded turn
+            // still has its working to show.
+            this.emit(turn, { type: "thinking", text: ev.text ?? "" });
+            break;
+          }
           case "text_reset": {
             // What is on screen was thinking. Drop it from the replay buffer
             // too, or a reload would faithfully restore the mistake.
@@ -706,6 +712,14 @@ export class SessionController {
       `Browser: driving ${pick.name} (${pick.path})` +
         (found.length > 1 ? `. Also available: ${found.slice(1).map((f) => f.name).join(", ")}.` : "")
     );
+    // Show it. Asking for a browser and getting no browser on screen is the
+    // whole complaint: headless plus a panel nobody opened means the only
+    // evidence of a page is a wall of tool output in the chat.
+    //
+    // Deliberately not awaited and deliberately swallowed. This runs inside a
+    // tool call, and failing to reveal a panel must never fail the navigation
+    // the model was actually asked to perform.
+    void this.app.revealBrowser().catch(() => { /* the panel is a courtesy */ });
     return cdp;
   }
 
@@ -901,10 +915,64 @@ export class SessionController {
     const title = titleFrom(this.history);
     if (!title || title === "New chat" || title === this.title) return;
 
+    this.setTitle(title);
+    // Then ask for a real one. The line above is a placeholder that is right
+    // immediately; this replaces it a second later with something that reads
+    // like a name instead of like a shouted instruction.
+    void this.titleFromModel(this.sessionId, title);
+  }
+
+  private setTitle(title: string): void {
     this.title = title;
     this.app.sessions.save(this.sessionId, this.history, title);
     this.app.broadcast({ type: "sessionTitled", id: this.sessionId, title });
     this.app.refreshSessions();
+  }
+
+  /**
+   * Ask the model to name the conversation.
+   *
+   * The first message is a serviceable placeholder and a poor title. It is
+   * whatever the user typed, at whatever length and in whatever case they
+   * typed it, so a conversation opened with "LAUNCH BROWSER AND SEARCH FOR MY
+   * NAME" is filed under exactly that, shouting, in a list of other people's
+   * shouting.
+   *
+   * Runs beside the turn rather than after it, on the one-shot path, so the
+   * name settles within a second or two rather than after the answer. It
+   * renames once and never again: a title that keeps changing as a
+   * conversation grows is worse than a slightly wrong one that stays put.
+   *
+   * Entirely best-effort. A failure here leaves the placeholder, which was
+   * already good enough to ship for months.
+   */
+  private async titleFromModel(id: string, placeholder: string): Promise<void> {
+    const first = this.history.find((m) => m.role === "user");
+    if (!first) return;
+    const text = typeof first.content === "string"
+      ? first.content
+      : first.content.filter((b) => b.type === "text").map((b: any) => b.text).join(" ");
+    if (!text.trim()) return;
+
+    let raw: string;
+    try {
+      raw = await this.app.oneShot(
+        `Name this conversation in three to six words, as a title someone would ` +
+          `recognise in a list. Use sentence case. No quotes, no full stop, no ` +
+          `preamble.\n\nFirst message:\n${text.slice(0, 800)}`,
+        { maxTokens: 24 }
+      );
+    } catch {
+      return; // the placeholder stands
+    }
+
+    const title = sanitizeTitle(raw, "");
+    if (!title || title === placeholder) return;
+    // The user may have moved on, renamed it, or started a new chat while the
+    // request was in flight. Naming a conversation they have left would rename
+    // the wrong one.
+    if (this.sessionId !== id || this.title !== placeholder) return;
+    this.setTitle(title);
   }
 
   /**

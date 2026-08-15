@@ -766,6 +766,22 @@ export class App {
     this.running = running;
   }
 
+  /**
+   * Put the browser panel on screen, beside the editor.
+   *
+   * Called when the agent starts a browser, because "launch the browser" that
+   * produces no visible browser is not the thing anyone asked for. Headless is
+   * still right - a Chrome window jumping over the editor on every lookup is
+   * worse - but headless with the panel closed means the only evidence a page
+   * was ever loaded is a wall of tool output in the transcript.
+   *
+   * Routed through the command rather than importing BrowserPanel, so this
+   * file keeps knowing nothing about the panel classes.
+   */
+  async revealBrowser(): Promise<void> {
+    await vscode.commands.executeCommand("kryptonite.openBrowser");
+  }
+
   async openPreview(abs: string): Promise<void> {
     try {
       const doc = await vscode.workspace.openTextDocument(abs);

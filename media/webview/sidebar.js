@@ -877,22 +877,34 @@ function _sbRun() {
                 '<button id="modelBtn" aria-haspopup="listbox" aria-expanded="false">' +
                   '<span class="nm ell" id="modelName">No model</span>' + icon("i-caret", "ic-9") +
                 '</button>' +
+                // Approval mode belongs here, beside the phase and the model.
+                // Those three are the whole answer to "what will happen when I
+                // press send": what it may do, which model does it, and
+                // whether it will ask first. It used to sit under the box in a
+                // footer, which is where things go to be ignored.
+                '<button class="perm" id="permBtn" aria-haspopup="menu" aria-expanded="false"' +
+                  ' title="What the agent may do without asking">' +
+                  icon("i-shield", "ic-11") + '<span class="nm" id="permName">Ask</span>' +
+                '</button>' +
                 '<span class="sp"></span>' +
                 '<button class="tb-btn" id="atBtn" title="Reference a file" aria-label="Reference a file">@</button>' +
                 '<button class="tb-btn" id="clipBtn" title="Attach files" aria-label="Attach files">' + icon("i-clip", "ic-13") + '</button>' +
                 '<button id="sendBtn" data-ready="0" data-mode="send" title="Send" aria-label="Send">' + icon("i-up", "ic-13") + '</button>' +
               '</div>' +
             '</div>' +
+            // The approval menu hangs off the composer rather than off a
+            // footer, so it opens over the transcript above its button.
+            '<div class="popover perm-pop" id="permPop" role="menu" hidden></div>' +
+            // The endpoint's health, as a dot and nothing else. The name was
+            // "NVIDIA" written under every conversation - a label for a fact
+            // that only matters when it is wrong, and the dot already says
+            // when it is wrong. The full name is in the tooltip and in the
+            // model picker, which is where someone goes to change it.
             '<div class="footer">' +
-              '<span class="ep" id="epInd" data-err="0"><span class="dot"></span><span class="nm ell" id="epName">No endpoint</span></span>' +
-              '<span class="sp"></span>' +
-              // The approval mode, where the user can see and change it.
-              // It governs every side effect the agent has, and it lived
-              // only in the Control Center and settings.json.
-              '<button class="perm" id="permBtn" aria-haspopup="menu" aria-expanded="false">' +
-                icon("i-shield", "ic-11") + '<span class="nm" id="permName">Ask each time</span>' +
-              '</button>' +
-              '<div class="popover perm-pop" id="permPop" role="menu" hidden></div>' +
+              '<span class="ep" id="epInd" data-err="0" title="No endpoint">' +
+                '<span class="dot"></span>' +
+                '<span class="nm ell" id="epName" hidden></span>' +
+              '</span>' +
             '</div>' +
           '</div>' +
         '</section>' +
@@ -1097,23 +1109,40 @@ function _sbRun() {
   /* The three modes, in the order they surrender control. Each line says what
      happens rather than naming the setting: "edits-auto" is a value in a JSON
      file, "file edits run, commands ask" is a decision someone can make. */
+  /* Mode, the full name for the menu, what it actually does, and the short
+     name for the button. The button sits in the composer's control row beside
+     the phase and the model, where there is room for a word rather than a
+     sentence - and where all three together answer "what happens when I press
+     send". The sentence still appears in the menu, which is where someone is
+     deciding rather than glancing. */
   var PERMS = [
-    ["ask", "Ask each time", "Every side effect waits for you."],
-    ["edits-auto", "Auto-edit", "File edits run. Shell commands still ask."],
-    ["full-auto", "Allow all", "Runs everything without asking."]
+    ["ask", "Ask each time", "Every side effect waits for you.", "Ask"],
+    ["edits-auto", "Auto-edit", "File edits run. Shell commands still ask.", "Edits"],
+    ["full-auto", "Allow all", "Runs everything without asking.", "Auto"]
   ];
 
-  function permLabel(mode) {
-    for (var i = 0; i < PERMS.length; i++) if (PERMS[i][0] === mode) return PERMS[i][1];
-    return "Ask each time";
+  function permLabel(mode, short) {
+    for (var i = 0; i < PERMS.length; i++) {
+      if (PERMS[i][0] === mode) return short ? PERMS[i][3] : PERMS[i][1];
+    }
+    return short ? "Ask" : "Ask each time";
+  }
+
+  function permDetail(mode) {
+    for (var i = 0; i < PERMS.length; i++) if (PERMS[i][0] === mode) return PERMS[i][2];
+    return PERMS[0][2];
   }
 
   function renderPerm() {
     var mode = (S.config && S.config.approvalMode) || "ask";
     var nm = $("permName");
-    if (nm) nm.textContent = permLabel(mode);
+    if (nm) nm.textContent = permLabel(mode, true);
     var btn = $("permBtn");
-    if (btn) btn.setAttribute("data-mode", mode);
+    if (btn) {
+      btn.setAttribute("data-mode", mode);
+      // The full sentence, for the control that now shows one word.
+      btn.title = permLabel(mode) + " - " + permDetail(mode);
+    }
     var pop = $("permPop");
     if (!pop || pop.hidden) return;
     var html = "";
@@ -1421,6 +1450,38 @@ function _sbRun() {
     toolGroup = g;
     add(g);
     return g;
+  }
+
+  /**
+   * The model's working, collapsed.
+   *
+   * This used to arrive as ordinary reply text, so a turn that called three
+   * tools put three essays into the transcript ahead of a two-line answer -
+   * and, because prose closes a tool group, split one run of three calls into
+   * three separate strips each reading "1 step".
+   *
+   * Closed by default. Reasoning is worth having when a model does something
+   * surprising and worth nothing the rest of the time, which is exactly the
+   * shape of a disclosure.
+   */
+  function addThinking(text) {
+    var t = String(text == null ? "" : text).trim();
+    if (!t) return;
+    // Not through `aiEl`: this is not the answer, and appending it there would
+    // put it back in the same paragraph flow it just came out of.
+    aiEl = null;
+
+    var box = div("think");
+    box.setAttribute("data-open", "0");
+    var words = t.split(/\s+/).length;
+    box.innerHTML =
+      '<button class="think-head">' + icon("i-chev", "ic-9 chev") +
+        '<span class="n">Thought for ' + words + " word" + (words === 1 ? "" : "s") + "</span></button>" +
+      '<div class="think-body">' + esc(t) + "</div>";
+    box.querySelector(".think-head").addEventListener("click", function () {
+      box.setAttribute("data-open", box.getAttribute("data-open") === "1" ? "0" : "1");
+    });
+    add(box);
   }
 
   /** Freeze the group's counters. Safe to call when no group is open. */
@@ -1989,6 +2050,12 @@ function _sbRun() {
 
   function syncComposer() {
     var draft = $("draft");
+    // The mirror is a second copy of the draft, painted under the transparent
+    // textarea to colour skills and @paths. Clearing `draft.value` on send
+    // left the mirror holding the old text, so what was just sent stayed on
+    // screen underneath the placeholder. Every path that changes the draft
+    // ends here, so this is the one place that cannot be forgotten.
+    renderDraftMirror();
     var blocked = !S.workspace.open || !hasEndpoint();
     draft.disabled = blocked;
     // The aura reads this. Kept as an attribute rather than a class so the
@@ -2408,7 +2475,11 @@ function _sbRun() {
   function renderFooter() {
     var active = activeProfile();
     var name = active ? active.id : "No endpoint";
-    $("epName").textContent = S.tlsError ? name + " - TLS error" : name;
+    var label = S.tlsError ? name + " - TLS error" : name;
+    // The name is carried but not printed. It is a fact that only matters
+    // when something is wrong, and the dot already says when that is.
+    $("epName").textContent = label;
+    $("epInd").title = label;
     $("epInd").setAttribute("data-err", S.tlsError ? "1" : "0");
     var pinnedTo = (S.config && S.config.activeProfile) || "";
     $("modelName").textContent = active
@@ -3570,6 +3641,10 @@ function _sbRun() {
         startStream();
         appendAi(m.text);
         syncComposer();
+        break;
+
+      case "thinking":
+        addThinking(m.text);
         break;
 
       case "streamReset":

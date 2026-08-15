@@ -28,7 +28,7 @@ export interface AgentEvent {
    * tag arrives, which can be a thousand characters in.
    */
   type:
-    | "text" | "text_reset" | "tool_start" | "tool_end"
+    | "text" | "reasoning" | "text_reset" | "tool_start" | "tool_end"
     | "turn_end" | "error" | "context" | "steer";
   text?: string;
   tool?: { name: string; args: any; result?: string; isError?: boolean };
@@ -588,6 +588,13 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
         signal: opts.signal,
       })) {
         if (opts.signal?.aborted) return;
+        // The working, kept off the answer's channel. It never joins `text`,
+        // so it cannot reach the transcript the next turn is billed for, and
+        // the panel can show it as quietly as it likes.
+        if (ev.type === "reasoning") {
+          if (ev.text?.trim()) yield { type: "reasoning", text: ev.text };
+          continue;
+        }
         if (ev.type === "text") {
           const split = think.push(ev.text ?? "");
           // The opening tag was the prefill and never arrived, so what is

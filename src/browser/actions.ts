@@ -32,6 +32,7 @@ import {
   assertSameOrigin, pageText,
 } from "./page";
 import { normaliseUrl } from "./fetchPage";
+import { looksLikeBotWall, botWallAdvice } from "./search";
 
 /**
  * Every action the model may ask for.
@@ -102,6 +103,13 @@ export async function runBrowserAction(
   const snap = async (): Promise<string> => {
     const s = await snapshot(cdp);
     deps.onUrl(s.url);
+    // A bot check is not the page that was asked for, and it does not read
+    // like a failure - it reads like a page that happens to be about unusual
+    // traffic. Handing the model twenty lines of that is how it ends up
+    // apologising and giving up, which is the right response to the text and
+    // the wrong response to the situation.
+    const wall = looksLikeBotWall(s.url, s.text ?? "");
+    if (wall) return botWallAdvice(wall, s.url);
     return renderSnapshot(s);
   };
 
