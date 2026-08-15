@@ -553,6 +553,27 @@ export class CdpBrowser {
    * system temp folder, is how a tool quietly consumes a disk.
    */
   async close(): Promise<void> {
+    // Ask the browser to shut itself down before signalling it.
+    //
+    // Chromium writes its cookie database on a clean exit and may not on a
+    // kill. With a throwaway profile that costs nothing, since the directory
+    // is deleted anyway - but with a persistent one it loses exactly the
+    // logins the profile exists to keep, and it loses them silently: the
+    // session looks fine until the next launch starts at a sign-in page.
+    //
+    // Raced against a short timer and entirely best-effort. A browser that
+    // will not answer still gets the signal below.
+    if (this.ws && this.proc && this.proc.exitCode === null) {
+      const exited = new Promise<void>((r) => this.proc?.once("exit", () => r()));
+      // Ask, then wait for the process to actually go. Waiting on the reply
+      // instead was the bug this comment exists for: Browser.close is
+      // acknowledged the moment it is accepted, not when shutdown finishes, so
+      // killing on the ack interrupted the flush it was sent to trigger. The
+      // cookie database was created, and empty.
+      void this.send("Browser.close", {}).catch(() => undefined);
+      await Promise.race([exited, new Promise((r) => setTimeout(r, 4000))]);
+    }
+
     for (const [, p] of this.pending) { clearTimeout(p.timer); p.reject(new Error("The browser is closing.")); }
     this.pending.clear();
     this.sessionId = undefined;
