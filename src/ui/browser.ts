@@ -104,6 +104,13 @@ export class BrowserPanel {
         this.inFlight?.abort();
         return;
 
+      case "browserClose":
+        // Disposing the panel runs `dispose()`, which stops the stream and
+        // leaves the agent's browser running. Closing the window you are
+        // watching through is not a reason to end the session it is watching.
+        this.panel.dispose();
+        return;
+
       /* The agent's own browser, streamed in. Distinct from the iframe: these
          are the actual pixels of the actual page the model is driving, with
          its cookies and its scroll position, and they arrive from sites that

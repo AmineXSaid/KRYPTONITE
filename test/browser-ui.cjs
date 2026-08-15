@@ -48,10 +48,21 @@ function boot() {
 /* ── chrome ──────────────────────────────────────────────────────────── */
 {
   const { d, $ } = boot();
-  for (const id of ["bBack", "bFwd", "bGo", "bUrl", "bLive", "bRead", "bAgent", "bExt", "bStage", "bFoot"]) {
+  for (const id of ["bBack", "bFwd", "bGo", "bUrl", "bLive", "bRead", "bAgentView",
+                    "bAgent", "bExt", "bClosePanel", "bStage", "bFoot"]) {
     ok(`the toolbar has ${id}`, !!$(id));
   }
-  ok("it opens on an explanation rather than a blank frame", /Browser/.test($("bStage").textContent));
+  // The three views are the tab strip. A tab is the control everyone already
+  // knows for "which of these am I looking at".
+  ok("the views are tabs", d.querySelectorAll(".tabs .tab").length === 3);
+  ok("and the address bar is the widest thing in the chrome", !!d.querySelector(".bar .addr input"));
+  ok("the address invites rather than instructs",
+    $("bUrl").getAttribute("placeholder") === "Type a URL");
+  ok("it opens on an explanation rather than a blank frame",
+    /Type a URL above to browse/.test($("bStage").textContent), $("bStage").textContent.slice(0, 120));
+  // The empty state offers the one thing that can be started from here, on
+  // every tab, so the panel reads as one surface rather than three screens.
+  ok("and offers the browser that can be started", !!d.querySelector("#aStartLive"));
   ok("back and forward start disabled", $("bBack").disabled && $("bFwd").disabled);
   ok("send-to-chat is disabled until something has been fetched", $("bAgent").disabled);
   ok("Live is the starting view", $("bLive").getAttribute("aria-pressed") === "true");
@@ -197,13 +208,17 @@ function boot() {
 
   // Nothing running: a launcher, not an empty box.
   ok("with no browser it shows a launcher", !!d.querySelector(".launch-card"));
-  ok("saying plainly that none is running",
-    /No browser running/.test(d.querySelector(".launch-card h2").textContent));
-  // Starting a browser puts a process on someone's machine. The copy says so
-  // rather than presenting it as a toggle.
-  ok("and what pressing the button will do",
-    /headless by default/.test(d.querySelector(".launch-card p").textContent));
-  ok("there is one obvious action", (d.querySelector("#aStart").textContent || "").trim() === "Launch browser");
+  // Starting a browser puts a process on someone's machine. The copy still
+  // says so, even though the control is a row now rather than a card.
+  ok("saying what this panel is for",
+    /watch what the model sees/.test(d.querySelector(".launch-say").textContent));
+  ok("and what pressing it will do",
+    /headless/.test(d.querySelector(".launch-say").textContent));
+  ok("there is one obvious action", !!d.querySelector("#aStart"));
+  ok("named for the thing it starts",
+    /Agent browser/.test(d.querySelector("#aStart .srv-n").textContent));
+  ok("with the engine as its detail",
+    /chromium/.test(d.querySelector("#aStart .srv-m").textContent));
   ok("and nothing to close yet", !d.querySelector("#aClose"));
 
   click("#aStart");
@@ -229,12 +244,14 @@ function boot() {
   ok("the stale frame is dropped, not left on screen", !d.querySelector(".live-frame img"));
   ok("and the launcher returns", !!d.querySelector(".launch-card"));
   ok("now offering to watch the browser that is still up",
-    (d.querySelector("#aStart").textContent || "").trim() === "Watch it");
+    d.querySelector("#aStart").getAttribute("title") === "Watch it");
+  ok("and says it is already running",
+    /running/.test(d.querySelector("#aStart .srv-m").textContent));
   ok("and to close it", !!d.querySelector("#aClose"));
 
   send({ type: "agentState", running: false, live: false, url: "", title: "" });
   ok("closing it returns to the first state",
-    /No browser running/.test(d.querySelector(".launch-card h2").textContent));
+    d.querySelector("#aStart").getAttribute("title") === "Launch it");
   ok("with no close button, since there is nothing to close", !d.querySelector("#aClose"));
 
   send({ type: "agentError", message: "No Chromium-family browser is installed." });
@@ -252,7 +269,7 @@ function boot() {
   // "slightly wrong" long before anyone can name it.
   ok("form controls inherit the panel's font",
     /button,\s*input,\s*select,\s*textarea\s*\{[^}]*font:\s*inherit/.test(CSS));
-  ok("headings use the display cut", /\.launch-card h2\s*\{[^}]*var\(--kx-display\)/.test(CSS));
+  ok("headings use the display cut", /\.blank-in h2\s*\{[^}]*var\(--kx-display\)/.test(CSS));
   ok("body copy uses the text cut", /body\s*\{[^}]*var\(--kx-ui\)/.test(CSS));
   // The address bar is the one deliberate exception: an address is data, and a
   // proportional font makes a url harder to scan.

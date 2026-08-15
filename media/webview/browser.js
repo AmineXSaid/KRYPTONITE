@@ -59,7 +59,13 @@
     '<symbol id="b-ext" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h5" ' +
       'fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>' +
     '<symbol id="b-agent" viewBox="0 0 24 24"><path d="M4 12h11M11 7l5 5-5 5M18 4v16" fill="none" stroke="currentColor" ' +
-      'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>';
+      'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>' +
+    '<symbol id="b-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" ' +
+      'stroke-width="1.7" stroke-linecap="round"/></symbol>' +
+    '<symbol id="b-srv" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" fill="none" ' +
+      'stroke="currentColor" stroke-width="1.5"/><path d="M3.5 9.5h17" fill="none" stroke="currentColor" ' +
+      'stroke-width="1.5"/><circle cx="7" cy="7" r=".9" fill="currentColor"/></symbol>' +
+    '<symbol id="b-play" viewBox="0 0 24 24"><path d="M9 6.5l9 5.5-9 5.5z" fill="currentColor"/></symbol>';
 
   function icon(id, cls) {
     return '<svg class="' + (cls || "ic") + '" aria-hidden="true"><use href="#' + id + '"/></svg>';
@@ -95,27 +101,65 @@
       "</svg>";
   }
 
+  /**
+   * Two rows of chrome above the page, and nothing else.
+   *
+   * The strip on top is a tab strip, and the tabs are the three views. That is
+   * what they already were - one address, three ways of looking at it - and a
+   * tab is the control everyone already knows for "which of these am I
+   * looking at". The previous segmented button said the same thing in a
+   * smaller, less familiar shape and cost a row of its own.
+   *
+   * Everything on the right of both rows is an icon with a real command
+   * behind it. A decorative control in browser chrome is worse than a missing
+   * one: it is the one place a person expects every button to do the thing
+   * its shape promises.
+   */
   function mount() {
     $("root").innerHTML =
       '<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>' + ICONS + "</defs></svg>" +
       '<div class="bw">' +
+        '<div class="tabs">' +
+          '<button class="tab" id="bLive" aria-pressed="true">Live</button>' +
+          '<button class="tab" id="bRead" aria-pressed="false">Reader</button>' +
+          '<button class="tab" id="bAgentView" aria-pressed="false" ' +
+            'title="Watch the browser the agent drives">Agent</button>' +
+          '<span class="sp"></span>' +
+          '<button class="gh" id="bExt" title="Open in your system browser" aria-label="Open externally">' +
+            icon("b-ext", "ic-14") + "</button>" +
+          '<button class="gh" id="bClosePanel" title="Close this panel" aria-label="Close">' +
+            icon("b-x", "ic-14") + "</button>" +
+        "</div>" +
         '<div class="bar">' +
-          '<button class="nav" id="bBack" title="Back" aria-label="Back" disabled>' + icon("b-back", "ic-15") + "</button>" +
-          '<button class="nav" id="bFwd" title="Forward" aria-label="Forward" disabled>' + icon("b-fwd", "ic-15") + "</button>" +
-          '<button class="nav" id="bGo" title="Reload" aria-label="Reload">' + icon("b-reload", "ic-14") + "</button>" +
+          '<button class="gh" id="bBack" title="Back" aria-label="Back" disabled>' + icon("b-back", "ic-15") + "</button>" +
+          '<button class="gh" id="bFwd" title="Forward" aria-label="Forward" disabled>' + icon("b-fwd", "ic-15") + "</button>" +
+          '<button class="gh" id="bGo" title="Reload" aria-label="Reload">' + icon("b-reload", "ic-14") + "</button>" +
           '<div class="addr"><input id="bUrl" type="text" spellcheck="false" autocomplete="off" ' +
-            'placeholder="Search or enter address" aria-label="Address"><span id="bBusy" class="busy"></span></div>' +
-          '<div class="seg" role="group" aria-label="View">' +
-            '<button class="seg-b" id="bLive" aria-pressed="true">Live</button>' +
-            '<button class="seg-b" id="bRead" aria-pressed="false">Reader</button>' +
-            '<button class="seg-b" id="bAgentView" aria-pressed="false" title="Watch the browser the agent drives">Agent</button>' +
-          "</div>" +
-          '<button class="nav" id="bAgent" title="Send this page to the chat" aria-label="Send to chat">' + icon("b-agent", "ic-15") + "</button>" +
-          '<button class="nav" id="bExt" title="Open in your system browser" aria-label="Open externally">' + icon("b-ext", "ic-14") + "</button>" +
+            'placeholder="Type a URL" aria-label="Address"><span id="bBusy" class="busy"></span></div>' +
+          '<button class="gh" id="bAgent" title="Send this page to the chat" aria-label="Send to chat">' +
+            icon("b-agent", "ic-15") + "</button>" +
         "</div>" +
         '<div class="stage" id="bStage"></div>' +
         '<div class="foot" id="bFoot"></div>' +
       "</div>";
+  }
+
+  /**
+   * One row of the empty state: a thing that can be started, and the button
+   * that starts it.
+   *
+   * Shaped like a row rather than a card with a heading because the empty
+   * state should read as a short list of what is available here, not as an
+   * announcement. `meta` is the small monospace fact on the right - what a
+   * port number is on a server list, and what the engine is here.
+   */
+  function srvRow(id, name, meta, label) {
+    return '<button class="srv" id="' + id + '" title="' + esc(label) + '">' +
+      '<span class="srv-i">' + icon("b-srv", "ic-15") + "</span>" +
+      '<span class="srv-n">' + esc(name) + "</span>" +
+      '<span class="srv-m">' + esc(meta) + "</span>" +
+      '<span class="srv-go">' + icon("b-play", "ic-13") + "</span>" +
+      "</button>";
   }
 
   /**
@@ -137,23 +181,26 @@
     }
 
     if (!a.live) {
-      // The launcher. One button, and an honest account of what pressing it
-      // does - a browser starting is a process appearing on someone's machine,
-      // which is not a thing to do silently.
+      // The launcher, as an empty state rather than an announcement: a line
+      // saying what can be started here and what else this panel is for, then
+      // the thing itself as a row you press.
+      //
+      // The copy still says plainly what pressing it does. A browser starting
+      // is a process appearing on someone's machine, and the row being small
+      // is not a reason to be quieter about that.
       stage.innerHTML =
         '<div class="launch">' +
           '<div class="launch-card">' +
-            '<div class="launch-orb">' + orb() + "</div>" +
-            "<h2>" + (a.running ? "A browser is already running" : "No browser running") + "</h2>" +
-            "<p>" + (a.running
-              ? "The agent has one open. Watch it live, or close it and free the process."
-              : "Start a Chromium the agent drives. It opens headless by default, so nothing appears over your editor - this panel is where you see it.") +
+            '<p class="launch-say">' + (a.running
+              ? "A browser is already running. Watch it live, or close it and free the process."
+              : "Run the agent&rsquo;s browser below to watch what the model sees, or type a URL above to browse. It starts headless, so nothing appears over your editor.") +
             "</p>" +
-            '<div class="launch-row">' +
-              '<button class="btn primary" id="aStart">' +
-                (a.running ? "Watch it" : "Launch browser") + "</button>" +
-              (a.running ? '<button class="btn" id="aClose">Close browser</button>' : "") +
-            "</div>" +
+            srvRow("aStart", "Agent browser",
+              a.running ? "running" : "chromium",
+              a.running ? "Watch it" : "Launch it") +
+            (a.running
+              ? '<button class="ghost-row" id="aClose">Close the browser</button>'
+              : "") +
           "</div>" +
         "</div>";
       return;
@@ -194,13 +241,15 @@
     }
 
     if (!S.url) {
+      // The same empty state as the Agent tab, so the panel reads as one
+      // surface with three views rather than three unrelated screens.
       stage.innerHTML =
-        '<div class="blank"><div class="blank-in">' +
-          "<h2>Browser</h2>" +
-          "<p>Pages open beside your editor. <strong>Live</strong> frames the site; " +
-          "<strong>Reader</strong> fetches it over the active endpoint&rsquo;s connection " +
+        '<div class="launch"><div class="launch-card">' +
+          '<p class="launch-say">Type a URL above to browse. <b>Live</b> frames the site; ' +
+          "<b>Reader</b> fetches it over the active endpoint&rsquo;s connection " +
           "&mdash; the same CAs, proxy and client certificate &mdash; and reduces it to text " +
           "the model can read.</p>" +
+          srvRow("aStartLive", "Agent browser", "chromium", "Launch it") +
         "</div></div>";
       return;
     }
@@ -285,6 +334,9 @@
     var agent = $("bAgent");
     agent.disabled = !(S.page && S.page.text);
     $("bExt").disabled = !S.url;
+    // The tab strip carries the address, the way a browser tab carries a page
+    // title. With nothing loaded it says so rather than showing an empty tab.
+    $("bLive").title = S.url || "Nothing loaded";
   }
 
   function renderFoot() {
@@ -397,9 +449,13 @@
        every frame, so binding them individually would attach a new listener
        sixty times a second. Delegated once instead. */
     $("bStage").addEventListener("click", function (e) {
-      if (e.target.closest("#aStart")) {
+      // The same row appears on the Live tab's empty state, where pressing it
+      // has to switch to the Agent tab as well as start the browser - the
+      // frames have nowhere else to go.
+      if (e.target.closest("#aStart") || e.target.closest("#aStartLive")) {
         S.agent.error = "";
         S.agent.live = true;      // show the spinner while the browser starts
+        S.view = "agent";
         render();
         post("agentStart");
         return;
@@ -408,6 +464,7 @@
       if (e.target.closest("#aClose")) { post("agentClose"); return; }
     });
     $("bExt").addEventListener("click", function () { post("browserExternal", { url: S.url }); });
+    $("bClosePanel").addEventListener("click", function () { post("browserClose"); });
     $("bAgent").addEventListener("click", function () {
       if (!S.page || !S.page.text) return;
       post("browserToAgent", { url: S.page.finalUrl, text: S.page.text });
