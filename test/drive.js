@@ -35,9 +35,10 @@ const STATE = (over = {}) => ({ type: "stateSync", state: {
   running: false, phase: "act", status: { state: "ok", label: "OK · ACT" },
   endpoint: "gw", profiles: [{ id: "gw", status: "ready", active: true, model: "gpt-4o",
     wire: "openai", baseUrl: "https://x", capabilities: { contextWindow: 128000 } }],
-  skills: [], skillWarnings: [], config: { ui: {} }, tlsError: null, rungs: [],
+  skills: [], skillWarnings: [], agents: [], agentWarnings: [], activeAgent: "",
+  config: { ui: {} }, tlsError: null, rungs: [],
   tracing: false, todos: [], checkpoints: [], sessions: [], selection: null,
-  context: null, models: [{ group: "gw", models: ["gpt-4o"] }], logs: [],
+  context: null, changes: [], models: [{ group: "gw", models: ["gpt-4o"] }], logs: [],
   session: { id: "s1", title: "New chat", messages: [] },
   ...over,
 } });
@@ -958,6 +959,351 @@ function composer(over) {
         /type the id/i.test(d.getElementById("fModelHint").textContent));
     }
   }
+}
+
+/* ══ Long questions collapse ══════════════════════════════════ */
+{
+  const { w, d, inbound } = boot();
+  const wall = Array.from({ length: 40 }, (_, i) => "line " + i).join("\n");
+  inbound(STATE({ session: { id: "s1", title: "t", messages: [
+    { role: "user", content: "short one" },
+    { role: "user", content: wall },
+  ] } }));
+  const turns = d.querySelectorAll("#log .msg-user");
+  ok("LC both turns render", turns.length === 2);
+  ok("LC a short turn is not clamped", turns[0].getAttribute("data-clamped") === null);
+  ok("LC a short turn gets no expander", !turns[0].querySelector(".u-more"));
+  ok("LC a long turn is clamped", turns[1].getAttribute("data-clamped") === "1");
+  const more = turns[1].querySelector(".u-more");
+  ok("LC a long turn offers an expander", !!more);
+  ok("LC the expander counts the lines", !!more && /Show all 40 lines/.test(more.textContent));
+  ok("LC the text itself is never truncated", /line 39/.test(turns[1].textContent));
+  if (more) {
+    more.click();
+    ok("LC clicking expands", turns[1].getAttribute("data-clamped") === "0");
+    ok("LC expanded announces itself", more.getAttribute("aria-expanded") === "true");
+    ok("LC expanded offers the way back", /Show less/.test(more.textContent));
+    more.click();
+    ok("LC clicking again re-collapses", turns[1].getAttribute("data-clamped") === "1");
+    ok("LC the label returns", /Show all 40 lines/.test(more.textContent));
+  }
+
+  // One long paragraph on a single line is a wall of text too, so the
+  // character threshold has to catch what the line threshold cannot.
+  const c = boot();
+  c.inbound(STATE());
+  c.d.getElementById("draft").value = "x".repeat(900);
+  c.d.getElementById("draft").dispatchEvent(new c.w.Event("input"));
+  c.d.getElementById("sendBtn").click();
+  const sentTurn = c.d.querySelector("#log .msg-user");
+  ok("LC a single long paragraph clamps too", !!sentTurn && sentTurn.getAttribute("data-clamped") === "1");
+  ok("LC and is measured in characters",
+    !!sentTurn && /characters/.test(sentTurn.querySelector(".u-more").textContent));
+}
+
+/* ══ Export the chat as JSON ══════════════════════════════════ */
+{
+  const { d, sent, inbound } = boot();
+  inbound(STATE());
+  d.getElementById("moreBtn").click();
+  const one = d.querySelector('[data-more="exportChat"]');
+  const all = d.querySelector('[data-more="exportAll"]');
+  ok("EX the menu offers exporting this chat", !!one);
+  ok("EX the menu offers exporting every chat", !!all);
+  if (one) {
+    one.click();
+    ok("EX it asks the host for the current scope",
+      sent.some((m) => m.type === "exportChat" && m.scope === "current"));
+    ok("EX and closes the menu", d.getElementById("morePop").hidden === true);
+  }
+  d.getElementById("moreBtn").click();
+  if (all) {
+    all.click();
+    ok("EX all chats asks for the all scope",
+      sent.some((m) => m.type === "exportChat" && m.scope === "all"));
+  }
+
+  // The confirmation lands in the transcript, because a toast takes the path
+  // away with it and the path is the point.
+  inbound({ type: "chatExported", path: "/tmp/chat.json", scope: "current", sessions: 1, messages: 4 });
+  const box = d.querySelector("#log .ok-box");
+  ok("EX the export is confirmed in the transcript", !!box);
+  ok("EX the confirmation names the file", !!box && /\/tmp\/chat\.json/.test(box.textContent));
+  ok("EX the confirmation counts the messages", !!box && /4 messages/.test(box.textContent));
+  const open = box && box.querySelector("button");
+  ok("EX the confirmation offers to open it", !!open);
+  if (open) {
+    open.click();
+    ok("EX opening posts openFile with the path",
+      sent.some((m) => m.type === "openFile" && m.path === "/tmp/chat.json"));
+  }
+
+  const c = boot();
+  c.inbound(STATE());
+  c.inbound({ type: "chatExported", path: "/tmp/all.json", scope: "all", sessions: 7, messages: 91 });
+  ok("EX exporting all names how many conversations went in",
+    /7 conversations/.test(c.d.querySelector("#log .ok-box").textContent));
+}
+
+/* ══ Live changed-file panel ══════════════════════════════════ */
+{
+  const { d, sent, inbound } = boot();
+  inbound(STATE());
+  ok("CF the panel is hidden with nothing changed", d.getElementById("changeBar").hidden === true);
+
+  const touch = (path, change, added, removed, at, exact) => inbound({
+    type: "fileTouched", path,
+    file: { path, change, added, removed, at, exact: !!exact },
+  });
+
+  touch("src/agent/tools.ts", "modified", 12, 3, 1000);
+  const bar = d.getElementById("changeBar");
+  ok("CF a write reveals the panel", bar.hidden === false);
+  ok("CF it counts the files", /1 file changed/.test(d.getElementById("chgCount").textContent));
+  ok("CF it totals the lines", /\+12/.test(d.getElementById("chgStat").textContent));
+  ok("CF an estimate is marked as one", /~/.test(d.getElementById("chgStat").textContent));
+  ok("CF the row flashes on the file that just changed",
+    !!d.querySelector('.chg-row.hot[data-chg="src/agent/tools.ts"]'));
+
+  touch("README.md", "created", 40, 0, 2000);
+  ok("CF a second file adds a row", d.querySelectorAll(".chg-row").length === 2);
+  ok("CF the newest write is first",
+    d.querySelector(".chg-row").getAttribute("data-chg") === "README.md");
+  ok("CF a new file is marked as added",
+    d.querySelector('[data-chg="README.md"] .chg-kind').getAttribute("data-kind") === "created");
+  ok("CF totals cover every file", /\+52/.test(d.getElementById("chgStat").textContent));
+  ok("CF only the fresh row flashes", d.querySelectorAll(".chg-row.hot").length === 1);
+
+  // Writing the same file twice is one row, not two: the host sends the
+  // running total and the panel replaces the row it belongs to.
+  touch("src/agent/tools.ts", "modified", 20, 5, 3000);
+  ok("CF a second write to one file stays one row", d.querySelectorAll(".chg-row").length === 2);
+  ok("CF the row carries the running total",
+    /\+20/.test(d.querySelector('[data-chg="src/agent/tools.ts"] .s').textContent));
+
+  // Expanding is opt-in; the collapsed bar is the resting state.
+  ok("CF the list starts collapsed", d.getElementById("chgList").hidden === true);
+  d.getElementById("chgToggle").click();
+  ok("CF the toggle opens it", d.getElementById("chgList").hidden === false);
+  ok("CF and announces it", d.getElementById("chgToggle").getAttribute("aria-expanded") === "true");
+
+  d.querySelector('[data-chg="README.md"]').click();
+  ok("CF a row opens the file",
+    sent.some((m) => m.type === "openFile" && m.path === "README.md"));
+
+  // Git's numbers replace the estimates when the turn lands.
+  inbound({ type: "changesUpdated", files: [
+    { path: "src/agent/tools.ts", change: "modified", added: 9, removed: 2, at: 3000, exact: true },
+  ] });
+  ok("CF a correction replaces the whole list", d.querySelectorAll(".chg-row").length === 1);
+  ok("CF exact counts drop the tilde", !/~/.test(d.getElementById("chgStat").textContent));
+  ok("CF a correction leaves nothing flashing", d.querySelectorAll(".chg-row.hot").length === 0);
+
+  d.getElementById("chgClear").click();
+  ok("CF clearing asks the host", sent.some((m) => m.type === "clearChanges"));
+  ok("CF clearing hides the panel", d.getElementById("changeBar").hidden === true);
+
+  // Starting a new conversation empties it, because the list belongs to the
+  // conversation rather than to the workspace.
+  touch("z.ts", "modified", 1, 0, 9000);
+  ok("CF a later write brings it back", d.getElementById("changeBar").hidden === false);
+  inbound({ type: "changesUpdated", files: [] });
+  ok("CF and a new conversation empties it", d.getElementById("changeBar").hidden === true);
+
+  // A restored conversation comes back with the files it changed.
+  const c = boot();
+  c.inbound(STATE({ changes: [
+    { path: "a.ts", change: "modified", added: 3, removed: 1, at: 10, exact: true },
+  ] }));
+  ok("CF hydration restores the change list", c.d.querySelectorAll(".chg-row").length === 1);
+  ok("CF and shows the panel", c.d.getElementById("changeBar").hidden === false);
+}
+
+/* ══ A file tool card can reach its file ══════════════════════ */
+{
+  const { d, sent, inbound } = boot();
+  inbound(STATE());
+  inbound({ type: "toolStart", tool: { name: "edit_file", args: { path: "src/x.ts", old_text: "a", new_text: "b" } } });
+  inbound({ type: "toolEnd", tool: { name: "edit_file", args: { path: "src/x.ts", old_text: "a", new_text: "b" }, result: "Edited src/x.ts." } });
+  const open = d.querySelector('[data-open-file="src/x.ts"]');
+  ok("OF a file card offers to open its file", !!open);
+  if (open) {
+    open.click();
+    ok("OF it posts openFile", sent.some((m) => m.type === "openFile" && m.path === "src/x.ts"));
+  }
+
+  inbound({ type: "toolStart", tool: { name: "run_command", args: { command: "ls" } } });
+  inbound({ type: "toolEnd", tool: { name: "run_command", args: { command: "ls" }, result: "a\nb" } });
+  ok("OF a command card offers nothing to open",
+    d.querySelectorAll("[data-open-file]").length === 1);
+
+  // A declined write leaves nothing worth opening.
+  inbound({ type: "toolStart", tool: { name: "write_file", args: { path: "nope.ts", content: "x" } } });
+  inbound({ type: "toolEnd", tool: { name: "write_file", args: { path: "nope.ts", content: "x" }, result: "The user declined this edit.", isError: true } });
+  ok("OF a failed write offers nothing to open", !d.querySelector('[data-open-file="nope.ts"]'));
+}
+
+/* ══ The footer strip is gone, the meter is not ══════════ */
+{
+  const { d, inbound } = boot();
+  inbound(STATE());
+  ok("FT the footer strip is gone", !d.querySelector(".footer"));
+  ok("FT the meter moved into the header", !!d.querySelector(".kx-header #ctxBar"));
+  ok("FT and the figure with it", !!d.querySelector(".kx-header #ctxText"));
+
+  inbound({ type: "contextUsage", used: 24000, limit: 128000, exact: true });
+  ok("FT the figure still prints", /24/.test(d.getElementById("ctxText").textContent));
+  ok("FT the meter still fills", parseFloat(d.getElementById("ctxFill").style.width) > 0);
+  ok("FT the header says where the number came from",
+    /reported by/i.test(d.getElementById("ctxHead").title));
+
+  // The endpoint pill went with the strip; its health did not.
+  ok("FT endpoint health sits on the model button", !!d.querySelector("#modelBtn #epDot"));
+  ok("FT and reads healthy by default",
+    d.getElementById("epDot").getAttribute("data-err") === "0");
+  inbound({ type: "tlsError", error: { profile: "gw", rung: "TLS handshake", message: "bad cert",
+    endpoint: "https://x", proxied: false, fixKey: "k", fixValue: "v" } });
+  ok("FT a TLS failure turns it red", d.getElementById("epDot").getAttribute("data-err") === "1");
+  ok("FT and the button says so", /TLS error/.test(d.getElementById("modelBtn").title));
+}
+
+/* ══ The empty screen offers a way back ════════════════ */
+{
+  const { d, sent, inbound } = boot();
+  inbound(STATE());
+  ok("WB a first run shows the welcome", !!d.querySelector("#log .welcome"));
+  ok("WB with nothing to go back to", !d.querySelector(".recent"));
+
+  inbound({ type: "sessionsListed", sessions: [
+    { id: "s1", title: "This one", when: "now", count: 4, active: true },
+    { id: "s2", title: "TLS handshake triage", when: "2h ago", count: 12, active: false },
+    { id: "s3", title: "Empty one", when: "1d ago", count: 0, active: false },
+  ] });
+  ok("WB previous conversations appear on the empty screen", !!d.querySelector(".recent"));
+  const rows = d.querySelectorAll(".recent-row");
+  ok("WB the current one is not offered", rows.length === 1);
+  ok("WB nor an empty one", !/Empty one/.test(d.querySelector(".recent").textContent));
+  ok("WB the row names the conversation", /TLS handshake triage/.test(rows[0].textContent));
+  ok("WB and how much is in it", /12 messages/.test(rows[0].textContent));
+  rows[0].click();
+  ok("WB clicking one loads it", sent.some((m) => m.type === "loadSession" && m.id === "s2"));
+
+  // A conversation with messages shows the transcript, not the list.
+  const c = boot();
+  c.inbound(STATE({ session: { id: "s1", title: "t", messages: [{ role: "user", content: "hi" }] },
+    sessions: [{ id: "s2", title: "Other", when: "now", count: 3, active: false }] }));
+  ok("WB a conversation with messages shows no welcome", !c.d.querySelector(".welcome"));
+  ok("WB and no recent list", !c.d.querySelector(".recent"));
+}
+
+/* ══ A queued message keeps its attachments on screen ═════ */
+{
+  const { d, inbound } = boot();
+  inbound(STATE());
+  inbound({ type: "inputAccepted", mode: "queue", text: "look at this", depth: 1,
+    files: [{ name: "shot.png", size: 2048 }] });
+  const note = d.querySelector(".queued-note");
+  ok("QA the queued note renders", !!note);
+  ok("QA and carries the attachment chip", !!note.querySelector(".u-att-chip"));
+  ok("QA named", /shot\.png/.test(note.textContent));
+  ok("QA and sized", /2 KB/.test(note.textContent));
+
+  inbound({ type: "steerAccepted", text: "look at this", files: [{ name: "shot.png", size: 2048 }] });
+  const turn = d.querySelector("#log .msg-user");
+  ok("QA a steered message becomes a user turn", !!turn);
+  ok("QA carrying its file", /shot\.png/.test(turn.textContent));
+  ok("QA as a chip, not prose", !!turn.querySelector(".u-att-chip"));
+}
+
+/* ══ Agents ═══════════════════════════════════ */
+const AGENTS = [
+  { name: "reader", description: "Reads only.", model: "", memory: ".agent/memory/reader.md",
+    tools: ["read_file", "search"], skills: [], allMcp: false,
+    mcp: [{ server: "filesystem", include: ["read_text_file"], exclude: [] }],
+    file: ".agent/agents/reader.md", active: false },
+  { name: "wide", description: "Everything.", model: "gpt-4o", memory: "", tools: [], skills: [],
+    allMcp: true, mcp: [], file: ".agent/agents/wide.md", active: false },
+];
+{
+  const { d, sent, inbound } = boot();
+  inbound(STATE({ agents: AGENTS, activeAgent: "" }));
+  ok("AG nothing is drawn while no agent is selected",
+    d.getElementById("agentBar").hidden === true);
+
+  // The Diagnostics tab lists them with the scope they enforce.
+  d.getElementById("tabDiag").click();
+  const rows = d.querySelectorAll(".ag-row");
+  ok("AG both agents are listed", rows.length === 2);
+  ok("AG the badge counts them", d.getElementById("agBadge").textContent === "2");
+  const readerRow = d.querySelector('[data-name="reader"]').closest(".ag-row");
+  ok("AG a row names the agent", /reader/.test(readerRow.textContent));
+  ok("AG and describes it", /Reads only/.test(readerRow.textContent));
+  ok("AG and states its built-in scope", /2 built-in tools/.test(readerRow.textContent));
+  ok("AG and which MCP servers it can reach", /MCP: filesystem \(1\)/.test(readerRow.textContent));
+  ok("AG and that it keeps a memory", /memory/.test(readerRow.textContent));
+  ok("AG and names its file", /\.agent\/agents\/reader\.md/.test(readerRow.textContent));
+  const wideRow = d.querySelector('[data-name="wide"]').closest(".ag-row");
+  ok("AG an unrestricted agent says so", /all MCP servers/.test(wideRow.textContent));
+  ok("AG and names its model override", /gpt-4o/.test(wideRow.textContent));
+
+  d.querySelector('[data-ag="use"][data-name="reader"]').click();
+  ok("AG Use selects it", sent.some((m) => m.type === "setAgent" && m.name === "reader"));
+  d.querySelector('[data-ag="open"][data-name="reader"]').click();
+  ok("AG Open opens its file", sent.some((m) => m.type === "openAgent" && m.name === "reader"));
+  d.querySelector('[data-ag="new"]').click();
+  ok("AG New agent asks the host", sent.some((m) => m.type === "newAgent"));
+}
+{
+  // Becoming an agent, and leaving it.
+  const { d, sent, inbound } = boot();
+  inbound(STATE({ agents: AGENTS, activeAgent: "" }));
+  inbound({ type: "agentChanged", agent: { ...AGENTS[0], active: true } });
+  const bar = d.getElementById("agentBar");
+  ok("AG selecting one reveals the bar", bar.hidden === false);
+  ok("AG which names it", /reader/.test(d.getElementById("agentBarName").textContent));
+  ok("AG and states what it can reach",
+    /MCP: filesystem/.test(d.getElementById("agentBarScope").textContent));
+  d.getElementById("tabDiag").click();
+  ok("AG the row marks itself active",
+    d.querySelector('[data-name="reader"]').closest(".ag-row").getAttribute("data-on") === "1");
+  ok("AG and its button becomes Leave",
+    d.querySelector('[data-ag="use"][data-name="reader"]').textContent === "Leave");
+  d.querySelector('[data-ag="use"][data-name="reader"]').click();
+  ok("AG which sends an empty name",
+    sent.some((m) => m.type === "setAgent" && m.name === ""));
+
+  inbound({ type: "agentChanged", agent: null });
+  ok("AG leaving hides the bar again", d.getElementById("agentBar").hidden === true);
+}
+{
+  // The composer's own picker.
+  const { w, d, sent, inbound } = boot();
+  inbound(STATE({ agents: AGENTS, activeAgent: "wide" }));
+  const draft = d.getElementById("draft");
+  draft.value = "/agent";
+  draft.dispatchEvent(new w.Event("input"));
+  const qpRow = d.querySelector('#qp [data-i]');
+  ok("AG /agent is offered in the slash palette", !!qpRow);
+  qpRow.click();
+  const rows = d.querySelectorAll("#qp .qp-row");
+  ok("AG choosing it opens the agent list", rows.length === 3, String(rows.length));
+  ok("AG with None first, so leaving is one click", /None/.test(rows[0].textContent));
+  ok("AG the active one is ticked",
+    !!d.querySelectorAll("#qp .qp-row")[2].querySelector(".qp-check svg"));
+  ok("AG each row describes the agent", /Reads only/.test(rows[1].textContent));
+  rows[1].click();
+  ok("AG picking one sets it", sent.some((m) => m.type === "setAgent" && m.name === "reader"));
+}
+{
+  // Warnings from a malformed agent file have to reach the user.
+  const { d, inbound } = boot();
+  inbound(STATE({ agents: [], agentWarnings: ["broken: frontmatter is not valid YAML"] }));
+  d.getElementById("tabDiag").click();
+  ok("AG with no agents the section explains what one is",
+    /persona/.test(d.getElementById("agBody").textContent));
+  ok("AG and offers to make one", !!d.querySelector('[data-ag="new"]'));
+  ok("AG a malformed file is reported", /not valid YAML/.test(d.getElementById("agBody").textContent));
+  ok("AG and the badge flags it", d.getElementById("agBadge").className.indexOf("alert") >= 0);
 }
 
 // The clipboard block is async because FileReader is; everything else has

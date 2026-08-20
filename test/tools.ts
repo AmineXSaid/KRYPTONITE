@@ -11,7 +11,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { runTool, TOOL_DEFS, type ToolContext } from "../src/agent/tools";
+import { runTool, lineStat, TOOL_DEFS, type FileChange, type ToolContext } from "../src/agent/tools";
 import { ASK_ONLY, READ_ONLY, toolAllowedIn, refusalFor } from "../src/agent/loop";
 
 let pass = 0;
@@ -56,8 +56,11 @@ const ctx: ToolContext = {
     approvals.push(summary);
     return approveAnswer;
   },
-  onFileTouched: () => {},
+  onFileTouched: (abs, change) => { touched.push([abs, change]); },
 };
+let touched: Array<[string, FileChange | undefined]> = [];
+/** The change record for the last write, if the tool reported one. */
+const lastTouch = () => touched[touched.length - 1]?.[1];
 
 const run = (name: string, args: any) => runTool(name, args, ctx);
 
@@ -594,6 +597,53 @@ const run = (name: string, args: any) => runTool(name, args, ctx);
   {
     const r = await run("no_such_tool", {});
     ck(Boolean(r.isError) && /Unknown tool/.test(r.content), "an unknown tool is a clean error");
+  }
+
+  /* ── line accounting, for the live change panel ──────────────────── */
+  console.log("\n──── line accounting ────");
+  {
+    ck(lineStat("a\nb\n", "a\nb\n").added === 0, "an identical file counts nothing");
+    const one = lineStat("a\nb\nc\n", "a\nB\nc\n");
+    ck(one.added === 1 && one.removed === 1, "one changed line is one added and one removed");
+    const ins = lineStat("a\nc\n", "a\nb\nc\n");
+    ck(ins.added === 1 && ins.removed === 0, "an inserted line adds without removing", JSON.stringify(ins));
+    const del = lineStat("a\nb\nc\n", "a\nc\n");
+    ck(del.added === 0 && del.removed === 1, "a deleted line removes without adding", JSON.stringify(del));
+    const grow = lineStat("", "x\ny\n");
+    ck(grow.added === 2 && grow.removed === 0, "filling an empty file only adds", JSON.stringify(grow));
+    // Scattered edits are reported as the span containing them, which is an
+    // overestimate and is exactly why the panel marks these as estimates until
+    // git corrects them.
+    const spread = lineStat("a\nb\nc\nd\ne\n", "A\nb\nc\nd\nE\n");
+    ck(spread.added === 5 && spread.removed === 5,
+      "two distant edits are reported as the span between them", JSON.stringify(spread));
+  }
+  {
+    touched = [];
+    approveAnswer = true;
+    const r = await run("write_file", { path: "fresh.md", content: "one\ntwo\nthree" });
+    ck(!r.isError, "write_file writes a new file");
+    ck(lastTouch()?.change === "created", "a new file is reported as created");
+    ck(lastTouch()?.added === 3 && lastTouch()?.removed === 0,
+      "a new file counts every line as added", JSON.stringify(lastTouch()));
+
+    touched = [];
+    await run("write_file", { path: "fresh.md", content: "one\nTWO\nthree" });
+    ck(lastTouch()?.change === "modified", "an overwrite is reported as modified");
+    ck(lastTouch()?.added === 1 && lastTouch()?.removed === 1,
+      "an overwrite is measured against what it replaced", JSON.stringify(lastTouch()));
+
+    touched = [];
+    await run("edit_file", { path: "fresh.md", old_text: "TWO", new_text: "two\ntwo point five" });
+    ck(lastTouch()?.change === "modified", "an edit is reported as modified");
+    ck((lastTouch()?.added ?? 0) === 2 && (lastTouch()?.removed ?? 0) === 1,
+      "an edit counts the lines it replaced and produced", JSON.stringify(lastTouch()));
+
+    touched = [];
+    approveAnswer = false;
+    await run("write_file", { path: "fresh.md", content: "declined" });
+    ck(touched.length === 0, "a declined write reports no change at all");
+    approveAnswer = true;
   }
 
   // Teardown must never decide the outcome. The junction created above cannot

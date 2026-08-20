@@ -14,12 +14,57 @@ export interface TodoItem {
   status: TodoStatus;
 }
 
+/**
+ * What one write did to a file, so the panel can say it while the turn runs.
+ *
+ * The authoritative numbers arrive at the end of the turn from the shadow
+ * repository's `numstat`. These are what the tool itself knows at the moment
+ * it writes, which is the only thing available in real time.
+ */
+export interface FileChange {
+  change: "created" | "modified";
+  added: number;
+  removed: number;
+}
+
+/**
+ * Added and removed line counts for a whole-file replacement.
+ *
+ * Common leading and trailing lines are trimmed and what is left is counted.
+ * That is exact for a single contiguous edit - which is what `edit_file`
+ * always produces - and an overestimate for scattered ones, where it reports
+ * the span containing them rather than the lines inside it. A real LCS diff
+ * would be exact and is not worth its cost here: git supplies exact numbers a
+ * few seconds later, and the job of these is to be right immediately.
+ */
+export function lineStat(before: string, after: string): { added: number; removed: number } {
+  if (before === after) return { added: 0, removed: 0 };
+  const a = before.split("\n");
+  const b = after.split("\n");
+  let head = 0;
+  while (head < a.length && head < b.length && a[head] === b[head]) head++;
+  let tail = 0;
+  while (
+    tail < a.length - head &&
+    tail < b.length - head &&
+    a[a.length - 1 - tail] === b[b.length - 1 - tail]
+  ) {
+    tail++;
+  }
+  return { removed: a.length - head - tail, added: b.length - head - tail };
+}
+
 export interface ToolContext {
   root: string;
   skills: Skill[];
   /** Returns true if the user allows this side effect. */
   approve: (summary: string, detail?: string) => Promise<boolean>;
-  onFileTouched: (absPath: string) => void;
+  /**
+   * A file on disk changed. `change` is absent only for callers that do not
+   * track line counts, which is every offline harness and nothing in the
+   * extension itself.
+   */
+  onFileTouched: (absPath: string, change?: FileChange) => void;
   // CHANGED: added. Receives the validated list from update_todos. Optional so
   // callers that do not render a todo card need no changes.
   onTodos?: (todos: TodoItem[]) => void;
@@ -519,9 +564,26 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
           args.content.slice(0, 2000)
         );
         if (!ok) return { content: "The user declined this edit.", isError: true };
+        // Read before the write, and only once approval is in: an overwrite has
+        // to be measured against what it replaced, and there is nothing to
+        // measure if the user says no.
+        let before = "";
+        if (existed) {
+          try {
+            before = fs.readFileSync(abs, "utf8");
+          } catch {
+            // Unreadable (binary, permissions) - the write still stands, only
+            // the line counts are unavailable.
+          }
+        }
         fs.mkdirSync(path.dirname(abs), { recursive: true });
         fs.writeFileSync(abs, args.content, "utf8");
-        ctx.onFileTouched(abs);
+        ctx.onFileTouched(
+          abs,
+          existed
+            ? { change: "modified", ...lineStat(before, args.content) }
+            : { change: "created", added: args.content.split("\n").length, removed: 0 }
+        );
         return { content: `Wrote ${args.content.split("\n").length} lines to ${args.path}.` };
       }
 
@@ -559,7 +621,7 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
           ? before.split(args.old_text).join(args.new_text)
           : before.replace(args.old_text, args.new_text);
         fs.writeFileSync(abs, after, "utf8");
-        ctx.onFileTouched(abs);
+        ctx.onFileTouched(abs, { change: "modified", ...lineStat(before, after) });
         return { content: `Edited ${args.path}${all && count > 1 ? ` (${count} occurrences).` : "."}` };
       }
 
@@ -905,9 +967,12 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
         const want = extFor(out.mime);
         const rel = wanted.replace(/\.[A-Za-z0-9]+$/, "") + want;
         const abs = inside(ctx.root, rel);
+        const replaced = fs.existsSync(abs);
         fs.mkdirSync(path.dirname(abs), { recursive: true });
         fs.writeFileSync(abs, out.bytes);
-        ctx.onFileTouched(abs);
+        // Lines are meaningless for a PNG, so the counts stay at zero and the
+        // panel shows the file without a diff stat beside it.
+        ctx.onFileTouched(abs, { change: replaced ? "modified" : "created", added: 0, removed: 0 });
         ctx.onImage?.(abs, prompt);
 
         const kb = Math.max(1, Math.round(out.bytes.length / 1024));

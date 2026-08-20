@@ -62,6 +62,11 @@ auth:
   kind: none
 `;
 
+/** The same profile, but declaring vision, so image blocks are not dropped. */
+const VISION = GOOD + `capabilities:
+  vision: true
+`;
+
 async function main() {
   fs.mkdirSync(TMP, { recursive: true });
 
@@ -136,6 +141,169 @@ async function main() {
     ck(/transform|not found/i.test(errors(out).join(" ")), "the real reason survives", errors(out)[0]);
     ck(ended(out), "turnEnd fires so the button un-sticks");
     ck(app.session.running === false, "no turn is left running");
+    await app.dispose();
+  }
+
+  console.log("\n──── §2.13 a steered message keeps its attachments ────");
+  {
+    // The bug: the steer path built `{ role: "user", content: text }` by hand
+    // while the normal path composed images and text files into the message.
+    // A screenshot pasted mid-turn reached the model as the sentence about it,
+    // and the composer had already cleared the pill, so nothing said so.
+    const root = workspace({ "gw.yaml": VISION });
+    const { app, out } = await boot(root);
+    app.uiConfig = { ...app.uiConfig, inputWhileRunning: "steer" };
+    app.session.running = true;
+
+    const png = Buffer.from("fake png bytes").toString("base64");
+    const txt = Buffer.from("hello from a log file").toString("base64");
+    await app.session.send("look at this", [
+      { name: "shot.png", mediaType: "image/png", data: png },
+      { name: "run.log", mediaType: "text/plain", data: txt },
+    ]);
+
+    const steered: any = (app.session as any).steer[0];
+    ck(!!steered, "the message is queued for steering");
+    ck(Array.isArray(steered.content), "it is a block message, not a bare string",
+      typeof steered.content);
+    const blocks: any[] = Array.isArray(steered.content) ? steered.content : [];
+    ck(blocks.some((b) => b.type === "image" && b.data === png),
+      "the image survives into the steered message");
+    const textBlock = blocks.find((b) => b.type === "text");
+    ck(/look at this/.test(textBlock?.text ?? ""), "so does what the user typed");
+    ck(/hello from a log file/.test(textBlock?.text ?? ""),
+      "and the text file is inlined the same way a normal turn inlines it");
+
+    const accepted: any = out.find((m) => m.type === "inputAccepted");
+    ck(accepted?.files?.length === 2, "the acknowledgement carries the file chips",
+      JSON.stringify(accepted?.files));
+    ck(accepted.files.some((f: any) => f.name === "shot.png"), "named");
+    ck(accepted.files.every((f: any) => f.size > 0), "and sized in bytes, not base64 characters");
+    ck(accepted.files.find((f: any) => f.name === "run.log").size === 21,
+      "which is the decoded length",
+      String(accepted.files.find((f: any) => f.name === "run.log").size));
+
+    app.session.running = false;
+    await app.dispose();
+  }
+
+  console.log("\n──── §2.14 a queued message keeps its attachments ────");
+  {
+    const { app, out } = await boot(workspace({ "gw.yaml": VISION }));
+    app.uiConfig = { ...app.uiConfig, inputWhileRunning: "queue" };
+    app.session.running = true;
+    const png = Buffer.from("another png").toString("base64");
+    await app.session.send("and this", [{ name: "b.png", mediaType: "image/png", data: png }]);
+    const queued: any = (app.session as any).queued[0];
+    ck(queued?.attachments?.length === 1, "the queue holds the attachment, not just the text");
+    ck(queued.attachments[0].data === png, "byte for byte");
+    const accepted: any = out.find((m) => m.type === "inputAccepted");
+    ck(accepted?.files?.length === 1, "and the note can show what is waiting with it");
+    app.session.running = false;
+    await app.dispose();
+  }
+
+  console.log("\n──── §2.15 agents ────");
+  {
+    const root = workspace({ "gw.yaml": GOOD });
+    fs.mkdirSync(path.join(root, ".agent", "agents"), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, ".agent", "agents", "reader.md"),
+      `---\nname: reader\ndescription: Reads only.\nmemory: .agent/memory/reader.md\n` +
+        `tools: [read_file, search]\nmcp:\n  filesystem: [read_text_file]\n---\n\n` +
+        `You only read. Never write.\n`,
+      "utf8"
+    );
+    fs.writeFileSync(
+      path.join(root, ".agent", "agents", "wide.md"),
+      "---\nname: wide\ndescription: Unrestricted.\n---\n\nAnything goes.\n",
+      "utf8"
+    );
+    const { app, out } = await boot(root);
+
+    ck(app.agents.length === 2, "both agents load through the App", String(app.agents.length));
+    ck(app.activeAgentName === "", "none is selected to begin with");
+    ck(app.activeAgent() === undefined, "so there is no active agent object");
+
+    const base = app.systemPrompt("act");
+    ck(!/## Agent:/.test(base), "and the prompt carries no persona");
+
+    let before = out.length;
+    await app.setActiveAgent("reader");
+    ck(app.activeAgentName === "reader", "selecting one sticks");
+    const changed: any = out.slice(before).find((m) => m.type === "agentChanged");
+    ck(changed?.agent?.name === "reader", "and is announced with its whole DTO");
+    ck(changed.agent.tools.join(",") === "read_file,search", "including its tool scope");
+    ck(changed.agent.mcp[0].include.join(",") === "read_text_file", "and its MCP scope");
+    ck(changed.agent.active === true, "marked active");
+
+    const withAgent = app.systemPrompt("act");
+    ck(/## Agent: reader/.test(withAgent), "the persona joins the system prompt");
+    ck(/You only read/.test(withAgent), "verbatim");
+    ck(withAgent !== base, "so the prompt is genuinely different from the unscoped one");
+    ck(/does not exist yet/.test(withAgent), "an unwritten memory file says so");
+
+    // The loop closing: the agent writes its memory, and the next prompt has it.
+    fs.mkdirSync(path.join(root, ".agent", "memory"), { recursive: true });
+    fs.writeFileSync(path.join(root, ".agent", "memory", "reader.md"), "Prefers tabs.\n", "utf8");
+    ck(/Prefers tabs\./.test(app.systemPrompt("act")),
+      "and once written, it is read back into the next turn");
+
+    // A memory file outside the workspace must not be read.
+    const outside = path.join(TMP, "outside.md");
+    fs.writeFileSync(outside, "SECRET", "utf8");
+    const escaper = { ...app.agents[0], memory: "../outside.md" };
+    ck(app.agentMemory(escaper as any) === undefined,
+      "a memory path pointing out of the workspace is refused");
+
+    // Status carries it, because it changes what the next turn will do.
+    ck(app.statusDto().agent === "reader", "the status DTO names the agent");
+    ck(/READER/.test(app.statusDto().label), "and the status bar text shows it");
+
+    // Hydration carries it too, so a reloaded window comes back as the agent.
+    const sync = await app.buildStateSync();
+    ck(sync.agents.length === 2, "hydration lists the agents");
+    ck(sync.activeAgent === "reader", "and says which is active");
+
+    before = out.length;
+    await app.setActiveAgent("");
+    ck(app.activeAgentName === "", "leaving an agent works");
+    const off: any = out.slice(before).find((m) => m.type === "agentChanged");
+    ck(off && off.agent === null, "and is announced as null rather than silence");
+
+    await app.setActiveAgent("no-such-agent");
+    ck(app.activeAgentName === "", "selecting an agent that does not exist selects none");
+
+    await app.dispose();
+  }
+
+  console.log("\n──── §2.16 an agent narrows the skill index ────");
+  {
+    const root = workspace({ "gw.yaml": GOOD });
+    const skills = path.join(root, ".agent", "skills");
+    for (const n of ["alpha", "beta"]) {
+      fs.mkdirSync(path.join(skills, n), { recursive: true });
+      fs.writeFileSync(
+        path.join(skills, n, "SKILL.md"),
+        `---\nname: ${n}\ndescription: The ${n} skill.\n---\nBody.\n`,
+        "utf8"
+      );
+    }
+    fs.mkdirSync(path.join(root, ".agent", "agents"), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, ".agent", "agents", "narrow.md"),
+      "---\nname: narrow\ndescription: One skill only.\nskills: [alpha]\n---\nBody.\n",
+      "utf8"
+    );
+    const { app } = await boot(root);
+    const all = app.enabledSkills().map((s) => s.name);
+    ck(all.includes("alpha") && all.includes("beta"), "both skills are enabled", all.join(","));
+    const narrowed = app.enabledSkills(app.agents.find((a) => a.name === "narrow")).map((s) => s.name);
+    ck(narrowed.join(",") === "alpha", "the agent's list narrows them", narrowed.join(","));
+    await app.setActiveAgent("narrow");
+    const prompt = app.systemPrompt("act");
+    ck(/alpha: The alpha skill\./.test(prompt), "the index keeps the skill it named");
+    ck(!/beta: The beta skill\./.test(prompt), "and drops the one it did not");
     await app.dispose();
   }
 

@@ -29,6 +29,7 @@ export type CcSection =
   | "diag" | "agent" | "skills" | "checkpoints" | "logs";
 
 export type ApprovalMode = "ask" | "edits-auto" | "full-auto";
+export type ExportScope = "current" | "all";
 export type PermissionDecision = "allow" | "always" | "deny";
 export type DiffDecision = "accept" | "reject";
 export type TodoStatus = "pending" | "in_progress" | "completed";
@@ -198,6 +199,8 @@ export interface StatusDto {
   endpoint: string | null;
   model: string | null;
   phase: Phase;
+  /** Active agent name, or "" for none. */
+  agent: string;
 }
 
 export interface LogLine {
@@ -213,10 +216,64 @@ export interface ModelGroupDto {
   models: string[];
 }
 
+/** One MCP server an agent may reach, and the filter over its tools. */
+export interface AgentMcpDto {
+  server: string;
+  include: string[];
+  exclude: string[];
+}
+
+/**
+ * One agent defined in `.agent/agents/`.
+ *
+ * The scope fields are surfaced rather than kept host-side because the whole
+ * point of an agent is what it can and cannot reach: a picker that showed only
+ * a name would hide the one thing the user is choosing between.
+ */
+export interface AgentDto {
+  name: string;
+  description: string;
+  /** Empty when the agent uses the endpoint profile's own model. */
+  model: string;
+  /** Workspace-relative memory file, or empty. */
+  memory: string;
+  /** Built-in tool allowlist. Empty means unrestricted. */
+  tools: string[];
+  /** Skill allowlist. Empty means unrestricted. */
+  skills: string[];
+  /** True when the agent declares no `mcp` key: every configured server. */
+  allMcp: boolean;
+  mcp: AgentMcpDto[];
+  /** Workspace-relative path of the file it came from. */
+  file: string;
+  active: boolean;
+}
+
 export interface FileHitDto {
   path: string;
   /** `folder` entries are directories the user can mention wholesale. */
   kind: "file" | "config" | "folder";
+}
+
+/**
+ * One file the agent has changed in this conversation.
+ *
+ * Counts accumulate across turns, so the panel answers "what has this
+ * conversation done to the workspace" rather than "what did the last tool
+ * call do". They start as the writing tool's own estimate and are corrected
+ * from the shadow repository's `numstat` when the turn ends - `exact` says
+ * which of the two the number currently is, so nothing has to claim a
+ * precision it does not have.
+ */
+export interface FileChangeDto {
+  /** Workspace-relative, forward slashes on every platform. */
+  path: string;
+  change: "created" | "modified";
+  added: number;
+  removed: number;
+  /** Epoch milliseconds of the most recent write. */
+  at: number;
+  exact: boolean;
 }
 
 export interface EndpointForm {
@@ -266,6 +323,10 @@ export interface StateSync {
   profiles: ProfileDto[];
   skills: SkillDto[];
   skillWarnings: string[];
+  agents: AgentDto[];
+  agentWarnings: string[];
+  /** Name of the active agent, or "" for none. */
+  activeAgent: string;
   config: ConfigDto;
   tlsError: TlsErrorDto | null;
   rungs: RungDto[];
@@ -275,6 +336,8 @@ export interface StateSync {
   sessions: SessionMetaDto[];
   selection: SelectionDto | null;
   context: { used: number; limit: number; exact: boolean } | null;
+  /** Files this conversation has changed, newest write first. */
+  changes: FileChangeDto[];
   models: ModelGroupDto[];
   logs: LogLine[];
   session: { id: string; title: string; messages: Msg[] };
@@ -340,12 +403,28 @@ export interface CopyTextMsg { type: "copyText"; text: string }
 export interface NewEndpointMsg { type: "newEndpoint" }
 export interface SaveEndpointMsg { type: "saveEndpoint"; endpoint: EndpointForm }
 export interface DeleteEndpointMsg { type: "deleteEndpoint"; id: string }
+/** Speak as this agent, or as none when `name` is empty. */
+export interface SetAgentMsg { type: "setAgent"; name: string }
+/** Write `.agent/agents/<name>.md` from a template and open it. */
+export interface NewAgentMsg { type: "newAgent" }
+/** Open an agent's own file in an editor. */
+export interface OpenAgentMsg { type: "openAgent"; name: string }
 export interface ToggleSkillMsg { type: "toggleSkill"; name: string; enabled: boolean }
 export interface ReloadSkillsMsg { type: "reloadSkills" }
 export interface ReloadProfilesMsg { type: "reloadProfiles" }
 export interface SetConfigMsg { type: "setConfig"; key: ConfigKey; value: unknown }
 export interface RestoreCheckpointMsg { type: "restoreCheckpoint"; hash: string }
 export interface ExportBundleMsg { type: "exportBundle" }
+/**
+ * Write conversations out as JSON, through a save dialog.
+ *
+ * `current` is the conversation the composer is writing into, taken from the
+ * controller's live history rather than from disk, so a turn still in flight
+ * and a conversation not yet persisted both export what is on screen. `all`
+ * is every stored transcript for this workspace, with the live one substituted
+ * for its saved copy for the same reason.
+ */
+export interface ExportChatMsg { type: "exportChat"; scope: ExportScope }
 export interface OpenFileMsg { type: "openFile"; path: string; lines?: [number, number] }
 /** Probe the active endpoint and report what it can actually do. */
 export interface DetectCapsMsg { type: "detectCapabilities" }
@@ -370,6 +449,14 @@ export interface SearchFilesMsg { type: "searchFiles"; query: string }
  * the check only.
  */
 export interface CheckEndpointMsg { type: "checkEndpoint"; endpoint: EndpointForm }
+/**
+ * Empty the changed-file list without touching the files themselves.
+ *
+ * A long conversation accumulates every file it has ever written, and past a
+ * point that stops being a summary of the work and becomes a list. This is the
+ * user saying "I have seen those".
+ */
+export interface ClearChangesMsg { type: "clearChanges" }
 export interface McpReconnectMsg { type: "mcpReconnect"; name: string }
 export interface McpReloadMsg { type: "mcpReload" }
 
@@ -380,10 +467,11 @@ export type InboundMessage =
   | RunTraceMsg | SaveCaBundleMsg | BrowseCaBundleMsg | UseSystemTrustMsg
   | CopyTextMsg | NewEndpointMsg | SaveEndpointMsg | DeleteEndpointMsg
   | ToggleSkillMsg | ReloadSkillsMsg | ReloadProfilesMsg | SetConfigMsg
-  | RestoreCheckpointMsg | ExportBundleMsg | OpenFileMsg | OpenSettingsMsg
+  | SetAgentMsg | NewAgentMsg | OpenAgentMsg
+  | RestoreCheckpointMsg | ExportBundleMsg | ExportChatMsg | OpenFileMsg | OpenSettingsMsg
   | OpenYamlMsg | OpenControlCenterMsg | OpenSkillsFolderMsg
   | ListSessionsMsg | LoadSessionMsg | DeleteSessionMsg | SearchFilesMsg
-  | CheckEndpointMsg | McpReconnectMsg | McpReloadMsg
+  | CheckEndpointMsg | McpReconnectMsg | McpReloadMsg | ClearChangesMsg
   | DetectCapsMsg | SetCapabilityMsg | ApplyCapsMsg | McpLogMsg;
 
 export type InboundType = InboundMessage["type"];
@@ -456,7 +544,16 @@ export interface DiffResolvedOut {
   file: string;
   decision: DiffDecision;
 }
-export interface FileTouchedOut { type: "fileTouched"; path: string }
+/**
+ * A file changed on disk, right now.
+ *
+ * `file` carries the running total for that path, not the delta of this one
+ * write, so a panel can render it without keeping its own arithmetic in step
+ * with the host's.
+ */
+export interface FileTouchedOut { type: "fileTouched"; path: string; file: FileChangeDto }
+/** The whole changed-file set, after a correction or a reset. */
+export interface ChangesUpdatedOut { type: "changesUpdated"; files: FileChangeDto[] }
 export interface TurnEndOut { type: "turnEnd" }
 export interface ErrorOut { type: "error"; message: string }
 export interface TraceStartedOut { type: "traceStarted" }
@@ -464,6 +561,15 @@ export interface TraceUpdateOut { type: "traceUpdate"; rung: RungDto; index: num
 export interface TraceDoneOut { type: "traceDone"; rungs: RungDto[]; ok: boolean }
 export interface TlsErrorOut { type: "tlsError"; error: TlsErrorDto | null }
 export interface ProfilesReloadedOut { type: "profilesReloaded"; profiles: ProfileDto[] }
+export interface AgentsReloadedOut {
+  type: "agentsReloaded";
+  agents: AgentDto[];
+  /** Name of the active agent, or "" for none. */
+  active: string;
+  warnings: string[];
+}
+/** The active agent changed. `agent` is null when none is selected. */
+export interface AgentChangedOut { type: "agentChanged"; agent: AgentDto | null }
 export interface SkillsReloadedOut {
   type: "skillsReloaded";
   skills: SkillDto[];
@@ -539,6 +645,14 @@ export interface CheckpointsListedOut {
 }
 export interface CheckpointRestoredOut { type: "checkpointRestored"; hash: string }
 export interface BundleExportedOut { type: "bundleExported"; path: string }
+/** Confirmation that `exportChat` wrote a file, and what went into it. */
+export interface ChatExportedOut {
+  type: "chatExported";
+  path: string;
+  scope: ExportScope;
+  sessions: number;
+  messages: number;
+}
 export interface ConfigChangedOut { type: "configChanged"; config: ConfigDto }
 export interface PhaseChangedOut { type: "phaseChanged"; phase: Phase }
 export interface EndpointChangedOut {
@@ -555,14 +669,29 @@ export interface CaBundlePickedOut { type: "caBundlePicked"; path: string }
  * A message typed while a turn was running was accepted rather than refused.
  * `depth` is how many are now waiting, so the composer can say so.
  */
+/** One attached file, as the transcript's chips render it. `size` is bytes. */
+export interface AttachmentChipDto { name: string; size: number }
 export interface InputAcceptedOut {
   type: "inputAccepted";
   mode: "queue" | "steer";
   text: string;
   depth: number;
+  /** Files that went with it, so the note can show what is waiting. */
+  files: AttachmentChipDto[];
 }
-/** A steered message reached the model and is now part of the transcript. */
-export interface SteerAcceptedOut { type: "steerAccepted"; text: string }
+/**
+ * A steered message reached the model and is now part of the transcript.
+ *
+ * `files` travels with it because the transcript renders this as a user turn:
+ * without it a message steered with a screenshot attached rendered as the
+ * sentence alone, which is indistinguishable from the attachment having been
+ * dropped - and for a while it actually had been.
+ */
+export interface SteerAcceptedOut {
+  type: "steerAccepted";
+  text: string;
+  files: AttachmentChipDto[];
+}
 /** One profile's latest health probe. `ms` is time to response headers. */
 export interface HealthResultOut {
   type: "healthResult";
@@ -607,11 +736,13 @@ export type OutboundMessage =
   | StateSyncOut | StreamDeltaOut | ToolStartOut | ToolEndOut | TodosUpdatedOut
   | ImageGeneratedOut | CapsDetectedOut | McpLogOut
   | PlanProposedOut | PermissionRequestOut | PermissionResolvedOut
-  | DiffPendingOut | DiffResolvedOut | FileTouchedOut | TurnEndOut | ErrorOut
+  | DiffPendingOut | DiffResolvedOut | FileTouchedOut | ChangesUpdatedOut
+  | TurnEndOut | ErrorOut
   | TraceStartedOut | TraceUpdateOut | TraceDoneOut | TlsErrorOut
-  | ProfilesReloadedOut | SkillsReloadedOut | ContextUsageOut
+  | ProfilesReloadedOut | SkillsReloadedOut | AgentsReloadedOut | AgentChangedOut
+  | ContextUsageOut
   | AttachmentsReadyOut | SelectionChangedOut | SessionSwitchedOut | SessionsListedOut
-  | CheckpointsListedOut | CheckpointRestoredOut | BundleExportedOut
+  | CheckpointsListedOut | CheckpointRestoredOut | BundleExportedOut | ChatExportedOut
   | ConfigChangedOut | PhaseChangedOut | EndpointChangedOut | StatusChangedOut
   | LogLineOut | NavigateOut | FileResultsOut | CaBundlePickedOut
   | EndpointCheckStartedOut | EndpointCheckRungOut | EndpointCheckDoneOut
@@ -626,7 +757,7 @@ export type OutboundType = OutboundMessage["type"];
  */
 export type ReplayableEvent =
   | StreamDeltaOut | ToolStartOut | ToolEndOut
-  | TodosUpdatedOut | ImageGeneratedOut
+  | TodosUpdatedOut | ImageGeneratedOut | FileTouchedOut | ChangesUpdatedOut
   | PermissionRequestOut | ContextUsageOut | SteerAcceptedOut;
 
 /** Narrowing helper for host-side switch statements. */

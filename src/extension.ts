@@ -79,6 +79,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       instance.pickCheckpointRestore()
     ),
 
+    vscode.commands.registerCommand("kryptonite.selectAgent", () => instance.pickAgent()),
+
+    vscode.commands.registerCommand("kryptonite.newAgent", async () => {
+      try {
+        await instance.newAgent();
+      } catch (e) {
+        vscode.window.showErrorMessage(e instanceof Error ? e.message : String(e));
+      }
+    }),
+
+    // Two entries rather than one with a picker: "export this chat" is the
+    // common case and should not cost a second dialog before the save dialog.
+    vscode.commands.registerCommand("kryptonite.exportChat", () => exportChat(instance, "current")),
+
+    vscode.commands.registerCommand("kryptonite.exportAllChats", () => exportChat(instance, "all")),
+
     vscode.commands.registerCommand("kryptonite.exportBundle", async () => {
       try {
         await instance.exportBundle();
@@ -94,6 +110,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // After the commands are registered, and not awaited: the window should not
   // wait on a layout preference to finish activating.
   void applySidebarSide(context);
+}
+
+/**
+ * Run a chat export and report it, whichever surface asked for it.
+ *
+ * Dismissing the save dialog returns no path and is a normal outcome - it must
+ * not surface as an error, which is the only reason this is not a one-liner.
+ */
+async function exportChat(instance: App, scope: "current" | "all"): Promise<void> {
+  try {
+    const file = await instance.exportChat(scope);
+    if (!file) return;
+    const open = await vscode.window.showInformationMessage(
+      `Chat exported to ${file}.`,
+      "Open"
+    );
+    if (open) {
+      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+      await vscode.window.showTextDocument(doc, { preview: false });
+    }
+  } catch (e) {
+    vscode.window.showErrorMessage(e instanceof Error ? e.message : String(e));
+  }
 }
 
 /**

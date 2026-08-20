@@ -46,6 +46,56 @@ skills repository. Only the one-line index enters the system prompt; bodies
 load on demand through a tool. Forty skills cost the same as five until one is
 actually used — which is what makes the feature viable on a 32k gateway.
 
+## Agents
+
+An agent is a persona plus a list of what it may reach. One Markdown file each,
+in `.agent/agents/`, YAML frontmatter over a body:
+
+```yaml
+---
+name: log-reader
+description: Reads logs and explains what failed, without touching anything.
+model: openai/gpt-oss-20b          # optional, overrides the profile's model
+memory: .agent/memory/log-reader.md
+tools: [read_file, list_files, glob, search]
+skills: [tls-basics]
+mcp:
+  filesystem:
+    tools:
+      include: [read_text_file, list_directory]
+      exclude: [write_*]
+  memory: true
+---
+
+You read logs. That is the whole job.
+```
+
+The `mcp:` block is Hermes Agent's own shape, so a server filter can be copied
+between the two. `mcp: "*"` or omitting the key grants every configured server;
+`mcp: none` grants none; `mcp: [filesystem, memory]` names servers without
+filtering their tools.
+
+Scoping is not decoration. Every tool offered costs context on every request,
+and a tool the model can see is a tool it can call - handing a server's whole
+surface to an agent that needs two of its tools spends tokens on the other
+twelve and leaves the destructive ones one hallucination away.
+
+It is also enforced, not advertised. The same predicate runs at the boundary
+where tools are offered and at the boundary where a call is executed, so a name
+the model produced from earlier in the transcript is refused rather than run -
+the same rule the read-only phases follow, for the same reason.
+
+Everything except `name` is optional, and every omission means "unrestricted"
+rather than "none": an agent can start as a persona and acquire limits later.
+
+The `memory:` file is read into the system prompt on every turn and the agent
+is told it may rewrite it with its own tools. There is no machinery behind that
+- which is the point: what accumulates is a file you can read, edit and delete.
+
+Pick one with `/agent` in the composer, from the Agents section of the
+Diagnostics tab, or from the command palette. While one is active a bar under
+the tabs names it and states its scope; nothing is drawn when none is.
+
 ## Sessions
 
 Each conversation is one transcript, stored as a single JSON file under
@@ -66,6 +116,33 @@ the one you are writing into, and deletes on hover.
 Transcripts hold the full turn, including tool calls and their results, so the
 model keeps its own working memory across turns and a restored conversation
 renders the tool cards it originally produced.
+
+The conversation collapses what it should. A user turn past 420 characters or
+seven lines renders clamped under a fade with its own expander, so a pasted
+stack trace stops pushing the answer it is asking about off the panel. Nothing
+is truncated, only hidden.
+
+`KRYPTONITE: Export chat as JSON` writes the current conversation, or every
+conversation in the workspace, as one document through a save dialog. `/export`
+does the same from the composer. The conversation the composer is writing into
+comes from memory rather than from disk, so a turn still in flight exports what
+is on screen.
+
+The empty screen lists the conversations you can go back to, so New chat is not
+a one-way door.
+
+## Changed files
+
+One row per file, above the composer, revealed on the first write and updated
+in place while the turn runs - the running `+`/`-` per file and in total, a
+click to open, and no scrolling back through the transcript to find out what
+was touched.
+
+The counts start as the writing tool's own: common leading and trailing lines
+are trimmed and what remains is counted, which is exact for a single contiguous
+edit and an overestimate for scattered ones. They are marked with a `~` while
+that is true. When the turn ends the shadow repository's `numstat` replaces
+this turn's estimate with git's own count and the tilde goes.
 
 ## Checkpoints
 
@@ -93,6 +170,7 @@ VS Code cannot be launched in a headless build environment, so the extension is
 verified statically instead:
 
 ```bash
+npm run verify       # typecheck plus every suite below
 node test/host.js    # activates dist/extension.js against a vscode stub
 node test/drive.js   # drives the real sidebar frontend in jsdom
 ```
@@ -100,6 +178,13 @@ node test/drive.js   # drives the real sidebar frontend in jsdom
 `host.js` checks that every contributed command is registered and exercises the
 session lifecycle; `drive.js` renders the webview into a real DOM and asserts on
 what a user would see. Neither ships in the `.vsix`.
+
+Agent scoping is checked at three levels, because a scope that holds in one and
+not the others is worse than none: `test/agents.ts` on the predicate,
+`test/agent-gate.ts` driving the real loop with a model that deliberately calls
+tools it was never offered, and `test/mcp-live.ts` against a real MCP server
+process - fourteen tools connected, two of them visible to a scoped agent, the
+write tool reachable without it and refused with it.
 
 ## Settings
 
@@ -109,6 +194,7 @@ what a user would see. Neither ships in the `.vsix`.
 | `kryptonite.skillsDirectory` | `.agent/skills` | Where skills live |
 | `kryptonite.activeProfile` | *(first valid)* | Active profile name |
 | `kryptonite.approvalMode` | `ask` | `ask` / `edits-auto` / `full-auto` |
+| *(agents)* | `.agent/agents` | Not a setting - the path is fixed |
 | `kryptonite.caBundlePath` | — | Global CA merged into every profile |
 
 ## Known caveat

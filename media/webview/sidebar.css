@@ -76,10 +76,15 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   font-family: var(--kx-display); font-size: 12.5px; font-weight: 700;
   letter-spacing: .11em; text-transform: uppercase; color: var(--kx-fg);
 }
+/* Number and meter together, in the header. The footer strip they used to
+   share with the endpoint pill is gone: it cost a row of vertical space on
+   every panel for two facts that are status rather than controls. */
 .kx-ctx {
-  font-family: var(--kx-mono); font-size: 10px; flex: none;
+  display: flex; align-items: center; gap: 6px; flex: none;
+  font-family: var(--kx-mono); font-size: 10px;
   color: var(--kx-fg-3);
 }
+.kx-ctx[data-err="1"] { color: var(--kx-error); }
 .icon-btn {
   width: 26px; height: 26px; display: grid; place-items: center; border-radius: 5px;
   color: var(--kx-fg-2);
@@ -226,6 +231,27 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 }
 .msg-user > .u-body { min-width: 0; padding-top: 1px; }
 .msg-user code { font-family: var(--kx-mono); font-size: 11.5px; }
+
+/* -- long questions collapse --
+   The clamp is a max-height rather than -webkit-line-clamp: the body can hold
+   an image or a chip beside the text, and line-clamp would take those with it.
+   7 lines at 1.5 line-height, plus the fade the last line sits under. */
+.msg-user[data-clamped="1"] > .u-body > .u-text {
+  max-height: 10.5em; overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 7.6em, transparent 10.4em);
+  mask-image: linear-gradient(to bottom, #000 7.6em, transparent 10.4em);
+}
+.u-more {
+  display: inline-flex; align-items: center; gap: 5px;
+  margin-top: 5px; padding: 2px 7px 2px 5px;
+  background: none; border: 1px solid var(--kx-line); border-radius: 5px;
+  color: var(--kx-fg-3); cursor: pointer;
+  font-family: var(--kx-ui); font-size: 11px; font-weight: 500;
+}
+.u-more:hover { color: var(--kx-fg); border-color: var(--kx-line-2); background: var(--kx-surface-2); }
+.u-more:focus-visible { outline: 1px solid var(--kx-link); outline-offset: 1px; }
+.u-caret { transition: transform .12s ease; }
+.msg-user[data-clamped="0"] .u-caret { transform: rotate(180deg); }
 
 /* Attached files, inside the turn that sent them. */
 .u-att { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
@@ -813,6 +839,142 @@ li.doing .cbx { border-color: var(--kx-accent); }
   margin-bottom: 14px; white-space: pre-wrap;
 }
 
+/* The affirmative twin of .err-box: something finished and left a file behind. */
+.ok-box {
+  display: flex; gap: 9px; align-items: center;
+  margin-bottom: 14px; padding: 9px 11px;
+  border-left: 2px solid var(--kx-link);
+  background: var(--kx-surface); border-radius: 0 6px 6px 0;
+  font-family: var(--kx-ui); font-size: 12px; line-height: 1.5;
+  color: var(--kx-fg-2); overflow-wrap: anywhere;
+}
+.ok-box .ic { flex: none; color: var(--kx-link); }
+.ok-box > span { min-width: 0; flex: 1; }
+.ok-box .btn { flex: none; }
+
+/* The foot of a tool card, where the actions about its file live. */
+.tool-actions { display: flex; gap: 6px; padding: 6px 9px 8px; }
+.tool-actions .btn { display: inline-flex; align-items: center; gap: 5px; }
+
+/* -------------------------- agents --------------------------
+   The bar is drawn only while an agent is selected, so an unused feature
+   costs no vertical space at all. */
+.agent-bar {
+  flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 14px;
+  background: var(--kx-surface);
+  border-bottom: 1px solid var(--kx-line);
+  font-family: var(--kx-ui); font-size: 11.5px;
+  min-width: 0;
+}
+/* Teal, the palette's MCP colour. An agent is a persona over a scoped set of
+   MCP servers, so it belongs to that family - and the pink and amber are
+   already spoken for by Plan and Ask, where a second meaning would read as a
+   phase the composer does not have. */
+.agent-bar .dot {
+  width: 6px; height: 6px; flex: none; border-radius: 50%;
+  background: var(--kx-mcp);
+}
+.agent-bar .nm { flex: none; font-weight: 600; color: var(--kx-mcp); }
+.agent-bar .sub { min-width: 0; flex: 1; color: var(--kx-fg-2); font-family: var(--kx-mono); font-size: 10.5px; }
+.agent-bar .tb-btn { flex: none; }
+
+.ag-empty { padding: 10px 14px 12px; font-size: 12px; color: var(--kx-fg-2); line-height: 1.55; }
+.ag-empty p { margin: 0 0 10px; }
+.ag-empty code { font-family: var(--kx-mono); font-size: 11px; color: var(--kx-fg); }
+.ag-row { padding: 8px 14px; border-bottom: 1px solid var(--kx-line); }
+.ag-row[data-on="1"] { background: var(--kx-mcp-wash); }
+.ag-head { display: flex; align-items: center; gap: 7px; }
+.ag-head .ic { flex: none; color: var(--kx-fg-3); }
+.ag-head .n { min-width: 0; font-family: var(--kx-ui); font-size: 12px; font-weight: 600; }
+.ag-live {
+  flex: none; padding: 1px 6px; border-radius: 3px;
+  background: var(--kx-mcp); color: var(--kx-on-accent);
+  font-family: var(--kx-ui); font-size: 9.5px; font-weight: 700;
+  letter-spacing: .05em; text-transform: uppercase;
+}
+.ag-desc { margin-top: 4px; font-family: var(--kx-ui); font-size: 11.5px; color: var(--kx-fg-2); line-height: 1.5; }
+.ag-scope { margin-top: 3px; font-family: var(--kx-mono); font-size: 10.5px; color: var(--kx-fg-3); overflow-wrap: anywhere; }
+.ag-file { margin-top: 2px; font-family: var(--kx-mono); font-size: 10px; color: var(--kx-fg-4); }
+
+/* Conversations to go back to, listed on the empty screen. Pressing New chat
+   used to leave the way back two clicks deep in a header popover. */
+.recent { width: 100%; max-width: 300px; margin-top: 18px; text-align: left; }
+.recent-h {
+  font-family: var(--kx-ui); font-size: 10.5px; font-weight: 600;
+  letter-spacing: .05em; text-transform: uppercase;
+  color: var(--kx-fg-4); padding: 0 4px 6px;
+}
+.recent-row {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 6px 8px; border-radius: 5px;
+  background: none; border: none; cursor: pointer;
+  color: var(--kx-fg-2); font-family: var(--kx-ui); font-size: 12px;
+  text-align: left;
+}
+.recent-row:hover { background: var(--kx-hover); color: var(--kx-fg); }
+.recent-row .ic { flex: none; color: var(--kx-fg-4); }
+.recent-row .t { min-width: 0; flex: 1; }
+.recent-row .m { flex: none; font-size: 10.5px; color: var(--kx-fg-4); }
+.queued-note .u-att { margin-top: 0; }
+
+/* ------------------------- changed files -------------------------
+   One row per file, above the composer. It is state rather than history, so
+   it does not scroll away with the transcript: the answer to "what has this
+   conversation done to my workspace" has to be readable without scrolling
+   back through it. */
+.chg {
+  flex: none; border-top: 1px solid var(--kx-line);
+  background: var(--kx-surface);
+  font-family: var(--kx-ui);
+}
+.chg-bar { display: flex; align-items: center; }
+.chg-toggle {
+  display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0;
+  padding: 7px 4px 7px 14px; background: none; border: none; cursor: pointer;
+  color: var(--kx-fg-2); font-family: inherit; font-size: 11.5px; font-weight: 500;
+  text-align: left;
+}
+.chg-toggle:hover { color: var(--kx-fg); }
+.chg-toggle .chev { transition: transform .12s ease; flex: none; }
+.chg[data-open="1"] .chg-toggle .chev { transform: rotate(90deg); }
+.chg-ic { flex: none; color: var(--kx-fg-3); }
+.chg-toggle .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chg-toggle .s { margin-left: auto; flex: none; font-family: var(--kx-mono); font-size: 11px; }
+.chg-clear {
+  flex: none; width: 26px; height: 26px; margin-right: 8px;
+  display: flex; align-items: center; justify-content: center;
+  background: none; border: none; border-radius: 4px;
+  color: var(--kx-fg-4); cursor: pointer;
+}
+.chg-clear:hover { color: var(--kx-fg); background: var(--kx-hover); }
+.chg-list { max-height: 168px; overflow-y: auto; padding-bottom: 5px; }
+.chg-row {
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  padding: 4px 14px; background: none; border: none; cursor: pointer;
+  color: var(--kx-fg-2); font-family: var(--kx-mono); font-size: 11px;
+  text-align: left;
+}
+.chg-row:hover { background: var(--kx-hover); color: var(--kx-fg); }
+.chg-kind {
+  flex: none; width: 13px; text-align: center;
+  font-size: 10px; font-weight: 700;
+}
+.chg-kind[data-kind="created"] { color: var(--kx-accent); }
+.chg-kind[data-kind="modified"] { color: var(--kx-fg-3); }
+.chg-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chg-row .s { flex: none; }
+/* The flash is the whole point of the panel being live: a file written while
+   you are reading something else announces itself once and then settles. */
+@keyframes chgFlash {
+  from { background: color-mix(in srgb, var(--kx-accent) 26%, transparent); }
+  to   { background: transparent; }
+}
+.chg-row.hot { animation: chgFlash 1.1s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .chg-row.hot { animation: none; }
+  .chg-toggle .chev, .u-caret { transition: none; }
+}
+
 /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ composer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .composer-wrap { flex: none; padding: 8px 16px 12px; position: relative; }
@@ -953,13 +1115,8 @@ li.doing .cbx { border-color: var(--kx-accent); }
 #sendBtn[data-ready="1"] { background: var(--kx-action); color: var(--kx-on-action); }
 #sendBtn[data-mode="stop"] { background: var(--kx-surface-3); color: var(--kx-fg); }
 
-.footer {
-  display: flex; align-items: center; gap: 8px; padding: 8px 2px 0;
-  font-size: 12px; color: var(--kx-fg-2);
-  font-variant-numeric: tabular-nums;
-}
 #ctxBar {
-  width: 70px; height: 3px; flex: none; border-radius: 2px; overflow: hidden;
+  width: 40px; height: 3px; flex: none; border-radius: 2px; overflow: hidden;
   background: var(--kx-divider);
 }
 /* Sky: the meter reports a measurement, it does not assert health. On the
@@ -968,10 +1125,13 @@ li.doing .cbx { border-color: var(--kx-accent); }
 /* Near the ceiling it stops being a measurement and becomes a warning. */
 #ctxFill[data-level="warn"] { background: var(--kx-warn); }
 #ctxFill[data-level="full"] { background: var(--kx-error); }
-.ep { display: flex; align-items: center; gap: 5px; min-width: 0; }
-.ep .dot { width: 5px; height: 5px; flex: none; border-radius: 50%; background: var(--kx-accent); }
-.ep[data-err="1"] { color: var(--kx-error); }
-.ep[data-err="1"] .dot { display: none; }
+/* The endpoint's health, folded onto the control that already names its
+   model, so it costs no space of its own. */
+.ep-dot {
+  width: 5px; height: 5px; flex: none; border-radius: 50%;
+  background: var(--kx-accent);
+}
+.ep-dot[data-err="1"] { background: var(--kx-error); }
 
 /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ MCP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *
