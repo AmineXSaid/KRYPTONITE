@@ -7,63 +7,95 @@ body {
   font-family: var(--kx-ui); font-size: 12px;
   color: var(--kx-fg); background: var(--kx-bg);
 }
+/* Form controls do not inherit a font. Without this every button and input in
+   this panel fell back to the platform default - measured as Arial - while
+   everything around them was set in the house sans, which is the sort of thing
+   that reads as "slightly wrong" long before anyone can name it. The sidebar
+   has always had this line; this file never did. */
+button, input, select, textarea { font: inherit; color: inherit; }
+
 #root, .bw { height: 100%; }
 .bw { display: flex; flex-direction: column; min-height: 0; }
 
-/* ── toolbar ── */
-.bar {
-  flex: none; display: flex; align-items: center; gap: 6px;
-  padding: 7px 10px;
-  background: var(--kx-surface-2);
+/* ── chrome ───────────────────────────────────────────────────────────────
+   Two rows, both flat on the page background rather than on a raised bar.
+   Browser chrome that sits on its own surface competes with the site inside
+   it, and the site is the thing anyone opened this for. */
+
+.tabs {
+  flex: none; display: flex; align-items: center; gap: 2px;
+  padding: 5px 6px;
   border-bottom: 1px solid var(--kx-line);
 }
-.nav {
+.tabs .sp { flex: 1; }
+
+/* The three views, as tabs. That is what they always were - one address,
+   three ways of looking at it - and a tab is the control everyone already
+   knows for choosing between them. */
+.tab {
+  min-height: 24px; padding: 0 10px;
+  border: 0; border-radius: 6px; background: none; cursor: pointer;
+  font-size: 12px; color: var(--kx-fg-3);
+  white-space: nowrap;
+}
+.tab:hover { color: var(--kx-fg); background: var(--kx-hover); }
+.tab[aria-pressed="true"] {
+  background: var(--kx-surface-2); color: var(--kx-fg); font-weight: 500;
+}
+
+/* Ghost icon button. No border, no fill, until it is under the pointer. */
+.gh {
   display: inline-flex; align-items: center; justify-content: center;
   width: 26px; height: 26px; flex: none;
-  border: 0; border-radius: 5px; background: none; cursor: pointer;
-  color: var(--kx-fg-2);
+  border: 0; border-radius: 6px; background: none; cursor: pointer;
+  color: var(--kx-fg-4);
 }
-.nav:hover:not(:disabled) { background: var(--kx-hover); color: var(--kx-fg); }
-.nav:disabled { color: var(--kx-fg-5); cursor: default; }
-.ic, .ic-14, .ic-15 { width: 15px; height: 15px; }
+.gh:hover:not(:disabled) { background: var(--kx-hover); color: var(--kx-fg); }
+.gh:disabled { color: var(--kx-fg-5); cursor: default; }
+.ic, .ic-13, .ic-14, .ic-15 { width: 15px; height: 15px; }
+.ic-13 { width: 13px; height: 13px; }
 .ic-14 { width: 14px; height: 14px; }
+
+.bar {
+  flex: none; display: flex; align-items: center; gap: 3px;
+  padding: 0 6px 6px;
+}
 
 .addr {
   position: relative; flex: 1; min-width: 0;
-  display: flex; align-items: center;
+  display: flex; align-items: center; margin: 0 4px;
 }
+/* A full pill. The address is the widest thing in the chrome and the only one
+   worth reaching for, so it gets the room and the only rounded shape. */
 .addr input {
-  width: 100%; height: 26px; padding: 0 26px 0 10px;
-  border-radius: 13px;
-  border: 1px solid var(--kx-line);
-  background: var(--kx-bg);
+  width: 100%; height: 30px; padding: 0 30px 0 14px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: var(--kx-surface-2);
   color: var(--kx-fg);
   font-family: var(--kx-mono); font-size: 11.5px;
+  /* Centred while empty, so the placeholder reads as an invitation rather
+     than as a field someone has half filled in. Typing moves it left, because
+     a long URL centred is unreadable and its start is the part that matters. */
+  text-align: center;
+}
+.addr input:focus, .addr input:not(:placeholder-shown) { text-align: left; }
+/* The placeholder is a sentence, not an address. Set in mono it came out
+   looking letter-spaced and stretched - "T y p e  a  U R L" - because a
+   monospace face pads every narrow glyph to the same advance. The value it
+   replaces stays mono, where even advances are the point. */
+.addr input::placeholder {
+  color: var(--kx-fg-4, var(--kx-fg-3));
+  font-family: var(--kx-ui); letter-spacing: 0;
 }
 .addr input:focus {
   outline: none;
-  border-color: var(--kx-accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--kx-accent) 26%, transparent);
+  border-color: var(--kx-line-2);
+  background: var(--kx-surface-3);
 }
 .busy {
-  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
   display: flex; line-height: 0; pointer-events: none;
-}
-
-/* Live / Reader. The lit segment is the whole state, as in the Control Center. */
-.seg {
-  display: inline-flex; align-items: center; gap: 1px; flex: none;
-  padding: 2px; border-radius: 5px;
-  background: var(--kx-surface-3); border: 1px solid var(--kx-line);
-}
-.seg-b {
-  min-height: 22px; padding: 0 9px;
-  border: 0; border-radius: 4px; background: none; cursor: pointer;
-  font: inherit; font-size: 11px; color: var(--kx-fg-2);
-}
-.seg-b:hover { color: var(--kx-fg); }
-.seg-b[aria-pressed="true"] {
-  background: var(--kx-accent); color: var(--kx-on-accent); font-weight: 600;
 }
 
 /* ── stage ── */
@@ -149,3 +181,101 @@ body {
 }
 
 *:focus-visible { outline: 2px solid var(--kx-accent); outline-offset: 1px; border-radius: 4px; }
+
+/* ── the agent's browser ──────────────────────────────────────────────────
+   Two states with one job between them: say whether a browser exists, and
+   show it if it does. Everything here is sized around the fact that the panel
+   is usually narrow and beside an editor rather than filling a screen. */
+
+/* The empty state.
+   No card, no heading, no ornament. A line of copy saying what this panel is
+   for, and under it the thing that can be started, as a row you press. A
+   heading here would be announcing an empty screen, which is the one thing an
+   empty screen does not need. */
+.launch {
+  flex: 1; min-height: 0; display: grid; place-items: center;
+  padding: 24px;
+  background: var(--kx-bg);
+}
+.launch-card {
+  width: 100%; max-width: 380px; text-align: center;
+  display: flex; flex-direction: column; align-items: stretch; gap: 12px;
+}
+/* One step dimmer than inactive chrome. This is explanatory copy on an empty
+   screen: it should be readable when looked for and quiet when not. Measured
+   at 5.79:1 on the panel background, so quiet is not the same as faint. */
+.launch-say {
+  margin: 0 0 2px; font-size: 12.5px; line-height: 1.55; color: var(--kx-fg-4);
+}
+.launch-say b { color: var(--kx-fg-2); font-weight: 600; }
+
+/* One startable thing. Reads as a row in a short list rather than as a call
+   to action, because that is what it is: here is what is available here. */
+.srv {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 9px 10px 9px 12px; text-align: left;
+  border-radius: 10px;
+  border: 1px solid var(--kx-line);
+  background: var(--kx-surface);
+  color: var(--kx-fg);
+  cursor: pointer;
+}
+.srv:hover { border-color: var(--kx-line-2); background: var(--kx-surface-2); }
+.srv-i { display: flex; line-height: 0; color: var(--kx-fg-4); flex: none; }
+.srv-n { font-size: 12.5px; font-weight: 500; color: var(--kx-fg); }
+/* The small monospace fact on the right: what a port number is on a server
+   list, and what the engine is here. */
+.srv-m {
+  margin-left: auto; font-family: var(--kx-mono); font-size: 11px;
+  color: var(--kx-fg-4);
+}
+.srv-go {
+  display: grid; place-items: center; flex: none;
+  width: 24px; height: 22px; border-radius: 6px;
+  background: var(--kx-surface-3); color: var(--kx-fg-2);
+}
+.srv:hover .srv-go { background: var(--kx-accent); color: var(--kx-on-accent); }
+
+/* The secondary action, kept as text so it cannot be mistaken for a second
+   thing to start. */
+.ghost-row {
+  border: 0; background: none; cursor: pointer;
+  font-size: 11.5px; color: var(--kx-fg-3); padding: 2px;
+}
+.ghost-row:hover { color: var(--kx-fg); text-decoration: underline; }
+
+/* Live. The frame is the content, so it gets the room, and the strip beneath
+   it carries the address - a picture of a page does not say where it is. */
+.live { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--kx-bg-deep); }
+.live-frame {
+  flex: 1; min-height: 0; display: grid; place-items: center; padding: 10px;
+  overflow: hidden;
+}
+/* Contained rather than stretched: the frame arrives at the browser's aspect,
+   and filling a narrow panel with it would distort every page shown. */
+.live-frame img {
+  max-width: 100%; max-height: 100%; object-fit: contain;
+  border: 1px solid var(--kx-line); border-radius: 6px;
+  background: #fff;
+}
+.live-wait {
+  display: flex; align-items: center; gap: 9px;
+  font-size: 12px; color: var(--kx-fg-3);
+}
+.live-bar {
+  flex: none; display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px; font-size: 11.5px; color: var(--kx-fg-2);
+  border-top: 1px solid var(--kx-line); background: var(--kx-surface);
+}
+.live-bar .sp { flex: 1; }
+.live-bar .live-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The one moving thing here, and it is load-bearing: a still frame and a dead
+   stream look identical, so the dot is what says the picture is current. */
+.live-dot {
+  flex: none; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--kx-accent);
+  animation: kxlive 1.8s ease-in-out infinite;
+}
+@keyframes kxlive { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+.btn.small { font-size: 11px; padding: 3px 9px; }

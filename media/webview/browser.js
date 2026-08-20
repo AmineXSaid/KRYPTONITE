@@ -40,6 +40,10 @@
     /* Set when the frame has not reported a load in time. Sites that refuse
        framing produce no error event of any kind, so silence is the signal. */
     frameBlocked: false,
+    /* The agent's own browser: whether one is up, where it is, and the most
+       recent frame of it. `frame` is a base64 jpeg, replaced in place - the
+       previous one is never worth keeping. */
+    agent: { running: false, url: "", title: "", frame: null, error: "", live: false },
   };
   var frameTimer = null;
 
@@ -55,7 +59,13 @@
     '<symbol id="b-ext" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h5" ' +
       'fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>' +
     '<symbol id="b-agent" viewBox="0 0 24 24"><path d="M4 12h11M11 7l5 5-5 5M18 4v16" fill="none" stroke="currentColor" ' +
-      'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>';
+      'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>' +
+    '<symbol id="b-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" ' +
+      'stroke-width="1.7" stroke-linecap="round"/></symbol>' +
+    '<symbol id="b-srv" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" fill="none" ' +
+      'stroke="currentColor" stroke-width="1.5"/><path d="M3.5 9.5h17" fill="none" stroke="currentColor" ' +
+      'stroke-width="1.5"/><circle cx="7" cy="7" r=".9" fill="currentColor"/></symbol>' +
+    '<symbol id="b-play" viewBox="0 0 24 24"><path d="M9 6.5l9 5.5-9 5.5z" fill="currentColor"/></symbol>';
 
   function icon(id, cls) {
     return '<svg class="' + (cls || "ic") + '" aria-hidden="true"><use href="#' + id + '"/></svg>';
@@ -71,30 +81,156 @@
       "</svg>";
   }
 
+  /**
+   * The mark on the launcher card.
+   *
+   * Defined here rather than pulled from crystal.js, because this panel does
+   * not load that script and adding one for a single decorative glyph would
+   * be a script tag per ornament. It borrows the language - a faceted stone
+   * inside a ring - without borrowing the file.
+   */
+  function orb() {
+    return '<svg width="54" height="54" viewBox="0 0 54 54" fill="none" aria-hidden="true">' +
+      '<circle cx="27" cy="27" r="24" stroke="var(--kx-line-2)" stroke-width="1"/>' +
+      '<circle cx="27" cy="27" r="18" stroke="var(--kx-accent)" stroke-width="1" opacity=".45"/>' +
+      '<path d="M27 15 L37 27 L27 39 L17 27 Z" stroke="var(--kx-accent)" stroke-width="1.2" ' +
+        'stroke-linejoin="round" fill="var(--kx-accent)" fill-opacity=".10"/>' +
+      '<path d="M17 27 H37" stroke="var(--kx-accent)" stroke-width=".8" opacity=".6"/>' +
+      '<path d="M22 27 L27 15 L32 27" stroke="var(--kx-accent)" stroke-width=".8" opacity=".6" ' +
+        'stroke-linejoin="round"/>' +
+      "</svg>";
+  }
+
+  /**
+   * Two rows of chrome above the page, and nothing else.
+   *
+   * The strip on top is a tab strip, and the tabs are the three views. That is
+   * what they already were - one address, three ways of looking at it - and a
+   * tab is the control everyone already knows for "which of these am I
+   * looking at". The previous segmented button said the same thing in a
+   * smaller, less familiar shape and cost a row of its own.
+   *
+   * Everything on the right of both rows is an icon with a real command
+   * behind it. A decorative control in browser chrome is worse than a missing
+   * one: it is the one place a person expects every button to do the thing
+   * its shape promises.
+   */
   function mount() {
     $("root").innerHTML =
       '<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>' + ICONS + "</defs></svg>" +
       '<div class="bw">' +
+        '<div class="tabs">' +
+          '<button class="tab" id="bLive" aria-pressed="true">Live</button>' +
+          '<button class="tab" id="bRead" aria-pressed="false">Reader</button>' +
+          '<button class="tab" id="bAgentView" aria-pressed="false" ' +
+            'title="Watch the browser the agent drives">Agent</button>' +
+          '<span class="sp"></span>' +
+          '<button class="gh" id="bExt" title="Open in your system browser" aria-label="Open externally">' +
+            icon("b-ext", "ic-14") + "</button>" +
+          '<button class="gh" id="bClosePanel" title="Close this panel" aria-label="Close">' +
+            icon("b-x", "ic-14") + "</button>" +
+        "</div>" +
         '<div class="bar">' +
-          '<button class="nav" id="bBack" title="Back" aria-label="Back" disabled>' + icon("b-back", "ic-15") + "</button>" +
-          '<button class="nav" id="bFwd" title="Forward" aria-label="Forward" disabled>' + icon("b-fwd", "ic-15") + "</button>" +
-          '<button class="nav" id="bGo" title="Reload" aria-label="Reload">' + icon("b-reload", "ic-14") + "</button>" +
+          '<button class="gh" id="bBack" title="Back" aria-label="Back" disabled>' + icon("b-back", "ic-15") + "</button>" +
+          '<button class="gh" id="bFwd" title="Forward" aria-label="Forward" disabled>' + icon("b-fwd", "ic-15") + "</button>" +
+          '<button class="gh" id="bGo" title="Reload" aria-label="Reload">' + icon("b-reload", "ic-14") + "</button>" +
           '<div class="addr"><input id="bUrl" type="text" spellcheck="false" autocomplete="off" ' +
-            'placeholder="Search or enter address" aria-label="Address"><span id="bBusy" class="busy"></span></div>' +
-          '<div class="seg" role="group" aria-label="View">' +
-            '<button class="seg-b" id="bLive" aria-pressed="true">Live</button>' +
-            '<button class="seg-b" id="bRead" aria-pressed="false">Reader</button>' +
-          "</div>" +
-          '<button class="nav" id="bAgent" title="Send this page to the chat" aria-label="Send to chat">' + icon("b-agent", "ic-15") + "</button>" +
-          '<button class="nav" id="bExt" title="Open in your system browser" aria-label="Open externally">' + icon("b-ext", "ic-14") + "</button>" +
+            'placeholder="Type a URL" aria-label="Address"><span id="bBusy" class="busy"></span></div>' +
+          '<button class="gh" id="bAgent" title="Send this page to the chat" aria-label="Send to chat">' +
+            icon("b-agent", "ic-15") + "</button>" +
         "</div>" +
         '<div class="stage" id="bStage"></div>' +
         '<div class="foot" id="bFoot"></div>' +
       "</div>";
   }
 
+  /**
+   * One row of the empty state: a thing that can be started, and the button
+   * that starts it.
+   *
+   * Shaped like a row rather than a card with a heading because the empty
+   * state should read as a short list of what is available here, not as an
+   * announcement. `meta` is the small monospace fact on the right - what a
+   * port number is on a server list, and what the engine is here.
+   */
+  function srvRow(id, name, meta, label) {
+    return '<button class="srv" id="' + id + '" title="' + esc(label) + '">' +
+      '<span class="srv-i">' + icon("b-srv", "ic-15") + "</span>" +
+      '<span class="srv-n">' + esc(name) + "</span>" +
+      '<span class="srv-m">' + esc(meta) + "</span>" +
+      '<span class="srv-go">' + icon("b-play", "ic-13") + "</span>" +
+      "</button>";
+  }
+
+  /**
+   * The agent's browser: a launcher when none is running, live frames when one
+   * is.
+   *
+   * Deliberately not an iframe. These are the actual pixels of the actual page
+   * the model is driving - same cookies, same session, same scroll position -
+   * and they arrive from sites that refuse framing outright, which is most of
+   * the ones worth automating.
+   */
+  function renderAgent(stage) {
+    var a = S.agent;
+
+    if (a.error) {
+      stage.innerHTML = '<div class="blank"><div class="blank-in err">' +
+        "<h2>The browser could not start</h2><p>" + esc(a.error) + "</p></div></div>";
+      return;
+    }
+
+    if (!a.live) {
+      // The launcher, as an empty state rather than an announcement: a line
+      // saying what can be started here and what else this panel is for, then
+      // the thing itself as a row you press.
+      //
+      // The copy still says plainly what pressing it does. A browser starting
+      // is a process appearing on someone's machine, and the row being small
+      // is not a reason to be quieter about that.
+      stage.innerHTML =
+        '<div class="launch">' +
+          '<div class="launch-card">' +
+            '<p class="launch-say">' + (a.running
+              ? "A browser is already running. Watch it live, or close it and free the process."
+              : "Run the agent&rsquo;s browser below to watch what the model sees, or type a URL above to browse. It starts headless, so nothing appears over your editor.") +
+            "</p>" +
+            srvRow("aStart", "Agent browser",
+              a.running ? "running" : "chromium",
+              a.running ? "Watch it" : "Launch it") +
+            (a.running
+              ? '<button class="ghost-row" id="aClose">Close the browser</button>'
+              : "") +
+          "</div>" +
+        "</div>";
+      return;
+    }
+
+    // Live. The frame fills the stage and keeps its aspect; the strip under it
+    // says where the page actually is, because a picture of a page does not.
+    stage.innerHTML =
+      '<div class="live">' +
+        '<div class="live-frame">' +
+          (a.frame
+            ? '<img id="aFrame" alt="The page the agent is viewing" src="data:image/jpeg;base64,' + a.frame + '">'
+            : '<div class="live-wait">' + spinner(18) + "<span>waiting for the first frame…</span></div>") +
+        "</div>" +
+        '<div class="live-bar">' +
+          '<span class="live-dot"></span>' +
+          '<span class="live-t ell" title="' + esc(a.url) + '">' +
+            esc(a.title || a.url || "about:blank") + "</span>" +
+          '<span class="sp"></span>' +
+          '<button class="btn small" id="aStop">Stop watching</button>' +
+        "</div>" +
+      "</div>";
+  }
+
   function renderStage() {
     var stage = $("bStage");
+
+    // The agent view is its own thing: it has no address of its own and must
+    // render before the checks below, which are all about the address bar.
+    if (S.view === "agent") { renderAgent(stage); return; }
 
     // Before anything else: a rejected address is an error in both views, and
     // showing a blank frame instead would look like the site failed to load.
@@ -105,13 +241,15 @@
     }
 
     if (!S.url) {
+      // The same empty state as the Agent tab, so the panel reads as one
+      // surface with three views rather than three unrelated screens.
       stage.innerHTML =
-        '<div class="blank"><div class="blank-in">' +
-          "<h2>Browser</h2>" +
-          "<p>Pages open beside your editor. <strong>Live</strong> frames the site; " +
-          "<strong>Reader</strong> fetches it over the active endpoint&rsquo;s connection " +
+        '<div class="launch"><div class="launch-card">' +
+          '<p class="launch-say">Type a URL above to browse. <b>Live</b> frames the site; ' +
+          "<b>Reader</b> fetches it over the active endpoint&rsquo;s connection " +
           "&mdash; the same CAs, proxy and client certificate &mdash; and reduces it to text " +
           "the model can read.</p>" +
+          srvRow("aStartLive", "Agent browser", "chromium", "Launch it") +
         "</div></div>";
       return;
     }
@@ -192,9 +330,13 @@
     $("bBusy").innerHTML = S.loading ? spinner(13) : "";
     $("bLive").setAttribute("aria-pressed", S.view === "live" ? "true" : "false");
     $("bRead").setAttribute("aria-pressed", S.view === "reader" ? "true" : "false");
+    $("bAgentView").setAttribute("aria-pressed", S.view === "agent" ? "true" : "false");
     var agent = $("bAgent");
     agent.disabled = !(S.page && S.page.text);
     $("bExt").disabled = !S.url;
+    // The tab strip carries the address, the way a browser tab carries a page
+    // title. With nothing loaded it says so rather than showing an empty tab.
+    $("bLive").title = S.url || "Nothing loaded";
   }
 
   function renderFoot() {
@@ -301,7 +443,28 @@
     });
     $("bLive").addEventListener("click", function () { setView("live"); });
     $("bRead").addEventListener("click", function () { setView("reader"); });
+    $("bAgentView").addEventListener("click", function () { setView("agent"); });
+
+    /* The launcher's controls are inside the stage and the stage is rebuilt on
+       every frame, so binding them individually would attach a new listener
+       sixty times a second. Delegated once instead. */
+    $("bStage").addEventListener("click", function (e) {
+      // The same row appears on the Live tab's empty state, where pressing it
+      // has to switch to the Agent tab as well as start the browser - the
+      // frames have nowhere else to go.
+      if (e.target.closest("#aStart") || e.target.closest("#aStartLive")) {
+        S.agent.error = "";
+        S.agent.live = true;      // show the spinner while the browser starts
+        S.view = "agent";
+        render();
+        post("agentStart");
+        return;
+      }
+      if (e.target.closest("#aStop")) { post("agentStop"); return; }
+      if (e.target.closest("#aClose")) { post("agentClose"); return; }
+    });
     $("bExt").addEventListener("click", function () { post("browserExternal", { url: S.url }); });
+    $("bClosePanel").addEventListener("click", function () { post("browserClose"); });
     $("bAgent").addEventListener("click", function () {
       if (!S.page || !S.page.text) return;
       post("browserToAgent", { url: S.page.finalUrl, text: S.page.text });
@@ -318,6 +481,46 @@
     var m = event.data;
     if (!m || !m.type) return;
     switch (m.type) {
+      case "showAgent":
+        // The model started a browser. Land on it and start watching, rather
+        // than sitting on the Live tab's empty state while the chat beside
+        // this panel fills with screenshots of a page we are already on.
+        S.view = "agent";
+        S.agent.error = "";
+        if (!S.agent.live) {
+          S.agent.live = true;   // the spinner, until the first frame lands
+          post("agentStart");
+        }
+        render();
+        break;
+
+      case "agentFrame":
+        // Replaced in place: the previous frame is never worth keeping, and
+        // holding them would be a memory leak measured in megabytes a minute.
+        S.agent.frame = m.data;
+        S.agent.live = true;
+        if (S.view === "agent") renderStage();
+        break;
+
+      case "agentState":
+        // Two independent facts: whether a browser exists, and whether frames
+        // are flowing into this panel. Tracking only the first left a stopped
+        // stream showing its last frame, which is the one thing a live view
+        // must never do - a stale picture and a current one look identical.
+        S.agent.running = Boolean(m.running);
+        S.agent.live = Boolean(m.live);
+        S.agent.url = m.url || "";
+        S.agent.title = m.title || "";
+        if (!S.agent.live) S.agent.frame = null;
+        render();
+        break;
+
+      case "agentError":
+        S.agent.error = String(m.message || "");
+        S.agent.live = false;
+        render();
+        break;
+
       case "browserLoading":
         S.loading = true;
         S.error = "";

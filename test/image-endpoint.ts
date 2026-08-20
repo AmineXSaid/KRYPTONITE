@@ -113,7 +113,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "kx-img-"));
     return loadProfile(profileFile);
   };
   const client = (image: string) =>
-    new EndpointClient(writeProfile(image), () => undefined, () => {});
+    new EndpointClient(writeProfile(image), () => undefined, tmp);
 
   const DEFAULT = "image:\n  model: flux.1-dev\n";
 

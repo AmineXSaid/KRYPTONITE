@@ -69,8 +69,6 @@ async function main() {
   const EXPECTED = [
     "kryptonite.focusSidebar",
     "kryptonite.openControlCenter",
-    "kryptonite.moveToRight",
-    "kryptonite.moveToLeft",
     "kryptonite.openBrowser",
     "kryptonite.closeBrowser",
     "kryptonite.newChat",
@@ -83,6 +81,17 @@ async function main() {
     "kryptonite.exportChat",
     "kryptonite.exportAllChats",
     "kryptonite.exportBundle",
+    // The editor-side features. These are also invoked as CodeLens and code
+    // action targets, where a missing registration surfaces as a link that
+    // does nothing rather than as an error.
+    "kryptonite.fixProblem",
+    "kryptonite.documentSymbol",
+    "kryptonite.explainSelection",
+    "kryptonite.writeTests",
+    "kryptonite.generateCommitMessage",
+    // Distinct from openBrowser: lands on the agent's view and starts
+    // watching, which is what the model launching a browser calls for.
+    "kryptonite.watchAgentBrowser",
   ];
   for (const name of EXPECTED) {
     ck(recorded.commands.includes(name), `1.1 ${name} is registered`);
@@ -130,68 +139,58 @@ async function main() {
       offenders.slice(0, 5).join(", "));
   }
 
-  /* ── sidebar side ──────────────────────────────────────────────────
-     VS Code has no per-view "move to the right", only the pair that moves the
-     whole Primary Side Bar, so this asserts the command actually issued.
-     The once-only rule matters more than the move: an extension that re-moved
-     the bar on every window would undo a deliberate drag every morning. */
+  /* ── where the panel lives ─────────────────────────────────────────
+     The right-hand position is now a manifest fact, not something activation
+     does, so what is worth asserting is that nothing moves the user's layout
+     any more - and that the one machine-state repair left over from the
+     versions that did runs exactly once. */
   {
-    const { setSidebarSide, applySidebarSide, SIDEBAR_STATE_KEY } = extension;
+    const { undoSideBarMove, SIDEBAR_STATE_KEY } = extension;
     const fakeCtx: any = {
       globalState: {
         get: (k: string, d?: unknown) => (recorded.global.has(k) ? recorded.global.get(k) : d),
-        update: async (k: string, v: unknown) => { recorded.global.set(k, v); },
+        update: async (k: string, v: unknown) => {
+          v === undefined ? recorded.global.delete(k) : recorded.global.set(k, v);
+        },
       },
     };
 
-    recorded.executed.length = 0;
+    // Fresh install: no key, so activation must leave the layout alone.
     recorded.global.clear();
-    await setSidebarSide("right", fakeCtx);
-    ck(recorded.executed.some((e) => e.id === "workbench.action.moveSideBarRight"),
-      "1.1 moving right issues the workbench command",
-      recorded.executed.map((e) => e.id).join(", "));
-    ck(recorded.global.get(SIDEBAR_STATE_KEY) === "right", "1.1 and records what it applied");
-
     recorded.executed.length = 0;
-    await setSidebarSide("left", fakeCtx);
-    ck(recorded.executed.some((e) => e.id === "workbench.action.moveSideBarLeft"),
-      "1.1 and moving left issues the other one");
+    await undoSideBarMove(fakeCtx);
+    ck(recorded.executed.length === 0,
+      "1.1 a fresh install never touches the Primary Side Bar",
+      recorded.executed.map((e) => e.id).join(", "));
 
-    // Already applied: activation must not touch the layout again.
+    // Upgraded from a version that moved the bar right: put it back, once.
     recorded.global.set(SIDEBAR_STATE_KEY, "right");
     recorded.executed.length = 0;
-    await applySidebarSide(fakeCtx);
+    await undoSideBarMove(fakeCtx);
+    ck(recorded.executed.some((e) => e.id === "workbench.action.moveSideBarLeft"),
+      "1.1 an upgrade puts the Primary Side Bar back on the left",
+      recorded.executed.map((e) => e.id).join(", "));
+
+    recorded.executed.length = 0;
+    await undoSideBarMove(fakeCtx);
     ck(recorded.executed.length === 0,
-      "1.1 the side is applied once, so dragging it back afterwards sticks",
+      "1.1 and does it once, so a deliberate move afterwards sticks",
       recorded.executed.map((e) => e.id).join(", "));
 
-    // Changing the preference makes it apply again.
-    __cfg.set("sidebarPosition", "right");
-    recorded.global.set(SIDEBAR_STATE_KEY, "left");
-    recorded.executed.length = 0;
-    await applySidebarSide(fakeCtx);
-    ck(recorded.executed.some((e) => e.id === "workbench.action.moveSideBarRight"),
-      "1.1 but changing the setting applies it again",
-      recorded.executed.map((e) => e.id).join(", "));
-
-    // "keep" is the escape hatch for anyone who wants their layout left alone.
-    __cfg.set("sidebarPosition", "keep");
-    recorded.global.clear();
-    recorded.executed.length = 0;
-    await applySidebarSide(fakeCtx);
-    ck(recorded.executed.length === 0, "1.1 keep never touches the layout");
-    __cfg.delete("sidebarPosition");
-
-    // The code's fallback and the manifest's default have to agree. VS Code
-    // always returns the declared default, so a drift between them would only
-    // surface somewhere the manifest is not loaded, which is the worst place
-    // to discover it.
+    // The container has to be declared where the code says it is: a view
+    // contributed to the activity bar would open on the left again, and
+    // nothing in the extension host would complain.
     const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8"));
+    const containers = manifest.contributes.viewsContainers;
     ck(
-      manifest.contributes.configuration.properties["kryptonite.sidebarPosition"].default ===
-        extension.SIDEBAR_DEFAULT,
-      "1.1 the manifest default and the code fallback agree",
-      `${manifest.contributes.configuration.properties["kryptonite.sidebarPosition"].default} vs ${extension.SIDEBAR_DEFAULT}`
+      Array.isArray(containers.secondarySidebar) && !containers.activitybar,
+      "1.1 the container is contributed to the Secondary Side Bar only",
+      Object.keys(containers).join(", ")
+    );
+    ck(
+      containers.secondarySidebar[0].id === "kryptonite" &&
+        Array.isArray(manifest.contributes.views.kryptonite),
+      "1.1 and the view is declared inside it"
     );
   }
   ck(ctx.subscriptions.length > 0, "1.1 disposables registered", String(ctx.subscriptions.length));

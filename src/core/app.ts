@@ -9,11 +9,14 @@ import {
   EndpointProfile,
   ProfileError,
   Capabilities,
+  interpolate,
 } from "../endpoints/profile";
+import type { ProviderConfig } from "../browser/search";
 import { clearAuthCache, authCacheReport } from "../endpoints/auth";
 import { clearSecureContexts } from "../endpoints/transport";
 import { EndpointClient } from "../providers/client";
 import { systemPromptFor, PHASES } from "../agent/loop";
+import { runOneShot, OneShotOptions } from "../agent/oneShot";
 import { loadSkills, Skill, skillIndex } from "../skills/loader";
 import {
   loadAgents,
@@ -26,6 +29,15 @@ import { McpRegistry, mcpConfigPath } from "../mcp/registry";
 import { ShadowRepo } from "../checkpoint/shadow";
 import { DiagnosticsService, rungLabel } from "../diagnostics/service";
 import { SessionStore } from "./sessions";
+import { loadInstructions, ProjectInstructions, INSTRUCTIONS_CAP } from "./instructions";
+import {
+  renderEditorContext,
+  EditorContext,
+  EMPTY_CONTEXT,
+  ActiveFile,
+  ProblemRef,
+  Severity,
+} from "./editorContext";
 import {
   saveEndpointFile,
   deleteEndpointFile,
@@ -205,6 +217,11 @@ const REAL_CONFIG_KEYS = new Set([
   "activeProfile",
   "approvalMode",
   "caBundlePath",
+  // A real setting rather than UI state, because it changes how the browser is
+  // launched rather than how the panel draws itself, and someone who wants a
+  // visible browser wants it in every window.
+  "browserHeaded",
+  "editorContext",
 ]);
 
 /**
@@ -217,6 +234,8 @@ const REAL_CONFIG_KEYS = new Set([
 export class App {
   readonly output: vscode.OutputChannel;
   readonly sessions: SessionStore;
+  /** The workspace's standing instructions, when it has any. */
+  instructions?: ProjectInstructions;
   readonly diagnostics = new DiagnosticsService();
   /** MCP servers from .agent/mcp.json. Empty until the first reload. */
   readonly mcp = new McpRegistry((level, msg) => this.log(level, msg));
@@ -251,6 +270,11 @@ export class App {
   private watcher?: vscode.FileSystemWatcher;
   private skillWatcher?: vscode.FileSystemWatcher;
   private agentWatcher?: vscode.FileSystemWatcher;
+  private instructionsWatcher?: vscode.FileSystemWatcher;
+  private editorTimer?: NodeJS.Timeout;
+  private editorContext: EditorContext = EMPTY_CONTEXT;
+  /** Last published render, so an unchanged screen does not re-broadcast. */
+  private editorRendered = "";
   private warmTimer?: NodeJS.Timeout;
   private selectionTimer?: NodeJS.Timeout;
   private disposables: vscode.Disposable[] = [];
@@ -291,8 +315,10 @@ export class App {
     }
 
     await this.reload("activation");
+    this.reloadInstructions();
     this.installWatcher();
     this.installSelectionListener();
+    this.installEditorContextListener();
     this.updateStatus();
     this.status.show();
   }
@@ -326,6 +352,146 @@ export class App {
     this.broadcast({ type: "selectionChanged", selection: this.selection });
   }
 
+  /**
+   * Watch everything that changes what is on screen.
+   *
+   * Four events rather than one because they are genuinely different: the
+   * focused editor, the split layout, the tab bar, and the compiler's opinion
+   * of the file. All four funnel into one debounced publish, because a build
+   * finishing fires diagnostics for hundreds of files at once and re-rendering
+   * the composer per file would be visible as jank.
+   */
+  private installEditorContextListener(): void {
+    const bump = () => {
+      if (this.editorTimer) clearTimeout(this.editorTimer);
+      this.editorTimer = setTimeout(() => this.publishEditorContext(), 250);
+    };
+    this.disposables.push(
+      vscode.window.onDidChangeActiveTextEditor(bump),
+      vscode.window.onDidChangeVisibleTextEditors(bump),
+      vscode.window.tabGroups?.onDidChangeTabs?.(bump) ?? new vscode.Disposable(() => {}),
+      vscode.languages.onDidChangeDiagnostics(bump),
+      // The cursor moving is part of the picture, and the selection listener
+      // is already debounced separately for a different payload.
+      vscode.window.onDidChangeTextEditorSelection(bump)
+    );
+    this.publishEditorContext();
+  }
+
+  /**
+   * Snapshot the editor, and tell the panel only when it actually changed.
+   *
+   * The equality check is on the rendered string rather than the object: it is
+   * the thing that reaches the model and the thing the indicator shows, and
+   * two snapshots that render identically are the same fact however different
+   * their line numbers.
+   */
+  private publishEditorContext(): void {
+    const next = this.snapshotEditor();
+    const rendered = renderEditorContext(next);
+    if (rendered === this.editorRendered) return;
+    this.editorContext = next;
+    this.editorRendered = rendered;
+    this.broadcast({
+      type: "editorContextChanged",
+      file: next.active?.path ?? null,
+      language: next.active?.language ?? null,
+      errors: next.problems.filter((p) => p.severity === "error").length,
+      warnings: next.problems.filter((p) => p.severity === "warning").length,
+      tabs: next.tabs.length,
+    });
+  }
+
+  /** The rendered block, for the turn that is about to go out. */
+  editorContextBlock(): string {
+    if (this.cfg().get<boolean>("editorContext", true) === false) return "";
+    // Re-snapshotted rather than served from the cache: the debounce means the
+    // stored copy can be up to 250ms stale, and the one moment it matters is
+    // the moment the user presses Enter.
+    return renderEditorContext(this.snapshotEditor());
+  }
+
+  private relative(uri: vscode.Uri): string {
+    const root = this.root;
+    if (!root || uri.scheme !== "file") return uri.path.split("/").pop() ?? uri.toString();
+    const rel = path.relative(root, uri.fsPath).split(path.sep).join("/");
+    return rel.startsWith("..") ? uri.fsPath : rel;
+  }
+
+  private snapshotEditor(): EditorContext {
+    const editor = vscode.window.activeTextEditor;
+    const active: ActiveFile | undefined =
+      editor && editor.document.uri.scheme === "file"
+        ? {
+            path: this.relative(editor.document.uri),
+            language: editor.document.languageId,
+            lines: editor.document.lineCount,
+            cursorLine: editor.selection.active.line + 1,
+            dirty: editor.document.isDirty,
+          }
+        : undefined;
+
+    const visible = (vscode.window.visibleTextEditors ?? [])
+      .filter((e) => e.document.uri.scheme === "file")
+      .map((e) => this.relative(e.document.uri));
+
+    // Tab inputs are a union - a diff, a notebook, a webview, a terminal - and
+    // only the plain text ones have a single uri worth naming. The rest are
+    // skipped rather than guessed at.
+    const tabs: string[] = [];
+    for (const group of vscode.window.tabGroups?.all ?? []) {
+      for (const tab of group.tabs) {
+        const input: any = tab.input;
+        const uri: vscode.Uri | undefined = input?.uri;
+        if (!uri || uri.scheme !== "file") continue;
+        const rel = this.relative(uri);
+        if (!tabs.includes(rel)) tabs.push(rel);
+      }
+    }
+
+    const problems: ProblemRef[] = [];
+    let errors = 0;
+    let warnings = 0;
+    const files = new Set<string>();
+    for (const [uri, diags] of vscode.languages.getDiagnostics()) {
+      if (uri.scheme !== "file" || !diags.length) continue;
+      const isActive = active !== undefined && this.relative(uri) === active.path;
+      let counted = false;
+      for (const d of diags) {
+        const severity: Severity | undefined =
+          d.severity === vscode.DiagnosticSeverity.Error
+            ? "error"
+            : d.severity === vscode.DiagnosticSeverity.Warning
+              ? "warning"
+              : undefined;
+        // Hints and information are the editor talking to itself - a spelling
+        // suggestion, a "this can be simplified". They are not problems.
+        if (!severity) continue;
+        if (isActive) {
+          problems.push({
+            line: d.range.start.line + 1,
+            col: d.range.start.character + 1,
+            severity,
+            message: d.message,
+            source: d.source || undefined,
+            code:
+              d.code === undefined || d.code === null
+                ? undefined
+                : String(typeof d.code === "object" ? (d.code as any).value : d.code),
+          });
+        } else {
+          if (severity === "error") errors++;
+          else warnings++;
+          counted = true;
+        }
+      }
+      if (counted) files.add(uri.fsPath);
+    }
+    problems.sort((a, b) => a.line - b.line || a.col - b.col);
+
+    return { active, visible, tabs, problems, workspace: { errors, warnings, files: files.size } };
+  }
+
   /** Rebuilt whenever the configured directories change. */
   /**
    * Profiles and skills are watched separately on purpose.
@@ -342,6 +508,8 @@ export class App {
     this.skillWatcher = undefined;
     this.agentWatcher?.dispose();
     this.agentWatcher = undefined;
+    this.instructionsWatcher?.dispose();
+    this.instructionsWatcher = undefined;
     const root = this.root;
     if (!root) return;
     const profileDir = this.cfg().get<string>("profileDirectory", ".agent/endpoints");
@@ -365,6 +533,12 @@ export class App {
     // the connection pool down mid-conversation. Editing an agent's persona
     // and having it take effect on the next message is the whole workflow.
     this.agentWatcher = bind(".agent/agents/**", () => void this.reloadSkillsOnly("watcher"));
+    // Its own watcher rather than a glob folded into the skills one: the
+    // instructions file is not inside the skills directory, and re-reading
+    // every skill because a paragraph changed would cost a directory walk for
+    // nothing.
+    const instructionsFile = this.cfg().get<string>("instructionsFile", ".agent/instructions.md");
+    this.instructionsWatcher = bind(instructionsFile, () => this.reloadInstructions());
   }
 
   /**
@@ -383,6 +557,7 @@ export class App {
     this.session.dispose();
     this.skillWatcher?.dispose();
     this.agentWatcher?.dispose();
+    this.instructionsWatcher?.dispose();
     if (this.warmTimer) clearTimeout(this.warmTimer);
     // Transcript writes are asynchronous now, so make sure the last one lands.
     await this.sessions.flush();
@@ -651,6 +826,25 @@ export class App {
   }
 
   /**
+   * One prompt in, one string out, off the active profile.
+   *
+   * The editor features - quick fix, doc comment, CodeLens, commit message -
+   * all need the model without needing the conversation. Routing them through
+   * `session.send` would put a commit message in the user's transcript and
+   * then charge for it on every subsequent turn.
+   *
+   * This deliberately does not check `session.running`. These are short calls
+   * the user triggered from the editor, and refusing one because a chat turn
+   * is in flight would make the feature feel broken for the entire length of
+   * an unrelated conversation.
+   */
+  async oneShot(prompt: string, opts: OneShotOptions = {}): Promise<string> {
+    const profile = this.activeProfile();
+    if (!profile) throw new Error("No endpoint is selected.");
+    return runOneShot(this.clientFor(profile), prompt, opts);
+  }
+
+  /**
    * The exact stable head of the prompt the next turn will send.
    *
    * Shared with the agent loop so the pre-warmed cache entry and the real
@@ -662,12 +856,99 @@ export class App {
     return systemPromptFor(
       this.enabledSkills(agent),
       phase,
-      agent ? { agent, memory: this.agentMemory(agent) } : undefined
+      agent ? { agent, memory: this.agentMemory(agent) } : undefined,
+      this.instructions?.block
     );
+  }
+
+  /**
+   * Re-read the workspace's instructions file.
+   *
+   * Cheap enough to do on every change and on every reload: it is one small
+   * file, and the alternative is a stale rule surviving the edit that was
+   * meant to fix it. Logged only when the result changes, so a watcher firing
+   * on an unrelated save does not fill the log with the same line.
+   */
+  reloadInstructions(): void {
+    const rel = this.cfg().get<string>("instructionsFile", ".agent/instructions.md");
+    const next = loadInstructions(this.root, rel);
+    const before = this.instructions?.block;
+    this.instructions = next;
+    if (next?.block === before) return;
+    if (next) {
+      this.log(
+        "info",
+        `Instructions: ${next.path} loaded (${next.size} characters` +
+          (next.truncated ? `, truncated to ${INSTRUCTIONS_CAP}` : "") +
+          ")"
+      );
+    } else if (before) {
+      this.log("info", `Instructions: ${rel} is gone; the project prompt is back to the default.`);
+    }
   }
 
   setRunning(running: boolean): void {
     this.running = running;
+  }
+
+  /**
+   * Which search provider to use, and the credential for it.
+   *
+   * The key goes through `interpolate`, the same helper the endpoint profiles
+   * use, so it can be written as `${env:BRAVE_KEY}` or `${file:...}` and never
+   * has to sit in settings.json in the clear. That is already the convention
+   * everywhere else a secret appears in this extension.
+   */
+  searchConfig(): ProviderConfig {
+    const cfg = this.cfg();
+    const provider = cfg.get<string>("searchProvider", "duckduckgo");
+    const rawKey = cfg.get<string>("searchApiKey", "");
+    let apiKey = "";
+    try {
+      apiKey = rawKey ? interpolate(rawKey, this.secrets) : "";
+    } catch {
+      // A key that cannot be resolved is a key we do not have. `buildSearch`
+      // falls back to the keyless provider rather than failing the search.
+    }
+    return {
+      provider: (["duckduckgo", "brave", "google", "bing"].includes(provider)
+        ? provider
+        : "duckduckgo") as ProviderConfig["provider"],
+      apiKey: apiKey || undefined,
+      engineId: cfg.get<string>("searchEngineId", "") || undefined,
+    };
+  }
+
+  /**
+   * Where the agent's browser keeps its profile, or undefined for a throwaway.
+   *
+   * Persisting it is about the session rather than about how the browser looks
+   * to a server: the reason to have a browser the agent drives is that a login
+   * can be performed once and used afterwards, and a profile deleted on every
+   * close takes the login with it. It does not affect bot detection.
+   *
+   * Under globalStorage, not the workspace: it holds cookies, and cookies do
+   * not belong in a repository.
+   */
+  browserProfileDir(): string | undefined {
+    if (this.cfg().get<string>("browserProfile", "persistent") === "fresh") return undefined;
+    return path.join(this.context.globalStorageUri.fsPath, "browser-profile");
+  }
+
+  /**
+   * Put the browser panel on screen, beside the editor.
+   *
+   * Called when the agent starts a browser, because "launch the browser" that
+   * produces no visible browser is not the thing anyone asked for. Headless is
+   * still right - a Chrome window jumping over the editor on every lookup is
+   * worse - but headless with the panel closed means the only evidence a page
+   * was ever loaded is a wall of tool output in the transcript.
+   *
+   * Routed through the command rather than importing BrowserPanel, so this
+   * file keeps knowing nothing about the panel classes.
+   */
+  async revealBrowser(): Promise<void> {
+    await vscode.commands.executeCommand("kryptonite.watchAgentBrowser");
   }
 
   async openPreview(abs: string): Promise<void> {
@@ -1004,6 +1285,8 @@ export class App {
       caBundlePath: this.cfg().get<string>("caBundlePath", ""),
       profileDirectory: this.cfg().get<string>("profileDirectory", ".agent/endpoints"),
       skillsDirectory: this.cfg().get<string>("skillsDirectory", ".agent/skills"),
+      browserHeaded: this.cfg().get<boolean>("browserHeaded", false),
+      editorContext: this.cfg().get<boolean>("editorContext", true),
       ui: { ...this.uiConfig },
     };
   }
@@ -1351,6 +1634,12 @@ export class App {
       case "selectModel": {
         // The picker switches profiles. It never rewrites YAML, so it can only
         // ever offer a profile's own model.
+        //
+        // An empty endpoint is the picker's "Auto": it clears the pin rather
+        // than naming a profile, and `activeProfile` has always meant "the
+        // first valid one" when empty. Nothing new is stored - the setting
+        // already had this state, and there was simply no way to ask for it
+        // without editing settings.json.
         await this.cfg().update("activeProfile", msg.endpoint, vscode.ConfigurationTarget.Workspace);
         await this.reload("model picker");
         this.broadcast({ type: "configChanged", config: this.configDto() });
@@ -1612,6 +1901,23 @@ export class App {
         await vscode.commands.executeCommand("kryptonite.openControlCenter", msg.section);
         return;
 
+      case "editorCommand": {
+        // The slash commands are the lightbulb's features reached from the
+        // keyboard, so they run the same commands rather than reimplementing
+        // them. Mapped explicitly instead of interpolating the name into a
+        // command id, which would let the webview invoke anything registered.
+        const map = {
+          fix: "kryptonite.fixProblem",
+          doc: "kryptonite.documentSymbol",
+          explain: "kryptonite.explainSelection",
+          tests: "kryptonite.writeTests",
+          commit: "kryptonite.generateCommitMessage",
+        } as const;
+        const id = map[msg.command];
+        if (id) await vscode.commands.executeCommand(id);
+        return;
+      }
+
       case "openSkillsFolder": {
         const root = this.requireRoot();
         const dir = path.join(root, this.cfg().get<string>("skillsDirectory", ".agent/skills"));
@@ -1750,7 +2056,14 @@ export class App {
 
   private async setConfig(key: string, value: unknown): Promise<void> {
     if (REAL_CONFIG_KEYS.has(key)) {
-      await this.cfg().update(key, value, vscode.ConfigurationTarget.Workspace);
+      // The two booleans among them arrive from the panel as strings, because
+      // the toggle group is built from string values. Stored as written they
+      // would make `get<boolean>` return the string "false", which is truthy.
+      const stored =
+        key === "browserHeaded" || key === "editorContext"
+          ? value === true || value === "true"
+          : value;
+      await this.cfg().update(key, stored, vscode.ConfigurationTarget.Workspace);
       if (key === "profileDirectory" || key === "skillsDirectory" || key === "caBundlePath") {
         clearAuthCache();
         await this.reload(`setConfig ${key}`);

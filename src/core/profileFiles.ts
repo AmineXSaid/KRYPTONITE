@@ -183,6 +183,7 @@ export function renderProfileYaml(form: EndpointForm): string {
   lines.push(`  contextWindow: ${local ? 32768 : 128000}`);
   lines.push(`  maxOutputTokens: 4096`);
   lines.push(`  tokenCounting: heuristic        # api | heuristic`);
+  lines.push(`  maxImageBytes: 1500000          # base64 image bytes per request; oldest dropped first`);
   lines.push(`  parallelToolCalls: false`);
   lines.push(``);
 

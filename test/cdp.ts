@@ -130,9 +130,15 @@ const SECOND = `<!doctype html><html><head><title>Second Page</title></head>
     ck((await evalStatus(cdp)) === "submitted:query", "Enter submits", await evalStatus(cdp));
 
     console.log("\n──── screenshot ────");
-    const png = await screenshot(cdp);
-    ck(png.length > 1000, "a screenshot comes back", `${Math.round(png.length / 1024)} KB`);
-    ck(sniffBytes(png) === "image/png", "and it is a real PNG");
+    const shot = await screenshot(cdp);
+    ck(shot.bytes.length > 1000, "a screenshot comes back",
+      `${Math.round(shot.bytes.length / 1024)} KB ${shot.mediaType}`);
+    // A plain test page is small, so it must not have been re-encoded: jpeg
+    // costs sharpness and this is exactly the page where it buys nothing.
+    ck(shot.mediaType === "image/png", "and a light page stays png", shot.mediaType);
+    ck(shot.bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+      "with real png bytes, not a truncated base64 decode");
+    ck(sniffBytes(shot.bytes) === "image/png", "and it is a real PNG");
 
     console.log("\n──── scroll ────");
     await scroll(cdp, 1200);

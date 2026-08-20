@@ -715,21 +715,21 @@ const pasteTests = (async () => {
   ok("1.5 transcript hydrated", /hello/.test(log.textContent) && /hi/.test(log.textContent));
   ok("1.5 composer enabled with a ready endpoint", d.getElementById("draft").disabled === false);
   ok("1.5 todos hydrated", /step one/.test(d.getElementById("root").textContent));
-  // The meter fills from an estimate, but the figure is printed only when the
-  // gateway reported real usage — an estimate that drifts is worse than no
-  // number. So hydration proves itself through the bar, not the text.
-  ok("1.5 context meter fills", parseFloat(d.getElementById("ctxFill").style.width) > 0);
-  ok("1.5 estimated usage prints no figure", d.getElementById("ctxText").textContent === "");
+  // The context readout moved into the header rather than going away, and
+  // the endpoint name went with it onto the model button. What has to keep
+  // working is that the message carrying it still does not throw - a renderer
+  // reaching for an element that is gone takes the whole panel with it.
+  ok("1.5 the endpoint is named on the model button", /gw/.test(d.getElementById("modelBtn").title));
 }
 
-/* 1.5b — an endpoint-reported count does print */
+/* 1.5b — a usage report is accepted even though nothing renders it */
 {
   const { d, inbound } = boot();
   inbound(STATE());
   inbound({ type: "contextUsage", used: 12000, limit: 128000, exact: true });
-  ok("1.5b exact usage prints a figure", d.getElementById("ctxText").textContent.trim().length > 0);
-  ok("1.5b figure is attributed", /endpoint/i.test(d.getElementById("ctxText").title));
-  ok("1.5b meter fills for exact usage", parseFloat(d.getElementById("ctxFill").style.width) > 0);
+  ok("1.5b a usage message does not break the panel",
+    d.getElementById("draft").disabled === false);
+  ok("1.5b and the meter still stands", !!d.getElementById("ctxHead"));
 }
 
 /* 1.6 — a second stateSync replaces, never duplicates */
@@ -1172,17 +1172,17 @@ function composer(over) {
   const { d, sent, inbound } = boot();
   inbound(STATE());
   ok("WB a first run shows the welcome", !!d.querySelector("#log .welcome"));
-  ok("WB with nothing to go back to", !d.querySelector(".recent"));
+  ok("WB with nothing to go back to", !d.querySelector(".chips.resume"));
 
   inbound({ type: "sessionsListed", sessions: [
     { id: "s1", title: "This one", when: "now", count: 4, active: true },
     { id: "s2", title: "TLS handshake triage", when: "2h ago", count: 12, active: false },
     { id: "s3", title: "Empty one", when: "1d ago", count: 0, active: false },
   ] });
-  ok("WB previous conversations appear on the empty screen", !!d.querySelector(".recent"));
-  const rows = d.querySelectorAll(".recent-row");
+  ok("WB previous conversations appear on the empty screen", !!d.querySelector(".chips.resume"));
+  const rows = d.querySelectorAll(".resume-btn");
   ok("WB the current one is not offered", rows.length === 1);
-  ok("WB nor an empty one", !/Empty one/.test(d.querySelector(".recent").textContent));
+  ok("WB nor an empty one", !/Empty one/.test(d.querySelector(".chips.resume").textContent));
   ok("WB the row names the conversation", /TLS handshake triage/.test(rows[0].textContent));
   ok("WB and how much is in it", /12 messages/.test(rows[0].textContent));
   rows[0].click();
@@ -1193,7 +1193,7 @@ function composer(over) {
   c.inbound(STATE({ session: { id: "s1", title: "t", messages: [{ role: "user", content: "hi" }] },
     sessions: [{ id: "s2", title: "Other", when: "now", count: 3, active: false }] }));
   ok("WB a conversation with messages shows no welcome", !c.d.querySelector(".welcome"));
-  ok("WB and no recent list", !c.d.querySelector(".recent"));
+  ok("WB and no recent list", !c.d.querySelector(".chips.resume"));
 }
 
 /* ══ A queued message keeps its attachments on screen ═════ */

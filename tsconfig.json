@@ -13,6 +13,7 @@
     "sourceMap": true,
     "resolveJsonModule": true
   },
-  "include": ["src"],
+  "//": "test/ is included because it is not otherwise typechecked at all: esbuild bundles it and esbuild does not check types, so a plain reference error in a suite only surfaced when that line happened to run, after a browser had been launched. The .js and .cjs suites are still outside this - allowJs is off - and are checked by running them.",
+  "include": ["src", "test"],
   "exclude": ["node_modules", "dist", "media"]
 }

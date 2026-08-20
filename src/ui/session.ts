@@ -1,20 +1,29 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
+import { request } from "undici";
 import type { Msg } from "../providers/client";
 import { runAgent } from "../agent/loop";
-import { isUntitled, titleFrom } from "../core/sessions";
-import type { FileChange, ToolContext, TodoItem } from "../agent/tools";
+import { isUntitled, titleFrom, sanitizeTitle } from "../core/sessions";
+import type { FileChange, ToolContext, TodoItem, ToolImage } from "../agent/tools";
 import { agentAllowsMcp, agentRefusal } from "../agents/loader";
 import { parseQualified } from "../mcp/registry";
 import { fetchPage, normaliseUrl } from "../browser/fetchPage";
 import { CdpBrowser, findBrowser, listBrowsers } from "../browser/cdp";
-import { navigate, snapshot, screenshot, click, type, scroll, goBack, renderSnapshot } from "../browser/page";
+import { runBrowserAction } from "../browser/actions";
+import {
+  buildSearch, parseProvider, renderResults, looksLikeBotWall, botWallAdvice,
+} from "../browser/search";
+// Still used directly by the panel's own controls, which drive the browser
+// without going through a model turn.
+import { navigate, snapshot } from "../browser/page";
+import { wrapUntrusted } from "../agent/untrusted";
 import type { App } from "../core/app";
 import type {
   AttachmentChipDto,
   DiffDecision,
   FileChangeDto,
+  OutboundMessage,
   PermissionDecision,
   ReplayableEvent,
   TodoDto,
@@ -55,6 +64,31 @@ interface TurnDiffs {
   files: Map<string, "pending" | "accepted" | "rejected">;
 }
 
+/**
+ * A turn that is running, and the conversation it belongs to.
+ *
+ * This exists because a turn used to belong to the controller rather than to a
+ * conversation. There was one `abort` and one replay buffer, so switching
+ * conversations mid-stream could only mean killing the turn - the model was
+ * still being paid for, the answer was already half written, and it was thrown
+ * away because the panel had nowhere to put it.
+ *
+ * `history` is the same array object the conversation owns rather than a copy.
+ * That is what lets a backgrounded turn keep appending to the right transcript
+ * while the panel shows a different one, and what lets switching back find the
+ * work already in place instead of re-reading a stale file from disk.
+ */
+interface LiveTurn {
+  /** The session this turn is writing into. */
+  id: string;
+  abort: AbortController;
+  history: Msg[];
+  /** What the panel would need to redraw this turn from the start. */
+  replay: ReplayableEvent[];
+  /** Captured so a background turn can be saved under its own name. */
+  title: string;
+}
+
 const PATCH_LIMIT = 30_000;
 
 export class SessionController {
@@ -65,7 +99,14 @@ export class SessionController {
   /** Set by "Always allow" on a write or edit. Session-scoped by design. */
   private alwaysAllowEdits = false;
 
-  private abort?: AbortController;
+  /**
+   * Every turn currently running, keyed by the conversation it belongs to.
+   *
+   * Usually empty or holding one. It holds more than one when someone starts a
+   * turn, switches conversations, and starts another - which is the whole
+   * point of it being a map.
+   */
+  private live = new Map<string, LiveTurn>();
   /**
    * One browser per session, launched on first use.
    *
@@ -75,8 +116,9 @@ export class SessionController {
    * whole reason to have one.
    */
   private cdp?: CdpBrowser;
+  /** Where the last page read came from, for the untrusted-content fence. */
+  private browserUrl = "";
   private pending = new Map<string, PendingApproval>();
-  private replay: ReplayableEvent[] = [];
   private turnDiffs = new Map<string, TurnDiffs>();
 
   /**
@@ -111,9 +153,9 @@ export class SessionController {
     this.title = app.sessions.nextUntitled();
   }
 
-  /** Events the current turn has produced, for a webview that reloaded. */
-  replayBuffer(): ReplayableEvent[] {
-    return this.replay;
+  /** The turn running in the conversation currently on screen, if any. */
+  private activeTurn(): LiveTurn | undefined {
+    return this.live.get(this.sessionId);
   }
 
   /** Files this conversation has changed, most recently written first. */
@@ -185,21 +227,62 @@ export class SessionController {
     }
     this.turnEstimate.clear();
     const ev: ReplayableEvent = { type: "changesUpdated", files: this.changedFiles() };
-    this.buffer(ev);
+    // Reconciliation lands after the turn's own events, so it buffers into
+    // whichever turn is still live here rather than through emit, which
+    // needs a turn this caller does not hold.
+    const live = this.activeTurn();
+    if (live) SessionController.bufferInto(live.replay, ev);
     this.app.broadcast(ev);
   }
 
-  private buffer(ev: ReplayableEvent): void {
+
+  /** Events the current turn has produced, for a webview that reloaded. */
+  replayBuffer(): ReplayableEvent[] {
+    return this.activeTurn()?.replay ?? [];
+  }
+
+  private static bufferInto(replay: ReplayableEvent[], ev: ReplayableEvent): void {
     // Consecutive text deltas coalesce; a long reply would otherwise leave
     // thousands of one-word entries to replay.
     if (ev.type === "streamDelta") {
-      const last = this.replay[this.replay.length - 1];
+      const last = replay[replay.length - 1];
       if (last && last.type === "streamDelta") {
         last.text += ev.text;
         return;
       }
+      // A copy, because the same object is also handed to the panel. Storing
+      // it directly made the next delta's `+=` reach back and rewrite an event
+      // that had already been sent - harmless for a webview that reads the
+      // string straight into the DOM, and silent corruption for anything that
+      // keeps the object.
+      replay.push({ ...ev });
+      return;
     }
-    this.replay.push(ev);
+    replay.push(ev);
+  }
+
+  /**
+   * Record an event against its turn, and show it only if that turn's
+   * conversation is the one on screen.
+   *
+   * The gate is the whole reason a background turn is safe. Without it a turn
+   * left running would keep streaming its text into whatever conversation the
+   * user switched to, which looks exactly like the model answering a question
+   * nobody asked.
+   */
+  private emit(turn: LiveTurn, ev: ReplayableEvent): void {
+    SessionController.bufferInto(turn.replay, ev);
+    if (turn.id === this.sessionId) this.app.broadcast(ev);
+  }
+
+  /**
+   * Show something that is not worth replaying.
+   *
+   * Same gate, no buffer: a turn-scoped notice that only means anything while
+   * it is on screen.
+   */
+  private show(turn: LiveTurn, msg: OutboundMessage): void {
+    if (turn.id === this.sessionId) this.app.broadcast(msg);
   }
 
   /**
@@ -294,7 +377,11 @@ export class SessionController {
     }
     for (const n of notes) this.app.broadcast({ type: "error", message: n });
 
-    const composed = [text, ...parts].filter(Boolean).join("\n\n");
+    // What is on screen goes last, after the user's own words and anything
+    // they attached: the thing they typed is the request, and this is the room
+    // it was typed in. It rides here rather than in the system prompt because
+    // that prompt is a cache key and this text changes when the cursor moves.
+    const composed = [text, ...parts, this.app.editorContextBlock()].filter(Boolean).join("\n\n");
     const attachImages = vision ? images : [];
     return attachImages.length > 0
       ? {
@@ -373,9 +460,18 @@ export class SessionController {
     }
 
     const phase = this.app.phase;
+    // The turn is bound to the conversation it starts in, not to the
+    // controller. Everything below writes through `turn`, so switching
+    // conversations changes what is on screen and nothing else.
+    const turn: LiveTurn = {
+      id: this.sessionId,
+      abort: new AbortController(),
+      history: this.history,
+      replay: [],
+      title: this.title,
+    };
+    this.live.set(turn.id, turn);
     this.running = true;
-    this.replay = [];
-    this.abort = new AbortController();
     this.app.setRunning(true);
 
     // The user's turn joins the transcript before the model is called, not
@@ -386,11 +482,12 @@ export class SessionController {
     const priorHistory = this.history.slice();
 
     const userMsg = this.composeUserMessage(text, attachments, profile);
-    this.history.push(userMsg);
+    turn.history.push(userMsg);
     // Named before the model is even called, so the strip is correct on the
     // first frame rather than filling in later.
     this.nameFromFirstMessage();
-    this.persist();
+    turn.title = this.title;
+    this.persistTurn(turn);
 
     const turnId = crypto.randomUUID();
     const touched = new Set<string>();
@@ -435,16 +532,62 @@ export class SessionController {
         ? {
             model: profile.image.model,
             generate: (prompt: string, size?: string) =>
-              client.generateImage(prompt, { size, signal: this.abort?.signal }),
+              client.generateImage(prompt, { size, signal: turn.abort.signal }),
           }
         : undefined,
       // Present only when a browser is actually installed, which is what keeps
       // the tool out of the model's list rather than offering one that fails.
-      browser: findBrowser() ? (action, a) => this.driveBrowser(action, a, root) : undefined,
+      browser: findBrowser()
+        ? async (action, a) => {
+            const out = await this.driveBrowser(
+              action, a, root, profile.capabilities.vision === true, turn
+            );
+            // Fenced here, at the one place every action funnels through,
+            // rather than at each of the eighteen return sites. A nineteenth
+            // action added later is covered without anyone remembering to.
+            const src = this.browserUrl || "the browser";
+            return typeof out === "string"
+              ? wrapUntrusted(out, src)
+              : { ...out, text: wrapUntrusted(out.text, src) };
+          }
+        : undefined,
+      // Search goes out on the same dispatcher as the model's own requests,
+      // which is the point: it reaches whatever that endpoint reaches, through
+      // the corporate proxy and the private CA. A hosted search API cannot do
+      // that, and it is the reason this is worth having rather than a key to
+      // somebody else's service.
+      search: async (query: string, limit: number) => {
+        const cfg = this.app.searchConfig();
+        const req = buildSearch(query, cfg, limit);
+        const res = await request(req.url, {
+          method: "GET",
+          headers: req.headers,
+          dispatcher: (client as any).dispatcher,
+          signal: turn.abort.signal,
+          maxRedirections: 3,
+        });
+        const body = await res.body.text();
+        if (res.statusCode >= 400) {
+          // Naming the provider matters: a 401 from Brave means a bad key, and
+          // a model told only "search failed" will retry it forever.
+          throw new Error(
+            `${cfg.provider} answered HTTP ${res.statusCode}. ` +
+            (res.statusCode === 401 || res.statusCode === 403
+              ? "The API key is missing or rejected; check kryptonite.searchApiKey."
+              : "Try again, or switch kryptonite.searchProvider.")
+          );
+        }
+        const results = parseProvider(req.kind, body, limit);
+        if (!results.length) {
+          const wall = looksLikeBotWall(req.url, body);
+          if (wall) return botWallAdvice(wall, req.url);
+        }
+        return renderResults(query, results);
+      },
       fetchUrl: async (url: string, withLinks: boolean) => {
         const page = await fetchPage(url, {
           dispatcher: (client as any).dispatcher,
-          signal: this.abort?.signal,
+          signal: turn.abort.signal,
         });
         const head =
           `${page.finalUrl} - HTTP ${page.status}` +
@@ -456,22 +599,24 @@ export class SessionController {
         // The same 60k ceiling the other tools use, so one page cannot evict
         // the conversation on the next turn.
         const body = page.text.length > 60_000 ? page.text.slice(0, 60_000) : page.text;
-        return `${head}\n\n${body}${links}`;
+        // Somebody else wrote this. The header stays outside the fence so the
+        // model can see where it came from without having to trust the fence
+        // to tell it.
+        return `${head}\n\n${wrapUntrusted(`${body}${links}`, page.finalUrl)}`;
       },
       onImage: (abs: string, prompt: string) => {
         const rel = path.relative(root, abs).split(path.sep).join("/");
         // Buffered as well as broadcast, so a restored session shows the image
         // instead of a sentence claiming one was produced.
         const ev: ReplayableEvent = { type: "imageGenerated", path: rel, prompt };
-        this.buffer(ev);
-        this.app.broadcast(ev);
+        this.emit(turn, ev);
       },
       // Every path that can change the workspace is gated on approval, so this
       // is where the deferred snapshot is joined. By the time any tool writes,
       // the checkpoint it would be restored to already exists.
       approve: async (summary, detail) => {
         await snapshot;
-        return this.requestApproval(summary, detail);
+        return this.requestApproval(summary, detail, turn);
       },
       onFileTouched: (abs: string, change?: FileChange) => {
         const rel = path.relative(root, abs).split(path.sep).join("/");
@@ -479,19 +624,17 @@ export class SessionController {
         // set, and a "../.." row in the panel would open nothing.
         if (!rel || rel.startsWith("..")) return;
         touched.add(rel);
-        const ev: ReplayableEvent = { type: "fileTouched", path: rel, file: this.recordChange(rel, change) };
-        // Buffered as well as broadcast: a webview that reloads mid-turn has to
-        // come back with the same change list it had before.
-        this.buffer(ev);
-        this.app.broadcast(ev);
+        // emit rather than broadcast: a webview that reloads mid-turn has to
+        // come back with the same change list it had before, and a turn running
+        // in a conversation the user has switched away from must not paint.
+        this.emit(turn, { type: "fileTouched", path: rel, file: this.recordChange(rel, change) });
         if (this.app.uiConfig.openTouched !== false) void this.app.openPreview(abs);
       },
       onTodos: (todos: TodoItem[]) => {
         const dto: TodoDto[] = todos.map((t) => ({ content: t.content, status: t.status }));
         this.app.todos = dto;
         const ev: ReplayableEvent = { type: "todosUpdated", todos: dto };
-        this.buffer(ev);
-        this.app.broadcast(ev);
+        this.emit(turn, ev);
       },
     };
 
@@ -504,9 +647,13 @@ export class SessionController {
         ctx,
         history: priorHistory,
         userMessage: text,
-        signal: this.abort.signal,
+        signal: turn.abort.signal,
         phase,
         mcpTools: this.app.agentMcpTools(),
+        // Read fresh off App rather than captured at construction: the file has
+        // a watcher, and an edit made mid-conversation should reach the very
+        // next turn rather than the next window.
+        instructions: this.app.instructions?.block,
         // Read here rather than at load time: the agent writes to its memory
         // file with its own tools, so the copy that goes into the prompt has
         // to be the one on disk when the turn starts.
@@ -514,7 +661,7 @@ export class SessionController {
         // Assistant replies and tool results land in the transcript as the loop
         // produces them, so tool calls survive into the next turn's context and
         // into a restored session.
-        onMessage: (m) => this.history.push(m),
+        onMessage: (m) => turn.history.push(m),
         takeSteer: this.takeSteer,
       })) {
         switch (ev.type) {
@@ -526,9 +673,22 @@ export class SessionController {
               planBuffer += chunk;
             } else {
               const out: ReplayableEvent = { type: "streamDelta", text: chunk };
-              this.buffer(out);
-              this.app.broadcast(out);
+              this.emit(turn, out);
             }
+            break;
+          }
+          case "reasoning": {
+            // Buffered like anything else, so a reloaded or backgrounded turn
+            // still has its working to show.
+            this.emit(turn, { type: "thinking", text: ev.text ?? "" });
+            break;
+          }
+          case "text_reset": {
+            // What is on screen was thinking. Drop it from the replay buffer
+            // too, or a reload would faithfully restore the mistake.
+            planBuffer = "";
+            turn.replay = turn.replay.filter((e) => e.type !== "streamDelta");
+            this.show(turn, { type: "streamReset" });
             break;
           }
           case "tool_start": {
@@ -536,8 +696,7 @@ export class SessionController {
               type: "toolStart",
               tool: { name: ev.tool!.name, args: ev.tool!.args },
             };
-            this.buffer(out);
-            this.app.broadcast(out);
+            this.emit(turn, out);
             break;
           }
           case "tool_end": {
@@ -550,8 +709,7 @@ export class SessionController {
                 isError: ev.tool!.isError,
               },
             };
-            this.buffer(out);
-            this.app.broadcast(out);
+            this.emit(turn, out);
             break;
           }
           case "context": {
@@ -560,14 +718,13 @@ export class SessionController {
             const exact = ev.context!.exact;
             this.app.lastContext = { used, limit, exact };
             const out: ReplayableEvent = { type: "contextUsage", used, limit, exact };
-            this.buffer(out);
-            this.app.broadcast(out);
+            this.emit(turn, out);
             break;
           }
           case "error": {
             errored = true;
             this.app.log("error", ev.error ?? "Unknown agent error.");
-            this.app.broadcast({ type: "error", message: ev.error ?? "Unknown error." });
+            this.show(turn, { type: "error", message: ev.error ?? "Unknown error." });
             break;
           }
           case "steer": {
@@ -578,8 +735,7 @@ export class SessionController {
               text: ev.text ?? "",
               files: this.steerFilesInFlight.shift() ?? [],
             };
-            this.buffer(out);
-            this.app.broadcast(out);
+            this.emit(turn, out);
             break;
           }
           case "turn_end":
@@ -594,9 +750,11 @@ export class SessionController {
 
     if (phase === "plan" && planBuffer) {
       const { body, steps } = extractPlan(planBuffer);
-      if (body) this.app.broadcast({ type: "streamDelta", text: body });
+      // Buffered, not just shown: the plan is the reply in this phase, and a
+      // turn finished in the background has to have one to replay.
+      if (body) this.emit(turn, { type: "streamDelta", text: body });
       if (steps.length) {
-        this.app.broadcast({
+        this.show(turn, {
           type: "planProposed",
           meta: `${steps.length} steps · read-only research done`,
           steps,
@@ -604,24 +762,33 @@ export class SessionController {
       }
     }
 
-    this.persist();
+    this.persistTurn(turn);
 
     if (touched.size) {
       const preHash = await snapshot;
       if (preHash) await this.emitDiffs(turnId, preHash, touched);
     }
 
-    this.running = false;
-    this.abort = undefined;
-    this.replay = [];
-    this.app.setRunning(false);
-    this.app.broadcast({ type: "turnEnd" });
+    this.live.delete(turn.id);
+    // Only the conversation on screen gets its composer back. A turn that
+    // finished in the background has nothing to say to the panel, which is
+    // showing something else - it says it by leaving a full replay buffer
+    // behind for whenever the user returns.
+    if (turn.id === this.sessionId) {
+      this.running = false;
+      this.app.setRunning(false);
+      this.app.broadcast({ type: "turnEnd" });
+    }
 
     // Anything typed while this turn ran, and not steered into it, becomes the
     // next turn. Taken one at a time so a burst of messages produces a normal
     // conversation rather than one concatenated wall, and so an interrupt
     // between them still lands.
-    const next = this.queued.shift();
+    //
+    // Only when the user is still looking at this conversation. Queued text was
+    // typed into the composer of the chat they have since left, and sending it
+    // now would start a turn in a conversation they are not in.
+    const next = turn.id === this.sessionId ? this.queued.shift() : undefined;
     if (next) {
       this.app.broadcast({
         type: "inputAccepted",
@@ -711,7 +878,7 @@ export class SessionController {
    * Decide whether a side effect may proceed, escalating to the user only when
    * the configured mode requires it.
    */
-  requestApproval(summary: string, detail?: string): Promise<boolean> {
+  requestApproval(summary: string, detail?: string, turn?: LiveTurn): Promise<boolean> {
     const mode = this.app.approvalMode();
     const isCommand = summary.startsWith("Run:");
 
@@ -726,7 +893,13 @@ export class SessionController {
     const id = crypto.randomUUID();
     return new Promise<boolean>((resolve) => {
       this.pending.set(id, { resolve, summary });
-      this.app.broadcast({ type: "permissionRequest", id, summary, detail });
+      const ev: ReplayableEvent = { type: "permissionRequest", id, summary, detail };
+      // Through the turn when there is one, so a question asked by a
+      // background turn is buffered rather than shown over a different
+      // conversation. It reappears when the user comes back, and the promise
+      // above is still waiting for the answer.
+      if (turn) this.emit(turn, ev);
+      else this.app.broadcast(ev);
     });
   }
 
@@ -749,108 +922,178 @@ export class SessionController {
   }
 
   /** Abort the run and deny everything waiting on the user. */
+
+  /**
+   * The browser this session drives, launched on first use.
+   *
+   * Extracted so the panel can start one too. It used to be reachable only
+   * from inside a tool call, which meant the only way to see a browser was to
+   * ask the model to go and look at something.
+   */
+  private async ensureBrowser(): Promise<CdpBrowser> {
+    if (this.cdp) return this.cdp;
+    const found = listBrowsers();
+    if (!found.length) {
+      throw new Error(
+        "No Chromium-family browser is installed. Kryptonite drives Chrome, Edge, " +
+        "Brave, Vivaldi or Chromium - whichever the machine already has - and bundles " +
+        "none of them. Install one, or set KRYPTONITE_BROWSER to its executable. " +
+        "fetch_url still works without any browser."
+      );
+    }
+    const pick = found[0];
+    const cdp = new CdpBrowser(pick.path);
+    // Headless is still the default - a window appearing over the editor every
+    // time the agent looks something up is worse than not seeing it. The panel
+    // is the answer to "what is it actually doing" that does not require one.
+    const headed = this.app.configDto().browserHeaded;
+    // A profile that survives the window, so a login the agent performs once
+    // is still there next time. Stored beside the extension's other state
+    // rather than in the workspace, because it holds cookies and nobody wants
+    // those in a repository.
+    await cdp.launch({
+      headed,
+      viewport: { width: 1280, height: 800 },
+      profileDir: this.app.browserProfileDir(),
+    });
+    this.cdp = cdp;
+    this.app.log(
+      "info",
+      `Browser: driving ${pick.name} (${pick.path})` +
+        (found.length > 1 ? `. Also available: ${found.slice(1).map((f) => f.name).join(", ")}.` : "")
+    );
+    // Show it. Asking for a browser and getting no browser on screen is the
+    // whole complaint: headless plus a panel nobody opened means the only
+    // evidence of a page is a wall of tool output in the chat.
+    //
+    // Deliberately not awaited and deliberately swallowed. This runs inside a
+    // tool call, and failing to reveal a panel must never fail the navigation
+    // the model was actually asked to perform.
+    void this.app.revealBrowser().catch(() => { /* the panel is a courtesy */ });
+    return cdp;
+  }
+
+  /** True while a browser is up, whoever started it. */
+  get browserRunning(): boolean {
+    return Boolean(this.cdp?.running);
+  }
+
+  /** Where that browser is, for the panel's address bar. */
+  async browserWhere(): Promise<{ url: string; title: string }> {
+    if (!this.cdp) return { url: "", title: "" };
+    try {
+      const s = await snapshot(this.cdp);
+      this.browserUrl = s.url;
+      return { url: s.url, title: s.title };
+    } catch {
+      return { url: this.browserUrl, title: "" };
+    }
+  }
+
+  /**
+   * Stream the agent's browser into the panel.
+   *
+   * Frames rather than an iframe: these are the actual pixels of the actual
+   * page the agent is driving, with its cookies and its scroll position, and
+   * they arrive from sites that refuse to be framed at all.
+   */
+  async startLiveView(onFrame: (jpeg: string) => void): Promise<{ url: string; title: string }> {
+    const cdp = await this.ensureBrowser();
+    cdp.startScreencast(onFrame, 900);
+    return this.browserWhere();
+  }
+
+  stopLiveView(): void {
+    this.cdp?.stopScreencast();
+  }
+
+  /** Point the agent's browser somewhere, from the panel's address bar. */
+  async browserGoto(url: string): Promise<{ url: string; title: string }> {
+    const cdp = await this.ensureBrowser();
+    await navigate(cdp, normaliseUrl(url));
+    return this.browserWhere();
+  }
+
+  async closeBrowser(): Promise<void> {
+    await this.cdp?.close();
+    this.cdp = undefined;
+  }
+
   /**
    * The model's browser, one action per call.
    *
    * A screenshot is written into the workspace and announced like a generated
-   * image, so it appears in the transcript. The model is told the path rather
-   * than handed the pixels: it may not have vision, and a base64 PNG in a tool
-   * result would burn the context window for something it cannot read.
+   * image, so it appears in the transcript, *and* handed back as pixels so the
+   * model can actually look at it. Every other action answers in text, because
+   * the accessibility tree is what you click on and a picture cannot be.
+   *
+   * The pixels are withheld from an endpoint that does not declare vision. That
+   * is not caution: a gateway without it answers a base64 blob with a 400, so
+   * sending one would break the tool for everyone it cannot help. Those
+   * profiles get what they got before - the path, and a line saying why.
    */
   private async driveBrowser(
     action: string,
     a: Record<string, unknown>,
-    root: string
-  ): Promise<string> {
+    root: string,
+    vision: boolean,
+    // A screenshot is shown to the user, so it goes through the turn that
+    // asked for it rather than straight to the panel - otherwise a background
+    // turn drops a picture into whatever conversation is on screen.
+    turn: LiveTurn
+  ): Promise<string | { text: string; images?: ToolImage[] }> {
     if (action === "close") {
       await this.cdp?.close();
       this.cdp = undefined;
       return "Browser closed.";
     }
 
-    if (!this.cdp) {
-      const found = listBrowsers();
-      if (!found.length) {
-        throw new Error(
-          "No Chromium-family browser is installed. Kryptonite drives Chrome, Edge, " +
-          "Brave, Vivaldi or Chromium - whichever the machine already has - and bundles " +
-          "none of them. Install one, or set KRYPTONITE_BROWSER to its executable. " +
-          "fetch_url still works without any browser."
-        );
-      }
-      const pick = found[0];
-      this.cdp = new CdpBrowser(pick.path);
-      await this.cdp.launch({ viewport: { width: 1280, height: 800 } });
-      this.app.log(
-        "info",
-        `Browser: driving ${pick.name} (${pick.path})` +
-          (found.length > 1 ? `. Also available: ${found.slice(1).map((f) => f.name).join(", ")}.` : "")
-      );
-    }
-    const cdp = this.cdp;
+    const cdp = await this.ensureBrowser();
 
-    switch (action) {
-      case "open": {
-        const url = normaliseUrl(String(a.url ?? ""));
-        await navigate(cdp, url);
-        return renderSnapshot(await snapshot(cdp));
-      }
-      case "read":
-        return renderSnapshot(await snapshot(cdp));
-      case "click": {
-        const ref = String(a.ref ?? "");
-        if (!ref) throw new Error("ref is required for click.");
-        await click(cdp, ref);
-        return "Clicked " + ref + ".\n\n" + renderSnapshot(await snapshot(cdp));
-      }
-      case "type": {
-        const ref = String(a.ref ?? "");
-        if (!ref) throw new Error("ref is required for type.");
-        await type(cdp, ref, String(a.text ?? ""), {
-          submit: a.submit === true,
-          clear: a.clear === true,
-        });
-        return "Typed into " + ref + ".\n\n" + renderSnapshot(await snapshot(cdp));
-      }
-      case "scroll":
-        await scroll(cdp, Number(a.dy ?? 600));
-        return renderSnapshot(await snapshot(cdp));
-      case "back":
-        await goBack(cdp);
-        return renderSnapshot(await snapshot(cdp));
-      case "screenshot": {
-        const png = await screenshot(cdp);
-        const rel = `.agent/screenshots/page-${Date.now()}.png`;
-        const abs = path.join(root, ...rel.split("/"));
-        fs.mkdirSync(path.dirname(abs), { recursive: true });
-        fs.writeFileSync(abs, png);
-        const ev: ReplayableEvent = {
-          type: "imageGenerated",
-          path: rel,
-          prompt: "Browser screenshot",
-        };
-        this.buffer(ev);
-        this.app.broadcast(ev);
-        const s = await snapshot(cdp);
-        return (
-          `Screenshot saved to ${rel} and shown to the user (${Math.round(png.length / 1024)} KB).\n` +
-          `It is of: ${s.title || s.url}`
-        );
-      }
-      default:
-        throw new Error(`Unknown browser action "${action}".`);
-    }
+    // The dispatch itself lives in src/browser/actions.ts, where it can be
+    // driven against a real Chromium without an extension host. What stays
+    // here is the part that is genuinely the session's: which browser, which
+    // conversation the screenshot belongs to, and where files land.
+    return runBrowserAction(
+      cdp,
+      action,
+      a,
+      {
+        onUrl: (url) => { this.browserUrl = url; },
+        saveShot: (bytes, mediaType) => {
+          const rel =
+            `.agent/screenshots/page-${Date.now()}` +
+            (mediaType === "image/jpeg" ? ".jpg" : ".png");
+          const abs = path.join(root, ...rel.split("/"));
+          fs.mkdirSync(path.dirname(abs), { recursive: true });
+          fs.writeFileSync(abs, bytes);
+          // Through the turn, so a background turn does not drop a picture
+          // into whatever conversation happens to be on screen.
+          this.emit(turn, { type: "imageGenerated", path: rel, prompt: "Browser screenshot" });
+          return rel;
+        },
+        vision,
+      },
+      this.browserUrl
+    );
   }
 
+  /**
+   * Stop the turn in the conversation on screen.
+   *
+   * Only that one. Stop is a button in a chat, and someone pressing it means
+   * "stop this", not "stop everything I have running elsewhere".
+   */
   interrupt(): void {
-    this.abort?.abort();
+    const turn = this.activeTurn();
+    turn?.abort.abort();
+    if (turn) this.live.delete(turn.id);
     for (const [id, entry] of this.pending) {
       entry.resolve(false);
       this.app.broadcast({ type: "permissionResolved", id, decision: "deny" });
     }
     this.pending.clear();
     this.running = false;
-    this.replay = [];
     this.app.setRunning(false);
     this.app.broadcast({ type: "turnEnd" });
   }
@@ -883,6 +1126,20 @@ export class SessionController {
   }
 
   /**
+   * Save a turn's own conversation, which is not always the one on screen.
+   *
+   * `rememberSession` is deliberately only called for the active one: it
+   * records which conversation to reopen on the next window, and a background
+   * turn finishing should not change where the user lands.
+   */
+  private persistTurn(turn: LiveTurn): void {
+    if (!turn.history.length) return;
+    this.app.sessions.save(turn.id, turn.history, turn.title);
+    if (turn.id === this.sessionId) void this.app.rememberSession(turn.id);
+    this.app.refreshSessions();
+  }
+
+  /**
    * Name the conversation from the first thing the user said.
    *
    * This used to ask the model, after the first exchange, in a separate request.
@@ -908,10 +1165,64 @@ export class SessionController {
     const title = titleFrom(this.history);
     if (!title || title === "New chat" || title === this.title) return;
 
+    this.setTitle(title);
+    // Then ask for a real one. The line above is a placeholder that is right
+    // immediately; this replaces it a second later with something that reads
+    // like a name instead of like a shouted instruction.
+    void this.titleFromModel(this.sessionId, title);
+  }
+
+  private setTitle(title: string): void {
     this.title = title;
     this.app.sessions.save(this.sessionId, this.history, title);
     this.app.broadcast({ type: "sessionTitled", id: this.sessionId, title });
     this.app.refreshSessions();
+  }
+
+  /**
+   * Ask the model to name the conversation.
+   *
+   * The first message is a serviceable placeholder and a poor title. It is
+   * whatever the user typed, at whatever length and in whatever case they
+   * typed it, so a conversation opened with "LAUNCH BROWSER AND SEARCH FOR MY
+   * NAME" is filed under exactly that, shouting, in a list of other people's
+   * shouting.
+   *
+   * Runs beside the turn rather than after it, on the one-shot path, so the
+   * name settles within a second or two rather than after the answer. It
+   * renames once and never again: a title that keeps changing as a
+   * conversation grows is worse than a slightly wrong one that stays put.
+   *
+   * Entirely best-effort. A failure here leaves the placeholder, which was
+   * already good enough to ship for months.
+   */
+  private async titleFromModel(id: string, placeholder: string): Promise<void> {
+    const first = this.history.find((m) => m.role === "user");
+    if (!first) return;
+    const text = typeof first.content === "string"
+      ? first.content
+      : first.content.filter((b) => b.type === "text").map((b: any) => b.text).join(" ");
+    if (!text.trim()) return;
+
+    let raw: string;
+    try {
+      raw = await this.app.oneShot(
+        `Name this conversation in three to six words, as a title someone would ` +
+          `recognise in a list. Use sentence case. No quotes, no full stop, no ` +
+          `preamble.\n\nFirst message:\n${text.slice(0, 800)}`,
+        { maxTokens: 24 }
+      );
+    } catch {
+      return; // the placeholder stands
+    }
+
+    const title = sanitizeTitle(raw, "");
+    if (!title || title === placeholder) return;
+    // The user may have moved on, renamed it, or started a new chat while the
+    // request was in flight. Naming a conversation they have left would rename
+    // the wrong one.
+    if (this.sessionId !== id || this.title !== placeholder) return;
+    this.setTitle(title);
   }
 
   /**
@@ -949,7 +1260,7 @@ export class SessionController {
    * composer pointing at a file that no longer exists.
    */
   private reset(rotate: boolean, title: string): void {
-    this.interruptQuietly();
+    this.detach();
     if (rotate) {
       this.sessionId = this.app.sessions.newId();
       this.history = [];
@@ -964,6 +1275,10 @@ export class SessionController {
     this.app.lastContext = null;
     void this.app.rememberSession(this.sessionId);
     this.announce(title);
+    // Whatever is running in the conversation we have just landed on. Usually
+    // nothing; when it is something, the composer has to come back up in the
+    // running state or Stop is unreachable for a turn that is plainly moving.
+    this.adopt();
   }
 
   newChat(): void {
@@ -978,8 +1293,14 @@ export class SessionController {
     // The browser belongs to the conversation that opened it: carrying a
     // logged-in session into a fresh chat would surprise anyone who pressed
     // New chat expecting a clean slate.
-    void this.cdp?.close();
-    this.cdp = undefined;
+    //
+    // Not while a turn is still using it, though. Closing Chrome underneath a
+    // backgrounded turn would fail its next browser call for a reason that has
+    // nothing to do with what it was asked to do.
+    if (!this.live.has(this.sessionId)) {
+      void this.cdp?.close();
+      this.cdp = undefined;
+    }
     this.reset(rotate, rotate ? this.app.sessions.nextUntitled() : this.title);
   }
 
@@ -989,8 +1310,13 @@ export class SessionController {
       this.app.broadcast({ type: "error", message: "That session could not be read." });
       return;
     }
-    this.interruptQuietly();
-    this.history = doc.messages;
+    this.detach();
+    // A conversation with a turn still running owns the array that turn is
+    // appending to. Reading the file from disk here would fork the transcript:
+    // the turn would keep writing into the old array and the panel would show
+    // a copy that stopped growing.
+    const running = this.live.get(doc.id);
+    this.history = running ? running.history : doc.messages;
     this.sessionId = doc.id;
     this.reset(false, doc.title || this.app.sessions.nextUntitled());
   }
@@ -1005,21 +1331,52 @@ export class SessionController {
     this.reset(true, this.app.sessions.nextUntitled());
   }
 
-  /** Stop a run without emitting a turnEnd the caller is about to supersede. */
-  private interruptQuietly(): void {
-    this.abort?.abort();
-    for (const [, entry] of this.pending) entry.resolve(false);
-    this.pending.clear();
+  /**
+   * Leave the conversation without ending what it is doing.
+   *
+   * This is where the old behaviour was: it aborted. Switching conversations
+   * mid-stream killed a turn that was already half paid for, and there was no
+   * way to get the answer back. Now the turn stays in `live`, keeps appending
+   * to its own transcript, and buffers everything it emits for whenever the
+   * user returns.
+   *
+   * Pending approvals are deliberately left pending. The question was buffered
+   * into the turn's replay, so it comes back on screen when the conversation
+   * does, and its promise is still waiting to be answered. Resolving them as
+   * denied here would silently refuse an edit the user never saw asked.
+   */
+  private detach(): void {
     this.running = false;
-    this.replay = [];
     this.steer = [];
     this.steerFiles = [];
     this.steerFilesInFlight = [];
     this.app.setRunning(false);
   }
 
+  /**
+   * Pick up whatever is already running in the conversation now on screen.
+   *
+   * The replay itself is the webview's job - it asks for the buffer when it
+   * renders. What has to happen here is the running flag, or the composer
+   * comes back idle over a turn that is visibly still moving and Stop cannot
+   * be reached.
+   */
+  private adopt(): void {
+    const turn = this.activeTurn();
+    if (!turn) return;
+    this.running = true;
+    this.app.setRunning(true);
+  }
+
   dispose(): void {
-    this.interruptQuietly();
+    // Every turn, not just the visible one: the extension is going away, and a
+    // request still in flight has nothing left to write into.
+    for (const turn of this.live.values()) turn.abort.abort();
+    this.live.clear();
+    for (const [, entry] of this.pending) entry.resolve(false);
+    this.pending.clear();
+    this.running = false;
+    this.app.setRunning(false);
     // A headless Chrome outliving the window that started it is a process the
     // user never sees and cannot find. It goes when the extension goes.
     void this.cdp?.close();

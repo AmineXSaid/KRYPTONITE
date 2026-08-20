@@ -2,12 +2,12 @@
   "name": "kryptonite",
   "displayName": "KRYPTONITE",
   "description": "A coding agent for endpoints that don't behave. mTLS, corporate CAs, token exchange, air-gapped.",
-  "version": "0.6.0",
+  "version": "0.8.0",
   "publisher": "MohamedAmineSaid",
   "license": "MIT",
   "icon": "media/logo.png",
   "engines": {
-    "vscode": "^1.90.0",
+    "vscode": "^1.104.0",
     "node": ">=20"
   },
   "repository": {
@@ -25,7 +25,7 @@
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {
-      "activitybar": [
+      "secondarySidebar": [
         {
           "id": "kryptonite",
           "title": "Kryptonite",
@@ -50,14 +50,6 @@
       {
         "command": "kryptonite.openControlCenter",
         "title": "KRYPTONITE: Open Control Center"
-      },
-      {
-        "command": "kryptonite.moveToRight",
-        "title": "KRYPTONITE: Move sidebar to the right"
-      },
-      {
-        "command": "kryptonite.moveToLeft",
-        "title": "KRYPTONITE: Move sidebar to the left"
       },
       {
         "command": "kryptonite.openBrowser",
@@ -106,6 +98,31 @@
       {
         "command": "kryptonite.exportAllChats",
         "title": "KRYPTONITE: Export all chats as JSON"
+      },
+      {
+        "command": "kryptonite.fixProblem",
+        "title": "KRYPTONITE: Fix this problem"
+      },
+      {
+        "command": "kryptonite.documentSymbol",
+        "title": "KRYPTONITE: Document this"
+      },
+      {
+        "command": "kryptonite.explainSelection",
+        "title": "KRYPTONITE: Explain this"
+      },
+      {
+        "command": "kryptonite.writeTests",
+        "title": "KRYPTONITE: Write tests for this"
+      },
+      {
+        "command": "kryptonite.generateCommitMessage",
+        "title": "KRYPTONITE: Generate commit message",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "kryptonite.watchAgentBrowser",
+        "title": "KRYPTONITE: Watch the agent browser"
       }
     ],
     "configuration": {
@@ -120,6 +137,21 @@
           "type": "string",
           "default": ".agent/skills",
           "description": "Workspace-relative folder holding skills."
+        },
+        "kryptonite.instructionsFile": {
+          "type": "string",
+          "default": ".agent/instructions.md",
+          "markdownDescription": "Workspace-relative markdown file whose contents are prepended to every system prompt, for conventions that must hold on every turn. Absent is fine and is not warned about. Skills are the on-demand equivalent; this is the always-on one. Capped at 16,000 characters, with the truncation stated to the model."
+        },
+        "kryptonite.editorContext": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Append what is on screen - the focused file, the open tabs, and the compiler's errors for that file - to each message you send. Costs a few hundred tokens per turn and is what makes \"fix this\" resolve to something. Turn it off on a very small context window."
+        },
+        "kryptonite.browserHeaded": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Show the browser the agent drives in a real window instead of running it headless. Off by default, because a window appearing over your editor every time the agent looks something up is worse than not seeing it - but turn it on when you want to watch what it is doing, or drive it yourself mid-task. Takes effect the next time the browser starts."
         },
         "kryptonite.activeProfile": {
           "type": "string",
@@ -136,31 +168,75 @@
           "default": "ask",
           "description": "When tools run without confirming: ask = every side effect; edits-auto = file edits auto, shell commands ask; full-auto = never ask."
         },
-        "kryptonite.sidebarPosition": {
-          "type": "string",
-          "enum": [
-            "right",
-            "left",
-            "keep"
-          ],
-          "default": "right",
-          "markdownDescription": "Which side the Primary Side Bar sits on. VS Code has no way to move a single view container, so this moves the whole bar, so Explorer and Search come with it. Applied once when the setting changes, so dragging it back afterwards sticks. `keep` never touches your layout."
-        },
         "kryptonite.caBundlePath": {
           "type": "string",
           "default": "",
           "description": "Global fallback CA bundle merged into every profile's tls.caBundle at load time. Accepts a file path or the literal 'system'."
+        },
+        "kryptonite.codeLens": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Explain / Document / Tests above functions and classes."
+        },
+        "kryptonite.codeActions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Offer Kryptonite fixes and rewrites in the lightbulb menu."
+        },
+        "kryptonite.inlineCompletion": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Suggest code at the cursor as ghost text. Off by default: this needs a fast fill-in-the-middle endpoint, which most corporate gateways are not. The active profile must also set `capabilities.fim: true`."
+        },
+        "kryptonite.searchProvider": {
+          "type": "string",
+          "enum": [
+            "duckduckgo",
+            "brave",
+            "google",
+            "bing"
+          ],
+          "default": "duckduckgo",
+          "markdownDescription": "Which service `web_search` queries. `duckduckgo` needs no key and is the default. The others need `#kryptonite.searchApiKey#`, and Google also needs `#kryptonite.searchEngineId#`. A provider named without its credential falls back to `duckduckgo` rather than failing."
+        },
+        "kryptonite.searchApiKey": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "API key for the search provider. Supports `${env:NAME}` and `${file:path}`, the same as an endpoint profile, so the key need not sit here in the clear."
+        },
+        "kryptonite.searchEngineId": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Google Programmable Search engine id (`cx`). Google only."
+        },
+        "kryptonite.browserProfile": {
+          "type": "string",
+          "enum": [
+            "persistent",
+            "fresh"
+          ],
+          "default": "persistent",
+          "markdownDescription": "`persistent` keeps the agent browser's cookies and history between launches, so a login it performs survives closing the window. `fresh` starts from an empty temp profile every time, which is the old behaviour. Neither affects bot detection."
         }
       }
+    },
+    "menus": {
+      "scm/title": [
+        {
+          "command": "kryptonite.generateCommitMessage",
+          "group": "navigation",
+          "when": "scmProvider == git"
+        }
+      ]
     }
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node18",
     "watch": "npm run build -- --sourcemap --watch",
-    "test:bundle": "esbuild test/activation.ts test/send-path.ts test/skill-bounds.ts test/text-tool-protocol.ts test/tools.ts test/mcp-transport.ts test/image-endpoint.ts test/mcp-live.ts test/mcp-script.ts test/capabilities.ts test/browser.ts test/cdp.ts test/agents.ts test/agent-gate.ts --bundle --outdir=dist --out-extension:.js=.cjs --format=cjs --platform=node --target=node20 --alias:vscode=./test/vscode-stub.ts",
+    "test:bundle": "esbuild test/activation.ts test/send-path.ts test/skill-bounds.ts test/text-tool-protocol.ts test/tools.ts test/mcp-transport.ts test/image-endpoint.ts test/tool-images.ts test/instructions.ts test/editor-context.ts test/reply.ts test/reply-loop.ts test/untrusted.ts test/interrupt.ts test/mcp-live.ts test/capabilities.ts test/browser.ts test/cdp.ts test/browser-vision.ts test/browser-actions.ts test/browser-agent.ts test/browser-profile.ts test/search.ts test/one-shot.ts test/editor-features.ts test/completion.ts test/background-turns.ts test/mcp-script.ts test/agents.ts test/agent-gate.ts --bundle --outdir=dist --out-extension:.js=.cjs --format=cjs --platform=node --target=node20 --alias:vscode=./test/vscode-stub.ts",
     "pretest": "npm run build && npm run test:bundle",
-    "test": "node test/contrast.cjs && node test/markdown-render.cjs && node test/mcp-render.cjs && node test/browser-ui.cjs && node test/drive.js && node test/host.js && node dist/activation.cjs && node dist/send-path.cjs && node dist/skill-bounds.cjs && node dist/text-tool-protocol.cjs && node dist/tools.cjs && node dist/mcp-transport.cjs && node dist/image-endpoint.cjs && node dist/mcp-live.cjs && node dist/mcp-script.cjs && node dist/capabilities.cjs && node dist/browser.cjs && node dist/cdp.cjs && node dist/agents.cjs && node dist/agent-gate.cjs",
+    "test": "node test/contrast.cjs && node test/markdown-render.cjs && node test/mcp-render.cjs && node test/browser-ui.cjs && node test/control-center.cjs && node test/aura.cjs && node test/phases.cjs && node test/composer.cjs && node test/slash.cjs && node test/drive.js && node test/host.js && node dist/activation.cjs && node dist/send-path.cjs && node dist/skill-bounds.cjs && node dist/text-tool-protocol.cjs && node dist/tools.cjs && node dist/mcp-transport.cjs && node dist/image-endpoint.cjs && node dist/tool-images.cjs && node dist/instructions.cjs && node dist/editor-context.cjs && node dist/reply.cjs && node dist/reply-loop.cjs && node dist/untrusted.cjs && node dist/interrupt.cjs && node dist/mcp-live.cjs && node dist/capabilities.cjs && node dist/browser.cjs && node dist/cdp.cjs && node dist/browser-vision.cjs && node dist/browser-actions.cjs && node dist/browser-agent.cjs && node dist/browser-profile.cjs && node dist/search.cjs && node dist/one-shot.cjs && node dist/editor-features.cjs && node dist/completion.cjs && node dist/background-turns.cjs && node dist/mcp-script.cjs && node dist/agents.cjs && node dist/agent-gate.cjs",
     "test:live": "esbuild test/attachment-e2e.ts test/skill-gating-live.ts --bundle --outdir=dist --out-extension:.js=.cjs --format=cjs --platform=node --target=node20 && node dist/attachment-e2e.cjs && node dist/skill-gating-live.cjs",
     "test:mcp": "npm install --no-save @modelcontextprotocol/server-filesystem @modelcontextprotocol/server-memory && esbuild test/mcp-e2e.ts --bundle --outdir=dist --out-extension:.js=.cjs --format=cjs --platform=node --target=node20 && node dist/mcp-e2e.cjs",
     "verify": "npm run typecheck && npm test",
@@ -175,7 +251,7 @@
     "@modelcontextprotocol/server-filesystem": "^2026.7.10",
     "@modelcontextprotocol/server-memory": "^2026.7.4",
     "@types/node": "^20.14.0",
-    "@types/vscode": "^1.90.0",
+    "@types/vscode": "^1.104.0",
     "@vscode/vsce": "^2.32.0",
     "esbuild": "^0.23.0",
     "jsdom": "^27.0.0",
