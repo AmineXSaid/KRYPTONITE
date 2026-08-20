@@ -1,5 +1,79 @@
 # Changelog
 
+## 0.8.0
+
+The editor surface. Kryptonite had one place to work, a panel, and everything
+it could do had to be asked for there. This release is the other half: the
+model reaches the file you are looking at, the cursor you are at, and the
+errors already on screen, and it answers in the editor rather than beside it.
+
+This merges a line of work that had been running in parallel since 0.5.4 and
+had never reached main.
+
+### Added
+- **Ghost-text completion.** Suggestions at the cursor, behind two gates that
+  both default off: `capabilities.fim` on the profile and
+  `kryptonite.inlineCompletion` in settings. Either one off and not a single
+  request is sent. Fill-in-the-middle needs a fast endpoint and most corporate
+  gateways are not one, so this asks twice before it costs anything.
+- **Quick edit.** Select code, say what to change, apply or discard the diff
+  without leaving the file.
+- **CodeLens, code actions and doc comments.** Explain, Document and Tests above
+  functions and classes; fixes and rewrites in the lightbulb menu. Both on by
+  default, both with a setting, because a lens on every function is the feature
+  or the annoyance depending on the file. All three sit on one shared path for
+  invoking the model outside a chat turn and applying an edit, so they are thin.
+- **Commit message generation.** Writes into the Source Control box through the
+  Git extension's API rather than by shelling out, so it knows which repository
+  is in front of the user and can reach the box at all.
+- **Ambient editor context.** The focused file, the cursor, other editors in a
+  split, the open tabs and the compiler's diagnostics for that file ride with
+  each message. It is what makes "fix this" resolve to anything. Capped at 10
+  tabs, 12 problems and 200 characters each, about 160 tokens on a busy editor,
+  and it rides in the user message rather than the system prompt because that
+  prompt is a cache key and this text changes whenever the cursor moves.
+  `kryptonite.editorContext` turns it off.
+- **A project instructions file.** `.agent/instructions.md`, prepended to every
+  system prompt, for conventions that hold on every turn. Skills are the
+  on-demand half of the same idea. Capped, with truncation stated in-band so a
+  model reading a fragment is told so. Its own watcher, so an edit reaches the
+  next turn rather than the next window.
+- **Web search without a browser.** `web_search` for the questions that do not
+  need a page opened. DuckDuckGo by default and needs no key; Brave, Google and
+  Bing take `kryptonite.searchApiKey`, which accepts `${env:}` and `${file:}` so
+  it need not sit in settings in the clear.
+- **Untrusted-content marking.** Anything fetched from the internet reaches the
+  model wrapped and labelled, so a page attempting to issue instructions is read
+  as a page that says so rather than as an instruction.
+- **Browser actions and vision.** Click and type by ref, read a page as prose
+  with its images described, and a window to watch it work in
+  (`kryptonite.browserHeaded`, `kryptonite.browserProfile`).
+- **Background streaming across conversation switches.** A turn now carries its
+  own abort, its own replay buffer and a reference to the transcript it appends
+  to. Switching conversations mid-stream moves what is on screen and nothing
+  else; the answer keeps being written to the conversation that asked for it.
+
+### Changed
+- **Ask is one predicate, read twice.** Both lines of work had built Ask
+  independently. The surviving gate is read where tools are offered and again
+  where a call executes, because filtering the advertised array is a request to
+  the model rather than a guarantee about it. The agent gate rides on the same
+  predicate, so the two cannot disagree.
+- **The approval control moved onto the composer's control row**, beside the
+  phase and the model. Those three answer one question between them: what it may
+  do, which model does it, and whether it will ask first.
+- **The panel opens in the Secondary Side Bar** by manifest contribution rather
+  than by moving the whole Primary Side Bar across the window. Upgrading from
+  0.5.4 or earlier undoes that move once and then never touches the layout.
+- **The empty screen offers the conversations that exist**, not three invented
+  examples naming code no workspace has.
+
+### Fixed
+- **A screenshot cost ~157,000 tokens instead of ~1,400**, a photo page was sent
+  as a 1.2 MB png, and alt text never reached the model at all.
+- **`controlCenter.js` took down the whole pane** on an unguarded
+  `sv.tools.length`.
+
 ## 0.7.0
 
 Agents: a persona plus a list of what it may reach, enforced at the boundary

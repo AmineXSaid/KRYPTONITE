@@ -96,6 +96,59 @@ Pick one with `/agent` in the composer, from the Agents section of the
 Diagnostics tab, or from the command palette. While one is active a bar under
 the tabs names it and states its scope; nothing is drawn when none is.
 
+## In the editor
+
+The chat panel is not the only surface. Each of these calls the same endpoint
+profile, through the same transport, so a gateway that works in the panel works
+here too.
+
+**Ghost text at the cursor.** Off by default, behind two gates: the profile must
+declare `capabilities.fim` and `kryptonite.inlineCompletion` must be on. Either
+one off and not a single request is sent. Fill-in-the-middle needs a fast
+endpoint, and most corporate gateways are not one, so this asks twice before it
+costs anything.
+
+**Quick edit.** Select code, describe the change, apply or discard the diff
+without leaving the file.
+
+**CodeLens and code actions.** Explain, Document and Tests above functions and
+classes; Kryptonite's fixes in the lightbulb menu. Both are on by default and
+both have a setting, because a lens on every function is either the feature or
+the annoyance depending on the file.
+
+**Commit messages.** `KRYPTONITE: Generate commit message` writes into the Source
+Control box, through the Git extension's API rather than by shelling out, so it
+knows which repository is in front of you.
+
+**What is on screen.** The focused file, the cursor, the other editors in a
+split, the open tabs and the compiler's errors for that file ride along with
+each message. It is what makes "fix this" resolve to anything. It costs a few
+hundred tokens a turn and rides in the user message rather than the system
+prompt, because the system prompt is a cache key and this text changes whenever
+the cursor moves. `kryptonite.editorContext` turns it off for windows too small
+to afford it.
+
+## Project instructions
+
+`.agent/instructions.md`, prepended to every system prompt, for the conventions
+that have to hold on every turn. Skills are the on-demand half of the same idea:
+this is what is always true, a skill is what is true when it is needed. Absent
+is fine and is not warned about. Capped, with any truncation stated in-band so a
+model reading a fragment is told it is reading one.
+
+## Web search
+
+`web_search` answers without opening the browser, which is the cheaper path when
+the question is "what is the current syntax for X" rather than "what does this
+page say". `duckduckgo` is the default and needs no key. Brave, Google and Bing
+need `kryptonite.searchApiKey`, and Google also needs `kryptonite.searchEngineId`.
+The key takes `${env:NAME}` and `${file:path}` like an endpoint profile does, so
+it need not sit in settings in the clear.
+
+Anything fetched from the internet reaches the model wrapped and labelled as
+untrusted, so a page that tries to issue instructions is read as a page saying
+so rather than as an instruction.
+
 ## Browser
 
 The model drives whichever Chromium-family browser the machine already has;
@@ -250,6 +303,16 @@ write tool reachable without it and refused with it.
 | `kryptonite.approvalMode` | `ask` | `ask` / `edits-auto` / `full-auto` |
 | *(agents)* | `.agent/agents` | Not a setting - the path is fixed |
 | `kryptonite.caBundlePath` | — | Global CA merged into every profile |
+| `kryptonite.instructionsFile` | `.agent/instructions.md` | Conventions prepended to every system prompt |
+| `kryptonite.editorContext` | `true` | Send the focused file, open tabs and its errors with each message |
+| `kryptonite.codeLens` | `true` | Explain / Document / Tests above functions and classes |
+| `kryptonite.codeActions` | `true` | Kryptonite fixes and rewrites in the lightbulb menu |
+| `kryptonite.inlineCompletion` | `false` | Ghost text at the cursor. Also needs `capabilities.fim` |
+| `kryptonite.browserHeaded` | `false` | Show the agent's browser instead of running it headless |
+| `kryptonite.browserProfile` | `persistent` | `persistent` keeps its cookies, `fresh` starts empty |
+| `kryptonite.searchProvider` | `duckduckgo` | `duckduckgo` / `brave` / `google` / `bing` |
+| `kryptonite.searchApiKey` | — | Key for the provider. Takes `${env:}` and `${file:}` |
+| `kryptonite.searchEngineId` | — | Google Programmable Search `cx`. Google only |
 
 ## Where the panel opens
 
