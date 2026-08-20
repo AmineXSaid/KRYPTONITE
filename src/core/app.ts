@@ -76,6 +76,16 @@ const MCP_CONFIG_TEMPLATE = `{
     "  env       merged over the extension host's environment.",
     "  cwd       defaults to the workspace root.",
     "",
+    "MCP is a wire protocol, not a Node one, so command does not have to be npx.",
+    "A Python, Go or shell server is the same block with a different executable -",
+    "see the 'script-server' example below. Two things differ from the npx case:",
+    "point args at an ABSOLUTE path, because cwd is the workspace and a relative",
+    "script path breaks the moment someone opens a different folder - \${HOME} and",
+    "friends expand here, so it need not be hardcoded; and name the",
+    "interpreter, not the script, if the script has no executable bit - a shebang",
+    "is not consulted on Windows at all. Prefer 'python' over 'python3' there,",
+    "where python3 is a Store alias that launches nothing.",
+    "",
     "REMOTE - the server is reached over the network:",
     "  url       https://... A plain http:// url to anywhere but localhost is",
     "            refused, because the headers below would travel in clear text.",
@@ -102,6 +112,13 @@ const MCP_CONFIG_TEMPLATE = `{
     "filesystem": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+      "approval": "ask",
+      "timeoutMs": 120000,
+      "enabled": false
+    },
+    "script-server": {
+      "command": "python",
+      "args": ["/absolute/path/to/your/mcp_server.py"],
       "approval": "ask",
       "timeoutMs": 120000,
       "enabled": false

@@ -501,10 +501,25 @@ const quiet = () => {};
         ck(Object.values(doc.mcpServers ?? {}).every((v: any) => v.enabled === false),
           "every example ships disabled, so creating the file starts nothing");
         // The examples must survive the real parser, not just JSON.parse.
+        // Counted against the document rather than a literal, so adding an
+        // example cannot pass by being ignored - the previous `=== 2` failed
+        // the moment a third was added, which says nothing about whether the
+        // third one parses.
+        const declared = Object.keys(doc.mcpServers ?? {});
         const { specs, warnings } = loadMcpConfig(write(doc), { EXAMPLE_MCP_TOKEN: "t" } as any);
-        ck(specs.length === 2, "both examples parse into specs", String(specs.length));
+        ck(specs.length === declared.length,
+          "every example in the template parses into a spec",
+          `${specs.length} of ${declared.length}: ${declared.join(", ")}`);
         ck(warnings.length === 0, "with no warnings", warnings.join(" "));
         ck(specs.some((s) => s.transport === "http"), "including a remote one");
+        // MCP is a wire protocol, not a Node one. The template has to show
+        // that, or "add an MCP server" reads as "find an npm package".
+        const script = doc.mcpServers?.["script-server"];
+        ck(!!script?.command && !/^npx$/.test(script.command),
+          "a local server that is not an npm package is demonstrated", script?.command);
+        ck((script?.args ?? []).every((a: string) => path.isAbsolute(a)),
+          "and its script path is absolute, which is what survives a folder change",
+          JSON.stringify(script?.args));
       }
     }
   }

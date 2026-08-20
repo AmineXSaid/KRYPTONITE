@@ -64,6 +64,22 @@ Ask joins Plan and Act, a second live MCP example, and small chat-surface polish
   survives. Previously the one capability the client legitimately advertised
   was still answered "method not found". Remote servers get an empty list,
   which is the truth: they do not share this machine's filesystem.
+- **`test/mcp-script.ts`: an MCP server that is not an npm package.** Every
+  other MCP suite started something through `npx`, which quietly made "works
+  with MCP" mean "works with the two npm packages we ship as examples". This
+  one writes a dependency-free Python server to a temp file and drives it
+  through the real registry, so the transport is what is under test rather
+  than somebody's SDK. It also has the server call `roots/list` back mid
+  `tools/call` - the only coverage of a server-initiated request against a
+  live registry, and the thing that proves the fix above rather than assuming
+  it. Skips cleanly where no Python 3 exists; on Windows it prefers `python`,
+  because `python3` there is a Store alias that launches nothing.
+- The config template gains a `script-server` example (disabled, like the
+  others) and says plainly that `command` need not be `npx`. Two footguns are
+  documented at the point they bite: the script path must be absolute, since
+  `cwd` is the workspace and a relative path breaks when a different folder is
+  opened, and the interpreter must be named rather than relying on a shebang,
+  which Windows does not consult at all.
 - Command cards label their two halves `IN` and `OUT`. The header truncates a
   command to fit the panel, so the full line had nowhere to live; "what did it
   actually run" is also the first question on a failure, and the error path
