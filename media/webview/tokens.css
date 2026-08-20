@@ -42,8 +42,8 @@
    * meaning anything, and the surface it sits on stops being the subject.
    *
    * The palette is a painted doorway: turquoise wall, teal shadow, pink frame,
-   * burgundy recess, blue door, warm grey stone. Six colours, and every role
-   * below is drawn from them rather than invented.
+   * amber lamp, burgundy recess, blue door, warm grey stone. Seven colours,
+   * and every role below is drawn from them rather than invented.
    *
    *   turquoise   success and health: a passing rung, an added line, a
    *               finished todo, Act.
@@ -51,6 +51,9 @@
    *               the tools they expose. Adjacent to turquoise on purpose:
    *               related claims, not identical ones.
    *   pink        the Plan phase, and the tab underline that shows position.
+   *   amber       the Ask phase - reading to answer, never to act. Adjacent to
+   *               pink on the wheel but never the same role: Plan still ends
+   *               in a plan card, Ask never produces one.
    *   blue        interaction: send, links, focus, selection, and the mark
    *               that means "you".
    *   burgundy    failure. Only failure.
@@ -71,6 +74,7 @@
   --kx-accent: #22c9d6;    /* turquoise wall: success & health only          */
   --kx-mcp:    #17a9b8;    /* teal shadow: MCP servers and their tools       */
   --kx-active: #d98cbe;    /* pink frame: Plan phase                         */
+  --kx-ask:    #e0b64a;    /* amber lamp: Ask phase                          */
   --kx-under:  #d98cbe;    /* position: the 2px tab underline                */
   --kx-link:   #4a92d8;    /* blue door, lifted for text: links, "you"       */
   --kx-action: #1a6fb5;    /* blue door: send - a fill, so it stays deep     */

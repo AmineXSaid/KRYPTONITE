@@ -100,8 +100,12 @@ function _sbRun() {
     "Sketching…", "Imagining…", "Shaping the idea…", "Drawing on the napkin…",
     "Dreaming up options…", "Designing…", "Picturing it…", "Storyboarding…"
   ];
+  var ASK_VERBS = [
+    "Reading up…", "Checking the record…", "Looking it up…", "Following the trail…",
+    "Cross-referencing…", "Scanning the shard…", "Getting the facts straight…", "Tracing it back…"
+  ];
   function pickVerb(phase) {
-    var pool = phase === "plan" ? PLAN_VERBS : IDLE_VERBS;
+    var pool = phase === "plan" ? PLAN_VERBS : phase === "ask" ? ASK_VERBS : IDLE_VERBS;
     return pool[Math.floor(Math.random() * pool.length)];
   }
 
@@ -797,9 +801,9 @@ function _sbRun() {
           '<button class="kx-tab" id="tabMcp" role="tab" aria-selected="false" aria-controls="viewMcp">MCP<span class="tab-count" id="mcpCount" hidden></span></button>' +
           '<button class="kx-tab" id="tabDiag" role="tab" aria-selected="false" aria-controls="viewDiag">Diagnostics<span class="tab-count" id="tabCount" hidden></span></button>' +
         '</nav>' +
-        '<div class="plan-banner" id="planBanner" hidden>' +
-          '<span class="dot"></span><span class="lbl">Plan phase</span>' +
-          '<span class="sub">read-only tools · no edits applied</span>' +
+        '<div class="phase-banner" id="phaseBanner" hidden>' +
+          '<span class="dot"></span><span class="lbl"></span>' +
+          '<span class="sub"></span>' +
         '</div>' +
         '<section class="view" id="viewSession" role="tabpanel" aria-labelledby="tabSession">' +
           // The conversation's name. Placeholder until the model has been asked
@@ -820,10 +824,19 @@ function _sbRun() {
                 // used to sit here was chrome describing chrome; the shortcut
                 // lives in the group's accessible name and the tooltip, where a
                 // keyboard user finds it and everyone else is not taxed for it.
-                '<div class="seg" id="phaseSeg" role="group" title="Shift+Tab to switch phase"' +
-                  ' aria-label="Phase - press Shift+Tab to switch">' +
-                  '<button data-phase="plan" data-on="0">Plan</button>' +
-                  '<button data-phase="act" data-on="1">Act</button>' +
+                // A radiogroup, not a group of plain buttons. `data-on` drove
+                // the styling and nothing else, so a screen reader read three
+                // equal buttons and never announced which phase was live -
+                // the one thing the control exists to say. aria-checked is
+                // kept in step by applyPhase.
+                '<div class="seg" id="phaseSeg" role="radiogroup" title="Shift+Tab to cycle phase"' +
+                  ' aria-label="Phase - press Shift+Tab to cycle">' +
+                  '<button role="radio" aria-checked="false" data-phase="ask" data-on="0" ' +
+                    'title="Ask - read-only, answers a question">Ask</button>' +
+                  '<button role="radio" aria-checked="false" data-phase="plan" data-on="0" ' +
+                    'title="Plan - read-only, produces a plan">Plan</button>' +
+                  '<button role="radio" aria-checked="true" data-phase="act" data-on="1" ' +
+                    'title="Act - full tools, makes changes">Act</button>' +
                 '</div>' +
                 '<button id="modelBtn" aria-haspopup="listbox" aria-expanded="false">' +
                   '<span class="nm ell" id="modelName">No model</span>' + icon("i-caret", "ic-9") +
@@ -926,13 +939,42 @@ function _sbRun() {
 
   /* ─────────────────────────── phase ─────────────────────────── */
 
+  // Order Shift+Tab cycles in: read, then design, then build. Ask and Plan
+  // both show the banner below; Act does not, because nothing is withheld
+  // in Act and there is nothing to disclose.
+  var PHASE_CYCLE = ["ask", "plan", "act"];
+  var PHASE_INFO = {
+    ask: { lbl: "Ask phase", sub: "read-only tools · no edits, no plan" },
+    plan: { lbl: "Plan phase", sub: "read-only tools · no edits applied" }
+  };
+
   function applyPhase(phase, silent) {
+    // Normalised once, at the only door into phase state. Every caller is a
+    // different kind of untrusted: a restored session's persisted value, a
+    // `phaseChanged` from the host, a data attribute off a clicked element.
+    // An unrecognised value used to reach S.phase and leave the control with
+    // no segment lit and no banner - a UI in a state the user cannot name or
+    // get out of except by clicking. It falls back to act because that is the
+    // host's own default (`AppState.phase`), and the host is what actually
+    // gates the tools. Landing on ask would be the flattering choice and the
+    // wrong one: the panel would show a read-only badge over a session the
+    // host would still happily run a write in.
+    if (PHASE_CYCLE.indexOf(phase) === -1) phase = "act";
     S.phase = phase;
     var segs = $("phaseSeg").querySelectorAll("[data-phase]");
     for (var i = 0; i < segs.length; i++) {
-      segs[i].setAttribute("data-on", segs[i].getAttribute("data-phase") === phase ? "1" : "0");
+      var on = segs[i].getAttribute("data-phase") === phase;
+      segs[i].setAttribute("data-on", on ? "1" : "0");
+      segs[i].setAttribute("aria-checked", on ? "true" : "false");
     }
-    $("planBanner").hidden = phase !== "plan";
+    var info = PHASE_INFO[phase];
+    var banner = $("phaseBanner");
+    banner.hidden = !info;
+    if (info) {
+      banner.setAttribute("data-phase", phase);
+      banner.querySelector(".lbl").textContent = info.lbl;
+      banner.querySelector(".sub").textContent = info.sub;
+    }
     syncComposer();
     if (!silent) post("setPhase", { phase: phase });
   }
@@ -1199,7 +1241,12 @@ function _sbRun() {
     var el = div("tool");
     el.setAttribute("data-open", "0");
     el.innerHTML =
-      '<button class="tool-head">' + icon("i-chev", "ic-9 chev") +
+      /* The status rail. A column of dots down the left of the transcript is
+         readable at a glance in a way a trailing check is not: the eye tracks
+         one x-position instead of a ragged right edge set by each row's own
+         argument length. Colour is the whole signal - grey running, turquoise
+         done, burgundy failed - so it stays legible at 5px. */
+      '<button class="tool-head"><span class="tool-dot"></span>' + icon("i-chev", "ic-9 chev") +
         icon(TOOL_ICON[name] || "i-file", "ic-14 tool-icon") +
         '<span class="tool-verb">' + esc(TOOL_VERB[name] || name) + "</span>" +
         // argHtml escapes every part as it builds them.
@@ -1256,6 +1303,9 @@ function _sbRun() {
     pendingTool = null;
     if (!el) el = toolStart(name, args);
     el.setAttribute("data-error", isError ? "1" : "0");
+    // Drives the rail dot. Separate from data-error so "finished cleanly" has
+    // its own colour rather than being the absence of a failure.
+    el.setAttribute("data-done", isError ? "0" : "1");
     el.querySelector(".tool-meta").innerHTML = isError
       ? '<span class="tool-fail">' + icon("i-x", "ic-13") + "</span>"
       : '<span class="tool-ok">' + icon("i-check", "ic-13") + "</span>";
@@ -1273,7 +1323,16 @@ function _sbRun() {
     // they are already here, so show that instead - it costs the model nothing
     // because none of this is sent back to it.
     var preview = !isError && argPreview(name, args);
-    if (preview) body.appendChild(preview);
+    if (name === "run_command" && args && args.command) {
+      // A command is the one tool whose input is worth as much as its output:
+      // the header truncates it to fit a 340px row, so the full line lives
+      // here. Shown even on failure, where "what was actually run" is the
+      // first thing anyone checks.
+      var cmd = div("term-block cmd-in");
+      cmd.textContent = String(args.command);
+      body.appendChild(ioRow("IN", cmd));
+      if (text) body.appendChild(ioRow("OUT", resultBlock(text, name)));
+    } else if (preview) body.appendChild(preview);
     else if (text) body.appendChild(resultBlock(text, name));
     if (text.length > MODEL_TRUNCATION) {
       body.appendChild(div("trunc-note",
@@ -1292,6 +1351,23 @@ function _sbRun() {
    * Large results are assigned as a single textContent write. Splitting them
    * per line would build tens of thousands of nodes and lock the webview.
    */
+  /**
+   * One labelled row of an IO card: a small uppercase gutter tag and a body.
+   *
+   * The tag is what makes a command card self-describing. Without it the
+   * command and its output are two mono blocks of the same weight, and which
+   * one was typed has to be inferred from position - fine on the row you just
+   * watched run, guesswork three screens up in restored scrollback.
+   */
+  function ioRow(label, node) {
+    var row = div("io-row");
+    row.appendChild(div("io-tag", esc(label)));
+    var body = div("io-body");
+    body.appendChild(node);
+    row.appendChild(body);
+    return row;
+  }
+
   function resultBlock(text, name) {
     var wrap = document.createElement("div");
     // Shell output wraps and reads as a console; file contents stay a snippet.
@@ -1756,7 +1832,9 @@ function _sbRun() {
       ? "Configure an endpoint first…"
       : S.phase === "plan"
         ? "Describe what to plan…   ( / skills · @ files )"
-        : "Ask Kryptonite anything…   ( / skills · @ files )";
+        : S.phase === "ask"
+          ? "Ask Kryptonite anything…   ( / skills · @ files )"
+          : "Tell Kryptonite what to do…   ( / skills · @ files )";
 
     var send = $("sendBtn");
     var typing = draft.value.trim() || (S.attachments && S.attachments.length);
@@ -2453,7 +2531,7 @@ function _sbRun() {
         '<div class="mcp-empty">' +
         "<p>No MCP servers configured.</p>" +
         '<p class="s">Declare them in <code>.agent/mcp.json</code>, in the same shape Claude Desktop uses. ' +
-        "Their tools reach the model as <code>mcp__server__tool</code>, and are withheld in Plan mode.</p>" +
+        "Their tools reach the model as <code>mcp__server__tool</code>, and are withheld in Ask and Plan mode.</p>" +
         '<div><button class="btn sm primary" data-mcp="open">Create config</button></div>' +
         "</div>";
       return;
@@ -2640,8 +2718,20 @@ function _sbRun() {
         el.querySelector(".tool-meta").innerHTML =
           '<span class="tool-ok">' + icon("i-check", "ic-13") + "</span>";
         el.setAttribute("data-error", "0");
+        // The rail dot settles with the tick. Setting one and not the other
+        // left a restored card showing a green check beside a grey "still
+        // running" dot - the two marks contradicting each other on the same
+        // row.
+        el.setAttribute("data-done", "1");
         var res = resultFor[call.id];
-        if (res) el.querySelector(".tool-body").appendChild(resultBlock(res, call.name));
+        // Same IN/OUT shape the live path builds, so reopening a session does
+        // not quietly downgrade its command cards to a bare output block.
+        if (call.name === "run_command" && call.arguments && call.arguments.command) {
+          var rcmd = div("term-block cmd-in");
+          rcmd.textContent = String(call.arguments.command);
+          el.querySelector(".tool-body").appendChild(ioRow("IN", rcmd));
+          if (res) el.querySelector(".tool-body").appendChild(ioRow("OUT", resultBlock(res, call.name)));
+        } else if (res) el.querySelector(".tool-body").appendChild(resultBlock(res, call.name));
         g.querySelector(".tool-group-body").appendChild(el);
         g._count++;
       }
@@ -2695,8 +2785,6 @@ function _sbRun() {
     renderTls();
     renderEndpoints();
     renderSkills();
-  renderMcp();
-  renderMcpCount();
     renderMcp();
     renderMcpCount();
     renderHistory();
@@ -3079,7 +3167,8 @@ function _sbRun() {
     }
     if (e.key === "Tab" && e.shiftKey) {
       e.preventDefault();
-      applyPhase(S.phase === "plan" ? "act" : "plan");
+      var idx = PHASE_CYCLE.indexOf(S.phase);
+      applyPhase(PHASE_CYCLE[(idx + 1) % PHASE_CYCLE.length]);
       return;
     }
     if (e.key === "Enter" && !e.shiftKey) {

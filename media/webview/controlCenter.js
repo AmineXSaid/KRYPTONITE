@@ -230,9 +230,9 @@ function _run() {
       ["Approval",
         "ask routes every call from that server through the same gate as a shell command. " +
         "auto lets them run. A server is someone else's code, so ask is the default."],
-      ["Plan mode",
-        "MCP tools are withheld while planning, because the protocol gives no way for a " +
-        "server to declare a tool read-only and a plan must not change anything."],
+      ["Ask and Plan mode",
+        "MCP tools are withheld in both - the protocol gives no way for a server to " +
+        "declare a tool read-only, and neither mode may change anything."],
       ["State",
         "connected means its tools are live. starting is still handshaking. failed shows " +
         "the reason - hover it for the server's own error."]
@@ -867,7 +867,7 @@ function _run() {
       'Servers declared in <code>.agent/mcp.json</code>, in the same shape Claude Desktop and ' +
       'Claude Code use - stdio for a local child process, or a <code>url</code> for a remote one. ' +
       'Their tools reach the model as <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>, and are ' +
-      'withheld in Plan mode because MCP cannot declare a tool read-only.');
+      'withheld in Ask and Plan mode because MCP cannot declare a tool read-only.');
 
     if (m.warnings && m.warnings.length) {
       html += '<div class="warn-line">' + esc(m.warnings.join(" ")) + "</div>";

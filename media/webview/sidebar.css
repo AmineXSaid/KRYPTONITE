@@ -143,17 +143,23 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   letter-spacing: 0; color: var(--kx-error);
 }
 
-.plan-banner {
+/* Shown for both read-only phases, Ask and Plan - hidden in Act, where
+   nothing is withheld. Colour comes from data-phase rather than a default,
+   so neither phase is "the" banner colour and the other an override. */
+.phase-banner {
   flex: none; display: flex; align-items: center; gap: 8px; padding: 7px 14px;
   background: var(--kx-surface);
   border-bottom: 1px solid var(--kx-line);
 }
-.plan-banner .dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--kx-active); }
-.plan-banner .lbl {
+.phase-banner .dot { width: 6px; height: 6px; flex: none; border-radius: 50%; }
+.phase-banner .lbl {
   font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
-  color: var(--kx-active);
 }
-.plan-banner .sub { font-size: 11.5px; color: var(--kx-fg-2); }
+.phase-banner .sub { font-size: 11.5px; color: var(--kx-fg-2); }
+.phase-banner[data-phase="ask"] .dot { background: var(--kx-ask); }
+.phase-banner[data-phase="ask"] .lbl { color: var(--kx-ask); }
+.phase-banner[data-phase="plan"] .dot { background: var(--kx-active); }
+.phase-banner[data-phase="plan"] .lbl { color: var(--kx-active); }
 
 .view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
@@ -466,6 +472,16 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   display: flex; align-items: center; gap: 8px; width: 100%;
   padding: 4px 10px; border-radius: 0;
 }
+/* The status rail: one dot per row, all on the same x, so a run of steps can
+   be scanned vertically for the one that failed. Running is the muted state
+   rather than the loud one - most rows are running at some point, and a
+   column of bright dots would say nothing. */
+.tool-dot {
+  width: 5px; height: 5px; flex: none; border-radius: 50%;
+  background: var(--kx-fg-4); transition: background .12s;
+}
+.tool[data-done="1"] .tool-dot { background: var(--kx-accent); }
+.tool[data-error="1"] .tool-dot { background: var(--kx-error); }
 .tool-head:hover { background: var(--kx-hover); }
 .chev { transition: transform .12s; color: var(--kx-fg-2); }
 .tool[data-open="1"] .tool-head .chev { transform: rotate(90deg); }
@@ -497,6 +513,19 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   margin: 4px 0 8px 20px; padding-left: 10px;
   border-left: 1px solid var(--kx-line);
 }
+/* IN / OUT rows inside a command card. The tag column is a fixed width so the
+   two bodies share a left edge: a command and its output read as one exchange
+   rather than two unrelated blocks. */
+.io-row { display: flex; gap: 8px; align-items: flex-start; margin-top: 4px; }
+.io-tag {
+  flex: none; width: 26px; padding-top: 5px;
+  font-family: var(--kx-mono); font-size: 9.5px; font-weight: 600;
+  letter-spacing: .08em; color: var(--kx-fg-4); text-align: right;
+}
+.io-body { min-width: 0; flex: 1; }
+/* The command itself is the one line in the card the user typed nothing of but
+   is answerable for, so it gets foreground weight where output stays muted. */
+.cmd-in { color: var(--kx-fg); }
 .trunc-note {
   display: flex; align-items: center; gap: 6px; margin-top: 5px;
   font-size: 11px; color: var(--kx-warn);
@@ -884,10 +913,25 @@ li.doing .cbx { border-color: var(--kx-accent); }
  * violet is Plan, mint is Act.
  *
  * Plan takes the lighter violet, not --kx-active: the darker one is drawn for
- * a white foreground and has too little contrast as text on a raised surface. */
+ * a white foreground and has too little contrast as text on a raised surface.
+ *
+ * Ask joined later, in the palette's amber - a third read-only phase that,
+ * unlike Plan, never ends in a plan card, so it earns its own hue rather than
+ * sharing Plan's violet. */
 .seg button[data-on="1"] { background: var(--kx-surface-3); }
+.seg button[data-phase="ask"][data-on="1"] { color: var(--kx-ask); font-weight: 700; }
 .seg button[data-phase="plan"][data-on="1"] { color: var(--kx-under); font-weight: 700; }
 .seg button[data-phase="act"][data-on="1"] { color: var(--kx-accent); font-weight: 700; }
+
+/* A 2px underline in the phase's own hue, under the active segment only.
+ *
+ * Colour alone carried the active state, which fails twice: the three hues sit
+ * at similar lightness for a red-green colour-blind reader, and a raised
+ * surface is a weak cue at 12px. The bar restores a second, positional signal
+ * without repainting the control - the same trick the tab strip already uses,
+ * so the panel stays one vocabulary. */
+.seg button[data-on="1"] { box-shadow: inset 0 -2px 0 currentColor; }
+.seg button:hover:not([data-on="1"]) { background: var(--kx-hover); color: var(--kx-fg); }
 
 
 .hint { font-size: 10px; flex: none; color: var(--kx-fg-3); }

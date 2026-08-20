@@ -15,7 +15,13 @@ import type { Msg } from "../providers/client";
 
 /* ────────────────────────────── primitives ────────────────────────────── */
 
-export type Phase = "plan" | "act";
+// Re-exported, not redeclared. The phase decides which tools may run, so the
+// agent layer owns the definition and the wire contract follows it; two
+// hand-kept copies would let a fourth phase reach the UI without a tool policy.
+// Imported as well as re-exported because a bare `export ... from` re-exports
+// the name without binding it locally, and the messages below use it.
+import type { Phase } from "../agent/loop";
+export type { Phase };
 export type Surface = "sidebar" | "cc";
 
 export type CcSection =

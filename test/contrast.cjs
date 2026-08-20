@@ -67,7 +67,7 @@ for (const [name, min] of [["kx-fg", 4.5], ["kx-fg-2", 4.5], ["kx-fg-3", 4.5], [
 /* Every semantic hue is used as text somewhere: a failing rung, a warning,
    a link, a connected server, a token in a code block. */
 console.log("\n──── palette as text ────");
-for (const name of ["kx-accent", "kx-error", "kx-warn", "kx-link", "kx-mcp", "kx-info", "kx-active"]) {
+for (const name of ["kx-accent", "kx-error", "kx-warn", "kx-link", "kx-mcp", "kx-info", "kx-active", "kx-ask"]) {
   const onBg = ratio(token(name), BG);
   const onSurf = ratio(token(name), SURF);
   const worst = Math.min(onBg, onSurf);

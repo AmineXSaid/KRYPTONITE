@@ -11,7 +11,7 @@ import {
 import { clearAuthCache, authCacheReport } from "../endpoints/auth";
 import { clearSecureContexts } from "../endpoints/transport";
 import { EndpointClient } from "../providers/client";
-import { systemPromptFor } from "../agent/loop";
+import { systemPromptFor, PHASES } from "../agent/loop";
 import { loadSkills, Skill, skillIndex } from "../skills/loader";
 import { McpRegistry, mcpConfigPath } from "../mcp/registry";
 import { ShadowRepo } from "../checkpoint/shadow";
@@ -94,7 +94,9 @@ const MCP_CONFIG_TEMPLATE = `{
     "env, cwd, url and headers - so a token never has to be written into this",
     "file, which lives in the workspace and usually gets committed.",
     "",
-    "Tools reach the model as mcp__<server>__<tool>, and are withheld in Plan mode."
+    "Tools reach the model as mcp__<server>__<tool>. They are withheld entirely in",
+    "Ask and Plan mode - neither promises the model can only look, and MCP has",
+    "no way to declare a tool read-only, so there is nothing to check."
   ],
   "mcpServers": {
     "filesystem": {
@@ -1065,7 +1067,12 @@ export class App {
         return;
 
       case "setPhase":
-        this.phase = msg.phase;
+        // Normalised rather than trusted. `phase` selects the tool policy, and
+        // a value outside the three would land in `toolAllowedIn`'s non-act
+        // branch - restrictive, so not dangerous, but it would leave the host
+        // in a phase the UI cannot name or light up, and no message can clear
+        // it. Echoing the corrected value back is what puts the two in step.
+        this.phase = PHASES.includes(msg.phase) ? msg.phase : "act";
         this.broadcast({ type: "phaseChanged", phase: this.phase });
         this.updateStatus();
         return;

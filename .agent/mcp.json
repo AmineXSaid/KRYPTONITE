@@ -29,16 +29,33 @@
     "file, which lives in the workspace and usually gets committed.",
     "",
     "Tools reach the model as mcp__<server>__<tool>. They are withheld entirely in",
-    "Plan mode, because MCP has no way to declare a tool read-only.",
+    "Ask and Plan mode - neither promises the model can only look, and MCP has",
+    "no way to declare a tool read-only, so there is nothing to check.",
     "",
-    "The filesystem server below is live. It exposes read/write tools scoped to",
-    "the directory named in args - the workspace root here, and nothing above it.",
-    "approval is 'ask', so every call still stops for you first."
+    "Both servers below are live, and both are verified for real by",
+    "test/mcp-live.ts - not parsed, actually spawned, and actually called.",
+    "",
+    "filesystem exposes read/write tools scoped to the directory named in args -",
+    "the workspace root here, and nothing above it. approval is 'ask', so every",
+    "call still stops for you first.",
+    "",
+    "memory is a second shape on purpose: a local knowledge graph rather than",
+    "another filesystem reader, so it demonstrates a stateful tool - create an",
+    "entity, search for it later. It keeps its graph in its own process, next to",
+    "the installed package, not inside this workspace; set the MEMORY_FILE_PATH",
+    "env var here if you want it to persist somewhere specific instead."
   ],
   "mcpServers": {
     "filesystem": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+      "approval": "ask",
+      "timeoutMs": 120000,
+      "enabled": true
+    },
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"],
       "approval": "ask",
       "timeoutMs": 120000,
       "enabled": true

@@ -2,7 +2,7 @@
   "name": "kryptonite",
   "displayName": "KRYPTONITE",
   "description": "A coding agent for endpoints that don't behave. mTLS, corporate CAs, token exchange, air-gapped.",
-  "version": "0.5.4",
+  "version": "0.6.0",
   "publisher": "MohamedAmineSaid",
   "license": "MIT",
   "icon": "media/logo.png",
@@ -146,7 +146,7 @@
     "pretest": "npm run build && npm run test:bundle",
     "test": "node test/contrast.cjs && node test/markdown-render.cjs && node test/mcp-render.cjs && node test/browser-ui.cjs && node test/drive.js && node test/host.js && node dist/activation.cjs && node dist/send-path.cjs && node dist/skill-bounds.cjs && node dist/text-tool-protocol.cjs && node dist/tools.cjs && node dist/mcp-transport.cjs && node dist/image-endpoint.cjs && node dist/mcp-live.cjs && node dist/capabilities.cjs && node dist/browser.cjs && node dist/cdp.cjs",
     "test:live": "esbuild test/attachment-e2e.ts test/skill-gating-live.ts --bundle --outdir=dist --out-extension:.js=.cjs --format=cjs --platform=node --target=node20 && node dist/attachment-e2e.cjs && node dist/skill-gating-live.cjs",
-    "test:mcp": "npm install --no-save @modelcontextprotocol/server-filesystem && esbuild test/mcp-e2e.ts --bundle --outdir=dist --out-extension:.js=.cjs --format=cjs --platform=node --target=node20 && node dist/mcp-e2e.cjs",
+    "test:mcp": "npm install --no-save @modelcontextprotocol/server-filesystem @modelcontextprotocol/server-memory && esbuild test/mcp-e2e.ts --bundle --outdir=dist --out-extension:.js=.cjs --format=cjs --platform=node --target=node20 && node dist/mcp-e2e.cjs",
     "verify": "npm run typecheck && npm test",
     "vscode:prepublish": "npm run build",
     "package": "vsce package --no-dependencies"
@@ -157,6 +157,7 @@
   },
   "devDependencies": {
     "@modelcontextprotocol/server-filesystem": "^2026.7.10",
+    "@modelcontextprotocol/server-memory": "^2026.7.4",
     "@types/node": "^20.14.0",
     "@types/vscode": "^1.90.0",
     "@vscode/vsce": "^2.32.0",
