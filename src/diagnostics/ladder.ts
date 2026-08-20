@@ -64,6 +64,33 @@ async function timed<T>(fn: () => Promise<T>): Promise<[T | undefined, any, numb
   }
 }
 
+/**
+ * Reject if `fn` has not settled within `ms`.
+ *
+ * Every rung on this ladder has to end, because a rung that never returns ends
+ * the whole walk: no later rung runs, no further rung is emitted, and the panel
+ * driving it sits on a spinner with no way to tell a slow step from a dead one.
+ * The two steps below reach code with no deadline of its own - `getaddrinfo`,
+ * which a stale VPN resolver can leave hanging, and a token exchange against
+ * whatever host the auth block names - so both are raced here.
+ *
+ * The work is not cancelled, only stopped being waited on. Both are reads, so
+ * an abandoned one costs nothing beyond its own socket.
+ */
+function deadline<T>(fn: () => Promise<T>, ms: number, what: string): () => Promise<T> {
+  return () =>
+    new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error(`TIMEOUT - ${what} did not answer within ${Math.round(ms / 1000)}s`)),
+        ms
+      );
+      fn().then(
+        (v) => (clearTimeout(timer), resolve(v)),
+        (e) => (clearTimeout(timer), reject(e))
+      );
+    });
+}
+
 export async function runLadder(
   profile: EndpointProfile,
   workspaceRoot: string,
@@ -121,12 +148,14 @@ export async function runLadder(
 
   // 2. DNS
   {
-    const [addrs, err, ms] = await timed(() => dns.lookup(url.hostname, { all: true }));
+    const [addrs, err, ms] = await timed(
+      deadline(() => dns.lookup(url.hostname, { all: true }), 10_000, "the system resolver")
+    );
     if (err) {
       push({
         name: "DNS",
         status: "fail",
-        detail: `${url.hostname} did not resolve (${(err as any).code}).`,
+        detail: `${url.hostname} did not resolve (${(err as any).code ?? (err as Error).message}).`,
         fix: "Check your VPN, or add a hosts entry if this is an internal name.",
         ms,
       });
@@ -249,7 +278,9 @@ export async function runLadder(
   // 5. Auth
   const transport = buildTransport(profile);
   {
-    const [auth, err, ms] = await timed(() => applyAuth(profile, transport.dispatcher, secrets));
+    const [auth, err, ms] = await timed(
+      deadline(() => applyAuth(profile, transport.dispatcher, secrets), 20_000, "the credential")
+    );
     if (err) {
       push({
         name: "Authentication",

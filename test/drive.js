@@ -1325,6 +1325,102 @@ const AGENTS = [
   ok("AG and shows it", d.getElementById("agentCount").hidden === false);
 }
 
+/* ── the endpoint form's connection check ───────────────────────────────
+ *
+ * The form has two states, checking and checked, and only a message from the
+ * host moves it between them. Everything below is about the second one
+ * arriving: a check that starts and never ends looks, on screen, exactly like
+ * a gateway that accepted the request and went quiet, and sends the user to
+ * debug a network that is fine.
+ */
+function epForm(over = {}) {
+  const h = boot();
+  h.inbound(STATE(over));
+  h.d.getElementById("tabDiag").click();
+  h.d.querySelector('[data-ep="add"]').click();
+  const set = (id, v) => { const el = h.d.getElementById(id); if (el) el.value = v; };
+  set("fId", "gw");
+  set("fUrl", "https://gpt.example.net/api/v1");
+  set("fModel", "deep-thinking");
+  set("fKey", "sk-secret");
+  h.sent.length = 0;
+  return h;
+}
+const checking = (d) => /Checking/.test((d.querySelector(".ep-check") || { textContent: "" }).textContent);
+
+{
+  const { d, sent, inbound } = epForm();
+  d.querySelector('[data-ep="check"]').click();
+  const msg = sent.find((m) => m.type === "checkEndpoint");
+  ok("EP check sends the typed form", !!msg && msg.endpoint.url === "https://gpt.example.net/api/v1");
+  ok("EP and the key it was given", !!msg && msg.endpoint.apiKey === "sk-secret");
+  ok("EP the panel shows it is checking", checking(d));
+
+  inbound({ type: "endpointCheckStarted", id: "gw" });
+  inbound({ type: "endpointCheckRung", id: "gw",
+    rung: { name: "DNS", status: "pass", detail: "gpt.example.net resolves to 10.0.0.1.", ms: 4 } });
+  ok("EP rungs render as they stream", /10\.0\.0\.1/.test(d.querySelector(".ep-check").textContent));
+  ok("EP and the pending row stays until it is done", checking(d));
+  ok("EP a streaming rung does not wipe the typed URL",
+    d.getElementById("fUrl").value === "https://gpt.example.net/api/v1");
+
+  inbound({ type: "endpointCheckDone", id: "gw", ok: true, summary: "Ready to go - it answered.",
+    rungs: [{ name: "DNS", status: "pass", detail: "ok", ms: 4 }] });
+  ok("EP the verdict ends the check", !checking(d));
+  ok("EP and is shown", /Ready to go/.test(d.querySelector(".ep-check-banner").textContent));
+}
+
+{
+  // The regression this section exists for. Every throw on the host is
+  // reported as a plain `error`, which is delivered to the transcript - on the
+  // chat tab, which is not where the person watching this spinner is looking.
+  // The check it answers has to end too.
+  const { d, inbound } = epForm();
+  d.querySelector('[data-ep="check"]').click();
+  ok("EP a pending check spins", checking(d));
+  inbound({ type: "error", message: "Open a folder first." });
+  ok("EP a host error ends it", !checking(d));
+  ok("EP saying what the host said", /Open a folder first/.test(d.querySelector(".ep-check").textContent));
+  ok("EP and the button is usable again",
+    /Check connection/.test(d.querySelector('[data-ep="check"]').textContent));
+}
+
+{
+  // An error belonging to something else must not steal a walk in progress.
+  const { d, inbound } = epForm();
+  d.querySelector('[data-ep="check"]').click();
+  inbound({ type: "endpointCheckStarted", id: "gw" });
+  inbound({ type: "error", message: "Some unrelated failure." });
+  ok("EP an error after the walk started does not end it", checking(d));
+}
+
+{
+  // Nothing at all comes back: the host is wedged, or the channel is gone.
+  // The frontend has to give up on its own rather than spin forever.
+  const h = boot();
+  const armed = [];
+  const realSetTimeout = h.w.setTimeout;
+  h.w.setTimeout = (fn, ms) => { armed.push({ fn, ms }); return realSetTimeout(() => {}, 0); };
+  h.inbound(STATE());
+  h.d.getElementById("tabDiag").click();
+  h.d.querySelector('[data-ep="add"]').click();
+  h.d.getElementById("fId").value = "gw";
+  h.d.getElementById("fUrl").value = "https://gpt.example.net/api/v1";
+  h.d.getElementById("fModel").value = "m";
+  h.d.getElementById("fKey").value = "k";
+  h.d.querySelector('[data-ep="check"]').click();
+
+  const watchdog = armed.find((a) => a.ms >= 5000);
+  ok("EP a check arms a watchdog", !!watchdog);
+  ok("EP that waits seconds, not minutes, for the host to pick it up",
+    !!watchdog && watchdog.ms <= 30000);
+  watchdog.fn();
+  ok("EP silence ends the check", !checking(h.d));
+  ok("EP and says it was the host that did not answer",
+    /extension host/.test(h.d.querySelector(".ep-check").textContent));
+  h.w.setTimeout = realSetTimeout;
+}
+
 // The clipboard block is async because FileReader is; everything else has
 // already run by the time this executes.
 pasteTests

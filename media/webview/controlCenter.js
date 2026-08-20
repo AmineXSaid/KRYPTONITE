@@ -835,6 +835,39 @@ function _run() {
     return out + "</div>";
   }
 
+  /* ── watchdogs over the endpoint form ──────────────────────────────────
+   *
+   * The spinner is taken down by a message from the host and nothing else, so
+   * a reply that never comes leaves this form claiming the gateway went quiet
+   * when it was the host that did. See the sidebar copy for the reasoning; the
+   * two windows are the same here, because they are the same host.
+   */
+  var EP_PICKUP_MS = 12000;
+  var EP_WALK_MS = 260000;
+  var epTimer = null;
+
+  function epWatch(ms, why) {
+    clearTimeout(epTimer);
+    epTimer = setTimeout(function () { epGaveUp(why); }, ms);
+  }
+
+  function epWatchOff() {
+    clearTimeout(epTimer);
+    epTimer = null;
+  }
+
+  /** End the check on the frontend's own authority, saying so plainly. */
+  function epGaveUp(summary) {
+    epWatchOff();
+    if (!S.epCheck || !S.epCheck.running) return;
+    readEpForm();
+    S.epCheck.running = false;
+    S.epCheck.done = true;
+    S.epCheck.ok = false;
+    S.epCheck.summary = summary;
+    render();
+  }
+
   /** Snapshot the inputs before any re-render, so streaming rungs don't wipe them. */
   function readEpForm() {
     if (!S.epForm || !$("fId")) return S.epForm;
@@ -1575,17 +1608,23 @@ function _run() {
   function onEndpointAction(action, id) {
     if (action === "yaml") { post("openYaml", { profile: id }); return; }
     if (action === "del") { post("deleteEndpoint", { id: id }); return; }
-    if (action === "cancel") { S.epForm = null; S.epCheck = null; render(); return; }
+    if (action === "cancel") { epWatchOff(); S.epForm = null; S.epCheck = null; render(); return; }
     if (action === "check") {
       var draft = readEpForm();
       if (!draft) return;
-      S.epCheck = { id: draft.id || "draft", running: true, done: false, ok: false, summary: "", rungs: [] };
+      S.epCheck = {
+        id: draft.id || "draft", running: true, done: false, ok: false,
+        summary: "", rungs: [], started: false
+      };
       render();
+      epWatch(EP_PICKUP_MS, "The extension host did not pick the check up. " +
+        "Open the folder you keep .agent/ in, then check again - and see the log for the reason.");
       post("checkEndpoint", { endpoint: epPayload(draft) });
       return;
     }
     if (action === "save") {
       var form = epPayload(readEpForm());
+      epWatchOff();
       S.epForm = null;
       S.epCheck = null;
       render();
@@ -1728,18 +1767,27 @@ function _run() {
 
       case "endpointCheckStarted":
         readEpForm();
-        S.epCheck = { id: m.id, running: true, done: false, ok: false, summary: "", rungs: [] };
+        S.epCheck = {
+          id: m.id, running: true, done: false, ok: false,
+          summary: "", rungs: [], started: true
+        };
+        // Taken up, so the question is no longer whether the host is there.
+        epWatch(EP_WALK_MS, "The check did not finish. Every step it runs is " +
+          "bounded, so this is the extension host having stopped answering rather " +
+          "than a slow gateway. Reload the window and check again.");
         render();
         break;
 
       case "endpointCheckRung":
         if (!S.epCheck) break;
         readEpForm();
+        S.epCheck.started = true;
         S.epCheck.rungs = S.epCheck.rungs.concat([m.rung]);
         render();
         break;
 
       case "endpointCheckDone":
+        epWatchOff();
         readEpForm();
         S.epCheck = {
           id: m.id, running: false, done: true,
@@ -1792,6 +1840,10 @@ function _run() {
 
       case "error":
         S.logs.push({ t: Date.now(), level: "error", msg: m.message });
+        // A check waiting for a reply it will never get: this error is that
+        // reply, and the log section is not where the person watching the
+        // spinner is looking.
+        if (S.epCheck && S.epCheck.running && !S.epCheck.started) { epGaveUp(m.message); break; }
         if (S.section === "logs") render();
         else renderStrip();
         break;

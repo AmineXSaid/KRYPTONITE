@@ -33,6 +33,31 @@
   they were meant to be read.
 - Agents are no longer listed in Diagnostics. One home, not two.
 
+### Fixed
+- **"Check connection" could spin forever and never say why.** The endpoint form
+  has two states, checking and checked, and only a message from the host moves
+  it between them - so every path out of the host that did not send one left the
+  form on `Checking…` with no rungs and no reason, which on screen is
+  indistinguishable from a gateway that accepted the request and went quiet. The
+  most reachable of those paths was the check demanding an open workspace: with
+  no folder open, `requireRoot()` threw before the first rung, and the throw was
+  reported as a plain `error` - delivered to the transcript, on the chat tab,
+  where nobody watching the spinner would find it. A draft check reads no file
+  and writes none, so it no longer asks for a folder at all.
+  The rest is belt and braces, because the reasons a host stops answering are
+  not all knowable from inside it: `endpointCheckStarted` is now sent before any
+  work that can throw, the whole check is guarded so a throw ends as a failed
+  rung rather than a lost reply, and the two ladder steps that had no deadline
+  of their own - `getaddrinfo`, which a stale VPN resolver can leave hanging,
+  and the credential exchange - are bounded like the rest. A walk that stalls
+  anyway is ended by an overall budget that names the step which stopped
+  answering. The panel keeps its own watchdogs on top of that: a check nothing
+  answers within seconds is reported as the host not picking it up, and a plain
+  `error` arriving in place of a check now ends that check where it is being
+  watched. The same guarantee covers `Load` next to the model field, which could
+  stick in the same way. `test/endpoint-check.ts` holds a gateway open and says
+  nothing on it, which is the case that used to hang.
+
 ## 0.8.0
 
 The editor surface. Kryptonite had one place to work, a panel, and everything
@@ -206,7 +231,6 @@ agent is doing to the workspace while it does it.
   the meter still turns amber then coral, and the dot still turns red on a TLS
   failure.
 
-### Fixed
 - **A message steered mid-turn kept its text and lost its files.** The steering
   path built `{ role: "user", content: text }` by hand while the normal send
   path composed images into content blocks and inlined text files as fenced

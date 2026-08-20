@@ -265,7 +265,9 @@ export async function checkEndpoint(
   form: EndpointForm,
   apiKey: string,
   workspaceRoot: string,
-  emit: (r: Rung) => void
+  emit: (r: Rung) => void,
+  /** Overall deadline. Derived from the profile when omitted; set by tests. */
+  budgetMs?: number
 ): Promise<CheckOutcome> {
   const invalid = validateForm(form, apiKey);
   if (invalid) {
@@ -278,8 +280,86 @@ export async function checkEndpoint(
   // In-memory only: the key is resolvable for this call and nowhere else.
   const secrets = (k: string) => (k === wanted ? apiKey : undefined);
 
-  const rungs = await runLadder(profile, workspaceRoot, secrets, emit);
+  // Every rung is bounded, so in principle the walk always ends. This is the
+  // guarantee that it does anyway. The panel has no state between "checking"
+  // and "checked", so one step that never settles - a socket a middlebox holds
+  // open, a stream that dribbles a byte often enough to keep resetting the
+  // body timeout - costs the user the whole answer rather than one rung, and
+  // reads on screen exactly like an endpoint that accepted the request and
+  // went quiet. Reporting the step that hung says more than any of the rungs
+  // that passed before it.
+  const seen: Rung[] = [];
+  const collect = (r: Rung) => {
+    seen.push(r);
+    emit(r);
+  };
+
+  const budget = budgetMs ?? checkBudgetMs(profile);
+  let expire: NodeJS.Timeout | undefined;
+  const rungs = await Promise.race([
+    runLadder(profile, workspaceRoot, secrets, collect),
+    new Promise<Rung[]>((resolve) => {
+      expire = setTimeout(() => {
+        const stuck = ladderOrder(profile).find((n) => !seen.some((r) => r.name === n)) ?? "The check";
+        const rung: Rung = {
+          name: stuck,
+          status: "fail",
+          detail:
+            `TIMEOUT - ${stuck.toLowerCase()} did not finish, and the check gave up after ` +
+            `${Math.round(budget / 1000)}s.`,
+          fix:
+            "Everything before this step worked, so the endpoint is reachable and it is this step " +
+            "that is hanging rather than failing. A gateway behind an inspection proxy is the usual " +
+            "cause. Raise the timeout if it is merely slow, and check again.",
+          ms: budget,
+        };
+        collect(rung);
+        resolve(seen);
+      }, budget);
+    }),
+  ]).finally(() => clearTimeout(expire));
+
   return summarise(rungs, profile);
+}
+
+/**
+ * The rungs `runLadder` will emit for this profile, in order.
+ *
+ * Used to name the step that stopped answering, as the first one that never
+ * arrived. That only holds for rungs the walk was going to emit at all: the
+ * TLS rung is emitted-and-skipped when a proxy is in the way, but over plain
+ * http it is not reached, so leaving it in the list would pin every http
+ * timeout on a handshake that was never attempted.
+ */
+function ladderOrder(profile: EndpointProfile): string[] {
+  const https = /^https:/i.test(profile.baseUrl);
+  return [
+    "Certificates and keys",
+    "DNS",
+    "TCP",
+    ...(https ? ["TLS handshake"] : []),
+    "Authentication",
+    "Completion",
+    "Streaming",
+    "Tool calling",
+  ];
+}
+
+/**
+ * How long the whole walk may take before it is called a hang.
+ *
+ * Generous on purpose: this is the backstop for a step that has stopped
+ * answering, not a second opinion on the per-rung budgets, and cutting off a
+ * check that was about to pass would be its own bug. The fixed part covers the
+ * prelude, whose steps are bounded here at 10s (DNS), 10s (TCP), 15s (TLS),
+ * 20s (auth) and 20s + 20s (completion, then the streaming retry). The two
+ * probes after it are bounded by the profile's own timeout, so they scale with
+ * it - up to a point, because a 10-minute profile timeout is a statement about
+ * a long generation, not about how long a four-token probe may take.
+ */
+export function checkBudgetMs(profile: EndpointProfile): number {
+  const perProbe = Math.min(profile.timeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS, 60_000);
+  return 95_000 + 2 * perProbe;
 }
 
 /**

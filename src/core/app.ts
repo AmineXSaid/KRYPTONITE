@@ -210,6 +210,28 @@ const UI_DEFAULTS: UiConfigDto = {
   // whereas steering re-sends the conversation to change its course.
   inputWhileRunning: "queue",
 };
+/**
+ * How long to wait on VS Code's credential store before giving up on it.
+ *
+ * SecretStorage is normally instant, but it fronts an OS keychain: a locked
+ * login keyring, or a Linux desktop running without one at all, can leave the
+ * promise pending rather than rejecting. Nothing here is worth blocking a
+ * connection check on, so the read is raced and an unanswered store is read as
+ * "no stored key".
+ */
+const SECRET_READ_MS = 3_000;
+
+/** Resolve `p`, or `undefined` if it has not settled within `ms`. */
+function withDeadline<T>(p: Thenable<T>, ms: number): Promise<T | undefined> {
+  return new Promise<T | undefined>((resolve, reject) => {
+    const timer = setTimeout(() => resolve(undefined), ms);
+    Promise.resolve(p).then(
+      (v) => (clearTimeout(timer), resolve(v)),
+      (e) => (clearTimeout(timer), reject(e))
+    );
+  });
+}
+
 const LOG_RING = 200;
 const REAL_CONFIG_KEYS = new Set([
   "profileDirectory",
@@ -1437,19 +1459,35 @@ export class App {
    * typed, otherwise from SecretStorage - so listing works both while editing
    * an existing endpoint and while creating one.
    */
+  /**
+   * Ask the gateway for its model ids on behalf of the unsaved form.
+   *
+   * Like the check above, the button that starts this is only released by the
+   * reply, so every path has to end in a `modelsListed` - including the ones
+   * that throw before a socket is opened.
+   */
   private async listModelsFor(form: EndpointForm, source: Surface): Promise<void> {
     const id = form.id || "draft";
-    let apiKey = form.apiKey?.trim() ?? "";
-    if (!apiKey) {
-      apiKey = (await this.context.secrets.get(`kryptonite.${secretKeyFor(id)}`)) ?? "";
+    try {
+      let apiKey = form.apiKey?.trim() ?? "";
+      if (!apiKey) {
+        apiKey = (await withDeadline(
+          this.context.secrets.get(`kryptonite.${secretKeyFor(id)}`),
+          SECRET_READ_MS
+        ).catch(() => undefined)) ?? "";
+      }
+      const profile = draftProfile(form);
+      const { models, listed, error } = await listModels(profile, (k) =>
+        k === secretKeyFor(id) ? apiKey : this.secrets(k)
+      );
+      if (error) this.log("warn", `Could not list models for ${id}: ${error}`);
+      else this.log("info", `${form.url}: ${models.length} of ${listed} listed model(s) answered.`);
+      this.postTo(source, { type: "modelsListed", models, listed, error });
+    } catch (e: any) {
+      const error = String(e?.message ?? e);
+      this.log("error", `Listing models for ${id} threw: ${error}`);
+      this.postTo(source, { type: "modelsListed", models: [], listed: 0, error });
     }
-    const profile = draftProfile(form);
-    const { models, listed, error } = await listModels(profile, (k) =>
-      k === secretKeyFor(id) ? apiKey : this.secrets(k)
-    );
-    if (error) this.log("warn", `Could not list models for ${id}: ${error}`);
-    else this.log("info", `${form.url}: ${models.length} of ${listed} listed model(s) answered.`);
-    this.postTo(source, { type: "modelsListed", models, listed, error });
   }
 
   /**
@@ -1532,40 +1570,61 @@ export class App {
     );
   }
 
+  /**
+   * Run the pre-save connection check for an unsaved endpoint form.
+   *
+   * The contract with the panel is that every check ends. The spinner it puts
+   * up on click is only taken down by `endpointCheckDone`, so any path out of
+   * this method that does not send one leaves the form stuck on "Checking…"
+   * with no rungs and no reason - which is indistinguishable, on screen, from a
+   * gateway that accepted the request and never replied. `handleMessage` posting
+   * an `error` does not help: that lands in the transcript, on the other tab.
+   *
+   * So `started` goes out before anything that can throw or await, the whole
+   * body is guarded, and `done` is sent exactly once through a local helper.
+   */
   private async checkEndpoint(form: EndpointForm, source: Surface): Promise<void> {
     const id = form.id || "draft";
-    const root = this.requireRoot();
-
-    let apiKey = form.apiKey?.trim() ?? "";
-    if (!apiKey) {
-      apiKey = (await this.context.secrets.get(`kryptonite.${secretKeyFor(id)}`)) ?? "";
-    }
 
     this.postTo(source, { type: "endpointCheckStarted", id });
     this.log("info", `Checking connection to ${form.url || "(no URL)"} as ${id}…`);
 
+    let answered = false;
+    const done = (rungs: RungDto[], ok: boolean, summary: string) => {
+      if (answered) return;
+      answered = true;
+      this.postTo(source, { type: "endpointCheckDone", id, rungs, ok, summary });
+      this.log(ok ? "info" : "warn", `Connection check for ${id}: ${summary}`);
+    };
+
     try {
+      let apiKey = form.apiKey?.trim() ?? "";
+      if (!apiKey) {
+        // A credential store that is missing or locked rejects here, and on
+        // some Linux desktops without a keyring it can hang. Neither is a
+        // reason to lose the check: an absent key is a normal answer, and the
+        // Profile rung says so far better than a dead spinner.
+        apiKey = (await withDeadline(
+          this.context.secrets.get(`kryptonite.${secretKeyFor(id)}`),
+          SECRET_READ_MS
+        ).catch(() => undefined)) ?? "";
+      }
+
+      // A draft check needs no workspace. It reads no file and writes none:
+      // the root reaches `EndpointClient` only to resolve `profile.transform`,
+      // which a draft profile never has. Requiring one here used to throw
+      // "Open a folder first." before the ladder had emitted a single rung.
+      const root = this.root ?? "";
+
       const { rungs, ok, summary } = await runEndpointCheck(form, apiKey, root, (rung) =>
         this.postTo(source, { type: "endpointCheckRung", id, rung })
       );
-      this.postTo(source, { type: "endpointCheckDone", id, rungs, ok, summary });
-      this.log(ok ? "info" : "warn", `Connection check for ${id}: ${summary}`);
+      done(rungs, ok, summary);
     } catch (e: any) {
       // An unexpected throw is still a check result, not a dead panel.
-      const rung = {
-        name: "Profile",
-        status: "fail" as const,
-        detail: String(e?.message ?? e),
-        ms: 0,
-      };
-      this.postTo(source, {
-        type: "endpointCheckDone",
-        id,
-        rungs: [rung],
-        ok: false,
-        summary: rung.detail,
-      });
-      this.log("error", `Connection check for ${id} threw: ${rung.detail}`);
+      const detail = String(e?.message ?? e);
+      done([{ name: "Profile", status: "fail", detail, ms: 0 }], false, detail);
+      this.log("error", `Connection check for ${id} threw: ${detail}`);
     }
   }
 

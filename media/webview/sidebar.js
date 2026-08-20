@@ -3229,6 +3229,68 @@ function _sbRun() {
     return S.epForm;
   }
 
+  /* ── watchdogs over the endpoint form ──────────────────────────────────
+   *
+   * The spinner this form puts up on click is taken down by a message from
+   * the host, and nothing else. That is fine while the host answers, and a
+   * dead end when it does not: the panel has no state between "checking" and
+   * "checked", so a reply that never comes reads as an endpoint that accepted
+   * the request and went quiet, which is a lie about the user's gateway.
+   *
+   * The host now guarantees a reply on every path it can see, so these two
+   * timers only fire when it cannot see the path at all - it is wedged, the
+   * webview lost its channel, or the failure arrived as a plain `error`, which
+   * is delivered to the transcript on the other tab where nobody looking at
+   * this form will find it.
+   *
+   * Two windows rather than one, because the two silences mean different
+   * things. Nothing at all within a few seconds means the request was never
+   * picked up: `endpointCheckStarted` is sent before the host does any work,
+   * so its absence is not slowness. Once rungs are arriving the walk is real,
+   * and it is allowed the host's own budget - which scales with the profile
+   * timeout - before it is called a hang.
+   */
+  var EP_PICKUP_MS = 12000;
+  var EP_WALK_MS = 260000;
+  var epTimer = null;
+
+  function epWatch(ms, why) {
+    clearTimeout(epTimer);
+    epTimer = setTimeout(function () { epGaveUp(why); }, ms);
+  }
+
+  function epWatchOff() {
+    clearTimeout(epTimer);
+    epTimer = null;
+  }
+
+  /** End the check on the frontend's own authority, saying so plainly. */
+  function epGaveUp(summary) {
+    epWatchOff();
+    if (!S.epCheck || !S.epCheck.running) return;
+    readEpForm();
+    S.epCheck.running = false;
+    S.epCheck.done = true;
+    S.epCheck.ok = false;
+    S.epCheck.summary = summary;
+    renderEndpoints();
+  }
+
+  var MODELS_PICKUP_MS = 90000;
+  var modelsTimer = null;
+
+  /** Release the Load button when the model list never comes back. */
+  function modelsGaveUp() {
+    var lb = document.querySelector('[data-ep="models"]');
+    if (lb) lb.removeAttribute("data-busy");
+    var mh = $("fModelHint");
+    if (mh) {
+      mh.textContent =
+        "The extension host did not answer. Type the model id instead, and see View log for why.";
+      mh.setAttribute("data-err", "1");
+    }
+  }
+
   /**
    * The connection-check panel inside the endpoint form.
    *
@@ -4097,6 +4159,7 @@ function _sbRun() {
       S.epCheck = null;
       renderEndpoints();
     } else if (a === "cancel") {
+      epWatchOff();
       S.epForm = null;
       S.epCheck = null;
       renderEndpoints();
@@ -4136,15 +4199,23 @@ function _sbRun() {
         hint.removeAttribute("data-err");
       }
       if (b) b.setAttribute("data-busy", "1");
+      clearTimeout(modelsTimer);
+      modelsTimer = setTimeout(modelsGaveUp, MODELS_PICKUP_MS);
       post("listModels", { endpoint: epPayload(mDraft) });
     } else if (a === "check") {
       var draft = readEpForm();
       if (!draft) return;
-      S.epCheck = { id: draft.id || "draft", running: true, done: false, ok: false, summary: "", rungs: [] };
+      S.epCheck = {
+        id: draft.id || "draft", running: true, done: false, ok: false,
+        summary: "", rungs: [], started: false
+      };
       renderEndpoints();
+      epWatch(EP_PICKUP_MS, "The extension host did not pick the check up. " +
+        "Open the folder you keep .agent/ in, then check again - and see View log for the reason.");
       post("checkEndpoint", { endpoint: epPayload(draft) });
     } else if (a === "save") {
       var form = epPayload(readEpForm());
+      epWatchOff();
       S.epForm = null;
       S.epCheck = null;
       renderEndpoints();
@@ -4277,6 +4348,11 @@ function _sbRun() {
         break;
 
       case "error":
+        // A throw on the host is reported as a plain error, and the check that
+        // provoked it is left with no reply of its own. When one is waiting and
+        // has not been picked up, this error *is* its answer: showing it only
+        // in the transcript would leave the form spinning on the other tab.
+        if (S.epCheck && S.epCheck.running && !S.epCheck.started) epGaveUp(m.message);
         addError(m.message);
         break;
 
@@ -4318,13 +4394,21 @@ function _sbRun() {
 
       case "endpointCheckStarted":
         readEpForm();
-        S.epCheck = { id: m.id, running: true, done: false, ok: false, summary: "", rungs: [] };
+        S.epCheck = {
+          id: m.id, running: true, done: false, ok: false,
+          summary: "", rungs: [], started: true
+        };
+        // Taken up, so the question is no longer whether the host is there.
+        epWatch(EP_WALK_MS, "The check did not finish. Every step it runs is " +
+          "bounded, so this is the extension host having stopped answering rather " +
+          "than a slow gateway. Reload the window and check again.");
         renderEndpoints();
         break;
 
       case "endpointCheckRung":
         if (!S.epCheck) break;
         readEpForm();
+        S.epCheck.started = true;
         S.epCheck.rungs = S.epCheck.rungs.concat([m.rung]);
         renderEndpoints();
         break;
@@ -4356,6 +4440,7 @@ function _sbRun() {
         break;
 
       case "modelsListed": {
+        clearTimeout(modelsTimer);
         var dl = $("fModelList");
         var mh = $("fModelHint");
         var lb = document.querySelector('[data-ep="models"]');
@@ -4392,6 +4477,7 @@ function _sbRun() {
       }
 
       case "endpointCheckDone":
+        epWatchOff();
         readEpForm();
         S.epCheck = {
           id: m.id, running: false, done: true,
