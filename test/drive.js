@@ -1230,8 +1230,22 @@ const AGENTS = [
   ok("AG nothing is drawn while no agent is selected",
     d.getElementById("agentBar").hidden === true);
 
-  // The Diagnostics tab lists them with the scope they enforce.
-  d.getElementById("tabDiag").click();
+  // Agents have a tab of their own now, after MCP. It was a collapsed section
+  // inside Diagnostics, which is where a thing goes to be inspected rather than
+  // used, and an agent is chosen before a turn rather than diagnosed after one.
+  const tabIds = [...d.querySelectorAll(".kx-tabs .kx-tab")].map((t) => t.id);
+  ok("AG the tab sits after MCP and before Diagnostics",
+    tabIds.join(",") === "tabSession,tabMcp,tabAgents,tabDiag", tabIds.join(","));
+  d.getElementById("tabAgents").click();
+  ok("AG clicking it opens the panel", d.getElementById("viewAgents").hidden === false);
+  ok("AG and closes every other panel",
+    d.getElementById("viewSession").hidden && d.getElementById("viewMcp").hidden &&
+    d.getElementById("viewDiag").hidden);
+  ok("AG the tab announces itself as selected",
+    d.getElementById("tabAgents").getAttribute("aria-selected") === "true");
+  ok("AG and Diagnostics no longer carries a second copy", !d.getElementById("secAg"));
+  ok("AG the header offers New agent with the list still empty of rows",
+    !!d.querySelector(".ag-top [data-ag=\"new\"]"));
   const rows = d.querySelectorAll(".ag-row");
   ok("AG both agents are listed", rows.length === 2);
   ok("AG the badge counts them", d.getElementById("agBadge").textContent === "2");
@@ -1298,12 +1312,17 @@ const AGENTS = [
   // Warnings from a malformed agent file have to reach the user.
   const { d, inbound } = boot();
   inbound(STATE({ agents: [], agentWarnings: ["broken: frontmatter is not valid YAML"] }));
-  d.getElementById("tabDiag").click();
-  ok("AG with no agents the section explains what one is",
+  d.getElementById("tabAgents").click();
+  ok("AG with no agents the panel explains what one is",
     /persona/.test(d.getElementById("agBody").textContent));
   ok("AG and offers to make one", !!d.querySelector('[data-ag="new"]'));
   ok("AG a malformed file is reported", /not valid YAML/.test(d.getElementById("agBody").textContent));
   ok("AG and the badge flags it", d.getElementById("agBadge").className.indexOf("alert") >= 0);
+  // The number on the tab is warnings, not agents: a count of how many exist is
+  // not news, a file that failed to parse is, and it has to show while the user
+  // is looking at some other tab.
+  ok("AG the tab carries the warning count", d.getElementById("agentCount").textContent === "1");
+  ok("AG and shows it", d.getElementById("agentCount").hidden === false);
 }
 
 // The clipboard block is async because FileReader is; everything else has

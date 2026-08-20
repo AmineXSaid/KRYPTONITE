@@ -1,5 +1,38 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Agents have a tab.** They were a collapsed section inside Diagnostics,
+  which is where a thing goes to be inspected rather than used, three clicks
+  from the composer and behind a heading nobody opens twice. The tab sits after
+  MCP, because that is the order the two are chosen in: a server has to be
+  configured before an agent can be scoped to it. It carries the list, the
+  scope each agent enforces, the file each came from, and a New agent button in
+  a sticky header so the one always-available action does not depend on there
+  being anything in the list.
+- **A count on the Agents tab**, following the rule MCP and Diagnostics already
+  use: warnings, not totals. How many agents exist is not news and is on the
+  tab's own page; a file that failed to parse is something the user has to be
+  told about while looking somewhere else.
+
+### Changed
+- **The send control is a rounded square.** A disc reads as a media button, the
+  thing a consumer app puts under a video, and every other control in the
+  composer is a rectangle with soft corners, so it was the one shape belonging
+  to a different product. At a third of its own width it stays in the same
+  family as the phase segments and the pills while remaining the heaviest
+  element in the row, which is what a primary action should be. Armed it is the
+  only filled control there, so the eye lands on it without anything else
+  having to get louder; stop goes quiet rather than red, because red would say
+  "something failed" at the moment nothing has. A press scales it, and reduced
+  motion turns that off.
+- **The composer has room to breathe.** A slightly larger corner radius, and
+  padding in the text area and the toolbar that stops the first line sitting on
+  the border. Nothing moved, nothing was added: the same controls, spaced like
+  they were meant to be read.
+- Agents are no longer listed in Diagnostics. One home, not two.
+
 ## 0.8.0
 
 The editor surface. Kryptonite had one place to work, a panel, and everything
