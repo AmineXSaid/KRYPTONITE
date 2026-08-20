@@ -4,7 +4,7 @@ import type { InboundMessage, OutboundMessage } from "./protocol";
 import { sidebarHtml, webviewOptions } from "./shell";
 
 /**
- * The activity-bar sidebar.
+ * The panel itself, contributed to the Secondary Side Bar.
  *
  * The provider is a thin conduit: it hands the webview its HTML, registers a
  * sink so `App` can push to it, and forwards inbound messages. It deliberately

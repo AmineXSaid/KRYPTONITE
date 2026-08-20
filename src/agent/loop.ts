@@ -1,10 +1,36 @@
 import type { EndpointClient, Msg, ToolCall, ToolDef } from "../providers/client";
-import { TOOL_DEFS, runTool, ToolContext } from "./tools";
+import { imageDimensions } from "../providers/client";
+import { ThinkSplitter, parseXmlToolCall } from "./reply";
+import { UNTRUSTED_RULE } from "./untrusted";
+
+/**
+ * Openings worth withholding until we know what they are.
+ *
+ * A fence or a bare object might be a tool call written as prose; so might an
+ * XML `<tool_call>` or `<function=…>`, which is what the Hermes and Qwen
+ * families emit. Once a delta has been yielded it is on screen and cannot be
+ * taken back without a visible flicker, so these are held for the few
+ * characters it takes to decide.
+ */
+const HOLD_RE = /^(```|<\/?(?:tool_call|function)\b|[^A-Za-z\s]{0,12}\{)/i;
+
+/** The same XML call, found anywhere rather than only at the start. */
+const XML_CALL_RE = /<(?:tool_call\s*>|function\s*=)/i;
+import { TOOL_DEFS, runTool, ToolContext, ToolResult } from "./tools";
 import { skillIndex, Skill } from "../skills/loader";
 import { agentAllowsTool, agentPrompt, agentRefusal, type Agent } from "../agents/loader";
 
 export interface AgentEvent {
-  type: "text" | "tool_start" | "tool_end" | "turn_end" | "error" | "context" | "steer";
+  /**
+   * `text_reset` says that everything streamed so far in this turn was the
+   * model thinking out loud, and the surface showing it should drop it. It
+   * cannot be avoided by buffering: when the opening `<think>` is the prompt's
+   * prefill, nothing distinguishes reasoning from a reply until the closing
+   * tag arrives, which can be a thousand characters in.
+   */
+  type:
+    | "text" | "reasoning" | "text_reset" | "tool_start" | "tool_end"
+    | "turn_end" | "error" | "context" | "steer";
   text?: string;
   tool?: { name: string; args: any; result?: string; isError?: boolean };
   error?: string;
@@ -18,7 +44,9 @@ Work in small verified steps: read before you edit, edit one thing, then check t
 
 State what you are doing, briefly, as you do it. Do not narrate tool mechanics.
 
-When you are finished, say what changed and what the user should verify.`;
+When you are finished, say what changed and what the user should verify.
+
+${UNTRUSTED_RULE}`;
 
 // The tools available in ask phase: enough to ground an answer in the real
 // workspace - read a file, search, list, consult a skill - and nothing that
@@ -270,12 +298,47 @@ export function estimateTokens(text: string): number {
  */
 const tokenCache = new WeakMap<Msg, number>();
 
-function messageTokens(m: Msg): number {
+/**
+ * What an image costs a model, which is a count of pixels and not of bytes.
+ *
+ * Both major wires price an image by its dimensions - roughly width times
+ * height over 750 - so the same photograph costs the same whether it arrived
+ * as a 1.2 MB png or the 170 KB jpeg of the identical picture.
+ *
+ * Measuring the base64 instead, which is what serialising the content block
+ * does, is not a small error: one 1280x800 screenshot is about 1,400 tokens
+ * and about 570 KB of base64, so counting the characters overstates it by a
+ * factor of a hundred. On a 32k gateway that is the difference between a
+ * screenshot costing four percent of the window and appearing to cost five
+ * times the whole of it - at which point `fitToWindow` throws the entire
+ * conversation away to make room for something that already fits.
+ *
+ * Only the header is decoded. It is the first few bytes, and decoding half a
+ * megabyte of base64 to read six of them would be its own kind of waste.
+ */
+const IMAGE_TOKENS_UNKNOWN = 1_600;
+
+function imageBlockTokens(b: { mediaType: string; data: string }): number {
+  const d = imageDimensions(Buffer.from(b.data.slice(0, 4096), "base64"));
+  if (!d || !d.width || !d.height) return IMAGE_TOKENS_UNKNOWN;
+  return Math.ceil((d.width * d.height) / 750);
+}
+
+function contentTokens(content: Msg["content"]): number {
+  if (typeof content === "string") return estimateTokens(content);
+  let n = 0;
+  for (const b of content) {
+    n += b.type === "image" ? imageBlockTokens(b) : estimateTokens(b.text);
+  }
+  return n;
+}
+
+/** Exported for the tests that pin what an image is allowed to cost. */
+export function messageTokens(m: Msg): number {
   const hit = tokenCache.get(m);
   if (hit !== undefined) return hit;
-  const body = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
   const n =
-    estimateTokens(body) + (m.toolCalls ? estimateTokens(JSON.stringify(m.toolCalls)) : 0) + 8;
+    contentTokens(m.content) + (m.toolCalls ? estimateTokens(JSON.stringify(m.toolCalls)) : 0) + 8;
   tokenCache.set(m, n);
   return n;
 }
@@ -306,6 +369,89 @@ export function fitToWindow(messages: Msg[], limit: number, reserve: number): Ms
   return [...head, note, ...tail];
 }
 
+/**
+ * What is said in place of a picture that had to go.
+ *
+ * Deliberately a sentence and not a silence. A model that finds an image
+ * missing without explanation will either hallucinate what was in it or repeat
+ * the work that produced it; told plainly, it can decide whether that page is
+ * still worth looking at.
+ */
+/**
+ * Stands in for a tool call the user interrupted before it ran.
+ *
+ * Phrased for the model rather than for a log: on the next turn it will see
+ * this where it expected an answer, and "the user stopped it" is the fact that
+ * stops it retrying the same call as though the tool had merely failed.
+ */
+/** Mirrors `Phase` in the UI protocol; declared here so the agent owns it. */
+export type AgentPhase = Phase;
+
+export const INTERRUPTED_RESULT =
+  "The user interrupted this turn before this tool ran. It did not execute and " +
+  "nothing changed. Do not assume it succeeded or retry it without being asked.";
+
+export const IMAGE_EVICTED =
+  "[An earlier image was dropped here to keep this request inside the endpoint's " +
+  "image budget. Take another screenshot if you still need to see that page.]";
+
+/**
+ * Hold the request body under the endpoint's image budget, newest first.
+ *
+ * Images are the only thing in a conversation whose weight on the wire has
+ * nothing to do with its weight in the context window: a screenshot is about
+ * 1,400 tokens and about 200 KB, so ten of them barely dent a 200k window and
+ * still add up to a two megabyte POST. `fitToWindow` is therefore no help
+ * here - by its accounting nothing is wrong - and a gateway with a body cap
+ * answers with a 413 that names nothing in particular.
+ *
+ * Oldest go first because a screenshot ages badly: the page has usually been
+ * navigated away from, and the one the model is reasoning about is the one it
+ * just took. That last one is kept whatever it weighs. A cap that could
+ * discard the picture a model asked for one step earlier would turn a size
+ * problem into a correctness problem.
+ *
+ * Returns the input untouched when everything fits, which is nearly always,
+ * and never mutates it: the transcript keeps its images so a later turn with
+ * more room can still send them.
+ */
+export function fitImages(messages: Msg[], budget: number): Msg[] {
+  // A profile is hand-written YAML spread over the defaults, so this can
+  // arrive as a string or as nothing at all. An unreadable budget means no
+  // eviction rather than total eviction: a 413 is visible and says what it
+  // is, while pictures silently going missing because of a typo is the kind
+  // of thing nobody diagnoses.
+  const cap = Number.isFinite(budget) ? Math.max(0, Number(budget)) : Number.POSITIVE_INFINITY;
+
+  let total = 0;
+  for (const m of messages) {
+    if (typeof m.content === "string") continue;
+    for (const b of m.content) if (b.type === "image") total += b.data.length;
+  }
+  if (total <= cap) return messages;
+
+  const out = messages.slice();
+  let kept = 0;
+  let newest = true;
+  for (let i = out.length - 1; i >= 0; i--) {
+    const m = out[i];
+    if (typeof m.content === "string") continue;
+    if (!m.content.some((b) => b.type === "image")) continue;
+
+    const content = m.content.map((b) => {
+      if (b.type !== "image") return b;
+      if (newest || kept + b.data.length <= cap) {
+        newest = false;
+        kept += b.data.length;
+        return b;
+      }
+      return { type: "text" as const, text: IMAGE_EVICTED };
+    });
+    out[i] = { ...m, content };
+  }
+  return out;
+}
+
 export interface AgentRunOptions {
   client: EndpointClient;
   ctx: ToolContext;
@@ -313,6 +459,13 @@ export interface AgentRunOptions {
   userMessage: string;
   maxIterations?: number;
   signal?: AbortSignal;
+  /**
+   * The workspace's own standing instructions, already formatted.
+   *
+   * Passed in rather than read here so the cache pre-warm and the real request
+   * build the same head from the same string. This file has no filesystem.
+   */
+  instructions?: string;
   // CHANGED: added. Defaults to "act" so existing callers are unaffected.
   phase?: Phase;
   /**
@@ -361,15 +514,45 @@ export interface AgentRunOptions {
 export function systemPromptFor(
   skills: Skill[],
   phase: Phase,
-  agent?: { agent: Agent; memory?: string }
+  agent?: { agent: Agent; memory?: string },
+  instructions?: string,
+  identity?: { model: string; endpoint: string }
 ): string {
+  // Four things stack ahead of the phase addendum, outermost first: the
+  // engine's own rules, who is answering, what this workspace knows, and how
+  // this agent behaves. The project's instructions refine the engine rather
+  // than replace it, the persona refines the project, and the addendum keeps
+  // the last word - it is the one rule a persona must not be able to talk its
+  // way out of.
   const addendum = phase === "plan" ? PLAN_ADDENDUM : phase === "ask" ? ASK_ADDENDUM : "";
-  // The agent block sits after the skills index and before the phase addendum:
-  // the persona says who is answering, the addendum says what this phase will
-  // and will not do, and the phase rule has to be the last word - it is the one
-  // a persona must not be able to talk its way out of.
   const persona = agent ? agentPrompt(agent.agent, agent.memory) : "";
-  return [SYSTEM, skillIndex(skills), persona, addendum].filter(Boolean).join("\n\n");
+  return [SYSTEM, identityLine(identity), skillIndex(skills), instructions ?? "", persona, addendum]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+/**
+ * Tell the model what it is.
+ *
+ * Asked "what are you", a model with nothing to go on answers from its
+ * training, and open weights are very often tuned on transcripts of the big
+ * hosted assistants - so a model served from a gateway will cheerfully claim
+ * to be one of them. That is not a lie the model is choosing to tell; it is
+ * the only answer it has.
+ *
+ * The extension knows better: the profile names the model and the endpoint it
+ * is being served from. Stating it costs one line and replaces a guess with a
+ * fact. It sits in the stable head, which is safe because it changes only when
+ * the profile does - and a profile change invalidates the cache anyway.
+ */
+function identityLine(identity?: { model: string; endpoint: string }): string {
+  if (!identity?.model) return "";
+  return (
+    `You are the model \`${identity.model}\`, served through the endpoint ` +
+    `"${identity.endpoint}" and running inside the Kryptonite extension for VS Code. ` +
+    `If you are asked what model you are, answer with that and do not guess at a ` +
+    `brand name from your training.`
+  );
 }
 
 export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEvent> {
@@ -378,7 +561,10 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
   // CHANGED: the plan addendum joins the system prompt in plan phase.
   const phase = opts.phase ?? "act";
   const agent = opts.agent?.agent;
-  const system = systemPromptFor(ctx.skills, phase, opts.agent);
+  const system = systemPromptFor(ctx.skills, phase, opts.agent, opts.instructions, {
+    model: client.profile.model,
+    endpoint: client.profile.name,
+  });
 
   // CHANGED: in ask and plan phase the model is only offered a read-only tool
   // set, so a write is impossible rather than merely discouraged. Ask's set is
@@ -441,7 +627,14 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
       };
     }
 
-    const fitted = fitToWindow(messages, caps.contextWindow, caps.maxOutputTokens + 512);
+    // Images first, then the window. The order matters: an evicted picture
+    // becomes one short line, so trimming afterwards sees the sizes that are
+    // actually going out and throws away less history to make room.
+    const fitted = fitToWindow(
+      fitImages(messages, caps.maxImageBytes),
+      caps.contextWindow,
+      caps.maxOutputTokens + 512
+    );
     // The pre-flight number is an estimate - chars/3.6 - and it is emitted only
     // so the meter is not blank on the first turn. `exact: false` says so, and
     // the panel refuses to print an estimated figure. As soon as the endpoint
@@ -457,6 +650,10 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
 
     let text = "";
     const calls: ToolCall[] = [];
+    // Thinking is filtered out of the stream rather than after it. A reasoning
+    // model's working is often longer than its answer, and rendering it and
+    // then removing it is a paragraph that appears and vanishes.
+    const think = new ThinkSplitter();
 
     /* A reply that opens with `{` or a fence might be a tool call the model
        wrote as prose. It is withheld until we know, because once a delta has
@@ -476,14 +673,33 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
         signal: opts.signal,
       })) {
         if (opts.signal?.aborted) return;
+        // The working, kept off the answer's channel. It never joins `text`,
+        // so it cannot reach the transcript the next turn is billed for, and
+        // the panel can show it as quietly as it likes.
+        if (ev.type === "reasoning") {
+          if (ev.text?.trim()) yield { type: "reasoning", text: ev.text };
+          continue;
+        }
         if (ev.type === "text") {
-          text += ev.text;
+          const split = think.push(ev.text ?? "");
+          // The opening tag was the prefill and never arrived, so what is
+          // already on screen turns out to have been thinking. Tell the panel
+          // to drop it; nothing else can, because it has already been sent.
+          if (split.reset) {
+            text = "";
+            pending = "";
+            decided = false;
+            holding = false;
+            yield { type: "text_reset" };
+          }
+          if (!split.visible) continue;
+          text += split.visible;
           if (!decided) {
-            pending += ev.text;
+            pending += split.visible;
             const t = pending.trimStart();
             // Wait for enough to judge, but never past the first newline.
             if (t.length >= 8 || t.includes("\n")) {
-              holding = /^(```|[^A-Za-z\s]{0,12}\{)/.test(t);
+              holding = HOLD_RE.test(t);
               decided = true;
               if (!holding) {
                 yield { type: "text", text: pending };
@@ -515,10 +731,22 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
       return;
     }
 
+    /* Release whatever the splitter was holding. An unterminated `<think>`
+       ends here with its contents counted as thinking, and a tag fragment held
+       back at the last chunk boundary is finally safe to emit. */
+    {
+      const tail = think.end();
+      if (tail) {
+        text += tail;
+        if (!decided || holding) pending += tail;
+        else yield { type: "text", text: tail };
+      }
+    }
+
     /* A reply short enough to end before the hold decision was made still has
        everything sitting in `pending`. Decide now, or it is dropped. */
     if (!decided && pending) {
-      holding = /^(```|[^A-Za-z\s]{0,12}\{)/.test(pending.trimStart());
+      holding = HOLD_RE.test(pending.trimStart());
       decided = true;
       if (!holding) {
         yield { type: "text", text: pending };
@@ -531,22 +759,51 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
        it and drop the JSON from the transcript entirely - the tool card that
        follows is the honest rendering of what happened. Otherwise release the
        buffered text unchanged. */
+    const known = new Set(availableTools.map((t) => t.name));
+    const adopt = (r: { name: string; arguments: any }) => {
+      calls.push({
+        id: `text_${i}_${Date.now().toString(36)}`,
+        name: r.name,
+        arguments: r.arguments,
+      });
+    };
+
     if (holding) {
+      // JSON first, because it is the stricter parser: it demands the reply be
+      // essentially nothing but the call. The XML dialects are tried after.
       const recovered = calls.length
         ? undefined
-        : parseTextToolCall(text, new Set(availableTools.map((t) => t.name)));
+        : parseTextToolCall(text, known) ?? parseXmlToolCall(text, known);
       if (recovered) {
-        calls.push({
-          id: `text_${i}_${Date.now().toString(36)}`,
-          name: recovered.name,
-          arguments: recovered.arguments,
-        });
+        adopt(recovered);
         // The assistant turn keeps no visible content: the call *was* the reply.
         text = "";
       } else if (pending) {
         yield { type: "text", text: pending };
       }
       pending = "";
+    } else if (!calls.length && XML_CALL_RE.test(text)) {
+      // The model wrote a sentence and *then* a tool call, so the hold never
+      // engaged and the markup is already on screen. Take it back: the panel
+      // clears, the prose before the call is re-sent, and the call runs.
+      const xml = parseXmlToolCall(text, known);
+      if (xml) {
+        const at = text.search(XML_CALL_RE);
+        const prose = text.slice(0, at).trimEnd();
+        yield { type: "text_reset" };
+        if (prose) yield { type: "text", text: prose };
+        text = prose;
+        adopt(xml);
+      }
+    }
+
+    /* A turn that was nothing but thinking. The endpoint's own reasoning
+       channel already has this rule in the client; a model that spends its
+       whole budget in `<think>` deserves the same treatment rather than
+       rendering as an empty bubble. */
+    if (!calls.length && !text.trim() && think.onlyThought) {
+      text = think.thinking.trim();
+      yield { type: "text", text };
     }
 
     if (!calls.length) {
@@ -575,7 +832,7 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
     // The phase gate, applied to the name the model actually sent rather than
     // to the list it was offered. Everything above this line is advisory; this
     // is where Ask and Plan stop being a promise and become a property.
-    const invoke = (c: ToolCall) => {
+    const invoke = (c: ToolCall): Promise<ToolResult> => {
       if (!toolAllowedIn(phase, c.name)) {
         return Promise.resolve({ content: refusalFor(phase, c.name), isError: true });
       }
@@ -594,7 +851,7 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
           // runTool converts its own failures into results; this is belt and
           // braces so a rejection cannot escape as an unhandled one while it
           // sits in the array waiting to be awaited.
-          invoke(c).catch((e: any) => ({
+          invoke(c).catch((e: any): ToolResult => ({
             content: String(e?.message ?? e),
             isError: true,
           }))
@@ -603,17 +860,50 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
 
     for (let ci = 0; ci < calls.length; ci++) {
       const call = calls[ci];
-      if (opts.signal?.aborted) return;
+      if (opts.signal?.aborted) {
+        // Every tool call the model made has to be answered, including the
+        // ones the user interrupted. A transcript holding a tool call with no
+        // result is not merely untidy - the Anthropic wire rejects it, so the
+        // conversation cannot be resumed at all, and the damage is discovered
+        // one turn later when the next message fails rather than here.
+        //
+        // The assistant turn carrying these calls was already appended above,
+        // which is what makes this reachable. Bailing out before that point
+        // leaves nothing to orphan and needs no repair.
+        for (let rest = ci; rest < calls.length; rest++) {
+          const missed: Msg = {
+            role: "tool",
+            toolCallId: calls[rest].id,
+            content: INTERRUPTED_RESULT,
+          };
+          messages.push(missed);
+          opts.onMessage?.(missed);
+        }
+        return;
+      }
       yield { type: "tool_start", tool: { name: call.name, args: call.arguments } };
       const result = running ? await running[ci] : await invoke(call);
       yield {
         type: "tool_end",
         tool: { name: call.name, args: call.arguments, result: result.content, isError: result.isError },
       };
+      // Text alone stays a plain string. That is not only for tidiness: it is
+      // the shape every wire has always been handed, and a tool that returns
+      // no pixels must not start producing a different request body.
+      const body = result.content.slice(0, 60_000);
       const toolMsg: Msg = {
         role: "tool",
         toolCallId: call.id,
-        content: result.content.slice(0, 60_000),
+        content: result.images?.length
+          ? [
+              { type: "text", text: body },
+              ...result.images.map((im) => ({
+                type: "image" as const,
+                mediaType: im.mediaType,
+                data: im.data,
+              })),
+            ]
+          : body,
       };
       messages.push(toolMsg);
       opts.onMessage?.(toolMsg);

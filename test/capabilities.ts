@@ -182,7 +182,7 @@ const read = () => fs.readFileSync(file, "utf8");
     ].join("\n"));
     return loadProfile(file);
   };
-  const clientFor = () => new EndpointClient(profileFor(), () => undefined, () => {});
+  const clientFor = () => new EndpointClient(profileFor(), () => undefined, tmp);
   const by = (rs: any[], n: string) => rs.find((r) => r.name === n);
 
   {
@@ -273,7 +273,7 @@ const read = () => fs.readFileSync(file, "utf8");
       "auth:", "  kind: none", "timeoutMs: 1500",
       "capabilities:", "  streaming: true", "  tools: true",
     ].join("\n"));
-    const c = new EndpointClient(loadProfile(file), () => undefined, () => {});
+    const c = new EndpointClient(loadProfile(file), () => undefined, tmp);
     const rep = await detectCapabilities(loadProfile(file), c);
     ck(rep.results.length >= 4, "an unreachable endpoint still returns a full report");
     ck(rep.results.every((r) => r.supported !== true), "with nothing claimed as supported");
@@ -286,7 +286,7 @@ const read = () => fs.readFileSync(file, "utf8");
   {
     mode = "full";
     const p = profileFor();
-    const c = new EndpointClient(p, () => undefined, () => {});
+    const c = new EndpointClient(p, () => undefined, tmp);
     const rep = await detectCapabilities(p, c);
     setCapabilities(file, rep.patch as Record<string, unknown>);
     const reloaded = loadProfile(file);

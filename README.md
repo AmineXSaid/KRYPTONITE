@@ -96,6 +96,60 @@ Pick one with `/agent` in the composer, from the Agents section of the
 Diagnostics tab, or from the command palette. While one is active a bar under
 the tabs names it and states its scope; nothing is drawn when none is.
 
+## Browser
+
+The model drives whichever Chromium-family browser the machine already has;
+none is bundled. `read` returns the page text and a numbered ref for everything
+clickable, which is what `click` and `type` act on.
+
+`read` also lists the pictures. `innerText` carries no alt text, so a gallery of
+eight captioned photographs used to read as an empty page — every description
+its author wrote, discarded. Described images now arrive with their size, images
+marked decorative (`alt=""`) are left out, and anything undescribed is counted
+rather than listed: *"6 more with no description"* is the line that tells the
+model its reading is incomplete. It costs about 100 characters on a 15,000
+character read.
+
+`screenshot` returns the picture *to the model*, not only to the transcript, so
+it can judge a chart, a diagram, or where something sits on a page. On the
+Anthropic wire the image travels inside the `tool_result` block; chat-completions
+refuses images in a tool message, so it follows in a labelled user message.
+
+The format is chosen by measuring rather than guessing. A png is captured first,
+because most of what a model looks at is text and small text is what jpeg is
+worst at; if that png is over 200 KB it is captured again as jpeg and the
+smaller of the two wins. A page of prose stays a 50 KB png, and a wall of
+photographs goes from a 1.2 MB png to 425 KB of the same picture. Either way it
+is one viewport, so it costs the model about 1,400 tokens.
+
+This is gated on `capabilities.vision`. A gateway without it answers a base64
+blob with a 400, so a profile that does not declare vision gets the old
+behaviour — the screenshot is saved and shown to you, and the model is told in
+so many words that it cannot see it and why. Run the capability probe from the
+Control Center, or set `vision: true` by hand.
+
+### The image budget
+
+`capabilities.maxImageBytes` caps how much base64 image data one request may
+carry. It defaults to 1,500,000 — room for about six screenshots, sized to sit
+under the 2 MB body limit that is the common default on nginx and most API
+gateways.
+
+It exists because images are the one thing whose weight on the wire has nothing
+to do with its weight in the context window. A screenshot is ~1,400 tokens and
+~200 KB, so ten of them barely dent a 200k window and still add up to a 5.7 MB
+POST. Nothing else in the loop would catch that — by the token accounting
+nothing is wrong — and the gateway's answer is a 413 that names nothing in
+particular, ten useful turns in.
+
+Over budget, the oldest pictures are replaced by a line saying so, newest kept,
+because a screenshot ages badly: the page has usually been navigated away from,
+and the one being reasoned about is the one just taken. That most recent one is
+always sent whatever it weighs — a cap able to discard the picture the model
+asked for one step earlier would turn a size problem into a correctness one.
+Only the request is trimmed; the transcript keeps every image, so a later turn
+with more room can still send them.
+
 ## Sessions
 
 Each conversation is one transcript, stored as a single JSON file under
@@ -196,6 +250,21 @@ write tool reachable without it and refused with it.
 | `kryptonite.approvalMode` | `ask` | `ask` / `edits-auto` / `full-auto` |
 | *(agents)* | `.agent/agents` | Not a setting - the path is fixed |
 | `kryptonite.caBundlePath` | — | Global CA merged into every profile |
+
+## Where the panel opens
+
+In the Secondary Side Bar, on the far right of the window, beside the editor.
+The container is contributed to `viewsContainers.secondarySidebar`, so that is
+where VS Code puts it with no command run at activation and nothing moved.
+Explorer, Search and the rest of the Primary Side Bar stay on the left.
+
+Versions up to 0.5.4 could not do this — the contribution point did not exist,
+and the only thing an extension could reach was the pair of commands that swing
+the whole Primary Side Bar across the window, Explorer and all. Upgrading from
+one of those undoes that move once, then never touches the layout again.
+
+Dragging the panel somewhere else is a VS Code gesture and VS Code remembers it;
+**View: Reset View Locations** puts it back.
 
 ## Known caveat
 

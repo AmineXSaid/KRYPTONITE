@@ -189,6 +189,10 @@ export interface ConfigDto {
   /** Workspace-relative, surfaced in Control Center explainers. */
   profileDirectory: string;
   skillsDirectory: string;
+  /** Show the agent's browser in a real window rather than running it headless. */
+  browserHeaded: boolean;
+  /** Send what is on screen with each message. */
+  editorContext: boolean;
   ui: UiConfigDto;
 }
 
@@ -437,6 +441,18 @@ export interface McpLogMsg { type: "mcpLog"; name: string }
 export interface OpenSettingsMsg { type: "openSettings" }
 export interface OpenYamlMsg { type: "openYaml"; profile: string }
 export interface OpenControlCenterMsg { type: "openControlCenter"; section?: CcSection }
+/**
+ * Run one of the editor-side features from the composer.
+ *
+ * The slash commands `/fix`, `/doc`, `/explain` and `/tests` are the same
+ * features as the lightbulb and the CodeLens, reached from the keyboard. They
+ * carry no arguments on purpose: the host resolves the target from the active
+ * editor, so there is one definition of "this" rather than two that drift.
+ */
+export interface EditorCommandMsg {
+  type: "editorCommand";
+  command: "fix" | "doc" | "explain" | "tests" | "commit";
+}
 export interface OpenSkillsFolderMsg { type: "openSkillsFolder" }
 export interface ListSessionsMsg { type: "listSessions" }
 export interface LoadSessionMsg { type: "loadSession"; id: string }
@@ -469,7 +485,7 @@ export type InboundMessage =
   | ToggleSkillMsg | ReloadSkillsMsg | ReloadProfilesMsg | SetConfigMsg
   | SetAgentMsg | NewAgentMsg | OpenAgentMsg
   | RestoreCheckpointMsg | ExportBundleMsg | ExportChatMsg | OpenFileMsg | OpenSettingsMsg
-  | OpenYamlMsg | OpenControlCenterMsg | OpenSkillsFolderMsg
+  | OpenYamlMsg | OpenControlCenterMsg | EditorCommandMsg | OpenSkillsFolderMsg
   | ListSessionsMsg | LoadSessionMsg | DeleteSessionMsg | SearchFilesMsg
   | CheckEndpointMsg | McpReconnectMsg | McpReloadMsg | ClearChangesMsg
   | DetectCapsMsg | SetCapabilityMsg | ApplyCapsMsg | McpLogMsg;
@@ -480,6 +496,13 @@ export type InboundType = InboundMessage["type"];
 
 export interface StateSyncOut { type: "stateSync"; state: StateSync }
 export interface StreamDeltaOut { type: "streamDelta"; text: string }
+/**
+ * Discard the assistant bubble streamed so far: it was the model thinking.
+ *
+ * Not replayable, and it prunes the replay buffer instead. A reload should
+ * restore the corrected transcript, not the mistake followed by its retraction.
+ */
+export interface StreamResetOut { type: "streamReset" }
 export interface ToolStartOut {
   type: "toolStart";
   // `args` is model-authored JSON of arbitrary shape; the UI only summarises it.
@@ -639,6 +662,21 @@ export interface McpChangedOut {
   servers: McpServerDto[];
   warnings: string[];
 }
+/**
+ * What is on screen, for the composer's automatic indicator.
+ *
+ * Deliberately not the same payload the model gets. The model needs the
+ * problems themselves; the panel needs a chip, so it gets counts.
+ */
+export interface EditorContextChangedOut {
+  type: "editorContextChanged";
+  /** Workspace-relative, or null when no file editor is focused. */
+  file: string | null;
+  language: string | null;
+  errors: number;
+  warnings: number;
+  tabs: number;
+}
 export interface CheckpointsListedOut {
   type: "checkpointsListed";
   checkpoints: CheckpointDto[];
@@ -733,7 +771,7 @@ export interface EndpointCheckDoneOut {
 }
 
 export type OutboundMessage =
-  | StateSyncOut | StreamDeltaOut | ToolStartOut | ToolEndOut | TodosUpdatedOut
+  | StateSyncOut | StreamDeltaOut | ThinkingOut | StreamResetOut | ToolStartOut | ToolEndOut | TodosUpdatedOut
   | ImageGeneratedOut | CapsDetectedOut | McpLogOut
   | PlanProposedOut | PermissionRequestOut | PermissionResolvedOut
   | DiffPendingOut | DiffResolvedOut | FileTouchedOut | ChangesUpdatedOut
@@ -742,6 +780,7 @@ export type OutboundMessage =
   | ProfilesReloadedOut | SkillsReloadedOut | AgentsReloadedOut | AgentChangedOut
   | ContextUsageOut
   | AttachmentsReadyOut | SelectionChangedOut | SessionSwitchedOut | SessionsListedOut
+  | EditorContextChangedOut
   | CheckpointsListedOut | CheckpointRestoredOut | BundleExportedOut | ChatExportedOut
   | ConfigChangedOut | PhaseChangedOut | EndpointChangedOut | StatusChangedOut
   | LogLineOut | NavigateOut | FileResultsOut | CaBundlePickedOut
@@ -755,8 +794,17 @@ export type OutboundType = OutboundMessage["type"];
  * Events buffered by the SessionController for turn replay. A webview that
  * reloads mid-run receives `stateSync` and then these, in order.
  */
+/**
+ * The model showing its working.
+ *
+ * Its own event rather than a `streamDelta`, because it is not the answer.
+ * Rendered as a collapsed strip: available when someone wants to know why the
+ * model did what it did, and out of the way when they do not.
+ */
+export interface ThinkingOut { type: "thinking"; text: string }
+
 export type ReplayableEvent =
-  | StreamDeltaOut | ToolStartOut | ToolEndOut
+  | StreamDeltaOut | ThinkingOut | ToolStartOut | ToolEndOut
   | TodosUpdatedOut | ImageGeneratedOut | FileTouchedOut | ChangesUpdatedOut
   | PermissionRequestOut | ContextUsageOut | SteerAcceptedOut;
 

@@ -59,7 +59,15 @@ export interface CompletionRequest {
 }
 
 export interface CompletionEvent {
-  type: "text" | "tool_call" | "done" | "usage";
+  /**
+   * `reasoning` is the model showing its working, which is not its answer.
+   *
+   * It used to be yielded as `text`, which put four paragraphs of "the user
+   * provided X, which could be..." into the transcript at the same weight as
+   * the reply - and on an agentic turn every intermediate step produces
+   * reasoning and no content, so it happened on every step.
+   */
+  type: "text" | "reasoning" | "tool_call" | "done" | "usage";
   text?: string;
   toolCall?: ToolCall;
   usage?: TokenUsage;
@@ -223,7 +231,7 @@ export class EndpointClient {
         ...(stream ? { stream_options: { include_usage: true } } : {}),
         max_tokens: req.maxTokens ?? caps.maxOutputTokens,
         ...(req.temperature != null ? { temperature: req.temperature } : {}),
-        messages: msgs.map(toOpenAiMessage),
+        messages: packOpenAiMessages(msgs),
         ...(req.tools?.length && wantTools
           ? {
               tools: req.tools.map((t) => ({
@@ -646,7 +654,7 @@ function packAnthropicMessages(msgs: Msg[]): any[] {
     }
     const blocks: any[] = [];
     while (i < msgs.length && msgs[i].role === "tool") {
-      blocks.push({ type: "tool_result", tool_use_id: msgs[i].toolCallId, content: textOf(msgs[i]) });
+      blocks.push(anthropicToolResult(msgs[i]));
       i++;
     }
     i--;
@@ -655,10 +663,70 @@ function packAnthropicMessages(msgs: Msg[]): any[] {
   return out;
 }
 
+/**
+ * One `tool_result`, carrying pixels when the tool produced any.
+ *
+ * Anthropic takes image blocks inside `tool_result.content`, so a screenshot
+ * reaches the model in the same breath as the text describing it. Text-only
+ * results keep the plain string they have always been sent as - an array of
+ * one text block would be equivalent to the API and gratuitously different on
+ * the wire.
+ */
+function anthropicToolResult(m: Msg): any {
+  const imgs = imagesOf(m);
+  if (!imgs.length) {
+    return { type: "tool_result", tool_use_id: m.toolCallId, content: textOf(m) };
+  }
+  const content: any[] = [];
+  const t = textOf(m);
+  if (t) content.push({ type: "text", text: t });
+  for (const b of imgs) {
+    content.push({ type: "image", source: { type: "base64", media_type: b.mediaType, data: b.data } });
+  }
+  return { type: "tool_result", tool_use_id: m.toolCallId, content };
+}
+
 function textOf(m: Msg): string {
   return typeof m.content === "string"
     ? m.content
     : m.content.filter((b) => b.type === "text").map((b: any) => b.text).join("\n");
+}
+
+function imagesOf(m: Msg): { mediaType: string; data: string }[] {
+  return typeof m.content === "string"
+    ? []
+    : (m.content.filter((b) => b.type === "image") as any[]);
+}
+
+/**
+ * Translate the whole list, because a tool result carrying an image cannot be
+ * translated on its own.
+ *
+ * The chat-completions wire takes images in a user message only: a `tool`
+ * message's content is a string and nothing else. So the pixels follow the
+ * result they belong to, in a user message that says what they are. Putting
+ * them in the tool message would be a 400, and dropping them is the bug this
+ * exists to fix.
+ */
+function packOpenAiMessages(msgs: Msg[]): any[] {
+  const out: any[] = [];
+  for (const m of msgs) {
+    out.push(toOpenAiMessage(m));
+    if (m.role !== "tool") continue;
+    const imgs = imagesOf(m);
+    if (!imgs.length) continue;
+    out.push({
+      role: "user",
+      content: [
+        { type: "text", text: "Image returned by the tool call above:" },
+        ...imgs.map((b) => ({
+          type: "image_url",
+          image_url: { url: `data:${b.mediaType};base64,${b.data}` },
+        })),
+      ],
+    });
+  }
+  return out;
 }
 
 function toOpenAiMessage(m: Msg): any {
@@ -777,9 +845,9 @@ export const __openAiStreamForTest = () => openAiStream();
  */
 function openAiStream(onReasoning?: () => void) {
   const pending = new Map<number, { id: string; name: string; args: string }>();
-  // Held so a reasoning-only turn can fall back to showing its working.
+  // Accumulated per step and flushed on finish_reason, so the panel receives
+  // one block of working rather than a token-by-token stream of it.
   let reasoning = "";
-  let sawContent = false;
   let toldReasoning = false;
   return function* (json: any): Generator<CompletionEvent> {
     // Usage is checked before the delta branch and independently of it.
@@ -808,10 +876,7 @@ function openAiStream(onReasoning?: () => void) {
     }
     const d = json.choices?.[0]?.delta;
     if (!d) return;
-    if (d.content) {
-      sawContent = true;
-      yield { type: "text", text: d.content };
-    }
+    if (d.content) yield { type: "text", text: d.content };
     // Reasoning models stream their thinking on a separate field and only then
     // - if the budget lasts - produce content. Dropping it meant a turn that
     // spent its whole budget reasoning rendered as an empty reply, and the
@@ -839,13 +904,17 @@ function openAiStream(onReasoning?: () => void) {
         yield { type: "tool_call", toolCall: { id: slot.id, name: slot.name, arguments: safeJson(slot.args) } };
       }
       pending.clear();
-      // Only as a fallback. A model that produced an answer keeps its answer;
-      // one that produced nothing else shows its working rather than a blank
-      // bubble, which is indistinguishable from a broken endpoint.
-      if (!sawContent && reasoning.trim()) {
-        yield { type: "text", text: reasoning.trim() };
-        sawContent = true;
-      }
+      // The working, on its own channel. This used to be yielded as `text`,
+      // which is how four paragraphs of "the user provided X, which could
+      // be..." ended up in the transcript looking like the reply - on every
+      // step of an agentic turn, since a step that calls a tool produces
+      // reasoning and no content by definition.
+      //
+      // Still emitted rather than dropped: a turn that spent its whole budget
+      // reasoning and said nothing is otherwise a blank bubble, which is
+      // indistinguishable from a broken endpoint. The surface decides how
+      // loudly to show it; that is not this layer's call.
+      if (reasoning.trim()) yield { type: "reasoning", text: reasoning.trim() };
       reasoning = "";
     }
   };
@@ -938,6 +1007,43 @@ export function sniffBytes(b: Buffer): string {
 /** Sniff without decoding the whole payload: the header is in the first bytes. */
 function sniffImage(b64: string): string {
   return sniffBytes(Buffer.from(b64.slice(0, 64), "base64"));
+}
+
+/**
+ * How big the picture is, read out of its own header.
+ *
+ * Needed because an image's cost to a model is its pixels and has nothing to
+ * do with how many bytes it compressed to. The same photograph as a 1.2 MB png
+ * and a 170 KB jpeg is the same picture and the same price.
+ *
+ * Returns undefined for a format with no header here, or a header that is not
+ * in the bytes handed over. Callers are expected to have a fallback rather than
+ * to trust this.
+ */
+export function imageDimensions(b: Buffer): { width: number; height: number } | undefined {
+  if (b.length >= 24 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) {
+    // IHDR is required to be the first chunk, so width and height are fixed.
+    return { width: b.readUInt32BE(16), height: b.readUInt32BE(20) };
+  }
+  if (b.length >= 4 && b[0] === 0xff && b[1] === 0xd8) {
+    let i = 2;
+    while (i + 9 < b.length) {
+      if (b[i] !== 0xff) { i++; continue; }
+      const marker = b[i + 1];
+      // The SOF markers carry the frame size. C4, C8 and CC share the range
+      // and are a Huffman table, an extension and an arithmetic table.
+      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+        return { height: b.readUInt16BE(i + 5), width: b.readUInt16BE(i + 7) };
+      }
+      const len = b.readUInt16BE(i + 2);
+      if (len < 2) return undefined;
+      i += 2 + len;
+    }
+  }
+  if (b.length >= 10 && b.subarray(0, 4).toString("ascii").startsWith("GIF8")) {
+    return { width: b.readUInt16LE(6), height: b.readUInt16LE(8) };
+  }
+  return undefined;
 }
 
 export function extensionFor(mime: string): string {

@@ -63,7 +63,12 @@ function _sbRun() {
     '<symbol id="i-agent" viewBox="0 0 24 24"><path d="M12 3l7 4.5v9L12 21l-7-4.5v-9z" ' + S6 + ' stroke-width="1.5"/>' +
       '<path d="M12 3v18M5 7.5l14 9M19 7.5l-14 9" ' + S6 + ' stroke-width="1.1" opacity=".55"/></symbol>' +
     '<symbol id="i-diff" viewBox="0 0 24 24"><path d="M6 3.5v17M3 7h6M3 17h6" ' + S6 + ' stroke-width="1.6"/>' +
-      '<path d="M15 3.5h6v6h-6zM15 14.5h6v6h-6z" ' + S6 + ' stroke-width="1.5"/></symbol>';
+      '<path d="M15 3.5h6v6h-6zM15 14.5h6v6h-6z" ' + S6 + ' stroke-width="1.5"/></symbol>' +
+    /* The approval control. A shield rather than a lock: a lock says "you
+       cannot", and this says "something is standing between the agent and the
+       workspace" - which is a guard, not a barrier. */
+    '<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7.5 3v6c0 4.2-3 7.6-7.5 9-4.5-1.4-7.5-4.8-7.5-9V6z" ' +
+      S6 + ' stroke-width="1.5" stroke-linejoin="round"/></symbol>';
 
   /* Ladder rung name -> the short label the design shows. */
   var RUNG_LABELS = {
@@ -123,7 +128,17 @@ function _sbRun() {
   /* Extension features, not skills. `/` lists the workspace's SKILL.md files
      first and these underneath - see slashItems(). `/skill:` is gone: every
      skill now has its own row, which is what it was a stand-in for. */
+  /* The first four act on the editor rather than on the chat: they are the
+     same features as the lightbulb and the CodeLens, reached from the
+     keyboard, and they take their target from wherever the cursor is. They sit
+     at the top because they are the ones with a reason to be typed mid
+     sentence. */
   var CMDS = [
+    ["/fix", "Fix the problems where the cursor is"],
+    ["/doc", "Document the function where the cursor is"],
+    ["/explain", "Explain the selection"],
+    ["/tests", "Write tests for the selection"],
+    ["/commit", "Write a commit message for the staged change"],
     ["/clear", "Clear conversation history"],
     ["/doctor", "Run TLS connection diagnostics"],
     ["/endpoints", "Manage endpoint profiles"],
@@ -135,6 +150,14 @@ function _sbRun() {
     ["/skills", "Open the skills panel"],
     ["/help", "Show available commands"]
   ];
+
+  /* Slash command to host command. A lookup rather than string interpolation
+     on the host side: the webview should not be able to name an arbitrary
+     command and have the extension run it. */
+  var EDITOR_CMDS = {
+    "/fix": "fix", "/doc": "doc", "/explain": "explain",
+    "/tests": "tests", "/commit": "commit"
+  };
 
   var REVIEW_PROMPT =
     "Review the changes currently in the workspace. Read the modified files, " +
@@ -178,6 +201,8 @@ function _sbRun() {
     todos: [],
     sessions: [],
     selection: null,
+    /** Last editorContextChanged from the host; null until the first one. */
+    editor: null,
     context: null,
     changes: [],
     models: [],
@@ -836,9 +861,9 @@ function _sbRun() {
           '<button class="kx-tab" id="tabMcp" role="tab" aria-selected="false" aria-controls="viewMcp">MCP<span class="tab-count" id="mcpCount" hidden></span></button>' +
           '<button class="kx-tab" id="tabDiag" role="tab" aria-selected="false" aria-controls="viewDiag">Diagnostics<span class="tab-count" id="tabCount" hidden></span></button>' +
         '</nav>' +
-        '<div class="phase-banner" id="phaseBanner" hidden>' +
-          '<span class="dot"></span><span class="lbl"></span>' +
-          '<span class="sub"></span>' +
+        '<div class="phase-banner" id="phaseBanner" data-phase="plan" hidden>' +
+          '<span class="dot"></span><span class="lbl" id="phaseBannerLbl">Plan phase</span>' +
+          '<span class="sub" id="phaseBannerSub">read-only tools · no edits applied</span>' +
         '</div>' +
         // Only drawn while an agent is actually selected. A permanent chip in
         // the composer toolbar would cost a row of chrome on every panel to
@@ -876,13 +901,39 @@ function _sbRun() {
           '</div>' +
           '<div class="composer-wrap">' +
             '<div class="qp" id="qp" role="listbox" hidden></div>' +
+            // One line, above the input, rotating. It is where someone
+            // finds out a feature exists at all: nothing else in the panel
+            // advertises skills, phases or the browser, and a feature
+            // nobody knows about may as well not ship.
+            '<div class="tipbar" id="tipBar" hidden>' +
+              '<span class="tip-k">Tip</span>' +
+              '<span class="tip-t" id="tipText"></span>' +
+              '<span class="sp"></span>' +
+              '<button class="tip-x" id="tipNext" title="Another tip" aria-label="Another tip">' +
+                icon("i-refresh", "ic-11") + '</button>' +
+            '</div>' +
             '<div class="composer">' +
               '<div class="sel-pill" id="selPill" hidden>' + icon("i-file", "ic-13") +
                 '<span id="selText"></span><span class="sp"></span>' +
                 '<button class="tb-btn" id="selClear" title="Dismiss selection" aria-label="Dismiss selection" style="width:18px;height:18px">' + icon("i-x", "ic-9") + '</button>' +
               '</div>' +
+              // The automatic one, above the attachments and visibly unlike
+              // them: no dismiss button, because it is a readout of where the
+              // cursor is and cannot be dismissed - only moved away from.
+              '<div class="ed-pill" id="edPill" hidden>' + icon("i-file", "ic-11") +
+                '<span class="nm ell" id="edName"></span>' +
+                '<span class="prob" id="edProb" hidden></span>' +
+              '</div>' +
               '<div class="att-strip" id="attachStrip" hidden></div>' +
-              '<textarea id="draft" rows="1" aria-label="Message" placeholder="Ask Kryptonite anything…   ( / skills · @ files )"></textarea>' +
+              // The textarea keeps the caret, the selection, IME and undo; a
+              // contenteditable would have to reimplement all four and get
+              // them wrong. What it cannot do is colour its own text, so a
+              // mirror sits behind it holding the same string with the tokens
+              // marked, and the input above it is painted transparent.
+              '<div class="draft-wrap">' +
+                '<div class="draft-mirror" id="draftMirror" aria-hidden="true"></div>' +
+                '<textarea id="draft" rows="1" aria-label="Message" placeholder="Ask Kryptonite anything…   ( / skills · @ files )"></textarea>' +
+              '</div>' +
               '<div class="toolbar">' +
                 // #4 - the control row carries controls only. The keycap that
                 // used to sit here was chrome describing chrome; the shortcut
@@ -910,12 +961,24 @@ function _sbRun() {
                   '<span class="ep-dot" id="epDot" data-err="0"></span>' +
                   '<span class="nm ell" id="modelName">No model</span>' + icon("i-caret", "ic-9") +
                 '</button>' +
+                // Approval mode belongs here, beside the phase and the model.
+                // Those three are the whole answer to "what will happen when I
+                // press send": what it may do, which model does it, and
+                // whether it will ask first. It used to sit under the box in a
+                // footer, which is where things go to be ignored.
+                '<button class="perm" id="permBtn" aria-haspopup="menu" aria-expanded="false"' +
+                  ' title="What the agent may do without asking">' +
+                  icon("i-shield", "ic-11") + '<span class="nm" id="permName">Ask</span>' +
+                '</button>' +
                 '<span class="sp"></span>' +
                 '<button class="tb-btn" id="atBtn" title="Reference a file" aria-label="Reference a file">@</button>' +
                 '<button class="tb-btn" id="clipBtn" title="Attach files" aria-label="Attach files">' + icon("i-clip", "ic-13") + '</button>' +
                 '<button id="sendBtn" data-ready="0" data-mode="send" title="Send" aria-label="Send">' + icon("i-up", "ic-13") + '</button>' +
               '</div>' +
             '</div>' +
+            // The approval menu hangs off the composer rather than off a
+            // footer, so it opens over the transcript above its button.
+            '<div class="popover perm-pop" id="permPop" role="menu" hidden></div>' +
           '</div>' +
         '</section>' +
         '<section class="view" id="viewMcp" role="tabpanel" aria-labelledby="tabMcp" hidden>' +
@@ -1040,9 +1103,174 @@ function _sbRun() {
       banner.querySelector(".lbl").textContent = info.lbl;
       banner.querySelector(".sub").textContent = info.sub;
     }
+    // One banner, two read-only phases. Both make the same promise - nothing
+    // in the workspace changes - and saying it twice in two colours would be
+    // two ways to read one fact.
+    var banner = $("phaseBanner");
+    banner.hidden = phase === "act";
+    if (!banner.hidden) {
+      banner.setAttribute("data-phase", phase);
+      $("phaseBannerLbl").textContent = phase === "ask" ? "Ask phase" : "Plan phase";
+      // Ask's line carries one promise Plan's does not: no plan either. That is
+      // the whole difference between the two read-only phases, so the banner
+      // that announces the phase is where it has to be said.
+      $("phaseBannerSub").textContent = phase === "ask"
+        ? "read-only tools · no edits, no plan"
+        : "read-only tools · no edits applied";
+    }
     syncComposer();
     if (!silent) post("setPhase", { phase: phase });
   }
+
+  /**
+   * Repaint the layer behind the input so the draft is coloured as it is typed.
+   *
+   * Three things are marked, and only three, because every extra colour here
+   * competes with the message being written: the skill a leading slash names,
+   * the files an @ mention attaches, and inline code. All three are things the
+   * panel will *act* on, so seeing them recognised is feedback rather than
+   * decoration - a mistyped skill name simply stays uncoloured.
+   *
+   * The trailing newline matters: a textarea ending in one renders an extra
+   * blank line that the mirror would not, and the two would disagree about
+   * their height by exactly one line.
+   */
+  function renderDraftMirror() {
+    var mirror = $("draftMirror");
+    if (!mirror) return;
+    var draft = $("draft");
+    var raw = draft.value;
+
+    var html = esc(raw)
+      // A skill only counts at the very start, which is where the picker
+      // accepts one; "see /usr/bin" further along is a path, not a command.
+      .replace(/^(\/[a-z0-9][\w-]*)/i, '<span class="tk-skill">$1</span>')
+      // @path, stopping at whitespace. The trailing slash of a folder is kept.
+      .replace(/(^|\s)(@[\w./\\-]+)/g, '$1<span class="tk-file">$2</span>')
+      // Inline code, non-greedy and never across a line break.
+      .replace(/`([^`\n]+)`/g, '<span class="tk-code">`$1`</span>');
+
+    mirror.innerHTML = html + (raw.slice(-1) === "\n" ? "<br>" : "");
+    mirror.scrollTop = draft.scrollTop;
+  }
+
+  /* ───────────────────────── tips ───────────────────────── */
+
+  /**
+   * What this panel can do that is not visible from looking at it.
+   *
+   * Every line names a real feature and says how to reach it. A tip that
+   * cannot be acted on immediately is an advertisement, and an advertisement
+   * inside a tool someone is trying to work in is noise.
+   */
+  var TIPS = [
+    "Type <b>/</b> to run a skill - the index costs nothing until one is used.",
+    "<b>Shift+Tab</b> cycles Ask, Plan and Act. Ask reads and answers; it cannot edit.",
+    "<b>@</b> attaches a file by name, or a folder if you end it with a slash.",
+    "Paste an image straight into the box - it reaches the model when the endpoint has vision.",
+    "Ask the model to open a browser: it can click, read the console, and see the page.",
+    "Put standing rules in <b>.agent/instructions.md</b> and they join every prompt.",
+    "<b>Esc</b> stops a running turn, and the conversation stays resumable.",
+    "Every turn is snapshotted - <b>Restore checkpoint</b> undoes a whole turn, not one file.",
+    "The <b>Diagnostics</b> tab walks eight rungs and stops at the first real failure.",
+    "Drop a <b>SKILL.md</b> into .agent/skills and it appears under / straight away."
+  ];
+
+  /* How long one tip holds the strip.
+     Short enough that a panel left open all day shows more than one, long
+     enough that it is never moving while being read - a line that changes
+     under the eye is worse than a line nobody reads. */
+  var TIP_PERIOD_MS = 15 * 60 * 1000;
+
+  /* Derived from the clock rather than stored, so it advances on its own and
+     two panels open side by side agree. `tipNudge` is the manual button's
+     offset on top of it. */
+  function tipIndex() {
+    return (Math.floor(Date.now() / TIP_PERIOD_MS) + (S.tipNudge || 0)) % TIPS.length;
+  }
+
+  function renderTip(advance) {
+    var bar = $("tipBar");
+    if (!bar) return;
+    if (advance) S.tipNudge = (S.tipNudge || 0) + 1;
+    var i = tipIndex();
+    // innerHTML is safe here and only here: TIPS is a constant in this file
+    // and never carries anything a model or a page produced.
+    $("tipText").innerHTML = TIPS[i];
+    S.tipShown = i;
+    bar.hidden = false;
+  }
+
+  /* The strip has to change while the panel simply sits there, so the period
+     is watched rather than waited for: checking the bucket each minute costs
+     nothing and survives the machine sleeping, which a 15-minute timer would
+     not. */
+  function watchTips() {
+    setInterval(function () {
+      if (tipIndex() !== S.tipShown) renderTip(false);
+    }, 60 * 1000);
+  }
+
+  /* ───────────────────────── permissions ───────────────────────── */
+
+  /* The three modes, in the order they surrender control. Each line says what
+     happens rather than naming the setting: "edits-auto" is a value in a JSON
+     file, "file edits run, commands ask" is a decision someone can make. */
+  /* Mode, the full name for the menu, what it actually does, and the short
+     name for the button. The button sits in the composer's control row beside
+     the phase and the model, where there is room for a word rather than a
+     sentence - and where all three together answer "what happens when I press
+     send". The sentence still appears in the menu, which is where someone is
+     deciding rather than glancing. */
+  var PERMS = [
+    ["ask", "Ask each time", "Every side effect waits for you.", "Ask"],
+    ["edits-auto", "Auto-edit", "File edits run. Shell commands still ask.", "Edits"],
+    ["full-auto", "Allow all", "Runs everything without asking.", "Auto"]
+  ];
+
+  function permLabel(mode, short) {
+    for (var i = 0; i < PERMS.length; i++) {
+      if (PERMS[i][0] === mode) return short ? PERMS[i][3] : PERMS[i][1];
+    }
+    return short ? "Ask" : "Ask each time";
+  }
+
+  function permDetail(mode) {
+    for (var i = 0; i < PERMS.length; i++) if (PERMS[i][0] === mode) return PERMS[i][2];
+    return PERMS[0][2];
+  }
+
+  function renderPerm() {
+    var mode = (S.config && S.config.approvalMode) || "ask";
+    var nm = $("permName");
+    if (nm) nm.textContent = permLabel(mode, true);
+    var btn = $("permBtn");
+    if (btn) {
+      btn.setAttribute("data-mode", mode);
+      // The full sentence, for the control that now shows one word.
+      btn.title = permLabel(mode) + " - " + permDetail(mode);
+    }
+    var pop = $("permPop");
+    if (!pop || pop.hidden) return;
+    var html = "";
+    for (var i = 0; i < PERMS.length; i++) {
+      var on = PERMS[i][0] === mode;
+      html += '<button class="pop-row" role="menuitem" data-perm="' + esc(PERMS[i][0]) + '">' +
+        '<span class="perm-check">' + (on ? icon("i-check", "ic-13") : "") + "</span>" +
+        '<span class="col"><span class="t">' + esc(PERMS[i][1]) + "</span>" +
+        '<span class="m">' + esc(PERMS[i][2]) + "</span></span></button>";
+    }
+    pop.innerHTML = html;
+  }
+
+  function togglePerm(open) {
+    var pop = $("permPop");
+    if (!pop) return;
+    pop.hidden = open === undefined ? !pop.hidden : !open;
+    $("permBtn").setAttribute("aria-expanded", pop.hidden ? "false" : "true");
+    renderPerm();
+  }
+
 
   /* ─────────────────────── transcript primitives ─────────────────────── */
 
@@ -1090,46 +1318,43 @@ function _sbRun() {
         '</div>'));
       return;
     }
-    logEl.appendChild(div("welcome",
-      crystal(46, "crystal") +
-      "<h2>How can I help?</h2>" +
-      "<p>Kryptonite is connected and ready. Ask anything, or pick a starting point.</p>" +
-      '<div class="chips">' +
-        '<button class="chip-btn" data-sug="Add retry logic to fetch_json()">Add retry logic to fetch_json()</button>' +
-        '<button class="chip-btn" data-sug="Write tests for api.py">Write tests for api.py</button>' +
-        '<button class="chip-btn" data-act="doctor">Run TLS diagnostics</button>' +
-      '</div>' +
-      recentBlock()));
-  }
+    /* The three chips here used to be invented examples - "Add retry logic to
+       fetch_json()", a function nobody in this workspace has. They read as
+       features of a demo rather than of the tool, and pressing one typed a
+       sentence about somebody else's code.
 
-  /**
-   * Conversations to go back to, on the empty screen.
-   *
-   * Pressing New chat used to land on a welcome message with no way back
-   * except the history popover in the header - two clicks and a menu, to
-   * return to the thing you were reading a second ago. The empty screen is
-   * exactly where that list belongs: there is nothing else on it, and
-   * "continue where I was" is the most likely reason someone is looking at it.
-   *
-   * The current conversation is skipped: it is the empty one being looked at.
-   * With no previous conversations nothing renders at all, so a first run gets
-   * the welcome message alone rather than an empty heading.
-   */
-  function recentBlock() {
-    var rows = (S.sessions || []).filter(function (r) {
-      return r.id !== S.sessionId && (r.count || 0) > 0;
-    }).slice(0, 5);
-    if (!rows.length) return "";
-    var html = '<div class="recent"><div class="recent-h">Pick up where you left off</div>';
-    for (var i = 0; i < rows.length; i++) {
-      var r = rows[i];
-      var n = r.count === 1 ? "1 message" : (r.count || 0) + " messages";
-      html += '<button class="recent-row" data-session="' + esc(r.id) + '">' +
-        icon("i-clock", "ic-11") +
-        '<span class="t ell">' + esc(r.title) + "</span>" +
-        '<span class="m">' + esc(r.when) + " · " + n + "</span></button>";
+       What is actually useful on a blank screen is the work already in
+       progress, so the chips are the most recent conversations. On a genuinely
+       first run there are none, and then the welcome says so and offers
+       nothing - an empty row of buttons is worse than no row. */
+    var recent = [];
+    for (var ri = 0; ri < S.sessions.length && recent.length < 3; ri++) {
+      var sess = S.sessions[ri];
+      // Skip the conversation being written into - it is the empty screen the
+      // user is looking at, and offering to resume it goes nowhere. Skip the
+      // untouched ones too: an "Untitled" with no messages is not a thread
+      // anyone remembers starting.
+      if (sess.active || !sess.count || /^Untitled( \d+)?$/.test(sess.title || "")) continue;
+      recent.push(sess);
     }
-    return html + "</div>";
+
+    var body = crystal(46, "crystal") + "<h2>How can I help?</h2>";
+    if (!recent.length) {
+      body += "<p>Kryptonite is connected and ready. Ask anything to begin.</p>";
+    } else {
+      body += "<p>Kryptonite is connected and ready. Ask anything, or pick up where you left off.</p>" +
+        '<div class="chips resume">';
+      for (var rj = 0; rj < recent.length; rj++) {
+        var r = recent[rj];
+        var n = r.count === 1 ? "1 message" : r.count + " messages";
+        body += '<button class="chip-btn resume-btn" data-session="' + esc(r.id) + '">' +
+          icon("i-clock", "ic-11") +
+          '<span class="col"><span class="t ell">' + esc(r.title) + "</span>" +
+          '<span class="m">' + esc(r.when) + " · " + n + "</span></span></button>";
+      }
+      body += "</div>";
+    }
+    logEl.appendChild(div("welcome", body));
   }
 
   /* The rail is a ::before on .msg-user, so everything else has to sit in a
@@ -1355,6 +1580,22 @@ function _sbRun() {
     if (!aiFrame) aiFrame = requestAnimationFrame(typeStep);
   }
 
+  /**
+   * Everything streamed so far was the model thinking. Take it off screen.
+   *
+   * The bubble is removed rather than emptied. An empty bubble is a visible
+   * rectangle that then has to be filled again, and the whole point is that
+   * the user should never have seen the working in the first place - the
+   * closest we can get to that, once it has been sent, is for it to leave
+   * without a trace and the answer to arrive in a fresh one.
+   */
+  function resetAi() {
+    if (!aiEl) return;
+    if (aiFrame) { cancelAnimationFrame(aiFrame); aiFrame = null; }
+    if (aiEl.parentNode) aiEl.parentNode.removeChild(aiEl);
+    aiEl = null;
+  }
+
   /* ───────────────────────── tool cards ───────────────────────── */
 
   /**
@@ -1383,6 +1624,38 @@ function _sbRun() {
     toolGroup = g;
     add(g);
     return g;
+  }
+
+  /**
+   * The model's working, collapsed.
+   *
+   * This used to arrive as ordinary reply text, so a turn that called three
+   * tools put three essays into the transcript ahead of a two-line answer -
+   * and, because prose closes a tool group, split one run of three calls into
+   * three separate strips each reading "1 step".
+   *
+   * Closed by default. Reasoning is worth having when a model does something
+   * surprising and worth nothing the rest of the time, which is exactly the
+   * shape of a disclosure.
+   */
+  function addThinking(text) {
+    var t = String(text == null ? "" : text).trim();
+    if (!t) return;
+    // Not through `aiEl`: this is not the answer, and appending it there would
+    // put it back in the same paragraph flow it just came out of.
+    aiEl = null;
+
+    var box = div("think");
+    box.setAttribute("data-open", "0");
+    var words = t.split(/\s+/).length;
+    box.innerHTML =
+      '<button class="think-head">' + icon("i-chev", "ic-9 chev") +
+        '<span class="n">Thought for ' + words + " word" + (words === 1 ? "" : "s") + "</span></button>" +
+      '<div class="think-body">' + esc(t) + "</div>";
+    box.querySelector(".think-head").addEventListener("click", function () {
+      box.setAttribute("data-open", box.getAttribute("data-open") === "1" ? "0" : "1");
+    });
+    add(box);
   }
 
   /** Freeze the group's counters. Safe to call when no group is open. */
@@ -2198,8 +2471,19 @@ function _sbRun() {
 
   function syncComposer() {
     var draft = $("draft");
+    // The mirror is a second copy of the draft, painted under the transparent
+    // textarea to colour skills and @paths. Clearing `draft.value` on send
+    // left the mirror holding the old text, so what was just sent stayed on
+    // screen underneath the placeholder. Every path that changes the draft
+    // ends here, so this is the one place that cannot be forgotten.
+    renderDraftMirror();
     var blocked = !S.workspace.open || !hasEndpoint();
     draft.disabled = blocked;
+    // The aura reads this. Kept as an attribute rather than a class so the
+    // CSS can say what it means - a composer that is streaming - instead of
+    // naming a state twice in two vocabularies.
+    var composer = draft.closest(".composer");
+    if (composer) composer.setAttribute("data-streaming", S.running ? "1" : "0");
     // syncComposer runs on every render and overwrites the placeholder set at
     // mount, so this is the string that actually shows. It said "/ commands"
     // after `/` was changed to list skills - the mount was updated and this was
@@ -2298,6 +2582,18 @@ function _sbRun() {
     if (S.modelOpen) {
       var rows = [];
       var current = activeProfile();
+      // Auto first, and only when there is a choice to make. With one profile
+      // "let the extension pick" and "pick that one" are the same instruction,
+      // and offering both invites the user to wonder what the difference is.
+      var pinned = (S.config && S.config.activeProfile) || "";
+      if (S.models.length > 1) {
+        rows.push({
+          auto: true,
+          model: "Auto",
+          desc: "Follow the first healthy endpoint",
+          active: pinned === ""
+        });
+      }
       for (var i = 0; i < S.models.length; i++) {
         var g = S.models[i];
         rows.push({ group: g.group });
@@ -2401,6 +2697,11 @@ function _sbRun() {
           '<span class="qp-check">' + (r.active ? icon("i-check", "ic-13") : "") + "</span>" +
           '<span class="n ell">' + esc(r.agent || "None") + "</span>" +
           '<span class="d ell" title="' + esc(r.scope || r.desc) + '">' + esc(r.desc) + "</span></button>";
+      } else if (r.auto) {
+        html += '<button class="qp-row" role="option" data-active="' + on + '" data-i="' + idx + '">' +
+          '<span class="qp-check">' + (r.active ? icon("i-check", "ic-13") : "") + "</span>" +
+          '<span class="n">' + esc(r.model) + "</span>" +
+          '<span class="d ell">' + esc(r.desc) + "</span></button>";
       } else {
         html += '<button class="qp-row" role="option" data-active="' + on + '" data-i="' + idx + '">' +
           '<span class="qp-check">' + (r.active ? icon("i-check", "ic-13") : "") + "</span>" +
@@ -2435,6 +2736,11 @@ function _sbRun() {
     } else if (r.agent !== undefined) {
       post("setAgent", { name: r.agent });
       S.agentOpen = false;
+    } else if (r.auto) {
+      // An empty activeProfile is what "auto" already meant to the host; the
+      // picker just had no way to say it.
+      post("selectModel", { endpoint: "", model: "" });
+      S.modelOpen = false;
     } else {
       post("selectModel", { endpoint: r.endpoint, model: r.model });
       S.modelOpen = false;
@@ -2446,6 +2752,14 @@ function _sbRun() {
   }
 
   function runSlash(cmd, draft) {
+    // The editor-side ones first. They resolve their own target from the
+    // active editor, so there is nothing to put in the composer and nothing
+    // to send.
+    if (EDITOR_CMDS[cmd]) {
+      draft.value = "";
+      post("editorCommand", { command: EDITOR_CMDS[cmd] });
+      return;
+    }
     switch (cmd) {
       case "/clear":
         draft.value = ""; post("newChat"); break;
@@ -2627,6 +2941,11 @@ function _sbRun() {
 
   /* ───────────────────────── footer ───────────────────────── */
 
+  /* The footer says which endpoint is answering, and nothing else.
+     The context readout that used to live here - a figure and a meter - was
+     removed on request. The number is still tracked and still reported on
+     each turn's footer line; it simply no longer sits under the composer,
+     where it changed on every frame directly beneath the thing being typed. */
   function renderFooter() {
     var used = S.context ? S.context.used : 0;
     var limit = S.context ? S.context.limit : 0;
@@ -2650,7 +2969,12 @@ function _sbRun() {
       : "Context used - estimated, this endpoint reports no token count";
     $("epDot").setAttribute("data-err", S.tlsError ? "1" : "0");
     $("modelBtn").title = S.tlsError ? name + " - TLS error" : name;
-    $("modelName").textContent = active ? active.model : "No model";
+    // "Auto" when no profile is pinned and there is more than one to
+    // choose from: the label has to say the choice is being made for you.
+    var pinnedTo = (S.config && S.config.activeProfile) || "";
+    $("modelName").textContent = active
+      ? (pinnedTo === "" && S.models.length > 1 ? "Auto · " + active.model : active.model)
+      : "No model";
   }
 
   /* ─────────────────────── diagnostics: TLS ─────────────────────── */
@@ -3213,6 +3537,12 @@ function _sbRun() {
     setChangesOpen(S.changesOpen);
     renderChanges(null);
     renderSelection();
+    renderTip(false);
+    renderPerm();
+    // Survives a full re-render: the host pushes this on its own schedule, so
+    // a stateSync that dropped it would blank the chip until the cursor next
+    // moved, which on a still editor could be a long time.
+    renderEditorChip();
     renderTitle();
     renderFooter();
     renderTls();
@@ -3233,6 +3563,37 @@ function _sbRun() {
     if (!S.selection) { pill.hidden = true; return; }
     $("selText").textContent =
       "Selection: " + S.selection.file + " L" + S.selection.startLine + "–L" + S.selection.endLine;
+    pill.hidden = false;
+  }
+
+  /**
+   * The file the editor is on, which the model is told about automatically.
+   *
+   * Kept visibly distinct from the attachment chips below it. An attachment is
+   * something the user chose and can remove; this is a readout of where their
+   * cursor is, and offering a dismiss button on it would promise a control
+   * that does not exist. It goes quiet the moment focus leaves a real file, so
+   * the composer says nothing rather than something stale.
+   */
+  function renderEditorChip() {
+    var pill = $("edPill");
+    var e = S.editor;
+    if (!e || !e.file) { pill.hidden = true; return; }
+    var nm = $("edName");
+    nm.textContent = e.file;
+    nm.title = e.file + (e.language ? " · " + e.language : "");
+    var prob = $("edProb");
+    var n = (e.errors || 0) + (e.warnings || 0);
+    if (n) {
+      // Errors win the colour when there are both: one error matters more
+      // than nine warnings, and two numbers here would be noise.
+      prob.textContent = e.errors ? e.errors + (e.warnings ? "+" : "") : String(e.warnings);
+      prob.setAttribute("data-err", e.errors ? "1" : "0");
+      prob.title = e.errors + " error(s), " + e.warnings + " warning(s) in this file";
+      prob.hidden = false;
+    } else {
+      prob.hidden = true;
+    }
     pill.hidden = false;
   }
 
@@ -3453,6 +3814,7 @@ function _sbRun() {
     });
     document.addEventListener("click", function (e) {
       if (!e.target.closest(".kx-header")) closePops();
+      if (!e.target.closest("#permBtn") && !e.target.closest("#permPop")) togglePerm(false);
       if (S.modelOpen && !e.target.closest("#modelBtn") && !e.target.closest("#qp")) {
         S.modelOpen = false;
         renderQuickPick();
@@ -3506,7 +3868,16 @@ function _sbRun() {
     });
 
     var draft = $("draft");
-    draft.addEventListener("input", function () { syncComposer(); detectQuickPick(); });
+    draft.addEventListener("input", function () {
+      syncComposer();
+      detectQuickPick();
+      renderDraftMirror();
+    });
+    // A long draft scrolls inside a fixed-height box; the mirror has to follow
+    // or the colouring slides off the text it belongs to.
+    draft.addEventListener("scroll", function () {
+      $("draftMirror").scrollTop = draft.scrollTop;
+    });
     draft.addEventListener("keydown", onDraftKey);
     // Pay the connection, credential, and prompt-cache costs of the next turn
     // while the user is still typing, instead of after they press Enter. The
@@ -3560,6 +3931,21 @@ function _sbRun() {
     $("chgList").addEventListener("click", function (e) {
       var row = e.target.closest("[data-chg]");
       if (row) post("openFile", { path: row.getAttribute("data-chg") });
+    });
+    $("tipNext").addEventListener("click", function () { renderTip(true); });
+    watchTips();
+
+    $("permBtn").addEventListener("click", function (e) {
+      e.stopPropagation();
+      togglePerm();
+    });
+    $("permPop").addEventListener("click", function (e) {
+      var b = e.target.closest("[data-perm]");
+      if (!b) return;
+      // Straight to the host: approvalMode is a real setting, so the panel
+      // shows what it is rather than keeping a second copy of the truth.
+      post("setConfig", { key: "approvalMode", value: b.getAttribute("data-perm") });
+      togglePerm(false);
     });
 
     $("selClear").addEventListener("click", function () {
@@ -3778,6 +4164,14 @@ function _sbRun() {
         startStream();
         appendAi(m.text);
         syncComposer();
+        break;
+
+      case "thinking":
+        addThinking(m.text);
+        break;
+
+      case "streamReset":
+        resetAi();
         break;
 
       case "toolStart":
@@ -4003,6 +4397,11 @@ function _sbRun() {
         renderSelection();
         break;
 
+      case "editorContextChanged":
+        S.editor = m;
+        renderEditorChip();
+        break;
+
       case "attachmentsReady":
         if (!S.attachments) S.attachments = [];
         for (var ai = 0; ai < m.files.length; ai++) S.attachments.push(m.files[ai]);
@@ -4046,6 +4445,9 @@ function _sbRun() {
 
       case "configChanged":
         S.config = m.config;
+        // The footer shows the approval mode, so it has to follow a change
+        // made anywhere else - the Control Center, or settings.json by hand.
+        renderPerm();
         break;
 
       case "phaseChanged":

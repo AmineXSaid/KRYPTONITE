@@ -4,6 +4,10 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { ToolDef } from "../providers/client";
 import type { Skill } from "../skills/loader";
+import { BROWSER_ACTIONS } from "../browser/actions";
+import {
+  searchUrl, parseResults, renderResults, looksLikeBotWall, botWallAdvice, SEARCH_URL,
+} from "../browser/search";
 
 const pexec = promisify(execFile);
 
@@ -76,6 +80,15 @@ export interface ToolContext {
    * free of the mcp/ dependency - tools.ts is the one file both the agent loop
    * and the harness import.
    */
+  /**
+   * Web search, through whichever provider is configured.
+   *
+   * Its own hook rather than a `fetchUrl` call, because a search API needs
+   * headers - a key, an accept - and `fetchUrl` is a page reader that returns
+   * rendered text. Returns the rendered results, already formatted for the
+   * model. Absent in harnesses that have no network.
+   */
+  search?: (query: string, limit: number) => Promise<string>;
   mcp?: {
     has(name: string): boolean;
     needsApproval(name: string): boolean;
@@ -105,13 +118,37 @@ export interface ToolContext {
   /**
    * Drive a real browser. Absent when none is installed, which is what makes
    * the tool withhold itself rather than fail on every call.
+   *
+   * May answer with pixels as well as text. Whether it does is the caller's
+   * decision, not this module's: only the caller knows whether the endpoint
+   * declares vision, and a base64 PNG sent to a gateway without it is a 400
+   * rather than a degraded answer.
    */
-  browser?: (action: string, args: Record<string, unknown>) => Promise<string>;
+  browser?: (
+    action: string,
+    args: Record<string, unknown>
+  ) => Promise<string | { text: string; images?: ToolImage[] }>;
+}
+
+/** An image a tool hands back to the model. `data` is base64, no data: prefix. */
+export interface ToolImage {
+  mediaType: string;
+  data: string;
 }
 
 export interface ToolResult {
   content: string;
   isError?: boolean;
+  /**
+   * Pixels for the model, alongside `content` rather than instead of it.
+   *
+   * A tool result that carries these becomes a multi-part message on the wire.
+   * Nothing here reaches the transcript - what the *user* sees is posted
+   * separately, through `onImage`, because the two audiences want different
+   * things: the user wants the picture in the log, the model wants it in the
+   * context window, and neither should be inferred from the other.
+   */
+  images?: ToolImage[];
 }
 
 /**
@@ -360,24 +397,53 @@ export const TOOL_DEFS: ToolDef[] = [
       "Drive a real browser. Use this when a page needs JavaScript, a login, or a click " +
       "to reveal what you need - fetch_url only reads static HTML. Always `read` before " +
       "`click` or `type`: refs are assigned by each read and anything that navigated has " +
-      "new ones. Screenshots let you see the page; the ref list is what you act on.",
+      "new ones. `read` gives you the text, the refs you act on, and a line for each " +
+      "described picture in view; `screenshot` gives you the picture itself, and is the " +
+      "only way to judge what neither can carry - a chart, a diagram, a layout, an " +
+      "undescribed photograph, where something sits on the page. Read first and look when " +
+      "it leaves you guessing, rather than on every step: a screenshot stays in the " +
+      "context window for the rest of the conversation.",
     parameters: {
       type: "object",
       properties: {
         action: {
           type: "string",
-          enum: ["open", "read", "click", "type", "scroll", "screenshot", "back", "close"],
+          // Generated from the implementation's own list rather than repeated.
+          // Drift between the two is silent in both directions: an action here
+          // with no branch there throws at the model, and a branch with no
+          // entry here is a capability the model is never told it has.
+          enum: [...BROWSER_ACTIONS],
           description:
-            "open: go to a url. read: the page text plus every clickable ref. " +
-            "click/type: act on a ref. scroll: move the viewport. screenshot: see it. " +
-            "back: previous page. close: shut the browser down when finished.",
+            "open: go to a url. read: page text plus every clickable ref. " +
+            "text: the article, without the navigation and without refs - use it when you " +
+            "are reading rather than acting, since a long page's ref list is pure noise " +
+            "if you are not going to click anything. find: the refs " +
+            "matching a query, without re-reading the whole page. click/hover/type act on " +
+            "a ref. set: choose a <select> option or toggle a checkbox, which typing " +
+            "cannot do. key: press Enter, Escape, Tab, an arrow - wherever focus is. " +
+            "scroll: move the viewport. screenshot: see it. eval: run JavaScript and get " +
+            "the value back. console: what the page logged and threw. network: the " +
+            "requests it made, with statuses. wait: block until text or a selector " +
+            "appears, or the network goes quiet. resize: change the viewport, and " +
+            "optionally ask for the dark theme. back/forward: history. close when done.",
         },
         url: { type: "string", description: "For open." },
-        ref: { type: "string", description: "For click and type, from the last read." },
-        text: { type: "string", description: "For type." },
+        ref: { type: "string", description: "For click, hover, type and set, from the last read." },
+        text: { type: "string", description: "For type, set (the value), find (the query), and wait." },
         submit: { type: "boolean", description: "For type: press Enter afterwards." },
         clear: { type: "boolean", description: "For type: empty the field first." },
         dy: { type: "number", description: "For scroll: pixels, negative to go up." },
+        key: { type: "string", description: "For key: enter, escape, tab, arrowdown, …" },
+        expression: { type: "string", description: "For eval: JavaScript evaluated in the page." },
+        selector: { type: "string", description: "For wait: a CSS selector to wait for." },
+        errorsOnly: { type: "boolean", description: "For console and network: only failures." },
+        width: { type: "number", description: "For resize." },
+        height: { type: "number", description: "For resize." },
+        scheme: {
+          type: "string",
+          enum: ["light", "dark"],
+          description: "For resize: which colour scheme to claim.",
+        },
       },
       required: ["action"],
     },
@@ -395,6 +461,25 @@ export const TOOL_DEFS: ToolDef[] = [
         links: { type: "boolean", description: "Also list the page's links. Off by default; they are noisy." },
       },
       required: ["url"],
+    },
+  },
+  {
+    name: "web_search",
+    description:
+      "Search the web and get back titles, addresses and snippets. Use this whenever " +
+      "you need to find something rather than read a page you already have the address " +
+      "for - it is the only thing here that works for search. Do NOT drive the browser " +
+      "at google.com, bing.com or duckduckgo.com: a search page served to an automated " +
+      "browser is a bot check, not results. This goes out over HTTP on the active " +
+      "endpoint's connection, so it reaches whatever that endpoint reaches, and it is " +
+      "not subject to that check. Follow up with browser open or fetch_url on a result.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "What to search for, in plain words." },
+        limit: { type: "number", description: "How many results to return. Default 8, max 20." },
+      },
+      required: ["query"],
     },
   },
   {
@@ -890,6 +975,14 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
           open: `Open ${args?.url ?? ""} in the browser`,
           click: `Click ${args?.ref ?? ""} in the browser`,
           type: `Type into ${args?.ref ?? ""}: ${String(args?.text ?? "").slice(0, 80)}`,
+          // Setting a control and pressing a key are side effects on the page
+          // in exactly the way clicking is; reading is not, and hovering only
+          // reveals what a mouse passing over would.
+          set: `Set ${args?.ref ?? ""} to: ${String(args?.text ?? "").slice(0, 80)}`,
+          key: `Press ${String(args?.key ?? "")} in the browser`,
+          // Arbitrary script in the page can do anything a click can and more,
+          // so it is gated even though it is often only a read.
+          eval: `Run JavaScript in the page: ${String(args?.expression ?? "").slice(0, 120)}`,
         };
         if (gated[action]) {
           const ok = await ctx.approve(gated[action]!, "The browser is driven by the model.");
@@ -897,9 +990,35 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
         }
 
         try {
-          return { content: await ctx.browser(action, args ?? {}) };
+          const out = await ctx.browser(action, args ?? {});
+          return typeof out === "string"
+            ? { content: out }
+            : { content: out.text, images: out.images };
         } catch (e: any) {
           return { content: `browser ${action}: ${e?.message ?? e}`, isError: true };
+        }
+      }
+
+      case "web_search": {
+        if (!ctx.search) {
+          return { content: "Searching is not available in this context.", isError: true };
+        }
+        const query = String(args?.query ?? "").trim();
+        if (!query) return { content: "query is required.", isError: true };
+        const limit = Math.min(20, Math.max(1, Number(args?.limit ?? 8) || 8));
+
+        // The same gate as fetch_url: it reaches the network, and the query
+        // came from the model rather than from the user.
+        const ok = await ctx.approve(
+          `Search the web for ${JSON.stringify(query)}`,
+          "Queries the configured search provider over HTTP on the active endpoint's connection."
+        );
+        if (!ok) return { content: "The user declined that search.", isError: true };
+
+        try {
+          return { content: await ctx.search(query, limit) };
+        } catch (e: any) {
+          return { content: `The search failed: ${String(e?.message ?? e)}`, isError: true };
         }
       }
 

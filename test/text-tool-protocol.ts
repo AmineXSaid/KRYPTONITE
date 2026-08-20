@@ -101,32 +101,47 @@ console.log("\n──── gating on the available tool set ────");
 /* ── reasoning models stream on a different field ────────────────────── */
 console.log("\n──── reasoning_content ────");
 {
-  const drain = (parser: any, frames: any[]) => {
+  const drainOf = (kind: string) => (parser: any, frames: any[]) => {
     const out: string[] = [];
-    for (const f of frames) for (const ev of parser(f)) if (ev.type === "text") out.push(ev.text);
+    for (const f of frames) for (const ev of parser(f)) if (ev.type === kind) out.push(ev.text);
     return out.join("");
   };
+  const drain = drainOf("text");
+  const drainThinking = drainOf("reasoning");
   const delta = (d: any, finish?: string) => ({ choices: [{ delta: d, finish_reason: finish ?? null }] });
 
-  // Spent its whole budget thinking. Dropping this rendered a blank bubble,
-  // which is indistinguishable from a broken endpoint.
+  // Spent its whole budget thinking. Still emitted, so the panel has something
+  // to show rather than a blank bubble - but on its own channel, because it is
+  // not the answer. Yielded as `text` it landed in the transcript looking like
+  // one, and on an agentic turn that happens at every step.
+  const thinkingOnly = [
+    delta({ reasoning_content: "weighing " }),
+    delta({ reasoning_content: "the options" }),
+    delta({}, "length"),
+  ];
   ck(
-    drain(__openAiStreamForTest(), [
-      delta({ reasoning_content: "weighing " }),
-      delta({ reasoning_content: "the options" }),
-      delta({}, "length"),
-    ]) === "weighing the options",
-    "a reasoning-only turn shows its working rather than nothing"
+    drainThinking(__openAiStreamForTest(), thinkingOnly) === "weighing the options",
+    "a reasoning-only turn still reports its working"
+  );
+  ck(
+    drain(__openAiStreamForTest(), thinkingOnly) === "",
+    "but never as the answer"
   );
 
-  // Produced a real answer: the answer stands alone, thinking is not appended.
+  // Produced a real answer: the answer stands alone, and the working is
+  // reported separately rather than appended to it.
+  const answered = [
+    delta({ reasoning_content: "hmm" }),
+    delta({ content: "42" }),
+    delta({}, "stop"),
+  ];
   ck(
-    drain(__openAiStreamForTest(), [
-      delta({ reasoning_content: "hmm" }),
-      delta({ content: "42" }),
-      delta({}, "stop"),
-    ]) === "42",
+    drain(__openAiStreamForTest(), answered) === "42",
     "an answered turn keeps only its answer"
+  );
+  ck(
+    drainThinking(__openAiStreamForTest(), answered) === "hmm",
+    "and its working is still available, separately"
   );
 
   // Ordinary models are untouched.

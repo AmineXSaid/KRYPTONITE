@@ -154,6 +154,7 @@ const DRAFT_CAPS: Capabilities = {
   contextWindow: 128000,
   maxOutputTokens: 4096,
   tokenCounting: "heuristic",
+  maxImageBytes: 1_500_000,
   parallelToolCalls: false,
   // A pre-save check probes reachability, not throughput. Caching is opt-in
   // per saved profile, and a warm-up write here would be charged against a
@@ -161,6 +162,9 @@ const DRAFT_CAPS: Capabilities = {
   promptCaching: "none",
   cacheTtl: "5m",
   parallelToolExecution: true,
+  // Nothing on the pre-save path completes code, and claiming otherwise here
+  // would switch ghost text on for a profile the user has not saved yet.
+  fim: false,
 };
 
 /**

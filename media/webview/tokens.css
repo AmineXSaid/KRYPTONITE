@@ -84,6 +84,11 @@
   --kx-error:  #e8748f;    /* burgundy, lifted until it measures             */
   --kx-error-deep: #78122f;/* the recess itself: fills and washes            */
   --kx-warn:   #dd93b0;    /* rose: between the pink and the burgundy        */
+  /* Amber: the Ask phase, and only that. It had to be a fourth hue rather
+     than a reuse - Act's mint and Plan's violet already mean "go" and
+     "design", and rose already means "careful". Held to the same measured
+     4.5:1 as the rest by test/contrast.cjs rather than picked by eye. */
+  --kx-ask:    #e0b341;    /* amber: Ask phase - reading, changing nothing   */
   --kx-info:   #4a92d8;    /* measured figures, meters, reported counts      */
   /* Two grounds, two inks. The turquoise is bright enough to carry the near
      black; the door blue is deep and wants light text on it. Sharing one ink

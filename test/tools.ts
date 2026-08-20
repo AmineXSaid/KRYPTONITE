@@ -467,6 +467,31 @@ const run = (name: string, args: any) => runTool(name, args, ctx);
     const r = await run("browser", { action: "close" });
     ck(!r.isError && approvals.length === 0, "close is not gated");
   }
+  {
+    // A screenshot comes back as text *and* pixels. The dispatcher's job is to
+    // carry both through unchanged; deciding whether there are any pixels at
+    // all belongs to the caller, which is the only place that knows whether
+    // the endpoint can see.
+    ctx.browser = async () => ({
+      text: "Screenshot saved. The image follows.",
+      images: [{ mediaType: "image/jpeg", data: "AAAB" }],
+    });
+    const r = await run("browser", { action: "screenshot" });
+    ck(!r.isError && /The image follows/.test(r.content), "a screenshot returns its text");
+    ck(r.images?.length === 1, "and the pixels alongside it", String(r.images?.length));
+    ck(r.images?.[0].mediaType === "image/jpeg" && r.images?.[0].data === "AAAB",
+      "with the format and the bytes the browser chose", JSON.stringify(r.images?.[0]));
+  }
+  {
+    // The gated case, from the dispatcher's side: a caller that withholds the
+    // pixels answers with a plain string, and nothing downstream may invent an
+    // empty image array or a stray content block from it.
+    ctx.browser = async () => "Screenshot saved. The image is not attached.";
+    const r = await run("browser", { action: "screenshot" });
+    ck(r.images === undefined, "a text-only answer carries no images key at all",
+      JSON.stringify(r.images));
+    ck(/not attached/.test(r.content), "and says so in the text the model reads");
+  }
   ctx.browser = undefined;
 
   /* ── fetch_url ───────────────────────────────────────────────────── */

@@ -12,8 +12,11 @@
    those variables here would not have worked anyway â€” VS Code sets them as an
    inline style on <html>, which beats any :root rule in a stylesheet.)
 
-   No glows, no text-shadows, no gradient fills. The only glow in the product
-   lives inside the crystal artwork and the thinking aura.
+   No glows, no text-shadows, no gradient fills. Three exceptions, each one
+   deliberate and each one written down where it is defined: the crystal
+   artwork, the thinking aura, and the composer's rim - which is off entirely
+   at rest and only lights while the input has focus or the model is
+   streaming.
    â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 
@@ -160,6 +163,8 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 .phase-banner .lbl {
   font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
 }
+/* The banner takes the phase's own colour, so the strip and the segment that
+   turned it on are visibly the same fact rather than two unrelated markers. */
 .phase-banner .sub { font-size: 11.5px; color: var(--kx-fg-2); }
 .phase-banner[data-phase="ask"] .dot { background: var(--kx-ask); }
 .phase-banner[data-phase="ask"] .lbl { color: var(--kx-ask); }
@@ -493,6 +498,30 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .tool-group[data-open="0"] .tool-group-body { display: none; }
 .tool-group[data-open="1"] .tool-group-head .chev { transform: rotate(90deg); }
 
+/* ── the model's working ───────────────────────────────────────────────────
+   Quieter than a tool group on purpose. A tool call changed something and is
+   worth a bordered object; reasoning changed nothing and is worth a line you
+   can open. It used to be rendered as the reply, which put four paragraphs of
+   "the user provided X, which could be..." above a two-line answer. */
+.think { margin-bottom: 12px; }
+.think-head {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 4px 2px; border-radius: 5px;
+  color: var(--kx-fg-4);
+}
+.think-head:hover { color: var(--kx-fg-2); background: var(--kx-hover); }
+.think-head .n { font-family: var(--kx-ui); font-size: 11.5px; }
+.think[data-open="1"] .think-head .chev { transform: rotate(90deg); }
+.think[data-open="0"] .think-body { display: none; }
+/* Set in the reading face at a smaller size, and indented behind a rule: it
+   reads as an aside to the answer, which is what it is. */
+.think-body {
+  margin: 4px 0 0; padding: 2px 0 2px 12px;
+  border-left: 2px solid var(--kx-line);
+  font-family: var(--kx-prose); font-size: 12px; line-height: 1.6;
+  color: var(--kx-fg-4); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+
 .tool { margin-bottom: 0; }
 .tool-head {
   display: flex; align-items: center; gap: 8px; width: 100%;
@@ -808,7 +837,7 @@ li.doing .cbx { border-color: var(--kx-accent); }
 @media (prefers-reduced-motion: reduce) {
   .rad .rays, .rad .ki, .rad .shock, .rad .em { display: none; }
   .rad .crystal { animation: none; opacity: 1; }
-  .chev, #ctxFill { transition: none; }
+  .chev { transition: none; }
 }
 .stream .g { font-family: var(--kx-prose); font-size: 13px; }
 .stream .m {
@@ -1008,21 +1037,97 @@ li.doing .cbx { border-color: var(--kx-accent); }
 .qp-empty { padding: 8px 9px; font-size: 11.5px; color: var(--kx-fg-2); }
 
 /* #4 â€” one card, one control row. */
+/* ── the composer, and its aura ───────────────────────────────────────────
+   The one animated gradient in the product, and the third exception to the
+   no-glow rule at the top of this file alongside the crystal and the thinking
+   aura. It exists because the composer is where a turn begins and ends, and a
+   rim that turns while the model is working says "still going" in the one
+   place the eye already is.
+
+   Two rules keep it from becoming decoration:
+
+   - It is never on at rest. Focus turns it on, streaming turns it on; an idle
+     composer is a flat surface with a hairline border, exactly as before.
+   - It never replaces the focus ring. The ring is a 3:1 accessibility
+     affordance; a spinning gradient is not one, and someone who has asked for
+     reduced motion would be left with no focus indicator at all. Both are
+     drawn, and the ring is on top.
+
+   The angle is a registered custom property because a plain `--angle` is an
+   unanimatable string - the browser cannot interpolate between "0deg" and
+   "360deg" without being told it is an <angle>, so the whole thing would
+   simply snap at the end of each cycle. */
+@property --kx-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
 .composer {
   background: var(--kx-surface); border-radius: 10px; overflow: hidden;
   border: 1px solid rgba(222, 220, 209, .15);
 }
-/* A 1px border tint is not a 3:1 focus indicator on its own. The ring is what
-   makes the composer's focus visible without moving anything. */
+
+/* Two background layers rather than a pseudo-element: the surface is painted
+   to the padding box and the gradient to the border box, so the gradient is
+   visible only through a border that has been made transparent. It needs no
+   extra element, no stacking context, and - the reason it was chosen - no
+   change to `overflow: hidden`, which is what keeps the pills and the toolbar
+   clipped to the composer's rounded corners. The pseudo-element version has
+   to drop that clip to avoid clipping itself, and the children lose their
+   corners with it.
+
+   The border stays 1px so nothing moves when the aura turns on. */
+.composer:focus-within,
+.composer[data-streaming="1"] {
+  border-color: transparent;
+  background:
+    linear-gradient(var(--kx-surface), var(--kx-surface)) padding-box,
+    conic-gradient(
+      from var(--kx-angle),
+      var(--kx-accent), var(--kx-link), var(--kx-under), var(--kx-accent)
+    ) border-box;
+  animation: kx-aura-spin 4.2s linear infinite;
+}
+/* Streaming is the louder of the two: the model is doing something the user is
+   waiting on, and the composer is where they are already looking. */
+.composer[data-streaming="1"] { animation-duration: 2.4s; }
+
+@keyframes kx-aura-spin { to { --kx-angle: 360deg; } }
+
+/* A 1px border tint is not a 3:1 focus indicator on its own, and neither is a
+   gradient - parts of any sweep will be low-contrast against the surface. The
+   ring is the affordance, and it is drawn whether or not the aura is, which
+   is what makes the aura safe to be decoration. */
 .composer:focus-within {
-  border-color: var(--kx-link);
   box-shadow: 0 0 0 2px var(--kx-info-wash);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Held still rather than removed. The rim still marks both states; it simply
+     stops turning, which is the part that was objected to. */
+  .composer:focus-within,
+  .composer[data-streaming="1"] { animation: none; }
 }
 .sel-pill {
   display: flex; align-items: center; gap: 7px; padding: 7px 10px; font-size: 11.5px;
   color: var(--kx-fg-2);
   border-bottom: 1px solid var(--kx-line);
 }
+/* The automatic one. Quieter than the selection pill and quieter still than an
+   attachment chip, because nobody chose it: it reports where the cursor is,
+   and a readout that shouts competes with the message being written. */
+.ed-pill {
+  display: flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 11px;
+  color: var(--kx-fg-3);
+  border-bottom: 1px solid var(--kx-line);
+}
+.ed-pill .nm { min-width: 0; }
+.ed-pill .prob {
+  flex: none; font-family: var(--kx-mono); font-size: 10px; padding: 0 5px;
+  border-radius: 3px; background: var(--kx-surface-3); color: var(--kx-fg-2);
+}
+.ed-pill .prob[data-err="1"] { color: var(--kx-error); }
 /* The textarea must never show a scrollbar when empty. `rows=1` plus a fixed
    min-height gives the resting state; `overflow: hidden` prevents the scrollbar
    until autoGrow flips it to `auto` once the content exceeds one line. */
@@ -1030,14 +1135,59 @@ li.doing .cbx { border-color: var(--kx-accent); }
    specificity, so the composer had no visible keyboard focus at all. The
    composer's frame carries it instead, which is why the outline is dropped
    here rather than restored. */
+/* ── the draft, and the layer that colours it ─────────────────────────────
+   A textarea cannot colour its own text, and a contenteditable would have to
+   reimplement the caret, selection, IME and undo. So the textarea keeps all
+   four and gives up only its paint: its glyphs are transparent and an
+   identical block behind it draws them, with the tokens marked.
+
+   Every metric below is duplicated between the two on purpose. Font, size,
+   line-height, padding, wrapping and word-breaking must agree exactly or the
+   colouring slides off the characters it belongs to - and it drifts further
+   with every line, so a short draft looks fine and a long one is visibly
+   broken. They are kept adjacent so a change to one is a change to both. */
+.draft-wrap { position: relative; }
+
+#draft,
+.draft-mirror {
+  font-family: var(--kx-ui); font-size: 13px; line-height: 1.5;
+  padding: 12px 12px 8px;
+  white-space: pre-wrap; overflow-wrap: break-word; word-break: normal;
+  letter-spacing: normal;
+}
+
 #draft {
   display: block; width: 100%; background: transparent; border: none; outline: none; resize: none;
-  font-family: var(--kx-ui); font-size: 13px; line-height: 1.5;
-  color: var(--kx-fg); padding: 12px 12px 8px;
   min-height: 36px; max-height: 120px; overflow: hidden;
+  position: relative;
+  /* The glyphs come from the mirror; the caret and the selection do not, so
+     both are named explicitly rather than inherited from a transparent
+     foreground. */
+  color: transparent;
+  caret-color: var(--kx-fg);
 }
+#draft::selection { background: var(--kx-info-wash); color: var(--kx-fg); }
 #draft::placeholder { color: var(--kx-fg-4); }
+/* A disabled composer has nothing to colour, so it paints its own text and
+   the mirror steps out of the way. */
 #draft:disabled { color: var(--kx-fg-3); }
+/* The mirror precedes the textarea in the DOM, so this cannot be a sibling
+   selector - it has to ask the wrapper. */
+.draft-wrap:has(#draft:disabled) .draft-mirror { display: none; }
+
+.draft-mirror {
+  position: absolute; inset: 0;
+  pointer-events: none; overflow: hidden;
+  color: var(--kx-fg);
+}
+/* The three things the panel will act on. Anything else stays plain: every
+   extra colour here competes with the sentence being written. */
+.draft-mirror .tk-skill { color: var(--kx-under); font-weight: 600; }
+.draft-mirror .tk-file { color: var(--kx-link); }
+/* Colour only. A different family or size here would advance the text by a
+   different amount than the textarea does, and every character after the
+   first backtick would sit off its own glyph. */
+.draft-mirror .tk-code { color: var(--kx-accent); }
 
 /* â”€â”€ attachment pills â”€â”€ */
 .att-strip {
@@ -1084,6 +1234,10 @@ li.doing .cbx { border-color: var(--kx-accent); }
 .seg button[data-phase="ask"][data-on="1"] { color: var(--kx-ask); font-weight: 700; }
 .seg button[data-phase="plan"][data-on="1"] { color: var(--kx-under); font-weight: 700; }
 .seg button[data-phase="act"][data-on="1"] { color: var(--kx-accent); font-weight: 700; }
+/* Ask takes the amber. It reads as "held" next to Act's mint go and Plan's
+   violet - which is what the mode is: the model is reading and answering, and
+   nothing it does can reach the workspace. */
+.seg button[data-phase="ask"][data-on="1"] { color: var(--kx-ask); font-weight: 700; }
 
 /* A 2px underline in the phase's own hue, under the active segment only.
  *
@@ -1132,6 +1286,101 @@ li.doing .cbx { border-color: var(--kx-accent); }
   background: var(--kx-accent);
 }
 .ep-dot[data-err="1"] { background: var(--kx-error); }
+
+/* ── the welcome screen's resume chips ────────────────────────────────────
+   Two lines rather than one: the title says which conversation it was, and
+   the age and message count say whether it is worth going back to. A title
+   alone reads identically for a thread with one message and one with forty. */
+.chips.resume { flex-direction: column; gap: 6px; width: 100%; max-width: 340px; }
+.resume-btn {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 9px 11px; text-align: left;
+  color: var(--kx-fg-2);
+}
+.resume-btn svg { flex: none; color: var(--kx-fg-4); }
+.resume-btn .col { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.resume-btn .t { font-size: 12.5px; color: var(--kx-fg); }
+.resume-btn .m { font-size: 11px; color: var(--kx-fg-3); }
+.resume-btn:hover svg { color: var(--kx-link); }
+
+/* ── the tip strip ────────────────────────────────────────────────────────
+   Above the composer, below the transcript: the one place the eye already
+   passes on its way to the input. Quiet enough to ignore on the hundredth
+   read, legible enough to catch on the first. */
+.tipbar {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 7px; padding: 6px 10px;
+  font-size: 11.5px; line-height: 1.45; color: var(--kx-fg-3);
+  background: var(--kx-hover);
+  border: 1px solid var(--kx-hairline); border-radius: 7px;
+}
+/* The keycap-ish label. Amber, matching Ask: both mean "information, not
+   action", and a third accent for one word would be a third thing to learn. */
+.tipbar .tip-k {
+  flex: none; font-size: 9.5px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase;
+  color: var(--kx-ask);
+}
+.tipbar .tip-t { min-width: 0; }
+/* The feature names inside a tip. `b` rather than a class: the tip strings
+   are constants in sidebar.js and carry their own emphasis. */
+.tipbar .tip-t b { font-weight: 600; color: var(--kx-fg-2); }
+.tipbar .tip-x {
+  flex: none; width: 20px; height: 20px; display: grid; place-items: center;
+  border-radius: 4px; color: var(--kx-fg-4);
+}
+.tipbar .tip-x:hover { background: var(--kx-hover); color: var(--kx-fg-2); }
+
+/* What is left of the footer: one dot for the endpoint's health.
+   The name used to be printed here - "NVIDIA" under every conversation - which
+   is a label for a fact that only matters when it is wrong, and the dot
+   already says when it is wrong. The name is in the tooltip and in the model
+   picker, which is where anyone goes to change it. */
+.footer {
+  display: flex; align-items: center; gap: 8px; padding: 6px 2px 0;
+  font-size: 12px; color: var(--kx-fg-2);
+  font-variant-numeric: tabular-nums;
+  position: relative;
+}
+.footer .ep { cursor: default; }
+
+/* ── the approval control ─────────────────────────────────────────────────
+   Inside the composer now, on the control row with the phase and the model.
+   Those three together are the whole answer to "what happens when I press
+   send": what it may do, which model does it, and whether it asks first.
+   Under the box, in a footer, it was a setting nobody looked at.
+
+   Shaped to match the model button beside it rather than the phase segment,
+   because like the model it is a current value you can change, not one of
+   three states you pick between. */
+.perm {
+  display: flex; align-items: center; gap: 5px; flex: none;
+  min-height: 24px; padding: 0 8px; border-radius: 6px;
+  font-size: 11.5px; color: var(--kx-fg-3);
+  border: 1px solid transparent; background: none;
+}
+.perm .ic-11 { color: currentColor; }
+.perm:hover { background: var(--kx-hover); color: var(--kx-fg); }
+.perm[aria-expanded="true"] { background: var(--kx-hover); border-color: var(--kx-line); }
+/* Only the mode that stops asking is coloured. "Ask each time" is the
+   default and needs no marking; "Allow all" is a state someone should be
+   able to notice from across the room. */
+.perm[data-mode="edits-auto"] { color: var(--kx-ask); }
+.perm[data-mode="full-auto"] { color: var(--kx-error); }
+
+/* Opens upward, over the transcript, anchored to the composer rather than to
+   the old footer. Left-aligned because the button it belongs to now sits on
+   the left of the control row. */
+.perm-pop {
+  top: auto; bottom: 52px; left: 10px; right: auto; width: 250px;
+}
+.perm-pop .pop-row { align-items: flex-start; gap: 7px; }
+.perm-pop .perm-check { flex: none; width: 13px; margin-top: 1px; color: var(--kx-accent); }
+.perm-pop .col { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.ep { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.ep .dot { width: 5px; height: 5px; flex: none; border-radius: 50%; background: var(--kx-accent); }
+.ep[data-err="1"] { color: var(--kx-error); }
+.ep[data-err="1"] .dot { display: none; }
 
 /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ MCP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *

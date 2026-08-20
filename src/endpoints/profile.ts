@@ -66,6 +66,22 @@ export interface Capabilities {
   maxOutputTokens: number;
   /** "api" trusts a usage field; "heuristic" estimates locally (offline-safe). */
   tokenCounting: "api" | "heuristic";
+  /**
+   * How much base64 image data one request may carry, in bytes.
+   *
+   * Not a token budget - images are priced by their pixels and a screenshot is
+   * about 1,400 tokens whatever it weighs. This is a budget for the *body*,
+   * because a screenshot is around 200 KB of base64 and a conversation that
+   * takes ten of them is a two megabyte POST. Anthropic will accept that; a
+   * corporate gateway with a body cap answers it with a 413, and a 413 that
+   * arrives after ten useful turns is the worst possible time to find out.
+   *
+   * When the budget is exceeded the oldest pictures are replaced with a line
+   * saying so, newest kept. The most recent screenshot is always sent, whatever
+   * it weighs: a cap that could silently discard the thing the model just asked
+   * to look at would be worse than the 413.
+   */
+  maxImageBytes: number;
   parallelToolCalls: boolean;
   /**
    * How this endpoint caches the stable head of a prompt.
@@ -85,6 +101,19 @@ export interface Capabilities {
    * the workspace. Off means the old strictly-sequential behaviour.
    */
   parallelToolExecution: boolean;
+  /**
+   * This endpoint can complete code at the cursor quickly enough to be worth
+   * showing as ghost text.
+   *
+   * Defaults false, and that is a judgement about what this extension is for
+   * rather than caution. Inline completion wants a sub-500ms round trip and a
+   * fill-in-the-middle model. This extension exists for corporate gateways,
+   * air-gapped deployments and mTLS endpoints, which typically offer neither -
+   * so it is the feature most likely to feel broken on exactly the endpoints
+   * the product targets. Anyone whose gateway can carry it turns it on and
+   * gets it; nobody else pays for a laggy suggestion they did not ask for.
+   */
+  fim: boolean;
 }
 
 /**
@@ -153,10 +182,15 @@ const DEFAULT_CAPS: Capabilities = {
   contextWindow: 32000,
   maxOutputTokens: 4096,
   tokenCounting: "heuristic",
+  // Room for roughly six screenshots. Chosen to sit under the 2 MB body limit
+  // that is the common default on nginx and most API gateways, with the rest
+  // of the conversation and the tool definitions still to fit around it.
+  maxImageBytes: 1_500_000,
   parallelToolCalls: false,
   promptCaching: "none",
   cacheTtl: "5m",
   parallelToolExecution: true,
+  fim: false,
 };
 
 export class ProfileError extends Error {
