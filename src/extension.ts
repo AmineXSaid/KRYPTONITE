@@ -79,6 +79,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       instance.pickCheckpointRestore()
     ),
 
+    vscode.commands.registerCommand("kryptonite.selectAgent", () => instance.pickAgent()),
+
+    vscode.commands.registerCommand("kryptonite.newAgent", async () => {
+      try {
+        await instance.newAgent();
+      } catch (e) {
+        vscode.window.showErrorMessage(e instanceof Error ? e.message : String(e));
+      }
+    }),
+
     // Two entries rather than one with a picker: "export this chat" is the
     // common case and should not cost a second dialog before the save dialog.
     vscode.commands.registerCommand("kryptonite.exportChat", () => exportChat(instance, "current")),

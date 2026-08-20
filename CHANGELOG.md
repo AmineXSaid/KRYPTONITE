@@ -47,11 +47,66 @@ agent is doing to the workspace while it does it.
   replaces this turn's estimate with git's own count and the tilde goes. The
   estimate is subtracted rather than the total overwritten, so a file changed
   in an earlier turn keeps the count it earned there.
+- **Agents.** A persona plus a list of what it may reach, one Markdown file
+  each in `.agent/agents/`: a model override, a memory file, an allowlist of
+  built-in tools, an allowlist of skills, and a per-server filter over MCP
+  tools. The `mcp:` block takes Hermes Agent's own shape
+  (`tools.include` / `tools.exclude`, `*` globs) so a filter can be copied
+  between the two, plus the shorthands people write first - `mcp: "*"`,
+  `mcp: none`, `mcp: [filesystem, memory]`, `mcp: { filesystem: [read_*] }`.
+  Everything except `name` is optional and every omission means "unrestricted"
+  rather than "none", so an agent can start as a persona and acquire limits
+  later. Pick one with `/agent`, from the Agents section of the Diagnostics
+  tab, or from the command palette; a bar under the tabs names the active one
+  and states its scope, and nothing is drawn when none is selected.
+- **The agent scope is enforced, not advertised.** One predicate,
+  `agentAllowsMcp` / `agentAllowsTool` (`src/agents/loader.ts`), read at the
+  boundary where tools are offered *and* at the boundary where a call runs -
+  the same rule the read-only phases follow, for the same reason: filtering the
+  `tools` array is a request to the model, not a guarantee about it. An agent
+  whose picker row promises "read_text_file only" and whose runtime runs
+  `write_file` would be worse than no agent at all. `test/agent-gate.ts` drives
+  the real loop with a model that deliberately calls tools it was never
+  offered; `test/mcp-live.ts` proves the same scope against a real MCP server
+  process, where the write tool is connected and callable without the agent and
+  refused with it.
+- **Agent memory.** `memory:` names a workspace file that is read into the
+  system prompt on every turn, with the instruction that the agent may rewrite
+  it using its own tools. No machinery behind it, which is the point: what
+  accumulates is a file that can be read, edited and deleted. Capped at 8k
+  characters, refused if the path leaves the workspace.
+- **A way back from the empty screen.** New chat used to land on a welcome
+  message whose only route back was the history popover in the header - two
+  clicks and a menu, to return to the thing you were reading a second ago. The
+  empty screen now lists the last few conversations under the starting-point
+  chips. Nothing renders on a first run, so the message stands alone.
 - **`Open in editor` on file tool cards.** A card about a file could not reach
   it. The header cannot carry the link - it is itself the button that expands
   the card, and a control inside a control is neither valid nor operable by
   keyboard - so the action lives in the body it opens, on `read_file`,
   `write_file` and `edit_file`, and not on a call that failed.
+
+### Changed
+- **The footer strip is gone.** A row under the composer carried the context
+  figure, its meter and the endpoint pill: three facts that are status rather
+  than controls, costing a row of vertical space on every panel in a sidebar
+  whose scarcest resource is vertical space. The figure and the meter moved
+  into the header beside the wordmark, and the endpoint's health became a dot
+  on the model button, which already names that endpoint's model. Nothing was
+  dropped: the figure still prints only when the gateway reported real usage,
+  the meter still turns amber then coral, and the dot still turns red on a TLS
+  failure.
+
+### Fixed
+- **A message steered mid-turn kept its text and lost its files.** The steering
+  path built `{ role: "user", content: text }` by hand while the normal send
+  path composed images into content blocks and inlined text files as fenced
+  blocks. A screenshot pasted during a running turn reached the model as the
+  sentence about it - and the composer had already cleared the pill, so nothing
+  on screen said it was gone. Both paths now go through one
+  `composeUserMessage`, and the acknowledgement carries the file chips so the
+  transcript shows what is waiting. The queue path was already correct; its
+  note now shows the chips too.
 
 ## 0.6.0
 

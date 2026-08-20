@@ -312,11 +312,21 @@ export class McpRegistry {
   }
 
   /** Tools from every ready server, named for the model. */
-  toolDefs(): ToolDef[] {
+  /**
+   * Every ready server's tools, namespaced.
+   *
+   * `allow` narrows the list to what the active agent declares. Exposing a
+   * server's whole surface to an agent that needs two of its tools spends
+   * context on the other twelve and leaves the destructive ones one
+   * hallucination away, which is why the filter is applied here rather than
+   * left to the prompt.
+   */
+  toolDefs(allow?: (server: string, tool: string) => boolean): ToolDef[] {
     const out: ToolDef[] = [];
     for (const c of this.clients.values()) {
       if (c.state !== "ready") continue;
       for (const t of c.tools) {
+        if (allow && !allow(c.spec.name, t.name)) continue;
         out.push({
           name: qualify(c.spec.name, t.name),
           // The server name is in the description too: the model picks tools by

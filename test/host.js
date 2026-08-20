@@ -273,8 +273,13 @@ const context = {
     s.recordChange("x.ts", { change: "modified", added: 1, removed: 0 });
     const sync = await app.buildStateSync();
     ok("the change list is part of hydration", sync.changes.length === 1);
+    posted.length = 0;
     s.newChat();
     ok("a new conversation starts with no changes", s.changedFiles().length === 0);
+    // The panel is a mirror of this map, so clearing it host-side without
+    // saying so would leave the old rows on screen under a new conversation.
+    ok("and says so, so the panel empties with it",
+      posted.some((m) => m.type === "changesUpdated" && m.files.length === 0));
   }
 
   await ext.deactivate();

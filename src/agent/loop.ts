@@ -1,6 +1,7 @@
 import type { EndpointClient, Msg, ToolCall, ToolDef } from "../providers/client";
 import { TOOL_DEFS, runTool, ToolContext } from "./tools";
 import { skillIndex, Skill } from "../skills/loader";
+import { agentAllowsTool, agentPrompt, agentRefusal, type Agent } from "../agents/loader";
 
 export interface AgentEvent {
   type: "text" | "tool_start" | "tool_end" | "turn_end" | "error" | "context" | "steer";
@@ -321,6 +322,16 @@ export interface AgentRunOptions {
    */
   mcpTools?: ToolDef[];
   /**
+   * The active agent, if one is selected, and the current contents of its
+   * memory file. It contributes the persona to the system prompt and narrows
+   * both the built-in tool set and the MCP tool set to what it declares.
+   *
+   * The MCP side is already narrowed in `mcpTools` by the caller, which owns
+   * the registry; the second gate below covers the built-ins and, at the
+   * execution boundary, any MCP name the model produces that was never offered.
+   */
+  agent?: { agent: Agent; memory?: string };
+  /**
    * Called for every message the loop appends after the user's turn: each
    * assistant reply and each tool result, in order.
    *
@@ -347,9 +358,18 @@ export interface AgentRunOptions {
  * They have to be byte-identical: a prefix that differs by a single character
  * shares no cache entry, and a pre-warm that misses is pure cost.
  */
-export function systemPromptFor(skills: Skill[], phase: Phase): string {
+export function systemPromptFor(
+  skills: Skill[],
+  phase: Phase,
+  agent?: { agent: Agent; memory?: string }
+): string {
   const addendum = phase === "plan" ? PLAN_ADDENDUM : phase === "ask" ? ASK_ADDENDUM : "";
-  return [SYSTEM, skillIndex(skills), addendum].filter(Boolean).join("\n\n");
+  // The agent block sits after the skills index and before the phase addendum:
+  // the persona says who is answering, the addendum says what this phase will
+  // and will not do, and the phase rule has to be the last word - it is the one
+  // a persona must not be able to talk its way out of.
+  const persona = agent ? agentPrompt(agent.agent, agent.memory) : "";
+  return [SYSTEM, skillIndex(skills), persona, addendum].filter(Boolean).join("\n\n");
 }
 
 export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEvent> {
@@ -357,7 +377,8 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
   const caps = client.profile.capabilities;
   // CHANGED: the plan addendum joins the system prompt in plan phase.
   const phase = opts.phase ?? "act";
-  const system = systemPromptFor(ctx.skills, phase);
+  const agent = opts.agent?.agent;
+  const system = systemPromptFor(ctx.skills, phase, opts.agent);
 
   // CHANGED: in ask and plan phase the model is only offered a read-only tool
   // set, so a write is impossible rather than merely discouraged. Ask's set is
@@ -377,7 +398,9 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
   // just to filter it away wastes the mapping.
   const candidates: ToolDef[] =
     phase === "act" ? [...builtins, ...(opts.mcpTools ?? [])] : builtins;
-  const availableTools: ToolDef[] = candidates.filter((t) => toolAllowedIn(phase, t.name));
+  const availableTools: ToolDef[] = candidates.filter(
+    (t) => toolAllowedIn(phase, t.name) && (t.name.startsWith("mcp__") || agentAllowsTool(agent, t.name))
+  );
 
   const messages: Msg[] = [
     { role: "system", content: system },
@@ -403,7 +426,19 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
     for (const steer of opts.takeSteer?.() ?? []) {
       messages.push(steer);
       opts.onMessage?.(steer);
-      yield { type: "steer", text: typeof steer.content === "string" ? steer.content : "" };
+      // Array content means the message carried images; the text block is
+      // still the part a transcript shows. Yielding "" for those rendered a
+      // steered screenshot as an empty user turn.
+      yield {
+        type: "steer",
+        text:
+          typeof steer.content === "string"
+            ? steer.content
+            : steer.content
+                .filter((b): b is { type: "text"; text: string } => b.type === "text")
+                .map((b) => b.text)
+                .join("\n"),
+      };
     }
 
     const fitted = fitToWindow(messages, caps.contextWindow, caps.maxOutputTokens + 512);
@@ -540,10 +575,19 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
     // The phase gate, applied to the name the model actually sent rather than
     // to the list it was offered. Everything above this line is advisory; this
     // is where Ask and Plan stop being a promise and become a property.
-    const invoke = (c: ToolCall) =>
-      toolAllowedIn(phase, c.name)
-        ? runTool(c.name, c.arguments, ctx)
-        : Promise.resolve({ content: refusalFor(phase, c.name), isError: true });
+    const invoke = (c: ToolCall) => {
+      if (!toolAllowedIn(phase, c.name)) {
+        return Promise.resolve({ content: refusalFor(phase, c.name), isError: true });
+      }
+      // The agent gate, for the same reason as the phase gate above: the list
+      // of tools sent to the model is advisory, and a name the model produced
+      // from memory has to be checked rather than trusted. MCP names are left
+      // to the scoped registry the caller supplied, which knows the servers.
+      if (agent && !c.name.startsWith("mcp__") && !agentAllowsTool(agent, c.name)) {
+        return Promise.resolve({ content: agentRefusal(agent, c.name), isError: true });
+      }
+      return runTool(c.name, c.arguments, ctx);
+    };
 
     const running = canParallel
       ? calls.map((c) =>

@@ -13,6 +13,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { McpRegistry, mcpConfigPath, loadMcpConfig } from "../src/mcp/registry";
+import { agentAllowsMcp, type Agent } from "../src/agents/loader";
 
 let pass = 0;
 let fail = 0;
@@ -128,6 +129,55 @@ const cfg = mcpConfigPath(root);
       ck(!found.isError && found.content.includes(label),
         "and searching the graph finds what was just written", found.content.slice(0, 160));
     }
+  }
+
+  /* ── an agent's scope, against the real server ─────────────────── */
+  console.log("\n──── scoped to an agent ────");
+  {
+    // The claim under test is the one the picker makes on screen: an agent
+    // that names two of filesystem's tools sees those two and nothing else,
+    // and cannot call the rest even by naming them directly. Everything before
+    // this point proves the server works; this proves the scope does.
+    const agent: Agent = {
+      name: "reader",
+      description: "",
+      persona: "",
+      model: "",
+      memory: "",
+      tools: [],
+      skills: [],
+      allMcp: false,
+      mcp: [{ server: "filesystem", include: ["read_text_file", "list_directory"], exclude: [] }],
+      file: "",
+    };
+
+    const scoped = reg.toolDefs((server, tool) => agentAllowsMcp(agent, server, tool));
+    ck(scoped.length === 2, "the agent sees exactly the tools it named", String(scoped.length));
+    ck(
+      scoped.every((d) => d.name.startsWith("mcp__filesystem__")),
+      "and none from the server it did not name",
+      scoped.map((d) => d.name).join(", ")
+    );
+    ck(
+      scoped.some((d) => d.name === "mcp__filesystem__read_text_file") &&
+        scoped.some((d) => d.name === "mcp__filesystem__list_directory"),
+      "which are the two it did name"
+    );
+    // The whole point of the include list: the write tool is real, connected,
+    // and callable - and this agent must not be offered it.
+    ck(
+      defs.some((d) => d.name === "mcp__filesystem__write_file"),
+      "the unscoped list does offer write_file, so the filter is doing real work"
+    );
+    ck(
+      !scoped.some((d) => d.name === "mcp__filesystem__write_file"),
+      "and the scoped list does not"
+    );
+    ck(!agentAllowsMcp(agent, "memory", "create_entities"),
+      "a second connected server is refused when the agent never named it");
+
+    const wide = reg.toolDefs(() => true);
+    ck(wide.length === defs.length, "an allow-everything filter changes nothing");
   }
 
   await reg.stopAll();

@@ -35,7 +35,8 @@ const STATE = (over = {}) => ({ type: "stateSync", state: {
   running: false, phase: "act", status: { state: "ok", label: "OK · ACT" },
   endpoint: "gw", profiles: [{ id: "gw", status: "ready", active: true, model: "gpt-4o",
     wire: "openai", baseUrl: "https://x", capabilities: { contextWindow: 128000 } }],
-  skills: [], skillWarnings: [], config: { ui: {} }, tlsError: null, rungs: [],
+  skills: [], skillWarnings: [], agents: [], agentWarnings: [], activeAgent: "",
+  config: { ui: {} }, tlsError: null, rungs: [],
   tracing: false, todos: [], checkpoints: [], sessions: [], selection: null,
   context: null, changes: [], models: [{ group: "gw", models: ["gpt-4o"] }], logs: [],
   session: { id: "s1", title: "New chat", messages: [] },
@@ -1102,6 +1103,13 @@ function composer(over) {
   ok("CF clearing asks the host", sent.some((m) => m.type === "clearChanges"));
   ok("CF clearing hides the panel", d.getElementById("changeBar").hidden === true);
 
+  // Starting a new conversation empties it, because the list belongs to the
+  // conversation rather than to the workspace.
+  touch("z.ts", "modified", 1, 0, 9000);
+  ok("CF a later write brings it back", d.getElementById("changeBar").hidden === false);
+  inbound({ type: "changesUpdated", files: [] });
+  ok("CF and a new conversation empties it", d.getElementById("changeBar").hidden === true);
+
   // A restored conversation comes back with the files it changed.
   const c = boot();
   c.inbound(STATE({ changes: [
@@ -1133,6 +1141,169 @@ function composer(over) {
   inbound({ type: "toolStart", tool: { name: "write_file", args: { path: "nope.ts", content: "x" } } });
   inbound({ type: "toolEnd", tool: { name: "write_file", args: { path: "nope.ts", content: "x" }, result: "The user declined this edit.", isError: true } });
   ok("OF a failed write offers nothing to open", !d.querySelector('[data-open-file="nope.ts"]'));
+}
+
+/* ══ The footer strip is gone, the meter is not ══════════ */
+{
+  const { d, inbound } = boot();
+  inbound(STATE());
+  ok("FT the footer strip is gone", !d.querySelector(".footer"));
+  ok("FT the meter moved into the header", !!d.querySelector(".kx-header #ctxBar"));
+  ok("FT and the figure with it", !!d.querySelector(".kx-header #ctxText"));
+
+  inbound({ type: "contextUsage", used: 24000, limit: 128000, exact: true });
+  ok("FT the figure still prints", /24/.test(d.getElementById("ctxText").textContent));
+  ok("FT the meter still fills", parseFloat(d.getElementById("ctxFill").style.width) > 0);
+  ok("FT the header says where the number came from",
+    /reported by/i.test(d.getElementById("ctxHead").title));
+
+  // The endpoint pill went with the strip; its health did not.
+  ok("FT endpoint health sits on the model button", !!d.querySelector("#modelBtn #epDot"));
+  ok("FT and reads healthy by default",
+    d.getElementById("epDot").getAttribute("data-err") === "0");
+  inbound({ type: "tlsError", error: { profile: "gw", rung: "TLS handshake", message: "bad cert",
+    endpoint: "https://x", proxied: false, fixKey: "k", fixValue: "v" } });
+  ok("FT a TLS failure turns it red", d.getElementById("epDot").getAttribute("data-err") === "1");
+  ok("FT and the button says so", /TLS error/.test(d.getElementById("modelBtn").title));
+}
+
+/* ══ The empty screen offers a way back ════════════════ */
+{
+  const { d, sent, inbound } = boot();
+  inbound(STATE());
+  ok("WB a first run shows the welcome", !!d.querySelector("#log .welcome"));
+  ok("WB with nothing to go back to", !d.querySelector(".recent"));
+
+  inbound({ type: "sessionsListed", sessions: [
+    { id: "s1", title: "This one", when: "now", count: 4, active: true },
+    { id: "s2", title: "TLS handshake triage", when: "2h ago", count: 12, active: false },
+    { id: "s3", title: "Empty one", when: "1d ago", count: 0, active: false },
+  ] });
+  ok("WB previous conversations appear on the empty screen", !!d.querySelector(".recent"));
+  const rows = d.querySelectorAll(".recent-row");
+  ok("WB the current one is not offered", rows.length === 1);
+  ok("WB nor an empty one", !/Empty one/.test(d.querySelector(".recent").textContent));
+  ok("WB the row names the conversation", /TLS handshake triage/.test(rows[0].textContent));
+  ok("WB and how much is in it", /12 messages/.test(rows[0].textContent));
+  rows[0].click();
+  ok("WB clicking one loads it", sent.some((m) => m.type === "loadSession" && m.id === "s2"));
+
+  // A conversation with messages shows the transcript, not the list.
+  const c = boot();
+  c.inbound(STATE({ session: { id: "s1", title: "t", messages: [{ role: "user", content: "hi" }] },
+    sessions: [{ id: "s2", title: "Other", when: "now", count: 3, active: false }] }));
+  ok("WB a conversation with messages shows no welcome", !c.d.querySelector(".welcome"));
+  ok("WB and no recent list", !c.d.querySelector(".recent"));
+}
+
+/* ══ A queued message keeps its attachments on screen ═════ */
+{
+  const { d, inbound } = boot();
+  inbound(STATE());
+  inbound({ type: "inputAccepted", mode: "queue", text: "look at this", depth: 1,
+    files: [{ name: "shot.png", size: 2048 }] });
+  const note = d.querySelector(".queued-note");
+  ok("QA the queued note renders", !!note);
+  ok("QA and carries the attachment chip", !!note.querySelector(".u-att-chip"));
+  ok("QA named", /shot\.png/.test(note.textContent));
+  ok("QA and sized", /2 KB/.test(note.textContent));
+
+  inbound({ type: "steerAccepted", text: "look at this", files: [{ name: "shot.png", size: 2048 }] });
+  const turn = d.querySelector("#log .msg-user");
+  ok("QA a steered message becomes a user turn", !!turn);
+  ok("QA carrying its file", /shot\.png/.test(turn.textContent));
+  ok("QA as a chip, not prose", !!turn.querySelector(".u-att-chip"));
+}
+
+/* ══ Agents ═══════════════════════════════════ */
+const AGENTS = [
+  { name: "reader", description: "Reads only.", model: "", memory: ".agent/memory/reader.md",
+    tools: ["read_file", "search"], skills: [], allMcp: false,
+    mcp: [{ server: "filesystem", include: ["read_text_file"], exclude: [] }],
+    file: ".agent/agents/reader.md", active: false },
+  { name: "wide", description: "Everything.", model: "gpt-4o", memory: "", tools: [], skills: [],
+    allMcp: true, mcp: [], file: ".agent/agents/wide.md", active: false },
+];
+{
+  const { d, sent, inbound } = boot();
+  inbound(STATE({ agents: AGENTS, activeAgent: "" }));
+  ok("AG nothing is drawn while no agent is selected",
+    d.getElementById("agentBar").hidden === true);
+
+  // The Diagnostics tab lists them with the scope they enforce.
+  d.getElementById("tabDiag").click();
+  const rows = d.querySelectorAll(".ag-row");
+  ok("AG both agents are listed", rows.length === 2);
+  ok("AG the badge counts them", d.getElementById("agBadge").textContent === "2");
+  const readerRow = d.querySelector('[data-name="reader"]').closest(".ag-row");
+  ok("AG a row names the agent", /reader/.test(readerRow.textContent));
+  ok("AG and describes it", /Reads only/.test(readerRow.textContent));
+  ok("AG and states its built-in scope", /2 built-in tools/.test(readerRow.textContent));
+  ok("AG and which MCP servers it can reach", /MCP: filesystem \(1\)/.test(readerRow.textContent));
+  ok("AG and that it keeps a memory", /memory/.test(readerRow.textContent));
+  ok("AG and names its file", /\.agent\/agents\/reader\.md/.test(readerRow.textContent));
+  const wideRow = d.querySelector('[data-name="wide"]').closest(".ag-row");
+  ok("AG an unrestricted agent says so", /all MCP servers/.test(wideRow.textContent));
+  ok("AG and names its model override", /gpt-4o/.test(wideRow.textContent));
+
+  d.querySelector('[data-ag="use"][data-name="reader"]').click();
+  ok("AG Use selects it", sent.some((m) => m.type === "setAgent" && m.name === "reader"));
+  d.querySelector('[data-ag="open"][data-name="reader"]').click();
+  ok("AG Open opens its file", sent.some((m) => m.type === "openAgent" && m.name === "reader"));
+  d.querySelector('[data-ag="new"]').click();
+  ok("AG New agent asks the host", sent.some((m) => m.type === "newAgent"));
+}
+{
+  // Becoming an agent, and leaving it.
+  const { d, sent, inbound } = boot();
+  inbound(STATE({ agents: AGENTS, activeAgent: "" }));
+  inbound({ type: "agentChanged", agent: { ...AGENTS[0], active: true } });
+  const bar = d.getElementById("agentBar");
+  ok("AG selecting one reveals the bar", bar.hidden === false);
+  ok("AG which names it", /reader/.test(d.getElementById("agentBarName").textContent));
+  ok("AG and states what it can reach",
+    /MCP: filesystem/.test(d.getElementById("agentBarScope").textContent));
+  d.getElementById("tabDiag").click();
+  ok("AG the row marks itself active",
+    d.querySelector('[data-name="reader"]').closest(".ag-row").getAttribute("data-on") === "1");
+  ok("AG and its button becomes Leave",
+    d.querySelector('[data-ag="use"][data-name="reader"]').textContent === "Leave");
+  d.querySelector('[data-ag="use"][data-name="reader"]').click();
+  ok("AG which sends an empty name",
+    sent.some((m) => m.type === "setAgent" && m.name === ""));
+
+  inbound({ type: "agentChanged", agent: null });
+  ok("AG leaving hides the bar again", d.getElementById("agentBar").hidden === true);
+}
+{
+  // The composer's own picker.
+  const { w, d, sent, inbound } = boot();
+  inbound(STATE({ agents: AGENTS, activeAgent: "wide" }));
+  const draft = d.getElementById("draft");
+  draft.value = "/agent";
+  draft.dispatchEvent(new w.Event("input"));
+  const qpRow = d.querySelector('#qp [data-i]');
+  ok("AG /agent is offered in the slash palette", !!qpRow);
+  qpRow.click();
+  const rows = d.querySelectorAll("#qp .qp-row");
+  ok("AG choosing it opens the agent list", rows.length === 3, String(rows.length));
+  ok("AG with None first, so leaving is one click", /None/.test(rows[0].textContent));
+  ok("AG the active one is ticked",
+    !!d.querySelectorAll("#qp .qp-row")[2].querySelector(".qp-check svg"));
+  ok("AG each row describes the agent", /Reads only/.test(rows[1].textContent));
+  rows[1].click();
+  ok("AG picking one sets it", sent.some((m) => m.type === "setAgent" && m.name === "reader"));
+}
+{
+  // Warnings from a malformed agent file have to reach the user.
+  const { d, inbound } = boot();
+  inbound(STATE({ agents: [], agentWarnings: ["broken: frontmatter is not valid YAML"] }));
+  d.getElementById("tabDiag").click();
+  ok("AG with no agents the section explains what one is",
+    /persona/.test(d.getElementById("agBody").textContent));
+  ok("AG and offers to make one", !!d.querySelector('[data-ag="new"]'));
+  ok("AG a malformed file is reported", /not valid YAML/.test(d.getElementById("agBody").textContent));
+  ok("AG and the badge flags it", d.getElementById("agBadge").className.indexOf("alert") >= 0);
 }
 
 // The clipboard block is async because FileReader is; everything else has

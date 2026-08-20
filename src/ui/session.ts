@@ -5,11 +5,14 @@ import type { Msg } from "../providers/client";
 import { runAgent } from "../agent/loop";
 import { isUntitled, titleFrom } from "../core/sessions";
 import type { FileChange, ToolContext, TodoItem } from "../agent/tools";
+import { agentAllowsMcp, agentRefusal } from "../agents/loader";
+import { parseQualified } from "../mcp/registry";
 import { fetchPage, normaliseUrl } from "../browser/fetchPage";
 import { CdpBrowser, findBrowser, listBrowsers } from "../browser/cdp";
 import { navigate, snapshot, screenshot, click, type, scroll, goBack, renderSnapshot } from "../browser/page";
 import type { App } from "../core/app";
 import type {
+  AttachmentChipDto,
   DiffDecision,
   FileChangeDto,
   PermissionDecision,
@@ -25,6 +28,22 @@ import type {
  * started. Outbound UI events are buffered for the length of the turn so a
  * webview that comes back gets replayed into the state it missed.
  */
+
+/**
+ * File chips for a message, sized in bytes rather than base64 characters.
+ *
+ * The panel prints "12 KB" beside the name, and base64 is a third larger than
+ * what it encodes - printing the encoded length would overstate every
+ * attachment by 33%.
+ */
+function chipsFor(
+  attachments: Array<{ name: string; mediaType: string; data: string }> | undefined
+): AttachmentChipDto[] {
+  return (attachments ?? []).map((a) => ({
+    name: a.name,
+    size: Math.floor((a.data.length * 3) / 4),
+  }));
+}
 
 interface PendingApproval {
   resolve: (allowed: boolean) => void;
@@ -197,14 +216,100 @@ export class SessionController {
     attachments?: Array<{ name: string; mediaType: string; data: string }>;
   }> = [];
   private steer: Msg[] = [];
+  /**
+   * File chips for each pending steer, in the same order.
+   *
+   * Kept beside the messages rather than inside them because a `Msg` has
+   * nowhere to put a file name: an image is a content block with base64 in it
+   * and a text attachment has already been folded into the prose. The
+   * transcript still has to show the chip, so the names travel separately.
+   */
+  private steerFiles: AttachmentChipDto[][] = [];
+  /** Drained with the messages, consumed one per `steer` event from the loop. */
+  private steerFilesInFlight: AttachmentChipDto[][] = [];
 
   /** Drained by the agent loop between model calls. */
   private takeSteer = (): Msg[] => {
     if (!this.steer.length) return [];
     const out = this.steer;
     this.steer = [];
+    this.steerFilesInFlight.push(...this.steerFiles);
+    this.steerFiles = [];
     return out;
   };
+
+  /**
+   * One user turn, built from the text and whatever was attached.
+   *
+   * Extracted from `send` because the steering path needs exactly the same
+   * message and was building its own: `{ role: "user", content: text }`, which
+   * silently dropped every attachment. A message typed mid-turn with a
+   * screenshot on it reached the model as the sentence alone, and the composer
+   * had already cleared the pills, so nothing on screen said the image was
+   * gone.
+   *
+   * This used to keep `image/*` and drop everything else on the floor: a .txt,
+   * .md, .json or .log went through the picker, showed a pill in the composer,
+   * and then never reached the model at all - silently, because the send
+   * looked like it worked.
+   *
+   * Text-bearing files are inlined as fenced blocks, which is the only shape
+   * that works on every wire. Images stay as content blocks, and are only
+   * attached when the profile actually declares vision: a gateway without it
+   * answers a base64 blob with a 400, so sending one is a worse failure than
+   * saying it was skipped.
+   */
+  private composeUserMessage(
+    text: string,
+    attachments: Array<{ name: string; mediaType: string; data: string }> | undefined,
+    profile: { name: string; capabilities: { vision?: boolean } }
+  ): Msg {
+    const all = attachments ?? [];
+    const vision = profile.capabilities.vision === true;
+    const images = all.filter((a) => a.mediaType.startsWith("image/"));
+    const textual = all.filter((a) => !a.mediaType.startsWith("image/"));
+
+    const notes: string[] = [];
+    const parts: string[] = [];
+
+    for (const a of textual) {
+      const decoded = decodeTextAttachment(a.data);
+      if (decoded === undefined) {
+        notes.push(`${a.name} was not attached - it is not a text file (${a.mediaType}).`);
+        continue;
+      }
+      // A very large paste would evict the conversation from the window on the
+      // next turn, so it is capped here with the truncation stated in-band.
+      const CAP = 60_000;
+      const body = decoded.length > CAP ? decoded.slice(0, CAP) : decoded;
+      const cut = decoded.length > CAP ? `\n… truncated at ${CAP} of ${decoded.length} characters` : "";
+      parts.push(`Attached file \`${a.name}\`:\n\n\`\`\`\n${body}${cut}\n\`\`\``);
+    }
+
+    if (images.length && !vision) {
+      notes.push(
+        `${images.length} image(s) were not attached - ${profile.name} does not declare vision. ` +
+          `Set capabilities.vision: true in the profile if the gateway supports it.`
+      );
+    }
+    for (const n of notes) this.app.broadcast({ type: "error", message: n });
+
+    const composed = [text, ...parts].filter(Boolean).join("\n\n");
+    const attachImages = vision ? images : [];
+    return attachImages.length > 0
+      ? {
+          role: "user",
+          content: [
+            ...attachImages.map((a) => ({
+              type: "image" as const,
+              mediaType: a.mediaType,
+              data: a.data,
+            })),
+            { type: "text" as const, text: composed },
+          ],
+        }
+      : { role: "user", content: composed };
+  }
 
   async send(
     text: string,
@@ -215,12 +320,34 @@ export class SessionController {
       // a thought had to be held until the model happened to stop.
       if (!text.trim() && !(attachments ?? []).length) return;
       if (this.app.inputWhileRunning() === "steer") {
-        const msg: Msg = { role: "user", content: text };
+        // Composed the same way a normal turn is, so steering with a screenshot
+        // or a log file attached sends the file rather than the sentence about
+        // it. Without a profile there is nothing to compose against and nothing
+        // to send it to, so the message stays plain text and the turn's own
+        // error path reports the missing endpoint.
+        const profile = this.app.activeProfile();
+        const msg: Msg = profile
+          ? this.composeUserMessage(text, attachments, profile)
+          : { role: "user", content: text };
+        const chips = chipsFor(attachments);
         this.steer.push(msg);
-        this.app.broadcast({ type: "inputAccepted", mode: "steer", text, depth: this.steer.length });
+        this.steerFiles.push(chips);
+        this.app.broadcast({
+          type: "inputAccepted",
+          mode: "steer",
+          text,
+          depth: this.steer.length,
+          files: chips,
+        });
       } else {
         this.queued.push({ text, attachments });
-        this.app.broadcast({ type: "inputAccepted", mode: "queue", text, depth: this.queued.length });
+        this.app.broadcast({
+          type: "inputAccepted",
+          mode: "queue",
+          text,
+          depth: this.queued.length,
+          files: chipsFor(attachments),
+        });
       }
       return;
     }
@@ -258,64 +385,7 @@ export class SessionController {
     // leading up to this message.
     const priorHistory = this.history.slice();
 
-    // Build the user message from the text and whatever was attached.
-    //
-    // This used to keep `image/*` and drop everything else on the floor: a
-    // .txt, .md, .json or .log went through the picker, showed a pill in the
-    // composer, and then never reached the model at all. Silently - the send
-    // looked like it worked.
-    //
-    // Text-bearing files are now inlined as fenced blocks, which is the only
-    // shape that works on every wire. Images stay as content blocks, and are
-    // only attached when the profile actually declares vision: a gateway
-    // without it answers a base64 blob with a 400, so sending one is a worse
-    // failure than saying it was skipped.
-    const all = attachments ?? [];
-    const vision = profile.capabilities.vision === true;
-    const images = all.filter((a) => a.mediaType.startsWith("image/"));
-    const textual = all.filter((a) => !a.mediaType.startsWith("image/"));
-
-    const notes: string[] = [];
-    const parts: string[] = [];
-
-    for (const a of textual) {
-      const decoded = decodeTextAttachment(a.data);
-      if (decoded === undefined) {
-        notes.push(`${a.name} was not attached - it is not a text file (${a.mediaType}).`);
-        continue;
-      }
-      // A very large paste would evict the conversation from the window on the
-      // next turn, so it is capped here with the truncation stated in-band.
-      const CAP = 60_000;
-      const body = decoded.length > CAP ? decoded.slice(0, CAP) : decoded;
-      const cut = decoded.length > CAP ? `\n… truncated at ${CAP} of ${decoded.length} characters` : "";
-      parts.push(`Attached file \`${a.name}\`:\n\n\`\`\`\n${body}${cut}\n\`\`\``);
-    }
-
-    if (images.length && !vision) {
-      notes.push(
-        `${images.length} image(s) were not attached - ${profile.name} does not declare vision. ` +
-          `Set capabilities.vision: true in the profile if the gateway supports it.`
-      );
-    }
-    for (const n of notes) this.app.broadcast({ type: "error", message: n });
-
-    const composed = [text, ...parts].filter(Boolean).join("\n\n");
-    const attachImages = vision ? images : [];
-    const userMsg: Msg =
-      attachImages.length > 0
-        ? {
-            role: "user",
-            content: [
-              ...attachImages.map((a) => ({
-                type: "image" as const,
-                mediaType: a.mediaType,
-                data: a.data,
-              })),
-              { type: "text" as const, text: composed },
-            ],
-          }
-        : { role: "user", content: composed };
+    const userMsg = this.composeUserMessage(text, attachments, profile);
     this.history.push(userMsg);
     // Named before the model is even called, so the strip is correct on the
     // first frame rather than filling in later.
@@ -335,10 +405,29 @@ export class SessionController {
         ? this.app.shadow.snapshot(text.slice(0, 60)).catch(() => undefined)
         : Promise.resolve(undefined);
 
+    // Resolved once for the turn. An agent edited mid-turn should not change
+    // what the turn is allowed to do halfway through it.
+    const agent = this.app.activeAgent();
+
     const ctx: ToolContext = {
       root,
-      skills: this.app.enabledSkills(),
-      mcp: this.app.mcp,
+      skills: this.app.enabledSkills(agent),
+      // The agent's MCP scope is enforced at the call, not only in the list of
+      // tools offered - a name the model produced from earlier in the
+      // transcript never passed through the filter that built that list.
+      mcp: agent
+        ? {
+            has: (name: string) => this.app.mcp.has(name),
+            needsApproval: (name: string) => this.app.mcp.needsApproval(name),
+            call: async (name: string, args: unknown) => {
+              const q = parseQualified(name);
+              if (!q || !agentAllowsMcp(agent, q.server, q.tool)) {
+                return { content: agentRefusal(agent, name), isError: true };
+              }
+              return this.app.mcp.call(name, args);
+            },
+          }
+        : this.app.mcp,
       // Present only when the profile declares an image model. That absence is
       // what withholds the tool from the model entirely, rather than offering
       // one that could only ever answer "not configured".
@@ -417,7 +506,11 @@ export class SessionController {
         userMessage: text,
         signal: this.abort.signal,
         phase,
-        mcpTools: this.app.mcp.toolDefs(),
+        mcpTools: this.app.agentMcpTools(),
+        // Read here rather than at load time: the agent writes to its memory
+        // file with its own tools, so the copy that goes into the prompt has
+        // to be the one on disk when the turn starts.
+        agent: agent ? { agent, memory: this.app.agentMemory(agent) } : undefined,
         // Assistant replies and tool results land in the transcript as the loop
         // produces them, so tool calls survive into the next turn's context and
         // into a restored session.
@@ -480,7 +573,11 @@ export class SessionController {
           case "steer": {
             // Rendered as a user turn in the transcript, because that is
             // exactly what it is - the reply after it was written knowing it.
-            const out: ReplayableEvent = { type: "steerAccepted", text: ev.text ?? "" };
+            const out: ReplayableEvent = {
+              type: "steerAccepted",
+              text: ev.text ?? "",
+              files: this.steerFilesInFlight.shift() ?? [],
+            };
             this.buffer(out);
             this.app.broadcast(out);
             break;
@@ -526,7 +623,13 @@ export class SessionController {
     // between them still lands.
     const next = this.queued.shift();
     if (next) {
-      this.app.broadcast({ type: "inputAccepted", mode: "queue", text: next.text, depth: this.queued.length });
+      this.app.broadcast({
+        type: "inputAccepted",
+        mode: "queue",
+        text: next.text,
+        depth: this.queued.length,
+        files: chipsFor(next.attachments),
+      });
       await this.send(next.text, next.attachments);
     }
     void errored;
@@ -909,6 +1012,9 @@ export class SessionController {
     this.pending.clear();
     this.running = false;
     this.replay = [];
+    this.steer = [];
+    this.steerFiles = [];
+    this.steerFilesInFlight = [];
     this.app.setRunning(false);
   }
 

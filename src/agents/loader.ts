@@ -1,0 +1,402 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { parse as parseYaml } from "yaml";
+
+/**
+ * Agents: a persona, a model, a memory file, and a list of what it may reach.
+ *
+ * The shape is Hermes Agent's, adapted to a workspace rather than a home
+ * directory. Hermes keeps one global agent whose MCP servers are filtered
+ * per-server with `tools.include` / `tools.exclude`; the same filtering here is
+ * per *agent*, because the thing people actually want is several of them - a
+ * TLS triage agent that reads logs, a release agent that may only touch the
+ * changelog - each seeing only the tools its job needs.
+ *
+ * That scoping is not decoration. Every tool offered costs context on every
+ * request, and a tool the model can see is a tool it can call: exposing a
+ * server's whole surface to an agent that needs two of its tools spends tokens
+ * on the other twelve and leaves `delete_*` one hallucination away.
+ *
+ * An agent is one Markdown file in `.agent/agents/`, YAML frontmatter over a
+ * body, the same shape as a SKILL.md so the two read alike:
+ *
+ *   ---
+ *   name: tls-triage
+ *   description: Reads TLS captures and explains handshake failures.
+ *   model: openai/gpt-oss-20b
+ *   memory: .agent/memory/tls-triage.md
+ *   tools: [read_file, search, glob, list_files]
+ *   skills: [tls-basics]
+ *   mcp:
+ *     filesystem:
+ *       tools:
+ *         include: [read_text_file, list_directory]
+ *     memory: true
+ *   ---
+ *
+ *   You are a TLS triage specialist. ...
+ *
+ * Everything except `name` and the body is optional, and every omission means
+ * "unrestricted" rather than "nothing": an agent that declares no `tools` gets
+ * the full built-in set, and one that declares no `mcp` gets every configured
+ * server. An agent should be able to start as a persona and acquire limits
+ * afterwards.
+ */
+
+/** One server this agent may reach, and which of its tools. */
+export interface McpScope {
+  /** Server id, as it appears in `.agent/mcp.json`. */
+  server: string;
+  /** Tool names or `prefix_*` globs. Empty means every tool on the server. */
+  include: string[];
+  /** Applied after include, same syntax. */
+  exclude: string[];
+}
+
+export interface Agent {
+  name: string;
+  description: string;
+  /** The file body, appended to the system prompt. */
+  persona: string;
+  /** Model id override. Empty means the active profile's own model. */
+  model: string;
+  /** Workspace-relative memory file. Empty means this agent has no memory. */
+  memory: string;
+  /** Built-in tool allowlist. Empty means every built-in the phase allows. */
+  tools: string[];
+  /** Skill allowlist. Empty means every enabled skill. */
+  skills: string[];
+  /**
+   * Servers this agent may reach. Meaningful only when `allMcp` is false: an
+   * empty list then means no MCP at all, which is a real and useful setting.
+   */
+  mcp: McpScope[];
+  /** True when the agent declares no `mcp` key, or declares `mcp: "*"`. */
+  allMcp: boolean;
+  /** Absolute path of the file this came from, for "open" in the UI. */
+  file: string;
+}
+
+/** A memory file longer than this is a document; it would crowd a small context. */
+export const MAX_MEMORY_CHARS = 8000;
+/** Same reasoning as a SKILL.md body. */
+const MAX_PERSONA_CHARS = 12_000;
+const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/**
+ * `read_*` matches `read_file` and `read_text_file`; `read_file` matches only
+ * itself. One wildcard character, deliberately - Hermes documents `*` globs and
+ * nothing more, and a full glob dialect in a tool filter is a way to write a
+ * filter nobody can predict the effect of.
+ */
+export function matchesGlob(pattern: string, name: string): boolean {
+  if (pattern === "*") return true;
+  if (!pattern.includes("*")) return pattern === name;
+  const rx = new RegExp(
+    "^" + pattern.split("*").map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$"
+  );
+  return rx.test(name);
+}
+
+/**
+ * May this agent call this tool on this server?
+ *
+ * Used at both the advertisement boundary (which tool definitions are sent) and
+ * the execution boundary (whether a call runs). Filtering the offered list is a
+ * request to the model, not a guarantee about it - a gateway that drops the
+ * array, or a model echoing a tool name from earlier in the transcript, will
+ * produce a call for something that was never offered. The phase gate learned
+ * this the hard way; this predicate exists so the agent gate does not have to.
+ */
+export function agentAllowsMcp(agent: Agent | undefined, server: string, tool: string): boolean {
+  if (!agent) return true;
+  if (agent.allMcp) return true;
+  const scope = agent.mcp.find((s) => s.server === server);
+  if (!scope) return false;
+  if (scope.include.length && !scope.include.some((p) => matchesGlob(p, tool))) return false;
+  if (scope.exclude.some((p) => matchesGlob(p, tool))) return false;
+  return true;
+}
+
+/** May this agent call this built-in? An empty allowlist means "all of them". */
+export function agentAllowsTool(agent: Agent | undefined, name: string): boolean {
+  if (!agent || !agent.tools.length) return true;
+  return agent.tools.some((p) => matchesGlob(p, name));
+}
+
+/** The refusal a scoped-out call comes back as, written for the model to act on. */
+export function agentRefusal(agent: Agent, name: string): string {
+  const reach = agent.allMcp
+    ? "every configured MCP server"
+    : agent.mcp.length
+      ? agent.mcp.map((s) => s.server).join(", ")
+      : "no MCP servers";
+  const tools = agent.tools.length ? agent.tools.join(", ") : "every built-in tool";
+  return (
+    `Refused: "${name}" was not called. The ${agent.name} agent is scoped to ${tools}, ` +
+    `and to ${reach}. Do the work with what you have, or tell the user which agent ` +
+    `to switch to.`
+  );
+}
+
+function asList(v: unknown): string[] {
+  if (typeof v === "string") return v.split(",").map((s) => s.trim()).filter(Boolean);
+  if (Array.isArray(v)) return v.map((s) => String(s).trim()).filter(Boolean);
+  return [];
+}
+
+/**
+ * Read the `mcp:` key in every shape it is allowed to take.
+ *
+ * Four, because the useful cases are genuinely different sizes and forcing the
+ * smallest through the largest syntax is how a config file stops being written
+ * by hand:
+ *
+ *   mcp: "*"                                   every server, every tool
+ *   mcp: [filesystem, memory]                  those servers, every tool
+ *   mcp: { filesystem: [read_*, list_*] }      that server, those tools
+ *   mcp: { filesystem: { tools: { include: [...], exclude: [...] } } }
+ *
+ * The last is Hermes's own shape, so a server block can be lifted from a
+ * Hermes config unchanged.
+ */
+function readMcp(
+  raw: unknown,
+  name: string,
+  warnings: string[]
+): { mcp: McpScope[]; allMcp: boolean } {
+  if (raw === undefined || raw === null) return { mcp: [], allMcp: true };
+  if (raw === true) return { mcp: [], allMcp: true };
+  if (raw === false) return { mcp: [], allMcp: false };
+  if (typeof raw === "string") {
+    const t = raw.trim();
+    if (t === "*" || t.toLowerCase() === "all") return { mcp: [], allMcp: true };
+    if (!t || t.toLowerCase() === "none") return { mcp: [], allMcp: false };
+    return { mcp: [{ server: t, include: [], exclude: [] }], allMcp: false };
+  }
+  if (Array.isArray(raw)) {
+    const list = asList(raw);
+    if (list.includes("*")) return { mcp: [], allMcp: true };
+    return { mcp: list.map((s) => ({ server: s, include: [], exclude: [] })), allMcp: false };
+  }
+  if (typeof raw === "object") {
+    const out: McpScope[] = [];
+    for (const [server, value] of Object.entries(raw as Record<string, unknown>)) {
+      if (value === false) continue; // declared and switched off
+      if (value === true || value === null || value === undefined) {
+        out.push({ server, include: [], exclude: [] });
+        continue;
+      }
+      if (typeof value === "string" || Array.isArray(value)) {
+        out.push({ server, include: asList(value), exclude: [] });
+        continue;
+      }
+      const obj = value as Record<string, unknown>;
+      // `tools:` is Hermes's nesting; the flat form is accepted because it is
+      // what people write first and there is nothing else the keys could mean.
+      const t = (obj.tools ?? obj) as Record<string, unknown>;
+      out.push({
+        server,
+        include: asList(t.include),
+        exclude: asList(t.exclude),
+      });
+    }
+    return { mcp: out, allMcp: false };
+  }
+  warnings.push(`${name}: mcp must be "*", a list of servers, or a map of servers to tool filters.`);
+  return { mcp: [], allMcp: true };
+}
+
+/**
+ * Split frontmatter from body.
+ *
+ * The `yaml` package rather than the hand-rolled reader the skills loader uses:
+ * an agent's frontmatter is genuinely nested (a map of servers to include and
+ * exclude lists) and a flat scalar reader cannot represent it. A parse failure
+ * is a warning and the file is skipped, never a throw.
+ */
+function frontmatter(raw: string): { meta: Record<string, unknown>; body: string } | undefined {
+  const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  if (!m) return undefined;
+  const doc = parseYaml(m[1]);
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) return undefined;
+  return { meta: doc as Record<string, unknown>, body: raw.slice(m[0].length) };
+}
+
+export function loadAgents(dir: string): { agents: Agent[]; warnings: string[] } {
+  const agents: Agent[] = [];
+  const warnings: string[] = [];
+  if (!fs.existsSync(dir)) return { agents, warnings };
+
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (e) {
+    warnings.push(`Could not read ${dir}: ${e instanceof Error ? e.message : String(e)}`);
+    return { agents, warnings };
+  }
+
+  for (const entry of entries) {
+    // A folder with an AGENT.md inside is accepted as well as a bare file, so
+    // an agent that grows supporting material does not have to move.
+    let file: string;
+    if (entry.isDirectory()) {
+      file = path.join(dir, entry.name, "AGENT.md");
+      if (!fs.existsSync(file)) continue;
+    } else if (entry.isFile() && /\.md$/i.test(entry.name)) {
+      file = path.join(dir, entry.name);
+    } else {
+      continue;
+    }
+
+    const fallbackName = entry.isDirectory() ? entry.name : entry.name.replace(/\.md$/i, "");
+    let raw: string;
+    try {
+      raw = fs.readFileSync(file, "utf8");
+    } catch (e) {
+      warnings.push(`${fallbackName}: ${e instanceof Error ? e.message : String(e)}`);
+      continue;
+    }
+
+    let parsed: { meta: Record<string, unknown>; body: string } | undefined;
+    try {
+      parsed = frontmatter(raw);
+    } catch (e) {
+      warnings.push(`${fallbackName}: frontmatter is not valid YAML - ${e instanceof Error ? e.message : String(e)}`);
+      continue;
+    }
+    if (!parsed) {
+      warnings.push(`${fallbackName} has no YAML frontmatter and was ignored.`);
+      continue;
+    }
+
+    const { meta, body } = parsed;
+    const name = String(meta.name ?? fallbackName).trim();
+    if (!NAME_RE.test(name)) {
+      warnings.push(`"${name}" is not a usable agent name - letters, digits, dot, dash, underscore.`);
+      continue;
+    }
+    if (agents.some((a) => a.name === name)) {
+      warnings.push(`Two agents are called "${name}"; only the first was loaded.`);
+      continue;
+    }
+
+    const description = String(meta.description ?? "").trim();
+    if (!description) {
+      warnings.push(`${name} has no description, so the picker cannot say what it is for.`);
+    }
+    const persona = body.trim();
+    if (!persona) {
+      warnings.push(`${name} has no body, so it behaves exactly like no agent at all.`);
+    }
+    if (persona.length > MAX_PERSONA_CHARS) {
+      warnings.push(
+        `${name}'s body is ${Math.round(persona.length / 1000)}k characters and is sent on every ` +
+          `request. Move the detail into a skill and reference it.`
+      );
+    }
+
+    const { mcp, allMcp } = readMcp(meta.mcp, name, warnings);
+    agents.push({
+      name,
+      description,
+      persona,
+      model: String(meta.model ?? "").trim(),
+      memory: String(meta.memory ?? "").trim().replace(/\\/g, "/"),
+      tools: asList(meta.tools),
+      skills: asList(meta.skills),
+      mcp,
+      allMcp,
+      file,
+    });
+  }
+
+  agents.sort((a, b) => a.name.localeCompare(b.name));
+  return { agents, warnings };
+}
+
+/**
+ * The agent's contribution to the system prompt.
+ *
+ * The persona goes in verbatim - it is the user's own words about how this
+ * agent should behave, and paraphrasing it would be the one thing the feature
+ * must not do. The memory file is quoted underneath with the instruction that
+ * keeps the loop closed: the agent is told it may rewrite the file, which is
+ * what makes memory something that accumulates rather than something a human
+ * has to maintain.
+ *
+ * `memoryBody` is passed in rather than read here so this stays a pure
+ * function - the caller owns the filesystem and the size cap.
+ */
+export function agentPrompt(agent: Agent, memoryBody: string | undefined): string {
+  const parts: string[] = [];
+  if (agent.persona) {
+    parts.push(`## Agent: ${agent.name}\n\n${agent.persona}`);
+  }
+  if (agent.memory) {
+    const body = (memoryBody ?? "").trim();
+    parts.push(
+      [
+        "## Memory",
+        "",
+        `Long-term notes for this agent, kept in \`${agent.memory}\`.`,
+        body
+          ? "This is what you wrote there last time:"
+          : "The file does not exist yet.",
+        "",
+        body ? "```\n" + body + "\n```" : "",
+        "",
+        "It is yours to maintain. When this conversation teaches you something",
+        "durable about the user, the project, or how a task here has to be done,",
+        `write it into \`${agent.memory}\` with edit_file or write_file. Keep it`,
+        "short and factual - it is sent to you on every request, so it competes",
+        "with the conversation for room. Never record secrets, tokens, or",
+        "anything the user has asked you not to keep.",
+      ]
+        .filter((l) => l !== "")
+        .join("\n")
+    );
+  }
+  return parts.join("\n\n");
+}
+
+/** The starter file "New agent" writes. */
+export function agentTemplate(name: string, servers: string[]): string {
+  const mcp = servers.length
+    ? servers.map((s) => `#   ${s}: true`).join("\n")
+    : "#   filesystem: [read_text_file, list_directory]";
+  return `---
+name: ${name}
+description: One line saying when to use this agent, so the picker can explain itself.
+
+# Everything below is optional. Each omission means "unrestricted", not "none".
+
+# Override the endpoint profile's model for this agent only.
+# model: openai/gpt-oss-20b
+
+# A file this agent reads on every turn and may rewrite as it learns.
+# memory: .agent/memory/${name}.md
+
+# Restrict the built-in tools. Globs allowed: read_*, list_*.
+# tools: [read_file, list_files, glob, search]
+
+# Restrict the skills this agent may load.
+# skills: [some-skill]
+
+# Which MCP servers this agent may reach, and which of their tools.
+# Omit the key entirely for every configured server.
+# mcp:
+${mcp}
+#   github:
+#     tools:
+#       include: [list_issues, create_issue]
+#       exclude: [delete_*]
+---
+
+You are ${name}.
+
+Say what this agent is for, how it should behave, and what it must not do.
+This text is sent with every request, so keep it to what actually changes the
+answer.
+`;
+}

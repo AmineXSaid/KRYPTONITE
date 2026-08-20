@@ -15,6 +15,13 @@ import { clearSecureContexts } from "../endpoints/transport";
 import { EndpointClient } from "../providers/client";
 import { systemPromptFor, PHASES } from "../agent/loop";
 import { loadSkills, Skill, skillIndex } from "../skills/loader";
+import {
+  loadAgents,
+  agentAllowsMcp,
+  agentTemplate,
+  MAX_MEMORY_CHARS,
+  type Agent,
+} from "../agents/loader";
 import { McpRegistry, mcpConfigPath } from "../mcp/registry";
 import { ShadowRepo } from "../checkpoint/shadow";
 import { DiagnosticsService, rungLabel } from "../diagnostics/service";
@@ -33,6 +40,7 @@ import { checkEndpoint as runEndpointCheck, draftProfile, listModels } from "../
 import { SessionController } from "../ui/session";
 import type { Msg } from "../providers/client";
 import type {
+  AgentDto,
   ApprovalMode,
   CheckpointDto,
   ConfigDto,
@@ -68,6 +76,24 @@ interface ChatExportSession {
   updatedAt: string;
   messageCount: number;
   messages: Msg[];
+}
+
+/**
+ * One line saying what an agent can reach, for a picker row.
+ *
+ * The scope is the thing being chosen between - two agents with the same
+ * persona and different tool lists are different agents - so it belongs in the
+ * row rather than one level down.
+ */
+export function agentScopeLine(a: Agent): string {
+  const tools = a.tools.length ? `${a.tools.length} built-in tool(s)` : "all built-in tools";
+  const mcp = a.allMcp
+    ? "all MCP servers"
+    : a.mcp.length
+      ? `MCP: ${a.mcp.map((m) => (m.include.length ? `${m.server} (${m.include.length})` : m.server)).join(", ")}`
+      : "no MCP";
+  const extras = [a.model ? a.model : "", a.memory ? "memory" : ""].filter(Boolean);
+  return [tools, mcp, ...extras].join(" · ");
 }
 
 /**
@@ -201,6 +227,8 @@ export class App {
   profileErrors: ProfileError[] = [];
   skills: Skill[] = [];
   skillWarnings: string[] = [];
+  agents: Agent[] = [];
+  agentWarnings: string[] = [];
 
   phase: Phase = "act";
   running = false;
@@ -222,6 +250,7 @@ export class App {
   private status: vscode.StatusBarItem;
   private watcher?: vscode.FileSystemWatcher;
   private skillWatcher?: vscode.FileSystemWatcher;
+  private agentWatcher?: vscode.FileSystemWatcher;
   private warmTimer?: NodeJS.Timeout;
   private selectionTimer?: NodeJS.Timeout;
   private disposables: vscode.Disposable[] = [];
@@ -311,6 +340,8 @@ export class App {
     this.watcher = undefined;
     this.skillWatcher?.dispose();
     this.skillWatcher = undefined;
+    this.agentWatcher?.dispose();
+    this.agentWatcher = undefined;
     const root = this.root;
     if (!root) return;
     const profileDir = this.cfg().get<string>("profileDirectory", ".agent/endpoints");
@@ -329,6 +360,11 @@ export class App {
       void this.reload("watcher");
     });
     this.skillWatcher = bind(`${skillsDir}/**`, () => void this.reloadSkillsOnly("watcher"));
+    // Agents are the same kind of change as a skill - prompt material, not
+    // transport material - so they share the cheap reload rather than tearing
+    // the connection pool down mid-conversation. Editing an agent's persona
+    // and having it take effect on the next message is the whole workflow.
+    this.agentWatcher = bind(".agent/agents/**", () => void this.reloadSkillsOnly("watcher"));
   }
 
   /**
@@ -346,6 +382,7 @@ export class App {
   async dispose(): Promise<void> {
     this.session.dispose();
     this.skillWatcher?.dispose();
+    this.agentWatcher?.dispose();
     if (this.warmTimer) clearTimeout(this.warmTimer);
     // Transcript writes are asynchronous now, so make sure the last one lands.
     await this.sessions.flush();
@@ -415,6 +452,8 @@ export class App {
       this.profileErrors = [];
       this.skills = [];
       this.skillWarnings = [];
+      this.agents = [];
+      this.agentWarnings = [];
       this.updateStatus();
       return;
     }
@@ -458,6 +497,18 @@ export class App {
     this.skills = [...merged.values()];
     this.skillWarnings = [...workspaceSkills.warnings, ...bundled.warnings];
 
+    const loaded = loadAgents(this.agentsDir());
+    this.agents = loaded.agents;
+    this.agentWarnings = loaded.warnings;
+    for (const w of this.agentWarnings) this.log("warn", `Agent: ${w}`);
+    // An agent that was selected and has since been renamed or deleted must
+    // not stay silently active: the persona would be gone while the panel
+    // still named it.
+    if (this.activeAgentName && !this.agents.some((a) => a.name === this.activeAgentName)) {
+      this.log("warn", `The selected agent "${this.activeAgentName}" is gone; falling back to none.`);
+      void this.setActiveAgent("");
+    }
+
     // MCP servers are child processes, so a reload stops the old ones first.
     // Not awaited into the critical path: a cold `npx` fetch can take seconds
     // and the panel must not sit blank behind it.
@@ -474,6 +525,12 @@ export class App {
       type: "skillsReloaded",
       skills: this.skillDtos(),
       warnings: this.skillWarnings,
+    });
+    this.broadcast({
+      type: "agentsReloaded",
+      agents: this.agentDtos(),
+      active: this.activeAgentName,
+      warnings: this.agentWarnings,
     });
     const active = this.activeProfile();
     this.broadcast({
@@ -525,8 +582,18 @@ export class App {
     return this.cfg().get<ApprovalMode>("approvalMode", "ask");
   }
 
-  enabledSkills(): Skill[] {
-    return this.skills.filter((s) => !this.disabledSkills.includes(s.name));
+  /**
+   * Skills the next turn may load.
+   *
+   * An agent's `skills` list narrows this further: every skill in the index
+   * costs two lines of system prompt on every request, and an agent that
+   * declares which ones it works with should not be paying for the rest. An
+   * agent with no list is unrestricted, which is what makes the field optional.
+   */
+  enabledSkills(agent?: Agent): Skill[] {
+    const on = this.skills.filter((s) => !this.disabledSkills.includes(s.name));
+    if (!agent || !agent.skills.length) return on;
+    return on.filter((s) => agent.skills.includes(s.name));
   }
 
   /** Clients are pooled per profile so their connection pools survive a turn. */
@@ -591,7 +658,12 @@ export class App {
    * nothing.
    */
   systemPrompt(phase: Phase = this.phase): string {
-    return systemPromptFor(this.enabledSkills(), phase);
+    const agent = this.activeAgent();
+    return systemPromptFor(
+      this.enabledSkills(agent),
+      phase,
+      agent ? { agent, memory: this.agentMemory(agent) } : undefined
+    );
   }
 
   setRunning(running: boolean): void {
@@ -673,6 +745,113 @@ export class App {
   async rememberSession(id: string): Promise<void> {
     if (this.lastSessionId() === id) return;
     await this.context.workspaceState.update("kryptonite.activeSessionId", id);
+  }
+
+  /* ───────────────────────────── agents ───────────────────────────── */
+
+  agentsDir(): string {
+    return path.join(this.requireRoot(), ".agent", "agents");
+  }
+
+  /**
+   * Which agent the composer is speaking as, or "" for none.
+   *
+   * Workspace state rather than a setting: an agent is a property of the repo
+   * you are in, and syncing "I am currently the release agent" to a user's
+   * global settings across every window is not what anyone means by it.
+   */
+  get activeAgentName(): string {
+    return this.context.workspaceState.get<string>("kryptonite.activeAgent", "") ?? "";
+  }
+
+  activeAgent(): Agent | undefined {
+    const name = this.activeAgentName;
+    if (!name) return undefined;
+    return this.agents.find((a) => a.name === name);
+  }
+
+  async setActiveAgent(name: string): Promise<void> {
+    const next = this.agents.some((a) => a.name === name) ? name : "";
+    await this.context.workspaceState.update("kryptonite.activeAgent", next);
+    this.broadcast({ type: "agentChanged", agent: next ? this.agentDto(this.activeAgent()!) : null });
+    this.updateStatus();
+    if (next) this.log("info", `Agent: ${next}.`);
+    else this.log("info", "Agent: none.");
+  }
+
+  /**
+   * The agent's memory file, capped.
+   *
+   * Read at the top of each turn rather than cached: the agent writes to it
+   * with its own tools, so a cached copy would go stale the moment the feature
+   * did its job. Missing is not an error - an agent with a memory file it has
+   * not written yet is the normal first run.
+   */
+  agentMemory(agent: Agent): string | undefined {
+    if (!agent.memory) return undefined;
+    const root = this.root;
+    if (!root) return undefined;
+    const abs = path.resolve(root, agent.memory);
+    // Same containment rule the tools use: a memory path pointing out of the
+    // workspace would read a file the user never meant to hand over.
+    const rel = path.relative(root, abs);
+    if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
+      this.log("warn", `Agent ${agent.name}: memory path is outside the workspace and was ignored.`);
+      return undefined;
+    }
+    try {
+      const body = fs.readFileSync(abs, "utf8");
+      if (body.length <= MAX_MEMORY_CHARS) return body;
+      this.log(
+        "warn",
+        `Agent ${agent.name}: ${agent.memory} is ${Math.round(body.length / 1000)}k characters; ` +
+          `only the first ${MAX_MEMORY_CHARS / 1000}k is sent.`
+      );
+      return body.slice(0, MAX_MEMORY_CHARS);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** The MCP tool definitions the active agent is allowed to see. */
+  agentMcpTools(): ReturnType<McpRegistry["toolDefs"]> {
+    const agent = this.activeAgent();
+    if (!agent) return this.mcp.toolDefs();
+    return this.mcp.toolDefs((server, tool) => agentAllowsMcp(agent, server, tool));
+  }
+
+  /**
+   * Create `.agent/agents/<name>.md` and open it.
+   *
+   * The template names the servers actually configured in this workspace, so
+   * the commented-out `mcp:` block is a list to uncomment rather than a shape
+   * to look up.
+   */
+  async newAgent(): Promise<void> {
+    const root = this.requireRoot();
+    const name = await vscode.window.showInputBox({
+      title: "New agent",
+      prompt: "A short name. It becomes the file name and the label in the picker.",
+      value: "reviewer",
+      validateInput: (v) =>
+        /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(v.trim())
+          ? undefined
+          : "Letters, digits, dot, dash and underscore, starting with a letter or digit.",
+    });
+    if (!name) return;
+    const dir = path.join(root, ".agent", "agents");
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${name.trim()}.md`);
+    if (fs.existsSync(file)) {
+      vscode.window.showErrorMessage(`${path.relative(root, file)} already exists.`);
+      await this.openPreview(file);
+      return;
+    }
+    fs.writeFileSync(file, agentTemplate(name.trim(), this.mcp.statuses().map((r) => r.name)), "utf8");
+    await this.reloadSkillsOnly("new agent");
+    await this.setActiveAgent(name.trim());
+    const doc = await vscode.workspace.openTextDocument(file);
+    await vscode.window.showTextDocument(doc, { preview: false });
   }
 
   /* ───────────────────────────── DTO builders ───────────────────────── */
@@ -778,6 +957,25 @@ export class App {
     return [...ready, ...broken];
   }
 
+  agentDto(a: Agent): AgentDto {
+    return {
+      name: a.name,
+      description: a.description,
+      model: a.model,
+      memory: a.memory,
+      tools: a.tools,
+      skills: a.skills,
+      allMcp: a.allMcp,
+      mcp: a.mcp.map((m) => ({ server: m.server, include: m.include, exclude: m.exclude })),
+      file: this.root ? path.relative(this.root, a.file).split(path.sep).join("/") : a.file,
+      active: a.name === this.activeAgentName,
+    };
+  }
+
+  agentDtos(): AgentDto[] {
+    return this.agents.map((a) => this.agentDto(a));
+  }
+
   skillDtos(): SkillDto[] {
     const workspaceDir = this.root
       ? path.join(this.root, this.cfg().get<string>("skillsDirectory", ".agent/skills"))
@@ -813,8 +1011,9 @@ export class App {
   statusDto(): StatusDto {
     const active = this.activeProfile();
     const phaseLabel = this.phase.toUpperCase();
+    const agent = this.activeAgentName;
     if (!active) {
-      return { state: "none", label: "NO ENDPOINT", endpoint: null, model: null, phase: this.phase };
+      return { state: "none", label: "NO ENDPOINT", endpoint: null, model: null, phase: this.phase, agent };
     }
     if (this.tlsError) {
       return {
@@ -823,6 +1022,7 @@ export class App {
         endpoint: active.name,
         model: active.model,
         phase: this.phase,
+        agent,
       };
     }
     const failing = this.rungs.find((r) => r.status === "fail");
@@ -833,14 +1033,18 @@ export class App {
         endpoint: active.name,
         model: active.model,
         phase: this.phase,
+        agent,
       };
     }
     return {
       state: "ok",
-      label: `OK · ${phaseLabel}`,
+      // The agent is the loudest fact about what the next turn will do, so it
+      // goes in the status bar text rather than only in the panel.
+      label: agent ? `OK · ${phaseLabel} · ${agent.toUpperCase()}` : `OK · ${phaseLabel}`,
       endpoint: active.name,
       model: active.model,
       phase: this.phase,
+      agent,
     };
   }
 
@@ -881,6 +1085,9 @@ export class App {
       profiles: this.profileDtos(),
       skills: this.skillDtos(),
       skillWarnings: this.skillWarnings,
+      agents: this.agentDtos(),
+      agentWarnings: this.agentWarnings,
+      activeAgent: this.activeAgentName,
       config: this.configDto(),
       tlsError: this.tlsError,
       rungs: this.rungs,
@@ -1330,6 +1537,22 @@ export class App {
         return;
       }
 
+      case "setAgent":
+        await this.setActiveAgent(msg.name);
+        return;
+
+      case "newAgent":
+        await this.newAgent();
+        return;
+
+      case "openAgent": {
+        const agent = this.agents.find((a) => a.name === msg.name);
+        if (!agent) throw new Error(`No agent named "${msg.name}".`);
+        const doc = await vscode.workspace.openTextDocument(agent.file);
+        await vscode.window.showTextDocument(doc, { preview: false });
+        return;
+      }
+
       case "reloadSkills":
       case "reloadProfiles":
         clearAuthCache();
@@ -1713,6 +1936,36 @@ export class App {
     await this.cfg().update("activeProfile", pick.label, vscode.ConfigurationTarget.Workspace);
     await this.reload("endpoint picker");
     this.broadcast({ type: "configChanged", config: this.configDto() });
+  }
+
+  /**
+   * The command-palette twin of the composer's agent chip.
+   *
+   * "None" is a row rather than a separate command: getting back out of an
+   * agent is exactly as common as getting into one, and hiding that behind a
+   * second entry is how a mode becomes a trap.
+   */
+  async pickAgent(): Promise<void> {
+    if (!this.agents.length) {
+      const make = await vscode.window.showInformationMessage(
+        "No agents defined in .agent/agents/. Create one?",
+        "Create"
+      );
+      if (make) await this.newAgent();
+      return;
+    }
+    const rows = [
+      { label: "None", description: "The default assistant, every tool", name: "" },
+      ...this.agents.map((a) => ({
+        label: a.name,
+        description: a.description,
+        detail: agentScopeLine(a),
+        name: a.name,
+      })),
+    ];
+    const pick = await vscode.window.showQuickPick(rows, { title: "Agent" });
+    if (!pick) return;
+    await this.setActiveAgent(pick.name);
   }
 
   async pickCheckpointRestore(): Promise<void> {

@@ -199,6 +199,8 @@ export interface StatusDto {
   endpoint: string | null;
   model: string | null;
   phase: Phase;
+  /** Active agent name, or "" for none. */
+  agent: string;
 }
 
 export interface LogLine {
@@ -212,6 +214,39 @@ export interface LogLine {
 export interface ModelGroupDto {
   group: string;
   models: string[];
+}
+
+/** One MCP server an agent may reach, and the filter over its tools. */
+export interface AgentMcpDto {
+  server: string;
+  include: string[];
+  exclude: string[];
+}
+
+/**
+ * One agent defined in `.agent/agents/`.
+ *
+ * The scope fields are surfaced rather than kept host-side because the whole
+ * point of an agent is what it can and cannot reach: a picker that showed only
+ * a name would hide the one thing the user is choosing between.
+ */
+export interface AgentDto {
+  name: string;
+  description: string;
+  /** Empty when the agent uses the endpoint profile's own model. */
+  model: string;
+  /** Workspace-relative memory file, or empty. */
+  memory: string;
+  /** Built-in tool allowlist. Empty means unrestricted. */
+  tools: string[];
+  /** Skill allowlist. Empty means unrestricted. */
+  skills: string[];
+  /** True when the agent declares no `mcp` key: every configured server. */
+  allMcp: boolean;
+  mcp: AgentMcpDto[];
+  /** Workspace-relative path of the file it came from. */
+  file: string;
+  active: boolean;
 }
 
 export interface FileHitDto {
@@ -288,6 +323,10 @@ export interface StateSync {
   profiles: ProfileDto[];
   skills: SkillDto[];
   skillWarnings: string[];
+  agents: AgentDto[];
+  agentWarnings: string[];
+  /** Name of the active agent, or "" for none. */
+  activeAgent: string;
   config: ConfigDto;
   tlsError: TlsErrorDto | null;
   rungs: RungDto[];
@@ -364,6 +403,12 @@ export interface CopyTextMsg { type: "copyText"; text: string }
 export interface NewEndpointMsg { type: "newEndpoint" }
 export interface SaveEndpointMsg { type: "saveEndpoint"; endpoint: EndpointForm }
 export interface DeleteEndpointMsg { type: "deleteEndpoint"; id: string }
+/** Speak as this agent, or as none when `name` is empty. */
+export interface SetAgentMsg { type: "setAgent"; name: string }
+/** Write `.agent/agents/<name>.md` from a template and open it. */
+export interface NewAgentMsg { type: "newAgent" }
+/** Open an agent's own file in an editor. */
+export interface OpenAgentMsg { type: "openAgent"; name: string }
 export interface ToggleSkillMsg { type: "toggleSkill"; name: string; enabled: boolean }
 export interface ReloadSkillsMsg { type: "reloadSkills" }
 export interface ReloadProfilesMsg { type: "reloadProfiles" }
@@ -422,6 +467,7 @@ export type InboundMessage =
   | RunTraceMsg | SaveCaBundleMsg | BrowseCaBundleMsg | UseSystemTrustMsg
   | CopyTextMsg | NewEndpointMsg | SaveEndpointMsg | DeleteEndpointMsg
   | ToggleSkillMsg | ReloadSkillsMsg | ReloadProfilesMsg | SetConfigMsg
+  | SetAgentMsg | NewAgentMsg | OpenAgentMsg
   | RestoreCheckpointMsg | ExportBundleMsg | ExportChatMsg | OpenFileMsg | OpenSettingsMsg
   | OpenYamlMsg | OpenControlCenterMsg | OpenSkillsFolderMsg
   | ListSessionsMsg | LoadSessionMsg | DeleteSessionMsg | SearchFilesMsg
@@ -515,6 +561,15 @@ export interface TraceUpdateOut { type: "traceUpdate"; rung: RungDto; index: num
 export interface TraceDoneOut { type: "traceDone"; rungs: RungDto[]; ok: boolean }
 export interface TlsErrorOut { type: "tlsError"; error: TlsErrorDto | null }
 export interface ProfilesReloadedOut { type: "profilesReloaded"; profiles: ProfileDto[] }
+export interface AgentsReloadedOut {
+  type: "agentsReloaded";
+  agents: AgentDto[];
+  /** Name of the active agent, or "" for none. */
+  active: string;
+  warnings: string[];
+}
+/** The active agent changed. `agent` is null when none is selected. */
+export interface AgentChangedOut { type: "agentChanged"; agent: AgentDto | null }
 export interface SkillsReloadedOut {
   type: "skillsReloaded";
   skills: SkillDto[];
@@ -614,14 +669,29 @@ export interface CaBundlePickedOut { type: "caBundlePicked"; path: string }
  * A message typed while a turn was running was accepted rather than refused.
  * `depth` is how many are now waiting, so the composer can say so.
  */
+/** One attached file, as the transcript's chips render it. `size` is bytes. */
+export interface AttachmentChipDto { name: string; size: number }
 export interface InputAcceptedOut {
   type: "inputAccepted";
   mode: "queue" | "steer";
   text: string;
   depth: number;
+  /** Files that went with it, so the note can show what is waiting. */
+  files: AttachmentChipDto[];
 }
-/** A steered message reached the model and is now part of the transcript. */
-export interface SteerAcceptedOut { type: "steerAccepted"; text: string }
+/**
+ * A steered message reached the model and is now part of the transcript.
+ *
+ * `files` travels with it because the transcript renders this as a user turn:
+ * without it a message steered with a screenshot attached rendered as the
+ * sentence alone, which is indistinguishable from the attachment having been
+ * dropped - and for a while it actually had been.
+ */
+export interface SteerAcceptedOut {
+  type: "steerAccepted";
+  text: string;
+  files: AttachmentChipDto[];
+}
 /** One profile's latest health probe. `ms` is time to response headers. */
 export interface HealthResultOut {
   type: "healthResult";
@@ -669,7 +739,8 @@ export type OutboundMessage =
   | DiffPendingOut | DiffResolvedOut | FileTouchedOut | ChangesUpdatedOut
   | TurnEndOut | ErrorOut
   | TraceStartedOut | TraceUpdateOut | TraceDoneOut | TlsErrorOut
-  | ProfilesReloadedOut | SkillsReloadedOut | ContextUsageOut
+  | ProfilesReloadedOut | SkillsReloadedOut | AgentsReloadedOut | AgentChangedOut
+  | ContextUsageOut
   | AttachmentsReadyOut | SelectionChangedOut | SessionSwitchedOut | SessionsListedOut
   | CheckpointsListedOut | CheckpointRestoredOut | BundleExportedOut | ChatExportedOut
   | ConfigChangedOut | PhaseChangedOut | EndpointChangedOut | StatusChangedOut

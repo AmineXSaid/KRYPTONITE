@@ -57,6 +57,11 @@ function _sbRun() {
        arrow and points the other way. */
     '<symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v10.5M7.5 10.5L12 15l4.5-4.5" ' + S6 + ' stroke-width="1.6"/>' +
       '<path d="M4.5 17.5V20h15v-2.5" ' + S6 + ' stroke-width="1.6"/></symbol>' +
+    /* Agent: a facet, cut from the same geometry as the crystal - the mark
+       for "a configured persona" rather than a person's silhouette, which
+       would suggest a human on the other end. */
+    '<symbol id="i-agent" viewBox="0 0 24 24"><path d="M12 3l7 4.5v9L12 21l-7-4.5v-9z" ' + S6 + ' stroke-width="1.5"/>' +
+      '<path d="M12 3v18M5 7.5l14 9M19 7.5l-14 9" ' + S6 + ' stroke-width="1.1" opacity=".55"/></symbol>' +
     '<symbol id="i-diff" viewBox="0 0 24 24"><path d="M6 3.5v17M3 7h6M3 17h6" ' + S6 + ' stroke-width="1.6"/>' +
       '<path d="M15 3.5h6v6h-6zM15 14.5h6v6h-6z" ' + S6 + ' stroke-width="1.5"/></symbol>';
 
@@ -126,6 +131,7 @@ function _sbRun() {
     ["/review", "Review current changes"],
     ["/checkpoint", "Restore a previous checkpoint"],
     ["/export", "Export this conversation as JSON"],
+    ["/agent", "Speak as one of this workspace's agents"],
     ["/skills", "Open the skills panel"],
     ["/help", "Show available commands"]
   ];
@@ -160,6 +166,9 @@ function _sbRun() {
     profiles: [],
     skills: [],
     skillWarnings: [],
+    agents: [],
+    agentWarnings: [],
+    activeAgent: "",
     mcp: { servers: [], warnings: [] },
     config: { approvalMode: "ask", activeProfile: "", caBundlePath: "", ui: {} },
     tlsError: null,
@@ -174,6 +183,7 @@ function _sbRun() {
     models: [],
     /* local-only */
     changesOpen: false,
+    agentOpen: false,
     tab: "session",
     qp: null,
     qpIndex: 0,
@@ -790,13 +800,24 @@ function _sbRun() {
           '<span class="kx-wordmark">Kryptonite</span><span class="sp"></span>' +
           // Context usage belongs up here, not in the footer: it is status, not
           // a control, and moving it up shortens the composer.
-          '<span class="kx-ctx tnum" id="ctxHead" title="Context used"></span>' +
+          // The meter lives here now. It used to sit in a strip under the
+          // composer next to the endpoint pill, which cost a row of vertical
+          // space on every panel for two facts that are status rather than
+          // controls - and vertical space in a 340px sidebar is the thing the
+          // conversation is short of.
+          '<span class="kx-ctx tnum" id="ctxHead" title="Context used" data-err="0">' +
+            '<span id="ctxText"></span>' +
+            '<span id="ctxBar"><i id="ctxFill"></i></span>' +
+          '</span>' +
           '<button class="icon-btn" id="newBtn" title="New chat" aria-label="New chat">' + icon("i-plus") + '</button>' +
           '<button class="icon-btn" id="histBtn" title="History" aria-label="Chat history" aria-haspopup="menu" aria-expanded="false">' + icon("i-clock") + '</button>' +
           '<button class="icon-btn" id="moreBtn" title="More" aria-label="More actions" aria-haspopup="menu" aria-expanded="false">' + icon("i-dots") + '</button>' +
           '<div class="popover" id="historyPop" role="menu" hidden></div>' +
           '<div class="popover" id="morePop" role="menu" hidden>' +
             '<button class="pop-row" role="menuitem" data-more="control">' + crystal(15) + '<span class="t">Control Center</span></button>' +
+            '<div class="pop-div"></div>' +
+            '<button class="pop-row" role="menuitem" data-more="agents">' + icon("i-agent", "ic-13") +
+              '<span class="t">Agents…</span></button>' +
             '<div class="pop-div"></div>' +
             '<button class="pop-row" role="menuitem" data-more="exportChat">' + icon("i-download", "ic-13") +
               '<span class="t">Export chat as JSON…</span></button>' +
@@ -818,6 +839,18 @@ function _sbRun() {
         '<div class="phase-banner" id="phaseBanner" hidden>' +
           '<span class="dot"></span><span class="lbl"></span>' +
           '<span class="sub"></span>' +
+        '</div>' +
+        // Only drawn while an agent is actually selected. A permanent chip in
+        // the composer toolbar would cost a row of chrome on every panel to
+        // say "none" almost all of the time; this says nothing until there is
+        // something to say, and then says the whole of it - who is answering
+        // and what it can reach.
+        '<div class="agent-bar" id="agentBar" hidden>' +
+          '<span class="dot"></span>' +
+          '<span class="nm" id="agentBarName"></span>' +
+          '<span class="sub ell" id="agentBarScope"></span>' +
+          '<button class="tb-btn" id="agentLeave" title="Stop using this agent" ' +
+            'aria-label="Stop using this agent">' + icon("i-x", "ic-9") + '</button>' +
         '</div>' +
         '<section class="view" id="viewSession" role="tabpanel" aria-labelledby="tabSession">' +
           // The conversation's name. Placeholder until the model has been asked
@@ -870,6 +903,11 @@ function _sbRun() {
                     'title="Act - full tools, makes changes">Act</button>' +
                 '</div>' +
                 '<button id="modelBtn" aria-haspopup="listbox" aria-expanded="false">' +
+                  // The endpoint's health, on the control that already names
+                  // the endpoint's model. It was a pill of its own in the
+                  // removed footer; as a dot here it costs no space at all and
+                  // still turns red when the gateway is failing.
+                  '<span class="ep-dot" id="epDot" data-err="0"></span>' +
                   '<span class="nm ell" id="modelName">No model</span>' + icon("i-caret", "ic-9") +
                 '</button>' +
                 '<span class="sp"></span>' +
@@ -877,11 +915,6 @@ function _sbRun() {
                 '<button class="tb-btn" id="clipBtn" title="Attach files" aria-label="Attach files">' + icon("i-clip", "ic-13") + '</button>' +
                 '<button id="sendBtn" data-ready="0" data-mode="send" title="Send" aria-label="Send">' + icon("i-up", "ic-13") + '</button>' +
               '</div>' +
-            '</div>' +
-            '<div class="footer">' +
-              '<span id="ctxText" class="tnum">0 / 0</span>' +
-              '<span id="ctxBar"><i id="ctxFill"></i></span><span>·</span>' +
-              '<span class="ep" id="epInd" data-err="0"><span class="dot"></span><span class="nm ell" id="epName">No endpoint</span></span>' +
             '</div>' +
           '</div>' +
         '</section>' +
@@ -895,6 +928,7 @@ function _sbRun() {
             icon("i-chev", "ic-9") + '</button>' +
           sectionShell("secTls", "TLS diagnostics", "tlsBadge", "tlsBody", true) +
           sectionShell("secEp", "Endpoints", "epBadge", "epBody", false) +
+          sectionShell("secAg", "Agents", "agBadge", "agBody", false) +
           sectionShell("secSk", "Skills", "skBadge", "skBody", false) +
         '</section>' +
       '</div>';
@@ -1064,7 +1098,38 @@ function _sbRun() {
         '<button class="chip-btn" data-sug="Add retry logic to fetch_json()">Add retry logic to fetch_json()</button>' +
         '<button class="chip-btn" data-sug="Write tests for api.py">Write tests for api.py</button>' +
         '<button class="chip-btn" data-act="doctor">Run TLS diagnostics</button>' +
-      '</div>'));
+      '</div>' +
+      recentBlock()));
+  }
+
+  /**
+   * Conversations to go back to, on the empty screen.
+   *
+   * Pressing New chat used to land on a welcome message with no way back
+   * except the history popover in the header - two clicks and a menu, to
+   * return to the thing you were reading a second ago. The empty screen is
+   * exactly where that list belongs: there is nothing else on it, and
+   * "continue where I was" is the most likely reason someone is looking at it.
+   *
+   * The current conversation is skipped: it is the empty one being looked at.
+   * With no previous conversations nothing renders at all, so a first run gets
+   * the welcome message alone rather than an empty heading.
+   */
+  function recentBlock() {
+    var rows = (S.sessions || []).filter(function (r) {
+      return r.id !== S.sessionId && (r.count || 0) > 0;
+    }).slice(0, 5);
+    if (!rows.length) return "";
+    var html = '<div class="recent"><div class="recent-h">Pick up where you left off</div>';
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      var n = r.count === 1 ? "1 message" : (r.count || 0) + " messages";
+      html += '<button class="recent-row" data-session="' + esc(r.id) + '">' +
+        icon("i-clock", "ic-11") +
+        '<span class="t ell">' + esc(r.title) + "</span>" +
+        '<span class="m">' + esc(r.when) + " · " + n + "</span></button>";
+    }
+    return html + "</div>";
   }
 
   /* The rail is a ::before on .msg-user, so everything else has to sit in a
@@ -1765,6 +1830,109 @@ function _sbRun() {
     }
   }
 
+  /* ───────────────────────── agents ───────────────────────── */
+
+  /**
+   * One line saying what an agent can reach.
+   *
+   * Written from the DTO rather than from prose in the file, so it cannot
+   * disagree with what the host will actually enforce - the failure mode of a
+   * hand-written summary is that it stays true for one release.
+   */
+  function agentScope(a) {
+    if (!a) return "";
+    var parts = [];
+    parts.push(a.tools && a.tools.length ? a.tools.length + " built-in tools" : "all built-in tools");
+    if (a.allMcp) parts.push("all MCP servers");
+    else if (a.mcp && a.mcp.length) {
+      parts.push("MCP: " + a.mcp.map(function (m) {
+        return m.include && m.include.length ? m.server + " (" + m.include.length + ")" : m.server;
+      }).join(", "));
+    } else parts.push("no MCP");
+    if (a.skills && a.skills.length) parts.push(a.skills.length + " skills");
+    if (a.model) parts.push(a.model);
+    if (a.memory) parts.push("memory");
+    return parts.join(" · ");
+  }
+
+  function activeAgentDto() {
+    for (var i = 0; i < S.agents.length; i++) {
+      if (S.agents[i].name === S.activeAgent) return S.agents[i];
+    }
+    return null;
+  }
+
+  function renderAgentBar() {
+    var bar = $("agentBar");
+    var a = activeAgentDto();
+    if (!a) { bar.hidden = true; return; }
+    bar.hidden = false;
+    $("agentBarName").textContent = a.name;
+    $("agentBarScope").textContent = agentScope(a);
+    $("agentBarScope").title = a.description || agentScope(a);
+  }
+
+  /** The Agents section in the Diagnostics tab. */
+  function renderAgents() {
+    var body = $("agBody");
+    var badge = $("agBadge");
+    if (!body) return;
+    badge.textContent = S.agents.length ? String(S.agents.length) : "-";
+    badge.className = S.agentWarnings.length ? "badge alert" : "badge";
+
+    var html = "";
+    if (!S.agents.length) {
+      html +=
+        '<div class="ag-empty">' +
+        "<p>An agent is a persona plus a list of what it may reach: which built-in tools, " +
+        "which MCP servers and which of their tools, which skills, and a memory file it " +
+        "keeps for itself. They live in <code>.agent/agents/</code>, one Markdown file each.</p>" +
+        '<button class="btn primary sm" data-ag="new">Create an agent</button></div>';
+    } else {
+      html += '<div class="ag-rows">';
+      for (var i = 0; i < S.agents.length; i++) {
+        var a = S.agents[i];
+        html += '<div class="ag-row" data-on="' + (a.active ? "1" : "0") + '">' +
+          '<div class="ag-head">' + icon("i-agent", "ic-13") +
+            '<span class="n ell">' + esc(a.name) + "</span>" +
+            (a.active ? '<span class="ag-live">active</span>' : "") +
+            '<span class="sp"></span>' +
+            '<button class="btn sm" data-ag="use" data-name="' + esc(a.name) + '">' +
+              (a.active ? "Leave" : "Use") + "</button>" +
+            '<button class="btn sm" data-ag="open" data-name="' + esc(a.name) + '">Open</button>' +
+          "</div>" +
+          (a.description ? '<div class="ag-desc">' + esc(a.description) + "</div>" : "") +
+          '<div class="ag-scope">' + esc(agentScope(a)) + "</div>" +
+          '<div class="ag-file">' + esc(a.file) + "</div>" +
+          "</div>";
+      }
+      html += "</div>";
+      html += '<div class="sk-foot"><span>' +
+        (S.activeAgent ? esc(S.activeAgent) + " is active" : "No agent - the default assistant") +
+        "</span>" +
+        '<span class="sp"></span>' +
+        '<button class="btn sm" data-ag="new">New agent</button></div>';
+    }
+    if (S.agentWarnings.length) {
+      html += '<div class="warn-line">' + esc(S.agentWarnings.join(" ")) + "</div>";
+    }
+    body.innerHTML = html;
+  }
+
+  function onAgentClick(e) {
+    var b = e.target.closest("[data-ag]");
+    if (!b) return;
+    var a = b.getAttribute("data-ag");
+    if (a === "new") { post("newAgent"); return; }
+    var name = b.getAttribute("data-name");
+    if (a === "open") { post("openAgent", { name: name }); return; }
+    if (a === "use") {
+      // The button on the active row says Leave, so it has to send "" rather
+      // than the name it is sitting on.
+      post("setAgent", { name: name === S.activeAgent ? "" : name });
+    }
+  }
+
   /* ───────────────────── changed files ───────────────────── */
 
   /**
@@ -2112,6 +2280,21 @@ function _sbRun() {
   }
 
   function qpItems() {
+    if (S.agentOpen) {
+      // "None" is a row rather than a separate control: leaving an agent is
+      // exactly as common as entering one, and hiding the way out is how a
+      // mode becomes a trap.
+      var out = [{ group: "Agents" }, { agent: "", desc: "No agent - the default assistant", active: !S.activeAgent }];
+      for (var a = 0; a < S.agents.length; a++) {
+        out.push({
+          agent: S.agents[a].name,
+          desc: S.agents[a].description || "",
+          scope: agentScope(S.agents[a]),
+          active: S.agents[a].name === S.activeAgent
+        });
+      }
+      return out;
+    }
     if (S.modelOpen) {
       var rows = [];
       var current = activeProfile();
@@ -2210,6 +2393,14 @@ function _sbRun() {
           icon(isDir ? "i-folder" : "i-file", "ic-13") +
           '<span class="n ell">@' + esc(r.file) + (isDir ? "/" : "") + "</span>" +
           '<span class="d">' + esc(r.badge) + "</span></button>";
+      } else if (r.agent !== undefined) {
+        // The scope is on the row because the scope is what is being chosen
+        // between: two agents with the same persona and different tool lists
+        // are different agents, and a picker showing only names hides that.
+        html += '<button class="qp-row" role="option" data-active="' + on + '" data-i="' + idx + '">' +
+          '<span class="qp-check">' + (r.active ? icon("i-check", "ic-13") : "") + "</span>" +
+          '<span class="n ell">' + esc(r.agent || "None") + "</span>" +
+          '<span class="d ell" title="' + esc(r.scope || r.desc) + '">' + esc(r.desc) + "</span></button>";
       } else {
         html += '<button class="qp-row" role="option" data-active="' + on + '" data-i="' + idx + '">' +
           '<span class="qp-check">' + (r.active ? icon("i-check", "ic-13") : "") + "</span>" +
@@ -2241,6 +2432,9 @@ function _sbRun() {
       // directory" from "a file with no extension".
       var suffix = r.badge === "folder" ? "/ " : " ";
       draft.value = draft.value.replace(/@([\w./-]*)$/, "@" + r.file + suffix);
+    } else if (r.agent !== undefined) {
+      post("setAgent", { name: r.agent });
+      S.agentOpen = false;
     } else {
       post("selectModel", { endpoint: r.endpoint, model: r.model });
       S.modelOpen = false;
@@ -2265,6 +2459,8 @@ function _sbRun() {
         draft.value = ""; post("openControlCenter", { section: "checkpoints" }); break;
       case "/export":
         draft.value = ""; post("exportChat", { scope: "current" }); break;
+      case "/agent":
+        draft.value = ""; S.agentOpen = true; S.modelOpen = false; S.qpIndex = 0; renderQuickPick(); return;
       case "/review":
         draft.value = ""; sendText(REVIEW_PROMPT); break;
       case "/skills":
@@ -2446,14 +2642,14 @@ function _sbRun() {
     // Sky while the bar is only a reading; amber and then coral once the
     // number stops being information and starts being a problem.
     $("ctxFill").setAttribute("data-level", pct >= 90 ? "full" : pct >= 75 ? "warn" : "ok");
-    // Header carries the bare number; the footer keeps the meter it fills.
-    // Same rule in the header.
-    $("ctxHead").textContent = exact && used ? fmtK(used) : "";
 
     var active = activeProfile();
     var name = active ? active.id : "No endpoint";
-    $("epName").textContent = S.tlsError ? name + " - TLS error" : name;
-    $("epInd").setAttribute("data-err", S.tlsError ? "1" : "0");
+    $("ctxHead").title = exact
+      ? fmtK(used) + " of " + fmtK(limit) + " tokens, reported by " + name
+      : "Context used - estimated, this endpoint reports no token count";
+    $("epDot").setAttribute("data-err", S.tlsError ? "1" : "0");
+    $("modelBtn").title = S.tlsError ? name + " - TLS error" : name;
     $("modelName").textContent = active ? active.model : "No model";
   }
 
@@ -2991,6 +3187,9 @@ function _sbRun() {
     S.profiles = state.profiles || [];
     S.skills = state.skills || [];
     S.skillWarnings = state.skillWarnings || [];
+    S.agents = state.agents || [];
+    S.agentWarnings = state.agentWarnings || [];
+    S.activeAgent = state.activeAgent || "";
     S.mcp = state.mcp || { servers: [], warnings: [] };
     S.config = state.config;
     S.tlsError = state.tlsError;
@@ -3019,6 +3218,8 @@ function _sbRun() {
     renderTls();
     renderEndpoints();
     renderSkills();
+    renderAgents();
+    renderAgentBar();
     renderMcp();
     renderMcpCount();
     renderHistory();
@@ -3229,6 +3430,7 @@ function _sbRun() {
       closePops();
       var a = b.getAttribute("data-more");
       if (a === "control") post("openControlCenter", {});
+      else if (a === "agents") { setTab("diagnostics"); openSection("secAg"); renderAgents(); }
       else if (a === "exportChat") post("exportChat", { scope: "current" });
       else if (a === "exportAll") post("exportChat", { scope: "all" });
       else if (a === "settings") post("openSettings");
@@ -3291,6 +3493,8 @@ function _sbRun() {
         }
         return;
       }
+      var recent = e.target.closest(".welcome [data-session]");
+      if (recent) { post("loadSession", { id: recent.getAttribute("data-session") }); return; }
       var sug = e.target.closest("[data-sug]");
       if (sug) { sendText(sug.getAttribute("data-sug")); return; }
       var act = e.target.closest("[data-act]");
@@ -3379,6 +3583,8 @@ function _sbRun() {
       if (e.key === "Escape" && S.running && $("qp").hidden) post("interrupt");
     });
 
+    $("agentLeave").addEventListener("click", function () { post("setAgent", { name: "" }); });
+    $("agBody").addEventListener("click", onAgentClick);
     $("tlsBody").addEventListener("click", onTlsClick);
     $("epBody").addEventListener("click", onEpClick);
     $("skBody").addEventListener("click", onSkillClick);
@@ -3697,15 +3903,20 @@ function _sbRun() {
           : m.depth > 1
             ? m.depth + " messages queued for when this turn finishes."
             : "Queued - it will be sent when this turn finishes.";
+        // The chips go on the note because the composer's pills have already
+        // cleared: without them a message queued with a screenshot attached
+        // showed only the sentence, which is what it looked like back when the
+        // attachment really was being dropped.
         var note = div("queued-note", icon(m.mode === "steer" ? "i-up" : "i-clock", "ic-11") +
-          "<span>" + esc(word) + "</span>");
+          "<span>" + esc(word) + "</span>" + attChips(m.files));
         add(note);
         break;
       }
 
       case "steerAccepted":
-        // It is a user turn: the reply after it was written knowing it.
-        addUser(m.text);
+        // It is a user turn: the reply after it was written knowing it - and
+        // it carries its files, because the host sends them with it now.
+        addUser(m.text, m.files);
         break;
 
       case "modelsListed": {
@@ -3759,6 +3970,23 @@ function _sbRun() {
         renderMcpCount();
         break;
 
+      case "agentsReloaded":
+        S.agents = m.agents || [];
+        S.agentWarnings = m.warnings || [];
+        S.activeAgent = m.active || "";
+        renderAgents();
+        renderAgentBar();
+        break;
+
+      case "agentChanged":
+        S.activeAgent = m.agent ? m.agent.name : "";
+        for (var ai = 0; ai < S.agents.length; ai++) {
+          S.agents[ai].active = S.agents[ai].name === S.activeAgent;
+        }
+        renderAgents();
+        renderAgentBar();
+        break;
+
       case "skillsReloaded":
         S.skills = m.skills || [];
         S.skillWarnings = m.warnings || [];
@@ -3807,9 +4035,14 @@ function _sbRun() {
         break;
 
       case "sessionsListed":
+        // The empty screen lists these, and on a fresh chat the list arrives
+        // after the screen is already drawn. Without this it stayed blank
+        // until something else forced a re-render.
         S.sessions = m.sessions || [];
         renderHistory();
+        if (logEl.querySelector(".welcome")) renderWelcome();
         break;
+
 
       case "configChanged":
         S.config = m.config;
