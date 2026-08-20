@@ -30,6 +30,8 @@ import { ShadowRepo } from "../checkpoint/shadow";
 import { DiagnosticsService, rungLabel } from "../diagnostics/service";
 import { SessionStore } from "./sessions";
 import { loadInstructions, ProjectInstructions, INSTRUCTIONS_CAP } from "./instructions";
+import { HermesState } from "../hermes/state";
+import { snapshotFor, MEMORY_CAP, type MemorySnapshot } from "../hermes/snapshot";
 import {
   renderEditorContext,
   EditorContext,
@@ -234,8 +236,23 @@ const REAL_CONFIG_KEYS = new Set([
 export class App {
   readonly output: vscode.OutputChannel;
   readonly sessions: SessionStore;
+  /** Approved memory, and the ledger of how it got approved. */
+  readonly hermes: HermesState;
   /** The workspace's standing instructions, when it has any. */
   instructions?: ProjectInstructions;
+  /**
+   * The memory block for the conversation currently on screen.
+   *
+   * Held here rather than on the session controller because the pre-warm reads
+   * it. `systemPrompt()` below builds the exact head the next request will
+   * send and has no session to ask, so a snapshot that lived only on the
+   * controller would leave every pre-warm building a head without memory and
+   * missing the entry the real request then creates. One field, two readers,
+   * one string.
+   *
+   * Set when a session is created or loaded, and not again until the next one.
+   */
+  activeSnapshot?: MemorySnapshot;
   readonly diagnostics = new DiagnosticsService();
   /** MCP servers from .agent/mcp.json. Empty until the first reload. */
   readonly mcp = new McpRegistry((level, msg) => this.log(level, msg));
@@ -282,6 +299,7 @@ export class App {
   constructor(private context: vscode.ExtensionContext) {
     this.output = vscode.window.createOutputChannel("KRYPTONITE");
     this.sessions = new SessionStore(context, this.root);
+    this.hermes = new HermesState(context, this.root);
     this.status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     this.status.command = "kryptonite.focusSidebar";
     this.session = new SessionController(this);
@@ -857,7 +875,9 @@ export class App {
       this.enabledSkills(agent),
       phase,
       agent ? { agent, memory: this.agentMemory(agent) } : undefined,
-      this.instructions?.block
+      this.instructions?.block,
+      undefined,
+      this.memoryBlock()
     );
   }
 
@@ -869,6 +889,52 @@ export class App {
    * meant to fix it. Logged only when the result changes, so a watcher firing
    * on an unrelated save does not fill the log with the same line.
    */
+  /**
+   * The memory block, or nothing when the feature is off.
+   *
+   * Read through here rather than off the field directly so the setting is
+   * checked in one place: a user who turns Hermes off mid-session must stop
+   * paying for the block on the very next request, even though the snapshot
+   * itself stays frozen while the session lives.
+   */
+  memoryBlock(): string | undefined {
+    if (!this.cfg().get<boolean>("hermes.enabled", false)) return undefined;
+    // Built on demand when nothing has frozen one yet. `announce` refreshes on
+    // every session change, but a window reload restores a conversation
+    // without going through it, and the very first turn of a fresh window has
+    // had no session change at all. Building here covers both without either
+    // path having to remember to, and it still happens once: the field is set
+    // afterwards and only a session change clears it.
+    if (!this.activeSnapshot) this.refreshSnapshot();
+    return this.activeSnapshot?.block || undefined;
+  }
+
+  /**
+   * Freeze a snapshot for a session that is starting.
+   *
+   * Called on create and on load, and nowhere else. Everything about this
+   * feature's prompt-cache behaviour rests on that being true: see the header
+   * of `src/hermes/snapshot.ts`.
+   */
+  refreshSnapshot(): void {
+    if (!this.cfg().get<boolean>("hermes.enabled", false)) {
+      this.activeSnapshot = undefined;
+      return;
+    }
+    const cap = this.cfg().get<number>("hermes.memoryBudget", MEMORY_CAP);
+    const snap = snapshotFor(this.hermes, cap);
+    this.activeSnapshot = snap;
+    if (snap.used) {
+      this.log(
+        "info",
+        `Hermes: ${snap.used} note${snap.used === 1 ? "" : "s"} in this session's memory ` +
+          `(${snap.size} characters` +
+          (snap.dropped ? `, ${snap.dropped} over budget` : "") +
+          ")"
+      );
+    }
+  }
+
   reloadInstructions(): void {
     const rel = this.cfg().get<string>("instructionsFile", ".agent/instructions.md");
     const next = loadInstructions(this.root, rel);

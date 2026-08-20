@@ -217,6 +217,18 @@
           ],
           "default": "persistent",
           "markdownDescription": "`persistent` keeps the agent browser's cookies and history between launches, so a login it performs survives closing the window. `fresh` starts from an empty temp profile every time, which is the old behaviour. Neither affects bot detection."
+        },
+        "kryptonite.hermes.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Remember approved notes between sessions. Nothing is remembered automatically: a note is proposed, and it stays inert until you approve it. Approved notes enter the next session's prompt, never the one you are in, because the prompt is a cache key and a block that grew mid-conversation would invalidate it on the turn after every approval."
+        },
+        "kryptonite.hermes.memoryBudget": {
+          "type": "number",
+          "default": 4000,
+          "minimum": 0,
+          "maximum": 16000,
+          "description": "Characters of remembered notes admitted into a prompt. Notes accrete on their own, unlike the instructions file which somebody meant every line of, so this is deliberately well under the 16,000 that file gets. Anything over budget is dropped by importance and the model is told how many were left out."
         }
       }
     },
@@ -234,9 +246,9 @@
     "typecheck": "tsc --noEmit",
     "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node18",
     "watch": "npm run build -- --sourcemap --watch",
-    "test:bundle": "esbuild test/activation.ts test/send-path.ts test/skill-bounds.ts test/text-tool-protocol.ts test/tools.ts test/mcp-transport.ts test/image-endpoint.ts test/tool-images.ts test/instructions.ts test/editor-context.ts test/reply.ts test/reply-loop.ts test/untrusted.ts test/interrupt.ts test/mcp-live.ts test/capabilities.ts test/browser.ts test/cdp.ts test/browser-vision.ts test/browser-actions.ts test/browser-agent.ts test/browser-profile.ts test/search.ts test/one-shot.ts test/editor-features.ts test/completion.ts test/background-turns.ts test/mcp-script.ts test/agents.ts test/agent-gate.ts --bundle --outdir=dist --out-extension:.js=.cjs --format=cjs --platform=node --target=node20 --alias:vscode=./test/vscode-stub.ts",
+    "test:bundle": "esbuild test/activation.ts test/send-path.ts test/skill-bounds.ts test/text-tool-protocol.ts test/tools.ts test/mcp-transport.ts test/image-endpoint.ts test/tool-images.ts test/instructions.ts test/editor-context.ts test/reply.ts test/reply-loop.ts test/untrusted.ts test/interrupt.ts test/mcp-live.ts test/capabilities.ts test/browser.ts test/cdp.ts test/browser-vision.ts test/browser-actions.ts test/browser-agent.ts test/browser-profile.ts test/search.ts test/one-shot.ts test/editor-features.ts test/completion.ts test/background-turns.ts test/mcp-script.ts test/agents.ts test/agent-gate.ts test/hermes-state.ts test/hermes-snapshot.ts --bundle --outdir=dist --out-extension:.js=.cjs --format=cjs --platform=node --target=node20 --alias:vscode=./test/vscode-stub.ts",
     "pretest": "npm run build && npm run test:bundle",
-    "test": "node test/contrast.cjs && node test/markdown-render.cjs && node test/mcp-render.cjs && node test/browser-ui.cjs && node test/control-center.cjs && node test/aura.cjs && node test/phases.cjs && node test/composer.cjs && node test/slash.cjs && node test/drive.js && node test/host.js && node dist/activation.cjs && node dist/send-path.cjs && node dist/skill-bounds.cjs && node dist/text-tool-protocol.cjs && node dist/tools.cjs && node dist/mcp-transport.cjs && node dist/image-endpoint.cjs && node dist/tool-images.cjs && node dist/instructions.cjs && node dist/editor-context.cjs && node dist/reply.cjs && node dist/reply-loop.cjs && node dist/untrusted.cjs && node dist/interrupt.cjs && node dist/mcp-live.cjs && node dist/capabilities.cjs && node dist/browser.cjs && node dist/cdp.cjs && node dist/browser-vision.cjs && node dist/browser-actions.cjs && node dist/browser-agent.cjs && node dist/browser-profile.cjs && node dist/search.cjs && node dist/one-shot.cjs && node dist/editor-features.cjs && node dist/completion.cjs && node dist/background-turns.cjs && node dist/mcp-script.cjs && node dist/agents.cjs && node dist/agent-gate.cjs",
+    "test": "node test/contrast.cjs && node test/markdown-render.cjs && node test/mcp-render.cjs && node test/browser-ui.cjs && node test/control-center.cjs && node test/aura.cjs && node test/phases.cjs && node test/composer.cjs && node test/slash.cjs && node test/drive.js && node test/host.js && node dist/activation.cjs && node dist/send-path.cjs && node dist/skill-bounds.cjs && node dist/text-tool-protocol.cjs && node dist/tools.cjs && node dist/mcp-transport.cjs && node dist/image-endpoint.cjs && node dist/tool-images.cjs && node dist/instructions.cjs && node dist/editor-context.cjs && node dist/reply.cjs && node dist/reply-loop.cjs && node dist/untrusted.cjs && node dist/interrupt.cjs && node dist/mcp-live.cjs && node dist/capabilities.cjs && node dist/browser.cjs && node dist/cdp.cjs && node dist/browser-vision.cjs && node dist/browser-actions.cjs && node dist/browser-agent.cjs && node dist/browser-profile.cjs && node dist/search.cjs && node dist/one-shot.cjs && node dist/editor-features.cjs && node dist/completion.cjs && node dist/background-turns.cjs && node dist/mcp-script.cjs && node dist/agents.cjs && node dist/agent-gate.cjs && node dist/hermes-state.cjs && node dist/hermes-snapshot.cjs",
     "test:live": "esbuild test/attachment-e2e.ts test/skill-gating-live.ts --bundle --outdir=dist --out-extension:.js=.cjs --format=cjs --platform=node --target=node20 && node dist/attachment-e2e.cjs && node dist/skill-gating-live.cjs",
     "test:mcp": "npm install --no-save @modelcontextprotocol/server-filesystem @modelcontextprotocol/server-memory && esbuild test/mcp-e2e.ts --bundle --outdir=dist --out-extension:.js=.cjs --format=cjs --platform=node --target=node20 && node dist/mcp-e2e.cjs",
     "verify": "npm run typecheck && npm test",

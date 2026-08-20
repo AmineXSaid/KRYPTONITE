@@ -3,6 +3,23 @@
 ## Unreleased
 
 ### Added
+- **Remembered notes, off by default.** Kryptonite forgot everything between
+  sessions, so the same context got retyped every morning. There is now a small
+  store of approved notes that survives, behind `kryptonite.hermes.enabled`.
+  Nothing is remembered automatically: a note arrives as a proposal and stays
+  inert until approved, enforced by the store's shape rather than by a filter a
+  caller has to remember - the only method that yields prompt text returns
+  approved records, and there is no method that returns everything.
+  Notes enter the **next** session, never the one you are in, because the
+  system prompt is a cache key and a block that grew after every approval would
+  invalidate it on the turn after each one. The block is frozen when a
+  conversation starts, which is the exact opposite of how the instructions file
+  behaves, and both are deliberate. Storage sits in globalStorage beside the
+  transcripts, never in the repository, partitioned by workspace and by
+  endpoint trust zone so a fact learned against an internal gateway is not
+  replayed to a public one. Every approval, edit, rejection and deletion
+  appends to a ledger that is never rewritten: forgetting a note removes the
+  note and keeps the record that it was there.
 - **Agents have a tab.** They were a collapsed section inside Diagnostics,
   which is where a thing goes to be inspected rather than used, three clicks
   from the composer and behind a heading nobody opens twice. The tab sits after

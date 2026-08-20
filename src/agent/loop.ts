@@ -466,6 +466,15 @@ export interface AgentRunOptions {
    * build the same head from the same string. This file has no filesystem.
    */
   instructions?: string;
+  /**
+   * Approved memory for this session, already formatted.
+   *
+   * Frozen for the session's whole life, unlike `instructions` above, which is
+   * re-read every turn. The system prompt is a cache key: memory that grew
+   * mid-session would invalidate it on the turn after every approval. New
+   * learning appears in the next session instead.
+   */
+  memory?: string;
   // CHANGED: added. Defaults to "act" so existing callers are unaffected.
   phase?: Phase;
   /**
@@ -516,17 +525,28 @@ export function systemPromptFor(
   phase: Phase,
   agent?: { agent: Agent; memory?: string },
   instructions?: string,
-  identity?: { model: string; endpoint: string }
+  identity?: { model: string; endpoint: string },
+  memory?: string
 ): string {
-  // Four things stack ahead of the phase addendum, outermost first: the
-  // engine's own rules, who is answering, what this workspace knows, and how
-  // this agent behaves. The project's instructions refine the engine rather
-  // than replace it, the persona refines the project, and the addendum keeps
-  // the last word - it is the one rule a persona must not be able to talk its
-  // way out of.
+  // Five things stack ahead of the phase addendum, outermost first: the
+  // engine's own rules, who is answering, what this workspace knows, what has
+  // been learned about it, and how this agent behaves. The project's
+  // instructions refine the engine rather than replace it, learned memory sits
+  // under the instructions because a note nobody typed must not outrank a rule
+  // somebody did, the persona refines both, and the addendum keeps the last
+  // word - it is the one rule a persona must not be able to talk its way out
+  // of.
   const addendum = phase === "plan" ? PLAN_ADDENDUM : phase === "ask" ? ASK_ADDENDUM : "";
   const persona = agent ? agentPrompt(agent.agent, agent.memory) : "";
-  return [SYSTEM, identityLine(identity), skillIndex(skills), instructions ?? "", persona, addendum]
+  return [
+    SYSTEM,
+    identityLine(identity),
+    skillIndex(skills),
+    instructions ?? "",
+    memory ?? "",
+    persona,
+    addendum,
+  ]
     .filter(Boolean)
     .join("\n\n");
 }
@@ -561,10 +581,14 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
   // CHANGED: the plan addendum joins the system prompt in plan phase.
   const phase = opts.phase ?? "act";
   const agent = opts.agent?.agent;
-  const system = systemPromptFor(ctx.skills, phase, opts.agent, opts.instructions, {
-    model: client.profile.model,
-    endpoint: client.profile.name,
-  });
+  const system = systemPromptFor(
+    ctx.skills,
+    phase,
+    opts.agent,
+    opts.instructions,
+    { model: client.profile.model, endpoint: client.profile.name },
+    opts.memory
+  );
 
   // CHANGED: in ask and plan phase the model is only offered a read-only tool
   // set, so a write is impossible rather than merely discouraged. Ask's set is

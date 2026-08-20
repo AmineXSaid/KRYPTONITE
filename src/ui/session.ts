@@ -654,6 +654,11 @@ export class SessionController {
         // a watcher, and an edit made mid-conversation should reach the very
         // next turn rather than the next window.
         instructions: this.app.instructions?.block,
+        // Deliberately *not* read fresh, unlike the line above it. Memory is
+        // frozen when the session starts and stays that way: the system prompt
+        // is a cache key, and a block that grew after every approval would
+        // invalidate it mid-conversation. New notes arrive next session.
+        memory: this.app.memoryBlock(),
         // Read here rather than at load time: the agent writes to its memory
         // file with its own tools, so the copy that goes into the prompt has
         // to be the one on disk when the turn starts.
@@ -1234,6 +1239,10 @@ export class SessionController {
    * filed under a different id.
    */
   private announce(title: string): void {
+    // A new conversation gets a new snapshot, and this is the one funnel every
+    // path that changes `sessionId` ends in. Anything approved since the last
+    // session becomes visible here and nowhere else in the session's life.
+    this.app.refreshSnapshot();
     this.app.broadcast({ type: "todosUpdated", todos: [] });
     this.app.broadcast({ type: "changesUpdated", files: this.changedFiles() });
     this.app.broadcast({

@@ -135,6 +135,38 @@ prompt, because the system prompt is a cache key and this text changes whenever
 the cursor moves. `kryptonite.editorContext` turns it off for windows too small
 to afford it.
 
+## Remembered notes
+
+Off by default. `kryptonite.hermes.enabled` turns it on.
+
+Kryptonite otherwise forgets everything between sessions, so a user who
+explains their deployment layout on Monday explains it again on Tuesday. This
+is a small store of notes that survives, and two rules govern all of it.
+
+**Nothing is remembered automatically.** A note arrives as a proposal and stays
+inert until you approve it. That is not a policy the code asks callers to
+honour, it is the shape of the store: the only method that yields text for a
+prompt returns approved records, and there is deliberately no method that
+returns everything. A pending or rejected note cannot reach a model because
+there is no call that would hand it over.
+
+**Notes appear in the next session, never the one you are in.** The system
+prompt is a prompt-cache key, and a block that grew after every approval would
+invalidate that key on the turn after each one. So the block is built once when
+a conversation starts and stays byte-identical for its whole life. This is the
+opposite of `.agent/instructions.md`, which is re-read every turn on purpose,
+and the difference is deliberate in both directions.
+
+Notes live in globalStorage beside the transcripts, never in your repository,
+partitioned by workspace and by endpoint trust zone: something learned while
+talking to an internal gateway is not replayed into a request to a public one.
+Every approval, edit, rejection and deletion appends to a ledger that is never
+rewritten, so "forget that" removes the note and keeps the record that it
+existed.
+
+`kryptonite.hermes.memoryBudget` bounds what enters a prompt, and anything over
+budget is dropped by importance with the model told how many were left out.
+
 ## Project instructions
 
 `.agent/instructions.md`, prepended to every system prompt, for the conventions
