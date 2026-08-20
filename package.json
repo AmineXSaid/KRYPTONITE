@@ -3,7 +3,7 @@
   "displayName": "KRYPTONITE",
   "description": "A coding agent for endpoints that don't behave. mTLS, corporate CAs, token exchange, air-gapped.",
   "version": "0.5.4",
-  "publisher": "local",
+  "publisher": "MohamedAmineSaid",
   "license": "MIT",
   "icon": "media/logo.png",
   "engines": {
