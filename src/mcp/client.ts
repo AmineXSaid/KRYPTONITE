@@ -1,4 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 
 /**
  * A Model Context Protocol client over stdio.
@@ -140,8 +142,22 @@ export function diagnoseStderr(lines: string[]): string {
   return (err.trim().slice(0, 400) + hint).trim();
 }
 
-/** What the client advertises. Kept honest: we do not implement the rest. */
-const CLIENT_CAPABILITIES = { roots: { listChanged: false }, sampling: {} };
+/**
+ * What the client advertises. Kept honest: we do not implement the rest.
+ *
+ * `sampling` used to be in here and was a lie. Advertising it tells the server
+ * it may send `sampling/createMessage` - ask the client to run a model turn on
+ * its behalf - and this client answers every server-initiated request with
+ * -32601. A server that trusted the advertisement got a hard protocol error at
+ * the exact moment it tried to use the feature we claimed. Nothing consumed it
+ * on our side either, so removing it costs no behaviour.
+ *
+ * `roots` stays, and is now actually implemented below: `roots/list` answers
+ * with the workspace root. That is the one thing a filesystem-shaped server
+ * genuinely wants to know and previously had to be told twice - once in argv,
+ * and never through the protocol.
+ */
+const CLIENT_CAPABILITIES = { roots: { listChanged: false } };
 const PROTOCOL_VERSION = "2025-06-18";
 const DEFAULT_TIMEOUT_MS = 60_000;
 /**
@@ -168,6 +184,8 @@ export class McpClient {
   private buf = "";
   /** Last few stderr lines, for the diagnostics panel when a start fails. */
   private stderr: string[] = [];
+  /** The directory the server was started in - what `roots/list` answers. */
+  private root = "";
 
   constructor(
     readonly spec: McpServerSpec,
@@ -192,10 +210,12 @@ export class McpClient {
     this.tools = [];
     this.stderr = [];
 
+    this.root = this.spec.cwd ?? defaultCwd;
+
     const { file, args, verbatim } = spawnTarget(this.spec.command, this.spec.args ?? []);
     try {
       this.proc = spawn(file, args, {
-        cwd: this.spec.cwd ?? defaultCwd,
+        cwd: this.root,
         env: { ...process.env, ...(this.spec.env ?? {}) },
         stdio: ["pipe", "pipe", "pipe"],
         windowsVerbatimArguments: verbatim,
@@ -419,10 +439,12 @@ export class McpClient {
   }
 
   private dispatch(msg: any): void {
-    // Server-initiated requests: we advertise no capabilities that invite one,
-    // so answer with "method not found" rather than leaving it hanging.
+    // Server-initiated requests. Only the ones our advertised capabilities
+    // invite are answered for real; everything else gets "method not found"
+    // rather than being left to hang until the server's own timeout.
     if (msg.method && msg.id !== undefined) {
-      this.notify0(msg.id);
+      if (msg.method === "roots/list") this.answerRoots(msg.id);
+      else this.notify0(msg.id);
       return;
     }
     if (msg.id === undefined) return; // a notification we do not consume
@@ -436,6 +458,26 @@ export class McpClient {
       return;
     }
     p.resolve(msg.result);
+  }
+
+  /**
+   * Answer `roots/list` with the one directory this server was started in.
+   *
+   * The spec wants a file:// URI, and building it by hand is wrong on Windows
+   * ("C:\ws" is not "file://C:\ws"); `pathToFileURL` gets the drive letter and
+   * the percent-encoding right. A server may use this to scope itself, so the
+   * honest answer when we have no root is an empty list rather than a guess -
+   * "everywhere" is the one reading that could widen its reach.
+   */
+  private answerRoots(id: unknown): void {
+    const roots = this.root
+      ? [{ uri: pathToFileURL(this.root).toString(), name: path.basename(this.root) || this.root }]
+      : [];
+    try {
+      this.send({ jsonrpc: "2.0", id, result: { roots } });
+    } catch {
+      /* the server is gone; nothing to answer */
+    }
   }
 
   private notify0(id: unknown): void {

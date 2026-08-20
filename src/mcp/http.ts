@@ -26,7 +26,16 @@ import { flattenContent, type McpServerSpec, type McpState, type McpTool } from 
  */
 
 const PROTOCOL_VERSION = "2025-06-18";
-const CLIENT_CAPABILITIES = { roots: { listChanged: false }, sampling: {} };
+/**
+ * Same honesty rule as the stdio client: advertise only what is implemented.
+ *
+ * `sampling` was dropped here too - it invited `sampling/createMessage`, which
+ * this transport has no path to answer. `roots` is kept because the remote
+ * case has a defensible answer to `roots/list`: nothing. A remote server does
+ * not share this machine's filesystem, so an empty root list is the truth
+ * rather than a gap.
+ */
+const CLIENT_CAPABILITIES = { roots: { listChanged: false } };
 const DEFAULT_TIMEOUT_MS = 60_000;
 
 export class McpHttpClient {

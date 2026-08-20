@@ -1,5 +1,117 @@
 # Changelog
 
+## 0.6.0
+
+Ask joins Plan and Act, a second live MCP example, and small chat-surface polish.
+
+### Added
+- **Ask mode.** A third composer segment, in the palette's new amber
+  (`--kx-ask`), next to Plan (violet) and Act (turquoise). Ask offers the same
+  grounding as Plan - `read_file`, `list_files`, `glob`, `search`,
+  `read_skill` - but never `update_todos` and never ends in a plan card: it
+  exists to answer a direct question against the real workspace, not to
+  produce a design or a build order. Shift+Tab now cycles Ask → Plan → Act →
+  Ask instead of toggling two states, and the read-only banner above the
+  transcript generalises to both restricted phases instead of naming Plan
+  alone.
+- `ASK_ONLY` (`src/agent/loop.ts`), the tool set for ask phase, and
+  `ASK_ADDENDUM`, its system-prompt addition - short, and deliberately silent
+  about steps or plans, so a model cannot mistake it for Plan's contract.
+  `READ_ONLY` is now `ASK_ONLY` plus `update_todos` rather than a second
+  hand-maintained list, so the two cannot drift apart.
+- **A second MCP example.** `.agent/mcp.json` now ships `memory`
+  (`@modelcontextprotocol/server-memory`) alongside `filesystem` - a local
+  knowledge graph rather than another file reader, so the shipped config
+  demonstrates a stateful tool, not just a second passthrough. Nothing it does
+  touches the workspace: its graph lives next to the installed package unless
+  `MEMORY_FILE_PATH` says otherwise. `test/mcp-live.ts` spawns it for real,
+  same as `filesystem`, and round-trips a `create_entities` / `search_nodes`
+  call rather than only checking that it starts.
+
+### Fixed
+- **The read-only phases are now enforced, not just advertised.** Filtering the
+  `tools` array is a request to the model, not a guarantee about it: a gateway
+  that drops the array, a small model echoing a `write_file` shape from earlier
+  in the transcript, or an instruction injected into a file the model just
+  read, all produce a call for a tool that was never offered - and the loop
+  handed that name straight to `runTool`. A write in Ask mode landed. The phase
+  policy now lives in one predicate, `toolAllowedIn` (`src/agent/loop.ts`),
+  read at both the advertisement boundary and the execution boundary, so the
+  two cannot disagree. A refused call comes back as a tool result naming the
+  phase that *can* run it, so the turn continues instead of dying.
+  MCP tools are refused outside Act by prefix rather than by lookup - a server
+  that names a tool `read_file` does not walk through the gate on its suffix.
+- **The MCP client no longer advertises a capability it does not implement.**
+  `CLIENT_CAPABILITIES` claimed `sampling`, which invites the server to send
+  `sampling/createMessage`; every server-initiated request was answered with
+  `-32601`. A server that trusted the advertisement got a hard protocol error
+  at the moment it tried to use the feature. Dropped from both the stdio and
+  HTTP transports; nothing consumed it here either.
+- An unknown phase reaching the webview left the composer with no segment lit
+  and no banner - a state the user could not name or escape except by
+  clicking. It normalises to Act, matching the host's own default, rather than
+  to Ask: showing a read-only badge over a session the host would still run a
+  write in is the flattering answer and the wrong one. The host normalises
+  `setPhase` the same way and echoes the corrected value back.
+- A restored transcript showed settled tool cards with a green tick beside a
+  grey "still running" rail dot, the two marks contradicting each other on the
+  same row.
+
+### Added
+- **`roots/list` is now implemented** rather than refused. A server asking
+  where the workspace is gets a real answer - the directory it was started in,
+  as a `file://` URI built with `pathToFileURL` so a Windows drive letter
+  survives. Previously the one capability the client legitimately advertised
+  was still answered "method not found". Remote servers get an empty list,
+  which is the truth: they do not share this machine's filesystem.
+- **`test/mcp-script.ts`: an MCP server that is not an npm package.** Every
+  other MCP suite started something through `npx`, which quietly made "works
+  with MCP" mean "works with the two npm packages we ship as examples". This
+  one writes a dependency-free Python server to a temp file and drives it
+  through the real registry, so the transport is what is under test rather
+  than somebody's SDK. It also has the server call `roots/list` back mid
+  `tools/call` - the only coverage of a server-initiated request against a
+  live registry, and the thing that proves the fix above rather than assuming
+  it. Skips cleanly where no Python 3 exists; on Windows it prefers `python`,
+  because `python3` there is a Store alias that launches nothing.
+- The config template gains a `script-server` example (disabled, like the
+  others) and says plainly that `command` need not be `npx`. Two footguns are
+  documented at the point they bite: the script path must be absolute, since
+  `cwd` is the workspace and a relative path breaks when a different folder is
+  opened, and the interpreter must be named rather than relying on a shebang,
+  which Windows does not consult at all.
+- Command cards label their two halves `IN` and `OUT`. The header truncates a
+  command to fit the panel, so the full line had nowhere to live; "what did it
+  actually run" is also the first question on a failure, and the error path
+  used to skip the argument preview entirely. Both the live path and session
+  restore build the same shape.
+- A status rail down the left of the transcript - one dot per tool row, grey
+  running, turquoise done, burgundy failed. A column read at one x-position
+  scans faster than a ragged right edge set by each row's argument length.
+
+### Changed
+- The phase control is a `radiogroup` with `aria-checked` rather than three
+  plain buttons styled by a data attribute. A screen reader announced three
+  equal buttons and never which phase was live - the one thing the control
+  exists to say. The active segment also gains a 2px underline in its own hue,
+  so the state does not rest on colour alone.
+- `PHASES` is now the definition and `Phase` is derived from it, so a fourth
+  phase cannot enter the type without also becoming something the host can
+  validate at runtime. `src/ui/protocol.ts` re-exports it instead of keeping a
+  second hand-maintained copy.
+- Approval mode's own `"ask"` (confirm every mutating call) and phase's new
+  `"ask"` (a phase with no mutating calls to confirm) are different axes and
+  never interact - Ask phase offers nothing `approvalMode` would ever gate.
+  Documented at the point both are read, not only here.
+- The composer placeholder splits three ways: "Ask Kryptonite anything…" now
+  belongs to Ask, where it always literally applied; Act gets "Tell Kryptonite
+  what to do…" instead of inheriting Ask's old text.
+- The idle-verb pool gains `ASK_VERBS` ("Reading up…", "Following the
+  trail…", …), so a waiting Ask turn reads differently from a waiting Act
+  turn rather than falling back to the generic set.
+- `.agent/mcp.json` and the scaffold template in `src/core/app.ts` both now
+  say MCP tools are withheld in Ask mode too, not Plan alone.
+
 ## 0.5.0
 
 Latency work — connection reuse, prompt caching, and getting disk, git, and

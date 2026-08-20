@@ -528,6 +528,141 @@ const pasteTests = (async () => {
   ok("full text is in the DOM", d.querySelector("#log .msg-ai").textContent.length >= 600);
 }
 
+/* ── 13. Ask / Plan / Act: the three-phase control ──────────────────── */
+{
+  const { w, d, sent, inbound } = boot();
+  inbound(STATE());
+
+  const seg = d.getElementById("phaseSeg");
+  const btn = (p) => seg.querySelector('[data-phase="' + p + '"]');
+  ok("13 all three phases are offered", seg.querySelectorAll("[data-phase]").length === 3);
+  ok("13 Ask sits before Plan and Act",
+    [...seg.querySelectorAll("[data-phase]")].map((b) => b.getAttribute("data-phase")).join() ===
+      "ask,plan,act");
+
+  // The control announces which phase is live. data-on drives the styling and
+  // aria-checked drives the screen reader; both have to move together or the
+  // panel looks right and reads wrong.
+  ok("13 act starts lit", btn("act").getAttribute("data-on") === "1");
+  ok("13 and is announced as checked", btn("act").getAttribute("aria-checked") === "true");
+  ok("13 the group is a radiogroup", seg.getAttribute("role") === "radiogroup");
+
+  btn("ask").click();
+  ok("13 clicking Ask posts setPhase",
+    sent.some((m) => m.type === "setPhase" && m.phase === "ask"));
+  ok("13 Ask lights up", btn("ask").getAttribute("data-on") === "1");
+  ok("13 and Act goes dark", btn("act").getAttribute("data-on") === "0");
+  ok("13 aria-checked follows", btn("ask").getAttribute("aria-checked") === "true" &&
+    btn("act").getAttribute("aria-checked") === "false");
+
+  // The banner is the read-only disclosure. Ask and Plan each get their own
+  // wording; Act withholds nothing, so it must not appear at all.
+  const banner = d.getElementById("phaseBanner");
+  ok("13 Ask shows the read-only banner", banner.hidden === false);
+  ok("13 banner names the phase", banner.getAttribute("data-phase") === "ask");
+  ok("13 Ask's banner promises no plan either",
+    /no edits, no plan/.test(banner.querySelector(".sub").textContent));
+  ok("13 Ask's placeholder asks a question",
+    /^Ask Kryptonite anything/.test(d.getElementById("draft").placeholder));
+
+  btn("plan").click();
+  ok("13 Plan's banner is its own", banner.getAttribute("data-phase") === "plan" &&
+    /no edits applied/.test(banner.querySelector(".sub").textContent));
+  ok("13 Plan's placeholder describes planning",
+    /^Describe what to plan/.test(d.getElementById("draft").placeholder));
+
+  btn("act").click();
+  ok("13 Act hides the banner", banner.hidden === true);
+  ok("13 Act's placeholder is a work order",
+    /^Tell Kryptonite what to do/.test(d.getElementById("draft").placeholder));
+
+  // Shift+Tab cycles ask -> plan -> act -> ask. A two-state toggle cannot
+  // reach a third phase, which is the bug this replaced.
+  const tab = () => d.getElementById("draft").dispatchEvent(
+    new w.KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true }));
+  const lit = () => seg.querySelector('[data-on="1"]').getAttribute("data-phase");
+  tab();
+  ok("13 Shift+Tab from act reaches ask", lit() === "ask");
+  tab();
+  ok("13 then plan", lit() === "plan");
+  tab();
+  ok("13 then back to act", lit() === "act");
+
+  // A phase the UI does not know must not leave the control blank. It lands on
+  // act, matching the host's own default, rather than showing a read-only
+  // badge over a session the host would still run a write in.
+  inbound({ type: "phaseChanged", phase: "sideways" });
+  ok("13 an unknown phase falls back to act rather than blanking",
+    lit() === "act" && banner.hidden === true);
+  ok("13 nothing rendered undefined",
+    !/undefined|NaN|\[object Object\]/.test(d.getElementById("root").innerHTML));
+}
+
+/* ── 14. a command card shows what was run, not just what came back ── */
+{
+  const { d, inbound } = boot();
+  inbound(STATE());
+  inbound({ type: "toolStart", tool: { name: "run_command", args: { command: "npm test -- --bail" } } });
+
+  const card = d.querySelector("#log .tool");
+  ok("14 a running card has a rail dot", !!card.querySelector(".tool-dot"));
+  ok("14 which is neither done nor failed while it runs",
+    card.getAttribute("data-done") !== "1" && card.getAttribute("data-error") !== "1");
+
+  inbound({ type: "toolEnd", tool: {
+    name: "run_command", args: { command: "npm test -- --bail" },
+    result: "13 suites, 0 failed", isError: false } });
+
+  ok("14 the dot marks success on landing", card.getAttribute("data-done") === "1");
+  const tags = [...card.querySelectorAll(".io-tag")].map((t) => t.textContent);
+  ok("14 the card labels its input and output", tags.join() === "IN,OUT", tags.join());
+  ok("14 IN carries the full command, not the truncated header",
+    /npm test -- --bail/.test(card.querySelector(".io-row .cmd-in").textContent));
+  ok("14 OUT carries the result",
+    /13 suites, 0 failed/.test(card.querySelectorAll(".io-row")[1].textContent));
+}
+
+/* ── 15. a failed command still shows what was run ──────────────────── */
+{
+  const { d, inbound } = boot();
+  inbound(STATE());
+  inbound({ type: "toolStart", tool: { name: "run_command", args: { command: "false" } } });
+  inbound({ type: "toolEnd", tool: {
+    name: "run_command", args: { command: "false" }, result: "exit 1", isError: true } });
+  const card = d.querySelector("#log .tool");
+  ok("15 the rail dot marks failure", card.getAttribute("data-error") === "1" &&
+    card.getAttribute("data-done") === "0");
+  // "what did it actually run" is the first question on a failure, so IN must
+  // survive the error path - which is the branch that used to skip the
+  // argument preview entirely.
+  ok("15 IN survives the error path", !!card.querySelector(".cmd-in"));
+  ok("15 and the card opens itself", card.getAttribute("data-open") === "1");
+}
+
+/* ── 16. a restored transcript matches the one that just ran ────────── */
+{
+  // The replay path builds its cards by hand rather than going through
+  // toolEnd, so every mark it has to settle is a chance for the two paths to
+  // drift. The tool call carries `arguments` here and `args` on the live
+  // wire - reading the wrong one silently drops IN and nothing else breaks.
+  const { d, inbound } = boot();
+  inbound(STATE({ session: { id: "s9", title: "restored", messages: [
+    { role: "user", content: "run the tests" },
+    { role: "assistant", content: "", toolCalls: [
+      { id: "c1", name: "run_command", arguments: { command: "npm test -- --bail" } } ] },
+    { role: "tool", toolCallId: "c1", content: "13 suites, 0 failed" },
+  ] } }));
+
+  const card = d.querySelector("#log .tool");
+  ok("16 the restored card exists", !!card);
+  ok("16 its rail dot is settled, not left running",
+    card.getAttribute("data-done") === "1");
+  const tags = [...card.querySelectorAll(".io-tag")].map((t) => t.textContent);
+  ok("16 restored command cards keep IN/OUT", tags.join() === "IN,OUT", tags.join());
+  ok("16 IN reads the restored arguments",
+    /npm test -- --bail/.test(card.querySelector(".cmd-in").textContent));
+}
+
 /* ══ §1 Activation & first paint ═══════════════════════════════════════ */
 
 /* 1.2 — no folder open */

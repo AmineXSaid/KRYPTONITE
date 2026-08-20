@@ -12,7 +12,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { runTool, TOOL_DEFS, type ToolContext } from "../src/agent/tools";
-import { READ_ONLY } from "../src/agent/loop";
+import { ASK_ONLY, READ_ONLY, toolAllowedIn, refusalFor } from "../src/agent/loop";
 
 let pass = 0;
 let fail = 0;
@@ -73,7 +73,14 @@ const run = (name: string, args: any) => runTool(name, args, ctx);
     "src/../../proj-secrets/id_rsa",
   ]) {
     const r = await run("read_file", { path: p });
-    ck(Boolean(r.isError) && /outside the workspace/i.test(r.content),
+    // CHANGED: backslash separators are a real traversal on Windows, where
+    // `path` resolves them, and inert literal characters on POSIX, where they
+    // are not - so the honest refusal there is "no such file", not "outside
+    // the workspace". Either wording is fine; what must hold on every
+    // platform is that the secret's contents never come back.
+    const refused = Boolean(r.isError) &&
+      (/outside the workspace/i.test(r.content) || /no such file|ENOENT/i.test(r.content));
+    ck(refused && !r.content.includes("PRIVATE KEY"),
       `read_file refuses ${p}`, r.content.slice(0, 60));
   }
 
@@ -534,6 +541,55 @@ const run = (name: string, args: any) => runTool(name, args, ctx);
     for (const n of READ_ONLY) {
       ck(defs.has(n), `READ_ONLY entry "${n}" is a real tool`);
     }
+  }
+  {
+    // Ask mode filters on this narrower set. Every ASK_ONLY entry must also be
+    // read-only, or ask would be able to do something plan cannot - and the one
+    // entry plan adds on top, update_todos, must not leak into ask: a question
+    // has no steps to track.
+    ck(ASK_ONLY.has("read_file"), "read_file grounds an answer, so ask mode can use it");
+    for (const n of ASK_ONLY) {
+      ck(READ_ONLY.has(n), `ASK_ONLY entry "${n}" is also read-only`);
+    }
+    ck(!ASK_ONLY.has("update_todos"), "update_todos is plan's addition, not ask's");
+    const defs = new Set(TOOL_DEFS.map((t) => t.name));
+    for (const n of ASK_ONLY) {
+      ck(defs.has(n), `ASK_ONLY entry "${n}" is a real tool`);
+    }
+  }
+  {
+    // The phase gate itself. The sets above say what each phase is *offered*;
+    // this is the predicate the loop applies to what the model actually sent,
+    // which is the only one that holds when a gateway drops the tools array or
+    // a model invents a call it never saw.
+    for (const n of ["write_file", "edit_file", "run_command", "browser", "fetch_url"]) {
+      ck(!toolAllowedIn("ask", n), `ask refuses ${n} even when the model asks for it`);
+      ck(!toolAllowedIn("plan", n), `plan refuses ${n} even when the model asks for it`);
+      ck(toolAllowedIn("act", n), `act allows ${n}`);
+    }
+    ck(toolAllowedIn("ask", "read_file"), "ask allows read_file");
+    ck(toolAllowedIn("plan", "update_todos"), "plan allows update_todos");
+    ck(!toolAllowedIn("ask", "update_todos"), "ask does not allow update_todos");
+
+    // MCP is refused by prefix, not by lookup: the protocol cannot declare a
+    // tool read-only, so a name we have never seen is still a no outside act.
+    for (const n of ["mcp__filesystem__read_text_file", "mcp__memory__search_nodes", "mcp__x__y"]) {
+      ck(!toolAllowedIn("ask", n), `ask refuses MCP tool ${n}`);
+      ck(!toolAllowedIn("plan", n), `plan refuses MCP tool ${n}`);
+      ck(toolAllowedIn("act", n), `act allows MCP tool ${n}`);
+    }
+    // A read-only *name* under an MCP prefix must still be refused - the
+    // prefix decides, not the suffix, or a server could name a tool
+    // "read_file" and walk straight through the gate.
+    ck(!toolAllowedIn("ask", "mcp__evil__read_file"),
+      "an MCP tool named after a built-in is still refused");
+
+    // The refusal is a result the model can act on, and names where to go.
+    const refusal = refusalFor("ask", "write_file");
+    ck(/write_file/.test(refusal) && /Act/.test(refusal),
+      "the refusal names the tool and the phase that can run it", refusal);
+    ck(/MCP/.test(refusalFor("plan", "mcp__x__y")),
+      "and explains the MCP case in its own words");
   }
   {
     const r = await run("no_such_tool", {});

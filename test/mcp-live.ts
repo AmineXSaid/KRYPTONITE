@@ -59,16 +59,20 @@ const cfg = mcpConfigPath(root);
   console.log("\n──── its tools reach the model ────");
   const defs = reg.toolDefs();
   ck(defs.length > 0, "tool definitions are produced", String(defs.length));
-  ck(defs.every((d) => d.name.startsWith("mcp__filesystem__")),
-    "namespaced so they cannot collide with a built-in",
+  // Two servers are configured now, so "namespaced" means every def carries
+  // *some* server prefix - not that they all carry filesystem's specifically.
+  ck(defs.every((d) => d.name.startsWith("mcp__")),
+    "every tool is namespaced under its own server, so none collides with a built-in",
     defs.slice(0, 2).map((d) => d.name).join(", "));
+  const fsDefs = defs.filter((d) => d.name.startsWith("mcp__filesystem__"));
+  ck(fsDefs.length > 0, "and filesystem's own tools are among them", String(fsDefs.length));
   ck(defs.every((d) => d.parameters && typeof d.parameters === "object"),
     "each carries a schema the model can fill in");
   ck(reg.needsApproval(defs[0].name), "and every call routes through the approval gate");
 
   console.log("\n──── calling one ────");
-  const readTool = defs.find((d) => /read_text_file|read_file/.test(d.name));
-  ck(!!readTool, "the server exposes a read tool", defs.map((d) => d.name).join(", "));
+  const readTool = fsDefs.find((d) => /read_text_file|read_file/.test(d.name));
+  ck(!!readTool, "the server exposes a read tool", fsDefs.map((d) => d.name).join(", "));
 
   if (readTool) {
     // Read a file that certainly exists, through the whole path the agent uses.
@@ -87,6 +91,43 @@ const cfg = mcpConfigPath(root);
     const res = await reg.call("mcp__nosuchserver__x", {});
     ck(Boolean(res.isError) && /No MCP server/i.test(res.content),
       "an unknown server is a clean error", res.content.slice(0, 90));
+  }
+
+  console.log("\n──── the memory example ────");
+  {
+    const memSpec = specs.find((s) => s.name === "memory");
+    ck(!!memSpec, "the memory example is present");
+    ck(memSpec?.approval === "ask", "and asks before every call too");
+
+    const memLive = st.find((s) => s.name === "memory");
+    ck(!!memLive, "the registry knows about it");
+    ck(memLive?.state === "ready", "it connected",
+      memLive?.state + (memLive?.error ? ": " + memLive.error : "") + " | " + reg.logTail("memory"));
+    ck((memLive?.toolCount ?? 0) > 0, "and exposes tools", String(memLive?.toolCount));
+
+    const memDefs = defs.filter((d) => d.name.startsWith("mcp__memory__"));
+    ck(memDefs.length > 0, "namespaced tool definitions are produced", String(memDefs.length));
+
+    // A different shape from filesystem on purpose: a stateful local server,
+    // not a passthrough to a file. Write something through it, then read the
+    // same thing back through a different tool, so the round trip - not just
+    // the handshake - is what "works" is standing on.
+    const createTool = memDefs.find((d) => d.name.endsWith("__create_entities"));
+    const searchTool = memDefs.find((d) => d.name.endsWith("__search_nodes"));
+    ck(!!createTool && !!searchTool, "create_entities and search_nodes are both exposed",
+      memDefs.map((d) => d.name).join(", "));
+
+    if (createTool && searchTool) {
+      const label = "kx-mcp-live-" + Date.now();
+      const created = await reg.call(createTool.name, {
+        entities: [{ name: label, entityType: "test", observations: ["written by test/mcp-live.ts"] }],
+      });
+      ck(!created.isError, "creating an entity succeeds", created.content.slice(0, 120));
+
+      const found = await reg.call(searchTool.name, { query: label });
+      ck(!found.isError && found.content.includes(label),
+        "and searching the graph finds what was just written", found.content.slice(0, 160));
+    }
   }
 
   await reg.stopAll();

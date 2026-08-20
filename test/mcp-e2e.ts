@@ -53,10 +53,20 @@ async function main() {
   fs.mkdirSync(agentDir, { recursive: true });
   fs.writeFileSync(badJson, "{ not json", "utf8");
   check(/not valid JSON/.test(loadMcpConfig(badJson).warnings[0] ?? ""), "malformed JSON is reported");
+  // CHANGED: this used to assert a rejection - true before remote MCP shipped,
+  // stale once it did. A well-formed https:// url is meant to work silently;
+  // what actually deserves a warning is a plain http:// to a non-local host,
+  // which had no coverage at all.
   const httpCfg = writeConfig(path.join(ROOT, "http"), {
     mcpServers: { remote: { url: "https://example.com/mcp" } },
   });
-  check(/HTTP\/SSE/.test(loadMcpConfig(httpCfg).warnings[0] ?? ""), "HTTP transport is rejected with a reason");
+  check(loadMcpConfig(httpCfg).warnings.length === 0,
+    "a well-formed https:// remote config is accepted with no warnings");
+  const insecureCfg = writeConfig(path.join(ROOT, "insecure"), {
+    mcpServers: { remote: { url: "http://example.com/mcp" } },
+  });
+  check(/unencrypted/.test(loadMcpConfig(insecureCfg).warnings[0] ?? ""),
+    "plain http:// to a remote host is rejected with a reason");
   const noCmd = writeConfig(path.join(ROOT, "nocmd"), { mcpServers: { x: { args: ["a"] } } });
   check(/no "command"/.test(loadMcpConfig(noCmd).warnings[0] ?? ""), "missing command is reported");
   const badId = writeConfig(path.join(ROOT, "badid"), {

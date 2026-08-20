@@ -11,7 +11,7 @@ import {
 import { clearAuthCache, authCacheReport } from "../endpoints/auth";
 import { clearSecureContexts } from "../endpoints/transport";
 import { EndpointClient } from "../providers/client";
-import { systemPromptFor } from "../agent/loop";
+import { systemPromptFor, PHASES } from "../agent/loop";
 import { loadSkills, Skill, skillIndex } from "../skills/loader";
 import { McpRegistry, mcpConfigPath } from "../mcp/registry";
 import { ShadowRepo } from "../checkpoint/shadow";
@@ -76,6 +76,16 @@ const MCP_CONFIG_TEMPLATE = `{
     "  env       merged over the extension host's environment.",
     "  cwd       defaults to the workspace root.",
     "",
+    "MCP is a wire protocol, not a Node one, so command does not have to be npx.",
+    "A Python, Go or shell server is the same block with a different executable -",
+    "see the 'script-server' example below. Two things differ from the npx case:",
+    "point args at an ABSOLUTE path, because cwd is the workspace and a relative",
+    "script path breaks the moment someone opens a different folder - \${HOME} and",
+    "friends expand here, so it need not be hardcoded; and name the",
+    "interpreter, not the script, if the script has no executable bit - a shebang",
+    "is not consulted on Windows at all. Prefer 'python' over 'python3' there,",
+    "where python3 is a Store alias that launches nothing.",
+    "",
     "REMOTE - the server is reached over the network:",
     "  url       https://... A plain http:// url to anywhere but localhost is",
     "            refused, because the headers below would travel in clear text.",
@@ -94,12 +104,21 @@ const MCP_CONFIG_TEMPLATE = `{
     "env, cwd, url and headers - so a token never has to be written into this",
     "file, which lives in the workspace and usually gets committed.",
     "",
-    "Tools reach the model as mcp__<server>__<tool>, and are withheld in Plan mode."
+    "Tools reach the model as mcp__<server>__<tool>. They are withheld entirely in",
+    "Ask and Plan mode - neither promises the model can only look, and MCP has",
+    "no way to declare a tool read-only, so there is nothing to check."
   ],
   "mcpServers": {
     "filesystem": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+      "approval": "ask",
+      "timeoutMs": 120000,
+      "enabled": false
+    },
+    "script-server": {
+      "command": "python",
+      "args": ["/absolute/path/to/your/mcp_server.py"],
       "approval": "ask",
       "timeoutMs": 120000,
       "enabled": false
@@ -1065,7 +1084,12 @@ export class App {
         return;
 
       case "setPhase":
-        this.phase = msg.phase;
+        // Normalised rather than trusted. `phase` selects the tool policy, and
+        // a value outside the three would land in `toolAllowedIn`'s non-act
+        // branch - restrictive, so not dangerous, but it would leave the host
+        // in a phase the UI cannot name or light up, and no message can clear
+        // it. Echoing the corrected value back is what puts the two in step.
+        this.phase = PHASES.includes(msg.phase) ? msg.phase : "act";
         this.broadcast({ type: "phaseChanged", phase: this.phase });
         this.updateStatus();
         return;
