@@ -1,8 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.7.0
 
-Three chat-surface changes: long questions stop burying the answer, a
+Agents: a persona plus a list of what it may reach, enforced at the boundary
+where a call runs rather than advertised in the tools array. Alongside them,
+three chat-surface changes: long questions stop burying the answer, a
 conversation can leave the extension as a file, and the panel says what the
 agent is doing to the workspace while it does it.
 
