@@ -907,6 +907,17 @@ li.doing .cbx { border-color: var(--kx-accent); }
 .agent-bar .sub { min-width: 0; flex: 1; color: var(--kx-fg-2); font-family: var(--kx-mono); font-size: 10.5px; }
 .agent-bar .tb-btn { flex: none; }
 
+/* ── the Agents tab ──────────────────────────────────────────────────────
+   Same shape as the MCP tab: a sticky header carrying the count and the one
+   always-available action, over a list that scrolls under it. */
+.ag-wrap { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+.ag-top {
+  display: flex; align-items: center; gap: 9px; flex: none;
+  padding: 9px 14px; border-bottom: 1px solid var(--kx-line);
+  position: sticky; top: 0; z-index: 2; background: var(--kx-bg);
+}
+.ag-top .lbl { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.ag-body { flex: 1; min-height: 0; }
 .ag-empty { padding: 10px 14px 12px; font-size: 12px; color: var(--kx-fg-2); line-height: 1.55; }
 .ag-empty p { margin: 0 0 10px; }
 .ag-empty code { font-family: var(--kx-mono); font-size: 11px; color: var(--kx-fg); }
@@ -1064,7 +1075,7 @@ li.doing .cbx { border-color: var(--kx-accent); }
 }
 
 .composer {
-  background: var(--kx-surface); border-radius: 10px; overflow: hidden;
+  background: var(--kx-surface); border-radius: 12px; overflow: hidden;
   border: 1px solid rgba(222, 220, 209, .15);
 }
 
@@ -1151,7 +1162,7 @@ li.doing .cbx { border-color: var(--kx-accent); }
 #draft,
 .draft-mirror {
   font-family: var(--kx-ui); font-size: 13px; line-height: 1.5;
-  padding: 12px 12px 8px;
+  padding: 13px 14px 9px;
   white-space: pre-wrap; overflow-wrap: break-word; word-break: normal;
   letter-spacing: normal;
 }
@@ -1208,7 +1219,7 @@ li.doing .cbx { border-color: var(--kx-accent); }
 }
 .att-x:hover { color: var(--kx-error); background: var(--kx-hover); }
 
-.toolbar { display: flex; align-items: center; gap: 6px; padding: 0 8px 8px 10px; }
+.toolbar { display: flex; align-items: center; gap: 7px; padding: 0 9px 9px 11px; }
 .seg {
   display: flex; flex: none; border-radius: 4px; overflow: hidden;
   border: 1px solid var(--kx-line);
@@ -1262,12 +1273,45 @@ li.doing .cbx { border-color: var(--kx-accent); }
 }
 .tb-btn:hover:not(:disabled) { background: var(--kx-hover); color: var(--kx-fg); }
 .tb-btn:disabled { color: var(--kx-fg-3); }
+/* The send control is a rounded square, not a disc.
+ *
+ * A circle reads as a media button - the thing a consumer app puts under a
+ * video - and every other control in this composer is a rectangle with soft
+ * corners, so the disc was the one shape belonging to a different product.
+ * A squircle at about a third of its own width sits in the same family as the
+ * phase segments and the pills while still being the heaviest element in the
+ * row, which is what the primary action should be.
+ */
 #sendBtn {
-  width: 28px; height: 28px; flex: none; border-radius: 50%; display: grid; place-items: center;
-  background: var(--kx-surface-3); color: var(--kx-fg-2);
+  width: 30px; height: 30px; flex: none; border-radius: 9px;
+  display: grid; place-items: center;
+  background: var(--kx-surface-3); color: var(--kx-fg-3);
+  transition: background .14s ease, color .14s ease, box-shadow .14s ease, transform .09s ease;
 }
-#sendBtn[data-ready="1"] { background: var(--kx-action); color: var(--kx-on-action); }
-#sendBtn[data-mode="stop"] { background: var(--kx-surface-3); color: var(--kx-fg); }
+/* Nothing to send yet: present and legible, and visibly not the thing to press.
+   Dimming the glyph rather than the plate keeps the target obvious. */
+#sendBtn[data-ready="0"] { color: var(--kx-fg-4); }
+#sendBtn[data-ready="0"]:hover { background: var(--kx-surface-4); color: var(--kx-fg-3); }
+/* Armed: the only filled element in the composer, so the eye lands on it
+   without anything else having to get louder. */
+#sendBtn[data-ready="1"] {
+  background: var(--kx-action); color: var(--kx-on-action);
+  box-shadow: 0 1px 3px var(--kx-shadow);
+}
+#sendBtn[data-ready="1"]:hover { box-shadow: 0 2px 6px var(--kx-shadow); }
+/* Stop is not a second primary action. It is the same control admitting the
+   turn is still running, so it goes quiet rather than red: red would read as
+   "something failed" at the exact moment nothing has. */
+#sendBtn[data-mode="stop"] {
+  background: var(--kx-surface-3); color: var(--kx-fg); box-shadow: none;
+}
+#sendBtn[data-mode="stop"]:hover { background: var(--kx-surface-4); }
+/* A press has to register on a control this small. */
+#sendBtn:active { transform: scale(.93); }
+@media (prefers-reduced-motion: reduce) {
+  #sendBtn { transition: none; }
+  #sendBtn:active { transform: none; }
+}
 
 #ctxBar {
   width: 40px; height: 3px; flex: none; border-radius: 2px; overflow: hidden;

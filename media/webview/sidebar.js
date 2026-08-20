@@ -859,6 +859,12 @@ function _sbRun() {
           // MCP earns a tab now that it is real. 1a had a "SOON" placeholder,
           // which the review deleted; 1b replaces it with the live surface.
           '<button class="kx-tab" id="tabMcp" role="tab" aria-selected="false" aria-controls="viewMcp">MCP<span class="tab-count" id="mcpCount" hidden></span></button>' +
+          // Agents sit after MCP because that is the order they are chosen in:
+          // a server has to be configured before an agent can be scoped to it.
+          // This was a collapsed section inside Diagnostics, which is where a
+          // thing goes when it is being inspected rather than used - and an
+          // agent is picked before a turn, not diagnosed after one.
+          '<button class="kx-tab" id="tabAgents" role="tab" aria-selected="false" aria-controls="viewAgents">Agents<span class="tab-count" id="agentCount" hidden></span></button>' +
           '<button class="kx-tab" id="tabDiag" role="tab" aria-selected="false" aria-controls="viewDiag">Diagnostics<span class="tab-count" id="tabCount" hidden></span></button>' +
         '</nav>' +
         '<div class="phase-banner" id="phaseBanner" data-phase="plan" hidden>' +
@@ -984,6 +990,20 @@ function _sbRun() {
         '<section class="view" id="viewMcp" role="tabpanel" aria-labelledby="tabMcp" hidden>' +
           '<div class="mcp-wrap" id="mcpBody"></div>' +
         '</section>' +
+        '<section class="view" id="viewAgents" role="tabpanel" aria-labelledby="tabAgents" hidden>' +
+          '<div class="ag-wrap">' +
+            // The header carries the count and the one action that is always
+            // available. The list below owns everything that depends on having
+            // agents at all, including what to say when there are none.
+            '<div class="ag-top">' +
+              '<span class="lbl">Agents</span>' +
+              '<span class="badge" id="agBadge">-</span>' +
+              '<span class="sp"></span>' +
+              '<button class="btn sm" data-ag="new">New agent</button>' +
+            '</div>' +
+            '<div class="ag-body" id="agBody"></div>' +
+          '</div>' +
+        '</section>' +
         '<section class="view" id="viewDiag" role="tabpanel" aria-labelledby="tabDiag" hidden>' +
           '<button class="cc-card" id="ccBtn">' + crystal(19) +
             '<span class="col"><span class="t">Control Center</span>' +
@@ -991,7 +1011,6 @@ function _sbRun() {
             icon("i-chev", "ic-9") + '</button>' +
           sectionShell("secTls", "TLS diagnostics", "tlsBadge", "tlsBody", true) +
           sectionShell("secEp", "Endpoints", "epBadge", "epBody", false) +
-          sectionShell("secAg", "Agents", "agBadge", "agBody", false) +
           sectionShell("secSk", "Skills", "skBadge", "skBody", false) +
         '</section>' +
       '</div>';
@@ -1045,6 +1064,7 @@ function _sbRun() {
   var TABS = [
     ["session", "tabSession", "viewSession"],
     ["mcp", "tabMcp", "viewMcp"],
+    ["agents", "tabAgents", "viewAgents"],
     ["diagnostics", "tabDiag", "viewDiag"]
   ];
 
@@ -1056,6 +1076,7 @@ function _sbRun() {
       $(TABS[i][2]).hidden = !on;
     }
     if (tab === "mcp") renderMcp();
+    if (tab === "agents") renderAgents();
   }
 
   function openSection(secId) {
@@ -2190,6 +2211,23 @@ function _sbRun() {
       html += '<div class="warn-line">' + esc(S.agentWarnings.join(" ")) + "</div>";
     }
     body.innerHTML = html;
+    renderAgentCount();
+  }
+
+  /**
+   * The number on the Agents tab.
+   *
+   * Warnings, not agents. A count of how many agents exist is not news - it is
+   * on the tab's own page - whereas a file that failed to parse is something
+   * the user has to be told about while looking somewhere else. Same rule the
+   * MCP and Diagnostics tabs follow.
+   */
+  function renderAgentCount() {
+    var el = $("agentCount");
+    if (!el) return;
+    var n = S.agentWarnings.length;
+    el.textContent = n ? String(n) : "";
+    el.hidden = !n;
   }
 
   function onAgentClick(e) {
@@ -3791,7 +3829,7 @@ function _sbRun() {
       closePops();
       var a = b.getAttribute("data-more");
       if (a === "control") post("openControlCenter", {});
-      else if (a === "agents") { setTab("diagnostics"); openSection("secAg"); renderAgents(); }
+      else if (a === "agents") setTab("agents");
       else if (a === "exportChat") post("exportChat", { scope: "current" });
       else if (a === "exportAll") post("exportChat", { scope: "all" });
       else if (a === "settings") post("openSettings");
@@ -3970,12 +4008,16 @@ function _sbRun() {
     });
 
     $("agentLeave").addEventListener("click", function () { post("setAgent", { name: "" }); });
-    $("agBody").addEventListener("click", onAgentClick);
+    // On the wrapper rather than the list: the header's New agent button is a
+    // sibling of the list, and it is the one control that has to work when the
+    // list is empty.
+    $("viewAgents").addEventListener("click", onAgentClick);
     $("tlsBody").addEventListener("click", onTlsClick);
     $("epBody").addEventListener("click", onEpClick);
     $("skBody").addEventListener("click", onSkillClick);
     $("mcpBody").addEventListener("click", onMcpClick);
     $("tabMcp").addEventListener("click", function () { setTab("mcp"); });
+    $("tabAgents").addEventListener("click", function () { setTab("agents"); });
   }
 
   function onDraftKey(e) {

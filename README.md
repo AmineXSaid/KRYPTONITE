@@ -92,9 +92,16 @@ The `memory:` file is read into the system prompt on every turn and the agent
 is told it may rewrite it with its own tools. There is no machinery behind that
 - which is the point: what accumulates is a file you can read, edit and delete.
 
-Pick one with `/agent` in the composer, from the Agents section of the
-Diagnostics tab, or from the command palette. While one is active a bar under
-the tabs names it and states its scope; nothing is drawn when none is.
+Agents have a tab of their own, after MCP, because that is the order the two
+are chosen in: a server has to be configured before an agent can be scoped to
+it. The tab lists every agent with the scope it actually enforces, the file it
+came from, and a button to use it or open it; the number on the tab is a count
+of files that failed to parse, not of agents, so it stays dark when nothing is
+wrong.
+
+`/agent` in the composer and the command palette reach the same list. While one
+is active a bar under the tabs names it and states its scope; nothing is drawn
+when none is.
 
 ## In the editor
 

@@ -389,6 +389,37 @@ function boot() {
   b.dom.window.close();
 }
 
+/* ── the send control's shape ────────────────────────────────────────────
+   A CSS-text test, for the same reason the aura has them: jsdom applies no
+   stylesheet, so nothing here would notice the control turning back into a
+   disc. The shape is the decision, so the shape is what is pinned. */
+console.log("\n──── the send control ────");
+{
+  const send = CSS.match(/\n#sendBtn\s*\{[^}]*\}/);
+  ok("the send control has its own rule", !!send);
+  // A rounded square, not a circle. 50% would be a media button, which is the
+  // one shape in this composer that belongs to a different product.
+  ok("it is a rounded square, not a disc",
+    !!send && /border-radius:\s*(\d+)px/.test(send[0]) && !/border-radius:\s*50%/.test(send[0]),
+    send ? send[0].replace(/\s+/g, " ") : "not found");
+  // Radius has to stay well under half the width or it becomes a disc by
+  // arithmetic rather than by declaration.
+  const w = send && send[0].match(/width:\s*(\d+)px/);
+  const r = send && send[0].match(/border-radius:\s*(\d+)px/);
+  ok("and its corners stay corners",
+    !!w && !!r && Number(r[1]) < Number(w[1]) / 2,
+    w && r ? `radius ${r[1]} of width ${w[1]}` : "not found");
+  ok("armed, it is the one filled control in the row",
+    /#sendBtn\[data-ready="1"\][^}]*background:\s*var\(--kx-action\)/.test(CSS));
+  // Stop is the same control admitting the turn is still running. Red there
+  // would read as "something failed" at the moment nothing has.
+  ok("stop goes quiet rather than red",
+    /#sendBtn\[data-mode="stop"\][^}]*background:\s*var\(--kx-surface-3\)/.test(CSS));
+  ok("a press registers on a control this small", /#sendBtn:active[^}]*scale\(/.test(CSS));
+  ok("and reduced motion turns that off",
+    /prefers-reduced-motion[\s\S]*?#sendBtn:active\s*\{\s*transform:\s*none/.test(CSS));
+}
+
 if (failures.length) for (const f of failures) console.log("FAIL  " + f);
 console.log(`\n──── ${pass} passed, ${failures.length} failed ────`);
 process.exitCode = failures.length ? 1 : 0;
