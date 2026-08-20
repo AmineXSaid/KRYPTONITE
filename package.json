@@ -90,6 +90,14 @@
       {
         "command": "kryptonite.exportBundle",
         "title": "KRYPTONITE: Export offline bundle"
+      },
+      {
+        "command": "kryptonite.exportChat",
+        "title": "KRYPTONITE: Export chat as JSON"
+      },
+      {
+        "command": "kryptonite.exportAllChats",
+        "title": "KRYPTONITE: Export all chats as JSON"
       }
     ],
     "configuration": {

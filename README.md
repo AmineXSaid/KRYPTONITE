@@ -67,6 +67,30 @@ Transcripts hold the full turn, including tool calls and their results, so the
 model keeps its own working memory across turns and a restored conversation
 renders the tool cards it originally produced.
 
+The conversation collapses what it should. A user turn past 420 characters or
+seven lines renders clamped under a fade with its own expander, so a pasted
+stack trace stops pushing the answer it is asking about off the panel. Nothing
+is truncated, only hidden.
+
+`KRYPTONITE: Export chat as JSON` writes the current conversation, or every
+conversation in the workspace, as one document through a save dialog. `/export`
+does the same from the composer. The conversation the composer is writing into
+comes from memory rather than from disk, so a turn still in flight exports what
+is on screen.
+
+## Changed files
+
+One row per file, above the composer, revealed on the first write and updated
+in place while the turn runs - the running `+`/`-` per file and in total, a
+click to open, and no scrolling back through the transcript to find out what
+was touched.
+
+The counts start as the writing tool's own: common leading and trailing lines
+are trimmed and what remains is counted, which is exact for a single contiguous
+edit and an overestimate for scattered ones. They are marked with a `~` while
+that is true. When the turn ends the shadow repository's `numstat` replaces
+this turn's estimate with git's own count and the tilde goes.
+
 ## Checkpoints
 
 A shadow git repository snapshots the workspace before every turn using a

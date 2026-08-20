@@ -4,13 +4,14 @@ import * as crypto from "node:crypto";
 import type { Msg } from "../providers/client";
 import { runAgent } from "../agent/loop";
 import { isUntitled, titleFrom } from "../core/sessions";
-import type { ToolContext, TodoItem } from "../agent/tools";
+import type { FileChange, ToolContext, TodoItem } from "../agent/tools";
 import { fetchPage, normaliseUrl } from "../browser/fetchPage";
 import { CdpBrowser, findBrowser, listBrowsers } from "../browser/cdp";
 import { navigate, snapshot, screenshot, click, type, scroll, goBack, renderSnapshot } from "../browser/page";
 import type { App } from "../core/app";
 import type {
   DiffDecision,
+  FileChangeDto,
   PermissionDecision,
   ReplayableEvent,
   TodoDto,
@@ -60,6 +61,23 @@ export class SessionController {
   private turnDiffs = new Map<string, TurnDiffs>();
 
   /**
+   * Every file this conversation has changed, keyed by workspace-relative path.
+   *
+   * Conversation-scoped rather than turn-scoped on purpose: the question the
+   * panel answers is "what has this chat done to my workspace", and a list
+   * that emptied at every turn boundary could not answer it. Cleared with the
+   * conversation, and by the user.
+   */
+  private changes = new Map<string, FileChangeDto>();
+
+  /**
+   * What the running turn has contributed to those totals, by its own
+   * estimate. Held so the exact numbers from git can be swapped in for it
+   * when the turn ends, instead of being added on top of it.
+   */
+  private turnEstimate = new Map<string, { added: number; removed: number }>();
+
+  /**
    * The conversation's name.
    *
    * Starts as a placeholder and is replaced once, from the user's first message,
@@ -77,6 +95,79 @@ export class SessionController {
   /** Events the current turn has produced, for a webview that reloaded. */
   replayBuffer(): ReplayableEvent[] {
     return this.replay;
+  }
+
+  /** Files this conversation has changed, most recently written first. */
+  changedFiles(): FileChangeDto[] {
+    return [...this.changes.values()].sort((a, b) => b.at - a.at);
+  }
+
+  /** The user has seen them. Only the list is dropped; the files are untouched. */
+  clearChanges(): void {
+    this.changes.clear();
+    this.turnEstimate.clear();
+    this.app.broadcast({ type: "changesUpdated", files: [] });
+  }
+
+  /**
+   * Fold one write into the running totals and return the event announcing it.
+   *
+   * A file created and then edited again stays "created", because that is what
+   * happened to it over the conversation: reporting the last write's kind would
+   * describe a file that did not exist ten seconds ago as merely modified.
+   */
+  private recordChange(rel: string, info?: FileChange): FileChangeDto {
+    const prev = this.changes.get(rel);
+    const next: FileChangeDto = {
+      path: rel,
+      change: prev?.change === "created" ? "created" : info?.change ?? prev?.change ?? "modified",
+      added: (prev?.added ?? 0) + (info?.added ?? 0),
+      removed: (prev?.removed ?? 0) + (info?.removed ?? 0),
+      at: Date.now(),
+      exact: false,
+    };
+    this.changes.set(rel, next);
+
+    if (info) {
+      const run = this.turnEstimate.get(rel) ?? { added: 0, removed: 0 };
+      run.added += info.added;
+      run.removed += info.removed;
+      this.turnEstimate.set(rel, run);
+    }
+    return next;
+  }
+
+  /**
+   * Replace this turn's estimated line counts with git's exact ones.
+   *
+   * `numstat` measures the whole turn against its opening snapshot, so it is
+   * precisely this turn's contribution - which is why the estimate is
+   * subtracted rather than the total being overwritten, and why a file changed
+   * in an earlier turn keeps the count it earned there.
+   */
+  private reconcileChanges(stats: { file: string; added: number; removed: number }[]): void {
+    const exact = new Map(stats.map((r) => [r.file, r]));
+    for (const [rel, est] of this.turnEstimate) {
+      const row = this.changes.get(rel);
+      if (!row) continue;
+      const real = exact.get(rel);
+      if (!real) {
+        // Written and then reverted inside the same turn. It leaves no diff
+        // card either, so the row goes rather than claiming a change that is
+        // no longer on disk.
+        row.added -= est.added;
+        row.removed -= est.removed;
+        if (row.added <= 0 && row.removed <= 0) this.changes.delete(rel);
+        continue;
+      }
+      row.added = Math.max(0, row.added - est.added) + real.added;
+      row.removed = Math.max(0, row.removed - est.removed) + real.removed;
+      row.exact = true;
+    }
+    this.turnEstimate.clear();
+    const ev: ReplayableEvent = { type: "changesUpdated", files: this.changedFiles() };
+    this.buffer(ev);
+    this.app.broadcast(ev);
   }
 
   private buffer(ev: ReplayableEvent): void {
@@ -293,10 +384,17 @@ export class SessionController {
         await snapshot;
         return this.requestApproval(summary, detail);
       },
-      onFileTouched: (abs: string) => {
+      onFileTouched: (abs: string, change?: FileChange) => {
         const rel = path.relative(root, abs).split(path.sep).join("/");
-        if (rel && !rel.startsWith("..")) touched.add(rel);
-        this.app.broadcast({ type: "fileTouched", path: rel });
+        // A write outside the workspace is not part of this workspace's change
+        // set, and a "../.." row in the panel would open nothing.
+        if (!rel || rel.startsWith("..")) return;
+        touched.add(rel);
+        const ev: ReplayableEvent = { type: "fileTouched", path: rel, file: this.recordChange(rel, change) };
+        // Buffered as well as broadcast: a webview that reloads mid-turn has to
+        // come back with the same change list it had before.
+        this.buffer(ev);
+        this.app.broadcast(ev);
         if (this.app.uiConfig.openTouched !== false) void this.app.openPreview(abs);
       },
       onTodos: (todos: TodoItem[]) => {
@@ -473,6 +571,10 @@ export class SessionController {
     }
 
     if (files.size) this.turnDiffs.set(turnId, { preHash, files });
+    // Every path out of emitDiffs that got this far has real numbers; the two
+    // early returns above leave the estimates standing, which is the honest
+    // outcome when there is no shadow repository to check them against.
+    this.reconcileChanges(stats);
   }
 
   async resolveDiff(turnId: string, file: string, decision: DiffDecision): Promise<void> {
@@ -719,6 +821,7 @@ export class SessionController {
    */
   private announce(title: string): void {
     this.app.broadcast({ type: "todosUpdated", todos: [] });
+    this.app.broadcast({ type: "changesUpdated", files: this.changedFiles() });
     this.app.broadcast({
       type: "contextUsage",
       used: 0,
@@ -751,6 +854,9 @@ export class SessionController {
     this.title = title;
     this.alwaysAllowEdits = false;
     this.turnDiffs.clear();
+    // The change list belongs to the conversation, so it leaves with it.
+    this.changes.clear();
+    this.turnEstimate.clear();
     this.app.todos = [];
     this.app.lastContext = null;
     void this.app.rememberSession(this.sessionId);

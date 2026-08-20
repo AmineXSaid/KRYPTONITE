@@ -1,5 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
+import * as os from "node:os";
 import * as path from "node:path";
 
 import {
@@ -29,11 +31,13 @@ import { detectCapabilities } from "../endpoints/detect";
 // Aliased: `App.checkEndpoint` is the message handler, this is the probe it runs.
 import { checkEndpoint as runEndpointCheck, draftProfile, listModels } from "../endpoints/check";
 import { SessionController } from "../ui/session";
+import type { Msg } from "../providers/client";
 import type {
   ApprovalMode,
   CheckpointDto,
   ConfigDto,
   EndpointForm,
+  ExportScope,
   FileHitDto,
   InboundMessage,
   LogLevel,
@@ -55,6 +59,33 @@ import type {
 } from "../ui/protocol";
 
 type Sink = (msg: OutboundMessage) => void;
+
+/** One conversation inside an exported JSON document. */
+interface ChatExportSession {
+  id: string;
+  title: string;
+  /** ISO 8601, so the file reads without a converter. */
+  updatedAt: string;
+  messageCount: number;
+  messages: Msg[];
+}
+
+/**
+ * A conversation title, reduced to something a filesystem will accept.
+ *
+ * Titles come from the user's first message, so they carry slashes, colons and
+ * whatever else was typed - all of which either break the save dialog's default
+ * name or silently create a directory.
+ */
+function slugForFile(title: string): string {
+  const slug = String(title ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40)
+    .replace(/-+$/, "");
+  return slug || "chat";
+}
 
 /**
  * The starter written by "Create config".
@@ -859,6 +890,7 @@ export class App {
       sessions: this.sessionMetas(),
       selection: this.selection,
       context: this.lastContext,
+      changes: this.session.changedFiles(),
       models: this.modelGroups(),
       logs: this.logs.slice(-100),
       mcp: { servers: this.mcp.statuses(), warnings: this.mcp.warnings },
@@ -1316,6 +1348,10 @@ export class App {
         await this.exportBundle();
         return;
 
+      case "exportChat":
+        await this.exportChat(msg.scope);
+        return;
+
       case "openFile": {
         const root = this.requireRoot();
         const uri = vscode.Uri.file(path.isAbsolute(msg.path) ? msg.path : path.join(root, msg.path));
@@ -1378,6 +1414,10 @@ export class App {
         this.postTo(source, { type: "fileResults", query: msg.query, files });
         return;
       }
+
+      case "clearChanges":
+        this.session.clearChanges();
+        return;
     }
   }
 
@@ -1555,6 +1595,99 @@ export class App {
 
     this.broadcast({ type: "bundleExported", path: out });
     this.log("info", `Exported offline bundle to ${out}.`);
+  }
+
+  /**
+   * Write conversations out as one JSON document, through a save dialog.
+   *
+   * The transcripts on disk are one file per conversation in a private storage
+   * directory, which is the right shape for the extension and the wrong shape
+   * for a person: there is no way to hand a conversation to a colleague, attach
+   * it to a bug report, or feed it to a script. This produces a single readable
+   * file wherever the user points it.
+   *
+   * The conversation the composer is writing into is taken from the controller
+   * rather than from disk, so a turn still in flight and a chat that has not
+   * been persisted yet both export what is actually on screen.
+   *
+   * Returns the path written, or undefined if the dialog was dismissed - which
+   * is a normal outcome, not an error, and must not raise one.
+   */
+  async exportChat(scope: ExportScope): Promise<string | undefined> {
+    const live: ChatExportSession = {
+      id: this.session.sessionId,
+      title: this.session.title,
+      updatedAt: new Date().toISOString(),
+      messageCount: this.session.history.length,
+      messages: this.session.history,
+    };
+
+    let sessions: ChatExportSession[];
+    if (scope === "current") {
+      sessions = [live];
+    } else {
+      sessions = this.sessions.allIds().map((id) => {
+        if (id === live.id) return live;
+        const doc = this.sessions.load(id);
+        return {
+          id,
+          title: doc?.title ?? "Untitled",
+          updatedAt: new Date(doc?.updatedAt ?? 0).toISOString(),
+          messageCount: doc?.messages.length ?? 0,
+          messages: doc?.messages ?? [],
+        };
+      });
+      // A live conversation with nothing in it yet is not one of the stored
+      // ones, so it would be missing entirely rather than exported empty.
+      if (!sessions.some((r) => r.id === live.id)) sessions.unshift(live);
+    }
+
+    if (!sessions.some((r) => r.messageCount > 0)) {
+      throw new Error("There is nothing to export yet - this conversation is empty.");
+    }
+
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    const doc = {
+      format: "kryptonite-chat",
+      formatVersion: 1,
+      extensionVersion: String(this.context.extension.packageJSON.version ?? "0.0.0"),
+      exportedAt: new Date().toISOString(),
+      workspace: folder?.name ?? null,
+      scope,
+      sessions,
+    };
+
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    const name =
+      scope === "all"
+        ? `kryptonite-chats-${stamp}.json`
+        : `kryptonite-${slugForFile(live.title)}-${stamp}.json`;
+    // Defaulting into the workspace is deliberate: it is the directory the user
+    // is already looking at. Nothing is written there without the dialog.
+    const base = folder?.uri.fsPath ?? os.homedir();
+
+    const target = await vscode.window.showSaveDialog({
+      defaultUri: vscode.Uri.file(path.join(base, name)),
+      filters: { JSON: ["json"] },
+      saveLabel: "Export",
+      title: scope === "all" ? "Export all conversations" : "Export this conversation",
+    });
+    if (!target) return undefined;
+
+    const messages = sessions.reduce((n, r) => n + r.messageCount, 0);
+    await fsp.writeFile(target.fsPath, JSON.stringify(doc, null, 2), "utf8");
+    this.broadcast({
+      type: "chatExported",
+      path: target.fsPath,
+      scope,
+      sessions: sessions.length,
+      messages,
+    });
+    this.log(
+      "info",
+      `Exported ${sessions.length} conversation(s), ${messages} message(s), to ${target.fsPath}.`
+    );
+    return target.fsPath;
   }
 
   /* ───────────────────────── command-palette helpers ───────────────────── */

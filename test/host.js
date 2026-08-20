@@ -58,6 +58,9 @@ const vscode = {
     showWarningMessage: async () => undefined,
     showQuickPick: async () => undefined,
     showOpenDialog: async () => undefined,
+    // Answered by the export tests below; undefined models a dismissed dialog.
+    showSaveDialog: async () => vscode.window._saveTo,
+    _saveTo: undefined,
     showTextDocument: async () => ({}),
   },
   commands: {
@@ -165,6 +168,113 @@ const context = {
     s.restore();
     ok("a host restart resumes the same conversation", s.sessionId === survivor);
     ok("a host restart resumes its messages", s.history.length === 1);
+
+    /* ── chat export ──────────────────────────────────────────────────── */
+    // A dismissed save dialog is a normal outcome, not an error: nothing is
+    // written and nothing is announced.
+    posted.length = 0;
+    vscode.window._saveTo = undefined;
+    ok("a dismissed save dialog exports nothing",
+      (await app.exportChat("current")) === undefined);
+    ok("and announces nothing", !posted.some((m) => m.type === "chatExported"));
+
+    const out = path.join(storage, "export.json");
+    vscode.window._saveTo = { fsPath: out };
+    posted.length = 0;
+    const written = await app.exportChat("current");
+    ok("export returns the path it wrote", written === out);
+    ok("export writes the file", fs.existsSync(out));
+    const doc = JSON.parse(fs.readFileSync(out, "utf8"));
+    ok("export is tagged with its format", doc.format === "kryptonite-chat" && doc.formatVersion === 1);
+    ok("export stamps when it was made", typeof doc.exportedAt === "string");
+    ok("export carries one conversation", doc.sessions.length === 1);
+    ok("export carries the live transcript", doc.sessions[0].messages.length === 1);
+    ok("export names the conversation", typeof doc.sessions[0].title === "string");
+    ok("export counts its messages", doc.sessions[0].messageCount === 1);
+    ok("export dates are ISO, not epoch millis", /^\d{4}-\d{2}-\d{2}T/.test(doc.sessions[0].updatedAt));
+    ok("export announces itself to the UI",
+      posted.some((m) => m.type === "chatExported" && m.path === out && m.messages === 1));
+
+    // Scope "all" must reach every stored conversation, including the live one.
+    const other = app.sessions.newId();
+    app.sessions.save(other, [{ role: "user", content: "another chat" }], "Another");
+    const allOut = path.join(storage, "all.json");
+    vscode.window._saveTo = { fsPath: allOut };
+    await app.exportChat("all");
+    const allDoc = JSON.parse(fs.readFileSync(allOut, "utf8"));
+    ok("export all covers every conversation", allDoc.sessions.length === 2);
+    ok("export all records its scope", allDoc.scope === "all");
+    ok("export all includes the stored one",
+      allDoc.sessions.some((r) => r.id === other && r.messages.length === 1));
+    ok("export all includes the live one",
+      allDoc.sessions.some((r) => r.id === s.sessionId));
+
+    // An empty conversation has nothing to write, and says so rather than
+    // producing a file with an empty array in it.
+    s.newChat();
+    s.history = [];
+    app.sessions.delete(other);
+    app.sessions.delete(survivor);
+    vscode.window._saveTo = { fsPath: path.join(storage, "never.json") };
+    let refused = "";
+    try { await app.exportChat("current"); } catch (e) { refused = String(e.message || e); }
+    ok("exporting an empty conversation is refused with a reason", /nothing to export/i.test(refused));
+    ok("and writes no file", !fs.existsSync(path.join(storage, "never.json")));
+
+    /* ── the live change list ─────────────────────────────────────────── */
+    // recordChange and reconcileChanges are `private` in TypeScript, which is
+    // a compile-time claim only; this harness is JavaScript and drives them
+    // directly, because the alternative is a live model turn.
+    ok("a fresh conversation has changed nothing", s.changedFiles().length === 0);
+
+    s.recordChange("src/a.ts", { change: "modified", added: 10, removed: 2 });
+    ok("a write is recorded", s.changedFiles().length === 1);
+    ok("with its counts", s.changedFiles()[0].added === 10 && s.changedFiles()[0].removed === 2);
+    ok("and marked as an estimate", s.changedFiles()[0].exact === false);
+
+    s.recordChange("src/a.ts", { change: "modified", added: 5, removed: 1 });
+    ok("a second write to one file stays one row", s.changedFiles().length === 1);
+    ok("and accumulates", s.changedFiles()[0].added === 15 && s.changedFiles()[0].removed === 3);
+
+    s.recordChange("new.ts", { change: "created", added: 8, removed: 0 });
+    s.recordChange("new.ts", { change: "modified", added: 1, removed: 1 });
+    const created = s.changedFiles().find((f) => f.path === "new.ts");
+    ok("a file created and then edited is still reported as created", created.change === "created");
+
+    // git's numbers replace this turn's estimate rather than stacking on it.
+    posted.length = 0;
+    s.reconcileChanges([{ file: "src/a.ts", added: 11, removed: 2 }, { file: "new.ts", added: 9, removed: 0 }]);
+    const exact = s.changedFiles().find((f) => f.path === "src/a.ts");
+    ok("the exact count replaces the estimate", exact.added === 11 && exact.removed === 2);
+    ok("and says so", exact.exact === true);
+    ok("reconciliation announces the whole list",
+      posted.some((m) => m.type === "changesUpdated" && m.files.length === 2));
+
+    // A file written and then reverted inside the turn leaves no git row, and
+    // must not leave a row in the panel either.
+    s.recordChange("scratch.tmp", { change: "created", added: 4, removed: 0 });
+    s.reconcileChanges([]);
+    ok("a file reverted within the turn drops out of the list",
+      !s.changedFiles().some((f) => f.path === "scratch.tmp"));
+    ok("but files from earlier turns stay", s.changedFiles().length === 2);
+
+    // A second turn's numbers add to what earlier turns already earned.
+    s.recordChange("src/a.ts", { change: "modified", added: 3, removed: 0 });
+    s.reconcileChanges([{ file: "src/a.ts", added: 4, removed: 1 }]);
+    const grown = s.changedFiles().find((f) => f.path === "src/a.ts");
+    ok("a later turn adds to the running total", grown.added === 15 && grown.removed === 3);
+
+    posted.length = 0;
+    s.clearChanges();
+    ok("clearing empties the list", s.changedFiles().length === 0);
+    ok("clearing announces it",
+      posted.some((m) => m.type === "changesUpdated" && m.files.length === 0));
+
+    s.recordChange("x.ts", { change: "modified", added: 1, removed: 0 });
+    const sync = await app.buildStateSync();
+    ok("the change list is part of hydration", sync.changes.length === 1);
+    s.newChat();
+    ok("a new conversation starts with no changes", s.changedFiles().length === 0);
   }
 
   await ext.deactivate();

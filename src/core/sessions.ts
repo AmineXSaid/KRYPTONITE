@@ -186,6 +186,18 @@ export class SessionStore {
       }));
   }
 
+  /**
+   * Every stored conversation's id, newest first.
+   *
+   * `list` caps at what a popover can show; the JSON export has to cover the
+   * whole workspace, and a cap there would silently drop the oldest
+   * conversations out of a file the user asked to hold all of them.
+   */
+  allIds(): string[] {
+    this.hydrate();
+    return [...this.meta.values()].sort((a, b) => b.updatedAt - a.updatedAt).map((r) => r.id);
+  }
+
   load(id: string): StoredSession | undefined {
     // A transcript whose write is still in flight must read back as the
     // version we hold, not as whatever is currently on disk - switching

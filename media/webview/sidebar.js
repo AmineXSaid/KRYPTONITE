@@ -52,7 +52,13 @@ function _sbRun() {
       '<circle cx="17.5" cy="8.5" r="2.4" ' + S6 + ' stroke-width="1.6"/>' +
       '<path d="M7 8v8M17.5 11v1.2a4 4 0 01-4 4H9.4" ' + S6 + ' stroke-width="1.6"/></symbol>' +
     '<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 11-2.4-5.7M20 3.5V9h-5.5" ' + S6 + ' stroke-width="1.6"/></symbol>' +
-    '<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6h6l2 3h10v10H3z" ' + S6 + ' stroke-width="1.5"/></symbol>';
+    '<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6h6l2 3h10v10H3z" ' + S6 + ' stroke-width="1.5"/></symbol>' +
+    /* Download: an arrow into a tray. Distinct from i-up, which is the send
+       arrow and points the other way. */
+    '<symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v10.5M7.5 10.5L12 15l4.5-4.5" ' + S6 + ' stroke-width="1.6"/>' +
+      '<path d="M4.5 17.5V20h15v-2.5" ' + S6 + ' stroke-width="1.6"/></symbol>' +
+    '<symbol id="i-diff" viewBox="0 0 24 24"><path d="M6 3.5v17M3 7h6M3 17h6" ' + S6 + ' stroke-width="1.6"/>' +
+      '<path d="M15 3.5h6v6h-6zM15 14.5h6v6h-6z" ' + S6 + ' stroke-width="1.5"/></symbol>';
 
   /* Ladder rung name -> the short label the design shows. */
   var RUNG_LABELS = {
@@ -119,6 +125,7 @@ function _sbRun() {
     ["/model", "Select a model"],
     ["/review", "Review current changes"],
     ["/checkpoint", "Restore a previous checkpoint"],
+    ["/export", "Export this conversation as JSON"],
     ["/skills", "Open the skills panel"],
     ["/help", "Show available commands"]
   ];
@@ -163,8 +170,10 @@ function _sbRun() {
     sessions: [],
     selection: null,
     context: null,
+    changes: [],
     models: [],
     /* local-only */
+    changesOpen: false,
     tab: "session",
     qp: null,
     qpIndex: 0,
@@ -789,6 +798,11 @@ function _sbRun() {
           '<div class="popover" id="morePop" role="menu" hidden>' +
             '<button class="pop-row" role="menuitem" data-more="control">' + crystal(15) + '<span class="t">Control Center</span></button>' +
             '<div class="pop-div"></div>' +
+            '<button class="pop-row" role="menuitem" data-more="exportChat">' + icon("i-download", "ic-13") +
+              '<span class="t">Export chat as JSON…</span></button>' +
+            '<button class="pop-row" role="menuitem" data-more="exportAll">' + icon("i-download", "ic-13") +
+              '<span class="t">Export all chats as JSON…</span></button>' +
+            '<div class="pop-div"></div>' +
             '<button class="pop-row" role="menuitem" data-more="settings"><span class="t">Settings…</span></button>' +
             '<button class="pop-row" role="menuitem" data-more="docs"><span class="t">Documentation</span></button>' +
             '<button class="pop-row" role="menuitem" data-more="issue"><span class="t">Report Issue</span></button>' +
@@ -810,6 +824,23 @@ function _sbRun() {
           // for a real one, so the strip never appears and disappears.
           '<div class="convo-title" id="convoTitle" hidden></div>' +
           '<div id="log" aria-live="polite"></div>' +
+          /* What this conversation has done to the workspace, live.
+             It sits directly above the composer rather than in the transcript
+             because it is state, not history: one row per file no matter how
+             many times the file was written, updated in place while the turn
+             runs. The transcript still carries the per-turn diff cards. */
+          '<div class="chg" id="changeBar" data-open="0" hidden>' +
+            '<div class="chg-bar">' +
+              '<button class="chg-toggle" id="chgToggle" aria-expanded="false" aria-controls="chgList">' +
+                icon("i-chev", "ic-9 chev") + icon("i-diff", "ic-13 chg-ic") +
+                '<span class="t" id="chgCount"></span>' +
+                '<span class="s" id="chgStat"></span>' +
+              '</button>' +
+              '<button class="chg-clear" id="chgClear" title="Clear the list - the files are not touched" ' +
+                'aria-label="Clear the change list">' + icon("i-x", "ic-11") + '</button>' +
+            '</div>' +
+            '<div class="chg-list" id="chgList" hidden></div>' +
+          '</div>' +
           '<div class="composer-wrap">' +
             '<div class="qp" id="qp" role="listbox" hidden></div>' +
             '<div class="composer">' +
@@ -1060,27 +1091,94 @@ function _sbRun() {
     return out + "</span>";
   }
 
+  /* Long questions collapse.
+   *
+   * A pasted stack trace, a spec, a three-screen brief - all of it is the
+   * user's own words and none of it can be summarised away, but at full height
+   * one turn pushes the answer it is asking about off the panel entirely, and
+   * scrolling back past it is the price of every later glance at the
+   * conversation. Past either threshold the turn renders clamped with its own
+   * expander. The text is never altered; only how much of it is on screen at
+   * once, and the toggle restores it in place.
+   *
+   * Two thresholds because either one alone is wrong: 40 short lines is a wall
+   * of text well under the character count, and one 900-character paragraph
+   * wraps to a wall of text on a single line. */
+  var USER_CLAMP_CHARS = 420;
+  var USER_CLAMP_LINES = 7;
+
+  function isLongUser(text) {
+    return text.length > USER_CLAMP_CHARS || lineCount(text) > USER_CLAMP_LINES;
+  }
+
+  /**
+   * Build one user turn, clamping it when it is long enough to bury the reply.
+   *
+   * `html` is the already-escaped body; `plain` is the same content as text,
+   * which is what the length test and the button's label are measured against.
+   */
+  function userTurn(html, plain, att) {
+    var msg = div("msg-user");
+    var body = div("u-body");
+    var text = div("u-text", html);
+    body.appendChild(text);
+
+    if (isLongUser(plain)) {
+      msg.setAttribute("data-clamped", "1");
+      var n = lineCount(plain);
+      var more = document.createElement("button");
+      more.className = "u-more";
+      more.type = "button";
+      more.setAttribute("aria-expanded", "false");
+      var label = n > USER_CLAMP_LINES
+        ? "Show all " + n + " lines"
+        : "Show all " + fmtK(plain.length) + " characters";
+      more.innerHTML = icon("i-caret", "ic-9 u-caret") + "<span>" + label + "</span>";
+      more.addEventListener("click", function () {
+        var open = msg.getAttribute("data-clamped") !== "1";
+        msg.setAttribute("data-clamped", open ? "1" : "0");
+        more.setAttribute("aria-expanded", open ? "false" : "true");
+        more.querySelector("span").textContent = open ? label : "Show less";
+        // Re-collapsing from the bottom of a long turn would otherwise leave
+        // the viewport parked in whitespace below the message. Guarded because
+        // the jsdom harness has no scrollIntoView, and a throw here would take
+        // the toggle down with it.
+        if (open && msg.scrollIntoView) msg.scrollIntoView({ block: "nearest" });
+      });
+      body.appendChild(more);
+    }
+
+    if (att) {
+      var wrap = document.createElement("div");
+      wrap.innerHTML = att;
+      while (wrap.firstChild) body.appendChild(wrap.firstChild);
+    }
+    msg.appendChild(body);
+    add(msg);
+  }
+
   function addUser(content, files) {
     closeToolGroup();
     var att = attChips(files);
     if (typeof content === "string") {
-      add(div("msg-user", '<div class="u-body">' + esc(content) + att + "</div>"));
+      userTurn(esc(content), content, att);
       return;
     }
     if (!Array.isArray(content)) {
-      add(div("msg-user", '<div class="u-body">' + esc(String(content)) + att + "</div>"));
+      userTurn(esc(String(content)), String(content), att);
       return;
     }
-    var html = "";
+    var html = "", plain = "";
     for (var i = 0; i < content.length; i++) {
       var b = content[i];
       if (b.type === "image") {
         html += '<img class="msg-img" src="data:' + esc(b.mediaType) + ';base64,' + b.data + '" alt="attached image">';
       } else if (b.type === "text") {
         html += "<span>" + esc(b.text) + "</span>";
+        plain += (plain ? "\n" : "") + b.text;
       }
     }
-    add(div("msg-user", '<div class="u-body">' + html + att + "</div>"));
+    userTurn(html, plain, att);
   }
 
   /* Re-rendering the answer is throttled, because it costs the whole message.
@@ -1338,6 +1436,12 @@ function _sbRun() {
       body.appendChild(div("trunc-note",
         icon("i-warn", "ic-11") + "<span>Output truncated to 60,000 characters for the model</span>"));
     }
+    // A card about a file should be able to reach it. The header cannot carry
+    // the link - it is itself the button that expands the card, and a control
+    // inside a control is neither valid nor operable by keyboard - so the way
+    // to the file lives in the body it opens.
+    var fileAction = openFileRow(name, args, isError);
+    if (fileAction) body.appendChild(fileAction);
     if (isError) {
       el.setAttribute("data-open", "1");
       body.hidden = false;
@@ -1345,6 +1449,34 @@ function _sbRun() {
     // Back to the turn's own verb, not a fresh one - the work has not changed.
     S.gerund = S.idleVerb || "Thinking…";
     tickGerund();
+  }
+
+  /** Tools whose argument names a file the user may want in an editor. */
+  var FILE_TOOLS = { read_file: 1, write_file: 1, edit_file: 1 };
+
+  /**
+   * The "Open in editor" row at the foot of a file tool's card.
+   *
+   * Returns null for anything that is not about one file, and for a failed
+   * call - a write that was declined or a read that missed leaves nothing
+   * worth opening, and offering it would suggest otherwise.
+   */
+  function openFileRow(name, args, isError) {
+    if (isError || !FILE_TOOLS[name]) return null;
+    var p = args && typeof args === "object" ? args.path : null;
+    if (!p || typeof p !== "string") return null;
+    var row = div("tool-actions");
+    var btn = document.createElement("button");
+    btn.className = "btn sm";
+    btn.type = "button";
+    btn.innerHTML = icon("i-file", "ic-11") + "<span>Open in editor</span>";
+    btn.setAttribute("data-open-file", p);
+    btn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      post("openFile", { path: p });
+    });
+    row.appendChild(btn);
+    return row;
   }
 
   /**
@@ -1631,6 +1763,82 @@ function _sbRun() {
         : "Rejected · " + esc(file) + " restored from checkpoint"));
       return;
     }
+  }
+
+  /* ───────────────────── changed files ───────────────────── */
+
+  /**
+   * The live change list above the composer.
+   *
+   * `hot` is the path of the file that was just written, if any. It is the one
+   * piece of state the DOM cannot re-derive: the list is rebuilt wholesale on
+   * every event, so the flash has to be re-applied to the row it belongs to
+   * rather than surviving in it. Rebuilding is affordable because the list is
+   * one row per file, not one per write.
+   */
+  function renderChanges(hot) {
+    var bar = $("changeBar");
+    var files = S.changes || [];
+    if (!files.length) {
+      bar.hidden = true;
+      $("chgList").innerHTML = "";
+      return;
+    }
+
+    var add = 0, del = 0, est = false;
+    for (var i = 0; i < files.length; i++) {
+      add += files[i].added || 0;
+      del += files[i].removed || 0;
+      if (!files[i].exact) est = true;
+    }
+    bar.hidden = false;
+    $("chgCount").textContent =
+      files.length + (files.length === 1 ? " file changed" : " files changed");
+    /* A tilde while the counts are the writing tool's own estimate, dropped
+       once git has confirmed them at the end of the turn. Silently showing an
+       approximation as though it were exact is the thing worth avoiding. */
+    $("chgStat").innerHTML =
+      '<span class="add-n">' + (est ? "~" : "") + "+" + add + "</span> " +
+      '<span class="del-n">\u2212' + del + "</span>";
+
+    var html = "";
+    for (var j = 0; j < files.length; j++) {
+      var f = files[j];
+      var norm = String(f.path).replace(/\\/g, "/");
+      var cut = norm.lastIndexOf("/");
+      var dir = cut === -1 ? "" : norm.slice(0, cut + 1);
+      var base = cut === -1 ? norm : norm.slice(cut + 1);
+      html += '<button class="chg-row' + (f.path === hot ? " hot" : "") + '" data-chg="' + esc(f.path) + '" ' +
+        'title="' + esc(norm) + ' - click to open">' +
+        '<span class="chg-kind" data-kind="' + esc(f.change) + '">' +
+          (f.change === "created" ? "A" : "M") + "</span>" +
+        '<span class="chg-path ell">' +
+          (dir ? '<span class="p-dir">' + esc(dir) + "</span>" : "") +
+          '<span class="p-name">' + esc(base) + "</span></span>" +
+        '<span class="sp"></span>' +
+        '<span class="s">' +
+          (f.added ? '<span class="add-n">+' + f.added + "</span> " : "") +
+          (f.removed ? '<span class="del-n">\u2212' + f.removed + "</span>" : "") +
+        "</span></button>";
+    }
+    $("chgList").innerHTML = html;
+  }
+
+  /** Fold one live write into the list without waiting for a full refresh. */
+  function applyTouch(file) {
+    if (!file || !file.path) return;
+    var files = (S.changes || []).filter(function (f) { return f.path !== file.path; });
+    files.unshift(file);
+    files.sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
+    S.changes = files;
+    renderChanges(file.path);
+  }
+
+  function setChangesOpen(open) {
+    S.changesOpen = open;
+    $("changeBar").setAttribute("data-open", open ? "1" : "0");
+    $("chgToggle").setAttribute("aria-expanded", open ? "true" : "false");
+    $("chgList").hidden = !open;
   }
 
   /* ───────────────────── todo / permission / plan ───────────────────── */
@@ -2055,6 +2263,8 @@ function _sbRun() {
         draft.value = ""; S.modelOpen = true; S.qpIndex = 0; renderQuickPick(); return;
       case "/checkpoint":
         draft.value = ""; post("openControlCenter", { section: "checkpoints" }); break;
+      case "/export":
+        draft.value = ""; post("exportChat", { scope: "current" }); break;
       case "/review":
         draft.value = ""; sendText(REVIEW_PROMPT); break;
       case "/skills":
@@ -2123,6 +2333,27 @@ function _sbRun() {
     closeToolGroup();
     add(div("err-box", icon("i-warn", "ic-13") + "<span>" + esc(message) + "</span>"));
     return;
+  }
+
+  /**
+   * A confirmation the conversation itself should carry.
+   *
+   * VS Code's own notification toast disappears after a few seconds and takes
+   * the path with it, which for an export is the one thing the user needs
+   * afterwards. This stays in the transcript, and its path opens the file.
+   */
+  function addNotice(iconId, text, openPath) {
+    aiEl = null;
+    closeToolGroup();
+    var box = div("ok-box", icon(iconId, "ic-13") + "<span>" + esc(text) + "</span>");
+    if (openPath) {
+      var open = document.createElement("button");
+      open.className = "btn sm";
+      open.textContent = "Open";
+      open.addEventListener("click", function () { post("openFile", { path: openPath }); });
+      box.appendChild(open);
+    }
+    add(box);
   }
 
   /**
@@ -2770,6 +3001,7 @@ function _sbRun() {
     S.sessions = state.sessions || [];
     S.selection = state.selection;
     S.context = state.context;
+    S.changes = state.changes || [];
     S.models = state.models || [];
 
     S.sessionId = state.session ? state.session.id : null;
@@ -2779,6 +3011,8 @@ function _sbRun() {
     renderSession(state.session ? state.session.messages : []);
     todoEl = null;
     renderTodos(S.todos);
+    setChangesOpen(S.changesOpen);
+    renderChanges(null);
     renderSelection();
     renderTitle();
     renderFooter();
@@ -2995,6 +3229,8 @@ function _sbRun() {
       closePops();
       var a = b.getAttribute("data-more");
       if (a === "control") post("openControlCenter", {});
+      else if (a === "exportChat") post("exportChat", { scope: "current" });
+      else if (a === "exportAll") post("exportChat", { scope: "all" });
       else if (a === "settings") post("openSettings");
       else if (a === "docs") post("openControlCenter", { section: "logs" });
       else if (a === "issue") post("openControlCenter", { section: "logs" });
@@ -3108,6 +3344,20 @@ function _sbRun() {
         syncComposer();
       }
     });
+    $("chgToggle").addEventListener("click", function () { setChangesOpen(!S.changesOpen); });
+    $("chgClear").addEventListener("click", function () {
+      // Optimistic: the list is a view of the host's map, and the host answers
+      // with an empty changesUpdated, but waiting for the round trip makes the
+      // button feel unresponsive on a busy turn.
+      S.changes = [];
+      renderChanges(null);
+      post("clearChanges");
+    });
+    $("chgList").addEventListener("click", function (e) {
+      var row = e.target.closest("[data-chg]");
+      if (row) post("openFile", { path: row.getAttribute("data-chg") });
+    });
+
     $("selClear").addEventListener("click", function () {
       S.selection = null;
       renderSelection();
@@ -3367,6 +3617,12 @@ function _sbRun() {
         break;
 
       case "fileTouched":
+        applyTouch(m.file);
+        break;
+
+      case "changesUpdated":
+        S.changes = m.files || [];
+        renderChanges(null);
         break;
 
       case "turnEnd":
@@ -3582,6 +3838,16 @@ function _sbRun() {
         S.qpIndex = 0;
         renderQuickPick();
         break;
+
+      case "chatExported": {
+        var what = m.scope === "all"
+          ? m.sessions + (m.sessions === 1 ? " conversation" : " conversations")
+          : "This conversation";
+        addNotice("i-download",
+          what + " · " + m.messages + (m.messages === 1 ? " message" : " messages") +
+          " exported to " + m.path, m.path);
+        break;
+      }
 
       case "checkpointsListed":
       case "checkpointRestored":

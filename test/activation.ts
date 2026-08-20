@@ -78,6 +78,8 @@ async function main() {
     "kryptonite.selectEndpoint",
     "kryptonite.newEndpoint",
     "kryptonite.restoreCheckpoint",
+    "kryptonite.exportChat",
+    "kryptonite.exportAllChats",
     "kryptonite.exportBundle",
   ];
   for (const name of EXPECTED) {

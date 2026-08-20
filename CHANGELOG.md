@@ -1,5 +1,58 @@
 # Changelog
 
+## Unreleased
+
+Three chat-surface changes: long questions stop burying the answer, a
+conversation can leave the extension as a file, and the panel says what the
+agent is doing to the workspace while it does it.
+
+### Added
+- **Long questions collapse.** A pasted stack trace or a three-screen brief is
+  still the user's own words and none of it can be summarised away, but at full
+  height one turn pushes the answer it is asking about off the panel, and
+  scrolling back past it is the price of every later glance at the
+  conversation. Past 420 characters or 7 lines a user turn renders clamped
+  under a fade with its own `Show all N lines` expander; the text is never
+  altered, only how much of it is on screen. Two thresholds because either
+  alone is wrong: 40 short lines is a wall of text well under the character
+  count, and one 900-character paragraph wraps to a wall of text on a single
+  line. Restored transcripts clamp the same way, since both paths build the
+  turn through one function.
+- **Export the chat as JSON.** Transcripts live one-file-per-conversation in a
+  private storage directory, which is the right shape for the extension and the
+  wrong shape for a person: there was no way to hand a conversation to a
+  colleague, attach it to a bug report, or feed it to a script. Two new
+  commands - `KRYPTONITE: Export chat as JSON` and `Export all chats as JSON` -
+  two rows in the header's overflow menu, and `/export` in the composer, all
+  write one readable document through a save dialog. The conversation the
+  composer is writing into is taken from the controller rather than from disk,
+  so a turn still in flight and a chat not yet persisted both export what is on
+  screen. The confirmation lands in the transcript with an `Open` button rather
+  than in a toast that takes the path away with it.
+- **A live changed-file panel.** `fileTouched` reached the frontend and hit an
+  empty `case` - the panel knew a file had changed and did nothing with it.
+  There is now one row per file above the composer, revealed on the first
+  write, flashing on each subsequent one, with the running `+`/`-` per file and
+  in total; a row opens the file, and the panel can be cleared without touching
+  anything on disk. The list is conversation-scoped rather than turn-scoped: it
+  answers "what has this chat done to my workspace", which a list that emptied
+  at every turn boundary could not. It survives a webview reload through the
+  turn replay buffer and a window reload through `stateSync`.
+- **Line counts, while the turn is still running.** `write_file` and
+  `edit_file` now report what they did through `onFileTouched`, measured by
+  `lineStat` (`src/agent/tools.ts`): common leading and trailing lines are
+  trimmed and what remains is counted, which is exact for a single contiguous
+  edit and an overestimate for scattered ones. The panel marks those numbers
+  with a `~` until the end of the turn, when the shadow repository's `numstat`
+  replaces this turn's estimate with git's own count and the tilde goes. The
+  estimate is subtracted rather than the total overwritten, so a file changed
+  in an earlier turn keeps the count it earned there.
+- **`Open in editor` on file tool cards.** A card about a file could not reach
+  it. The header cannot carry the link - it is itself the button that expands
+  the card, and a control inside a control is neither valid nor operable by
+  keyboard - so the action lives in the body it opens, on `read_file`,
+  `write_file` and `edit_file`, and not on a call that failed.
+
 ## 0.6.0
 
 Ask joins Plan and Act, a second live MCP example, and small chat-surface polish.

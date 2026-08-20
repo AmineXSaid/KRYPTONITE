@@ -29,6 +29,7 @@ export type CcSection =
   | "diag" | "agent" | "skills" | "checkpoints" | "logs";
 
 export type ApprovalMode = "ask" | "edits-auto" | "full-auto";
+export type ExportScope = "current" | "all";
 export type PermissionDecision = "allow" | "always" | "deny";
 export type DiffDecision = "accept" | "reject";
 export type TodoStatus = "pending" | "in_progress" | "completed";
@@ -219,6 +220,27 @@ export interface FileHitDto {
   kind: "file" | "config" | "folder";
 }
 
+/**
+ * One file the agent has changed in this conversation.
+ *
+ * Counts accumulate across turns, so the panel answers "what has this
+ * conversation done to the workspace" rather than "what did the last tool
+ * call do". They start as the writing tool's own estimate and are corrected
+ * from the shadow repository's `numstat` when the turn ends - `exact` says
+ * which of the two the number currently is, so nothing has to claim a
+ * precision it does not have.
+ */
+export interface FileChangeDto {
+  /** Workspace-relative, forward slashes on every platform. */
+  path: string;
+  change: "created" | "modified";
+  added: number;
+  removed: number;
+  /** Epoch milliseconds of the most recent write. */
+  at: number;
+  exact: boolean;
+}
+
 export interface EndpointForm {
   id: string;
   name: string;
@@ -275,6 +297,8 @@ export interface StateSync {
   sessions: SessionMetaDto[];
   selection: SelectionDto | null;
   context: { used: number; limit: number; exact: boolean } | null;
+  /** Files this conversation has changed, newest write first. */
+  changes: FileChangeDto[];
   models: ModelGroupDto[];
   logs: LogLine[];
   session: { id: string; title: string; messages: Msg[] };
@@ -346,6 +370,16 @@ export interface ReloadProfilesMsg { type: "reloadProfiles" }
 export interface SetConfigMsg { type: "setConfig"; key: ConfigKey; value: unknown }
 export interface RestoreCheckpointMsg { type: "restoreCheckpoint"; hash: string }
 export interface ExportBundleMsg { type: "exportBundle" }
+/**
+ * Write conversations out as JSON, through a save dialog.
+ *
+ * `current` is the conversation the composer is writing into, taken from the
+ * controller's live history rather than from disk, so a turn still in flight
+ * and a conversation not yet persisted both export what is on screen. `all`
+ * is every stored transcript for this workspace, with the live one substituted
+ * for its saved copy for the same reason.
+ */
+export interface ExportChatMsg { type: "exportChat"; scope: ExportScope }
 export interface OpenFileMsg { type: "openFile"; path: string; lines?: [number, number] }
 /** Probe the active endpoint and report what it can actually do. */
 export interface DetectCapsMsg { type: "detectCapabilities" }
@@ -370,6 +404,14 @@ export interface SearchFilesMsg { type: "searchFiles"; query: string }
  * the check only.
  */
 export interface CheckEndpointMsg { type: "checkEndpoint"; endpoint: EndpointForm }
+/**
+ * Empty the changed-file list without touching the files themselves.
+ *
+ * A long conversation accumulates every file it has ever written, and past a
+ * point that stops being a summary of the work and becomes a list. This is the
+ * user saying "I have seen those".
+ */
+export interface ClearChangesMsg { type: "clearChanges" }
 export interface McpReconnectMsg { type: "mcpReconnect"; name: string }
 export interface McpReloadMsg { type: "mcpReload" }
 
@@ -380,10 +422,10 @@ export type InboundMessage =
   | RunTraceMsg | SaveCaBundleMsg | BrowseCaBundleMsg | UseSystemTrustMsg
   | CopyTextMsg | NewEndpointMsg | SaveEndpointMsg | DeleteEndpointMsg
   | ToggleSkillMsg | ReloadSkillsMsg | ReloadProfilesMsg | SetConfigMsg
-  | RestoreCheckpointMsg | ExportBundleMsg | OpenFileMsg | OpenSettingsMsg
+  | RestoreCheckpointMsg | ExportBundleMsg | ExportChatMsg | OpenFileMsg | OpenSettingsMsg
   | OpenYamlMsg | OpenControlCenterMsg | OpenSkillsFolderMsg
   | ListSessionsMsg | LoadSessionMsg | DeleteSessionMsg | SearchFilesMsg
-  | CheckEndpointMsg | McpReconnectMsg | McpReloadMsg
+  | CheckEndpointMsg | McpReconnectMsg | McpReloadMsg | ClearChangesMsg
   | DetectCapsMsg | SetCapabilityMsg | ApplyCapsMsg | McpLogMsg;
 
 export type InboundType = InboundMessage["type"];
@@ -456,7 +498,16 @@ export interface DiffResolvedOut {
   file: string;
   decision: DiffDecision;
 }
-export interface FileTouchedOut { type: "fileTouched"; path: string }
+/**
+ * A file changed on disk, right now.
+ *
+ * `file` carries the running total for that path, not the delta of this one
+ * write, so a panel can render it without keeping its own arithmetic in step
+ * with the host's.
+ */
+export interface FileTouchedOut { type: "fileTouched"; path: string; file: FileChangeDto }
+/** The whole changed-file set, after a correction or a reset. */
+export interface ChangesUpdatedOut { type: "changesUpdated"; files: FileChangeDto[] }
 export interface TurnEndOut { type: "turnEnd" }
 export interface ErrorOut { type: "error"; message: string }
 export interface TraceStartedOut { type: "traceStarted" }
@@ -539,6 +590,14 @@ export interface CheckpointsListedOut {
 }
 export interface CheckpointRestoredOut { type: "checkpointRestored"; hash: string }
 export interface BundleExportedOut { type: "bundleExported"; path: string }
+/** Confirmation that `exportChat` wrote a file, and what went into it. */
+export interface ChatExportedOut {
+  type: "chatExported";
+  path: string;
+  scope: ExportScope;
+  sessions: number;
+  messages: number;
+}
 export interface ConfigChangedOut { type: "configChanged"; config: ConfigDto }
 export interface PhaseChangedOut { type: "phaseChanged"; phase: Phase }
 export interface EndpointChangedOut {
@@ -607,11 +666,12 @@ export type OutboundMessage =
   | StateSyncOut | StreamDeltaOut | ToolStartOut | ToolEndOut | TodosUpdatedOut
   | ImageGeneratedOut | CapsDetectedOut | McpLogOut
   | PlanProposedOut | PermissionRequestOut | PermissionResolvedOut
-  | DiffPendingOut | DiffResolvedOut | FileTouchedOut | TurnEndOut | ErrorOut
+  | DiffPendingOut | DiffResolvedOut | FileTouchedOut | ChangesUpdatedOut
+  | TurnEndOut | ErrorOut
   | TraceStartedOut | TraceUpdateOut | TraceDoneOut | TlsErrorOut
   | ProfilesReloadedOut | SkillsReloadedOut | ContextUsageOut
   | AttachmentsReadyOut | SelectionChangedOut | SessionSwitchedOut | SessionsListedOut
-  | CheckpointsListedOut | CheckpointRestoredOut | BundleExportedOut
+  | CheckpointsListedOut | CheckpointRestoredOut | BundleExportedOut | ChatExportedOut
   | ConfigChangedOut | PhaseChangedOut | EndpointChangedOut | StatusChangedOut
   | LogLineOut | NavigateOut | FileResultsOut | CaBundlePickedOut
   | EndpointCheckStartedOut | EndpointCheckRungOut | EndpointCheckDoneOut
@@ -626,7 +686,7 @@ export type OutboundType = OutboundMessage["type"];
  */
 export type ReplayableEvent =
   | StreamDeltaOut | ToolStartOut | ToolEndOut
-  | TodosUpdatedOut | ImageGeneratedOut
+  | TodosUpdatedOut | ImageGeneratedOut | FileTouchedOut | ChangesUpdatedOut
   | PermissionRequestOut | ContextUsageOut | SteerAcceptedOut;
 
 /** Narrowing helper for host-side switch statements. */
