@@ -1,0 +1,29 @@
+[project]
+name = "atlassian-mcp"
+version = "1.0.0"
+description = "Read-only MCP servers for Jira and Confluence Data Center"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp[cli]>=1.2",   # 1.x FastMCP or 2.x MCPServer; see atlassian_client/mcp_compat.py
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "respx>=0.21"]
+
+# Two console scripts, one per server. An MCP client config points at these.
+[project.scripts]
+jira-mcp = "jira_mcp.server:main"
+confluence-mcp = "confluence_mcp.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/atlassian_client", "src/jira_mcp", "src/confluence_mcp"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src"]
