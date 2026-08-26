@@ -95,6 +95,10 @@ function _sbRun() {
     { v: "full-auto", icon: "i-bolt", label: "Full auto", desc: "Edits and shell commands both run without asking. Use with a workspace you trust." }
   ];
   var MODE_SHORT = { ask: "Ask", "edits-auto": "Auto-edit", "full-auto": "Full auto" };
+  /* The button carries its mode's icon as well as its word. Without it, a bare
+     "ASK" sitting a few pixels from the PLAN/ACT segment reads as a third
+     phase, which it is not — this control is about what may run unattended. */
+  var MODE_ICON = { ask: "i-hand", "edits-auto": "i-code", "full-auto": "i-bolt" };
 
   var INLINE_LIMIT = 100000;
   var MODEL_TRUNCATION = 60000;
@@ -243,7 +247,6 @@ function _sbRun() {
             '<button class="pop-row" role="menuitem" data-more="docs"><span>Documentation</span></button>' +
             '<button class="pop-row" role="menuitem" data-more="issue"><span>Report Issue</span></button>' +
           '</div>' +
-          '<div id="histModal"></div>' +
         '</header>' +
         '<nav class="gx-tabs" role="tablist">' +
           '<button class="gx-tab" id="tabSession" role="tab" aria-selected="true" aria-controls="viewSession">' +
@@ -313,6 +316,10 @@ function _sbRun() {
           sectionShell("secEp", "Endpoints", "epBadge", "epBody", false) +
           sectionShell("secSk", "Skills", "skBadge", "skBody", false) +
         '</section>' +
+        /* Sibling of the tab panels, not a child of the header: the scrim is
+           position:absolute and would otherwise resolve against the 42px
+           header box, clipping the dialog into the title bar. */
+        '<div id="histModal"></div>' +
       '</div>';
     logEl = $("log");
   }
@@ -482,6 +489,10 @@ function _sbRun() {
     var welcome = logEl.querySelector(".welcome");
     if (welcome) welcome.remove();
     logEl.appendChild(el);
+    /* The streaming row is created the moment a turn starts, so everything
+       appended afterwards would otherwise stack *below* it and leave
+       "Thinking…" stranded above the work it describes. Keep it trailing. */
+    if (streamEl && el !== streamEl) logEl.appendChild(streamEl);
     if (stick) scroll();
     return el;
   }
@@ -657,14 +668,27 @@ function _sbRun() {
   /* ───────────────────────── diff cards ───────────────────────── */
 
   function parsePatch(patch) {
-    var rows = [], oldN = 0, newN = 0, started = false;
+    var rows = [], oldN = 0, newN = 0, started = false, prevEnd = 1;
     var lines = String(patch).split("\n");
     for (var i = 0; i < lines.length; i++) {
       var raw = lines[i];
-      var hunk = raw.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      var hunk = raw.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,\d+)? @@/);
       if (hunk) {
-        oldN = Number(hunk[1]); newN = Number(hunk[2]); started = true;
-        rows.push({ kind: "hunk", text: raw });
+        var start = Number(hunk[1]);
+        /* Never surface the raw `@@ -12,7 +12,7 @@` header — say how much
+           context is being skipped instead. `prevEnd` is where the last hunk
+           stopped, so the first boundary reads "N lines above" and every
+           later one reads "N lines skipped". */
+        var skipped = started ? start - prevEnd : start - 1;
+        rows.push({
+          kind: "hunk",
+          text: skipped > 0
+            ? skipped + (skipped === 1 ? " line " : " lines ") + (started ? "skipped" : "above")
+            : "",
+        });
+        oldN = start; newN = Number(hunk[3]);
+        prevEnd = start + (hunk[2] === undefined ? 1 : Number(hunk[2]));
+        started = true;
         continue;
       }
       if (!started) continue;
@@ -719,6 +743,7 @@ function _sbRun() {
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i];
       if (r.kind === "hunk") {
+        if (!r.text) continue; /* hunk starts at line 1 — nothing was skipped */
         body += '<div class="dl hunk"><span class="rail"></span><span class="g"></span><span class="g"></span><span class="m"></span>' +
           '<span class="c">' + esc(r.text) + "</span></div>";
         continue;
@@ -962,7 +987,11 @@ function _sbRun() {
     }
     $("atBtn").disabled = blocked;
     $("modelBtn").disabled = !hasEndpoint();
-    $("modeBtn").textContent = MODE_SHORT[S.config.approvalMode] || "Ask";
+    var mv = S.config.approvalMode || "ask";
+    $("modeBtn").innerHTML = icon(MODE_ICON[mv] || "i-hand", "ic-11") +
+      "<span>" + esc(MODE_SHORT[mv] || "Ask") + "</span>";
+    $("modeBtn").title = "Approvals: " + (MODE_SHORT[mv] || "Ask") +
+      " — what Genesis may run without stopping to ask. Not the same as the Plan/Act phase.";
 
     draft.style.height = "auto";
     var natural = draft.scrollHeight;
@@ -1199,7 +1228,7 @@ function _sbRun() {
           '<div class="row"><button class="btn" data-tls="cancelUpload">Cancel</button>' +
           '<button class="btn primary" data-tls="saveCa"' + (S.caUpload.path ? "" : " disabled") + ">Save &amp; Retry</button></div></div>";
       } else {
-        html += '<div class="actions">' +
+        html += '<div class="tls-actions">' +
           '<button class="btn primary" data-tls="upload">Upload Custom CA Bundle</button>' +
           '<button class="btn" data-tls="system">Use System Trust Store</button>' +
           '<button class="btn" data-tls="trace">Retry Connection</button></div>';

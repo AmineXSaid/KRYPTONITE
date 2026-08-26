@@ -25,7 +25,7 @@ this refactor still works.
 | `package.json` | `viewsContainers`/`views`/`commands`/`configuration.title` display strings → "Genesis". `name`, `displayName`, `publisher`, and every `kryptonite.*` command id / config key are **unchanged** — see **Open question: product identity** below. Added `jsdom` devDependency + `test`/`pretest` scripts (the test files already existed and required jsdom; there was no way to run them before this). |
 | `media/icon.svg`, `media/logo.png` | Replaced with the Bezel Roundel (`g-roundel-sm` geometry for the activity-bar SVG; `logo.png` programmatically rendered from the `g-roundel` geometry — see **Marketplace icon** below). |
 | `.vscodeignore` | Excludes `kryptonite-0.3.0-source/**` (an old kx-theme snapshot that was not previously excluded and would otherwise have shipped the retired theme back into the `.vsix`), the unrelated `skills/**` bycatch and pasted screenshots that landed in this bundle, and two unreferenced stray root-level `icon.svg`/`logo.png` duplicates of the old shattered-fragment mark. |
-| `test/drive.js` | Updated to drive the new DOM (roundel, `.stream-row`, history-as-modal, `.step-row`, todos without checkbox chrome) instead of the old kx markup, plus three new assertions for genuinely new behavior (approval-mode sheet, changed-files strip). All 59 assertions pass. |
+| `test/drive.js` | Updated to drive the new DOM (roundel, `.stream-row`, history-as-modal, `.step-row`, todos without checkbox chrome) instead of the old kx markup, plus new assertions for genuinely new behavior (approval-mode sheet, changed-files strip) and regression cases for the six defects found by rendering it. All 71 assertions pass. |
 | `test/host.js` | Untouched — it never touched the frontend, only `App`'s activation/session lifecycle. All 28 assertions pass. |
 
 ## Feature → recipe → file
@@ -107,8 +107,20 @@ the protocol grows to support them, but nothing was faked:
   still shown, styled to the recipe, but isn't clickable to expand; the
   "Open diff"/file-open actions on the card cover the same need.
 - **A third "Ask" phase.** `Phase` is `"plan" | "act"` only in the wire
-  protocol; the mockup's three-way Act/Plan/Ask segmented control was
-  simplified to the two real states.
+  protocol of the 0.4.0 snapshot this was built against, so the mockup's
+  three-way Act/Plan/Ask segmented control renders here as two states.
+  Note that current `main` **does** have all three (its history includes a
+  `claude/ask-plan-act-mcp` PR), so this is a gap in the snapshot, not in the
+  product — when this theme is redone against `main` the segment becomes a
+  genuine three-way control.
+
+  Beware a name collision this creates: the approvals button that sits a few
+  pixels to the right of the PLAN/ACT segment reads `ASK` when
+  `approvalMode === "ask"`, which looks like the missing third phase but is a
+  different concept entirely (what may run without stopping to ask, vs. what
+  the model is allowed to do at all). It now carries a mode icon and a
+  disambiguating tooltip for exactly that reason. If the third phase does
+  land, that button likely needs renaming outright.
 
 ## Marketplace icon
 
@@ -118,6 +130,39 @@ core glyph) since no SVG→PNG toolchain or a designer export was available in
 this environment. It's geometrically accurate but was never eyeballed by a
 person at marketplace-listing size; swap it for a designer export before
 publishing if it doesn't look right at that size.
+
+## Bugs found by actually rendering it
+
+The panel was driven in headless Chromium with real `postMessage` traffic
+(the webview is a browser frame, so the same CSS/JS renders the same pixels
+there as in VS Code). Six defects showed up that reading the code did not,
+all now fixed and covered by regression tests in `test/drive.js`:
+
+1. **The streaming row stranded itself above its own work.** `startStream()`
+   appends when the turn begins, so every tool step, diff and gate appended
+   *after* it — "Thinking…" sat near the top of the transcript with the work
+   it described scrolling on below. `add()` now keeps it trailing. (This was
+   inherited behavior, not new: the pre-refactor `.stream` div did the same.)
+2. **Raw `@@ -12,7 +12,7 @@` headers leaked into the diff**, which the brief
+   explicitly forbids. Hunk boundaries now read `11 LINES ABOVE` /
+   `N LINES SKIPPED`, and a hunk starting at line 1 renders no marker at all.
+3. **`.actions` collided across two components.** The TLS remediation stack
+   declared a bare `.actions { flex-direction: column }`; the permission
+   gate's own `.actions` row never declared `flex-direction`, so the column
+   leaked across specificity and stacked Allow / Always / Deny vertically,
+   centered, against the panel edge. The TLS one is now `.tls-actions`.
+4. **The history modal was trapped inside the header.** Its scrim is
+   `position:absolute; inset:0`, and the nearest positioned ancestor was the
+   42px `.gx-header` — so the dialog rendered clipped into the title bar with
+   no backdrop. `#histModal` now hangs off `#app`.
+5. **The welcome screen never centered.** It carried `flex:1` inside `#log`,
+   which is a block box, so the grow factor did nothing and it sat jammed
+   against the top of an otherwise empty panel. Now `min-height:100%`.
+6. **The approvals button read as a third phase** — see the Ask note above.
+
+Worth stating plainly: items 1, 3 and 4 are the kind of defect that only
+appears once something renders. A jsdom suite that asserts on structure
+passed all of them, because the DOM was correct and the *layout* was not.
 
 ## Definition-of-done self-audit (against `REFACTOR-PROMPT.md`)
 
@@ -138,8 +183,8 @@ publishing if it doesn't look right at that size.
       fixed widths that would overflow at 280px (not verified in a real VS
       Code window; the environment has no way to render one — verify this
       one visually before shipping).
-- [x] `npm run typecheck`, `npm run build`, and `npm test` (59 + 28
-      assertions, including 3 new ones for approval-mode and changed-files)
+- [x] `npm run typecheck`, `npm run build`, and `npm test` (71 + 28
+      assertions, including regression cases for all six defects above)
       all pass clean as of this refactor.
 - [ ] Every pre-existing feature reachable and themed — true for everything
       the wire protocol actually supports (see the feature table). The

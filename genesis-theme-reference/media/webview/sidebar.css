@@ -50,7 +50,9 @@ textarea::placeholder, input::placeholder { color: var(--steel); }
   [data-shim] { background: none !important; color: var(--fog) !important; -webkit-text-fill-color: var(--fog) !important; }
 }
 
+/* #app is the positioning context for the history modal's full-panel scrim. */
 #root, #app { height: 100vh; display: flex; flex-direction: column; min-width: 0; }
+#app { position: relative; }
 
 .ic { flex: none; display: block; width: 16px; height: 16px; }
 .ic-8 { width: 8px; height: 8px; }
@@ -172,7 +174,10 @@ textarea::placeholder, input::placeholder { color: var(--steel); }
 
 /* ───────────────────────── welcome ───────────────────────── */
 
-.welcome { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; justify-content: center; padding: 24px 16px; }
+/* `min-height:100%` rather than `flex:1` — #log is a block box, so a flex
+   grow factor on this child does nothing and the welcome would sit jammed
+   against the top of an otherwise empty panel. */
+.welcome { min-height: 100%; display: flex; flex-direction: column; justify-content: center; padding: 24px 16px; }
 .welcome .roundel { margin-bottom: 18px; color: var(--cream); }
 .welcome .word { font-family: var(--display); font-size: 14px; letter-spacing: .16em; color: var(--cream); margin-bottom: 9px; }
 .welcome .line { font-size: 12.5px; line-height: 1.6; color: var(--fog); margin-bottom: 20px; max-width: 290px; text-wrap: pretty; }
@@ -275,9 +280,12 @@ textarea::placeholder, input::placeholder { color: var(--steel); }
 .dl.add .wd { background: rgba(45, 161, 96, .34); }
 .dl.del .wd { background: rgba(236, 89, 65, .32); }
 
-.diff-actions { display: flex; align-items: center; gap: 16px; padding: 9px 0 0; flex-wrap: wrap; }
+.diff-actions { display: flex; align-items: center; gap: 12px; padding: 9px 0 0; flex-wrap: wrap; }
 .diff-actions .roundel { flex: none; color: var(--cream); }
-.diff-actions .stat { font-family: var(--mono); font-size: 9px; letter-spacing: .1em; text-transform: uppercase; color: var(--steel); flex: 1; }
+/* Shrinkable down to ~100px, then the button group wraps to its own row as a
+   unit instead of the stat line breaking in two and the last button riding
+   the panel edge. */
+.diff-actions .stat { font-family: var(--mono); font-size: 9px; letter-spacing: .1em; text-transform: uppercase; color: var(--steel); flex: 1 1 100px; min-width: 0; }
 .diff-resolved { padding: 9px 0 0; font-family: var(--mono); font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: var(--steel); }
 
 .btn-line {
@@ -296,9 +304,12 @@ textarea::placeholder, input::placeholder { color: var(--steel); }
 /* ── permission gate ── */
 .perm-gate { margin: 0 -13px 16px; padding: 11px 13px 11px 10px; background: var(--ink); border-left: 3px solid var(--orange); border-top: 1px solid var(--slate); border-bottom: 1px solid var(--slate); }
 .perm-gate .lbl9 { color: var(--orange); margin-bottom: 7px; }
-.perm-gate .row { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-.perm-gate .cmd { font-family: var(--mono); font-size: 12px; color: var(--cream); min-width: 0; flex: 1; overflow-wrap: anywhere; }
-.perm-gate .actions { display: flex; align-items: center; gap: 14px; flex: none; flex-wrap: wrap; }
+/* Column, not a wrapping row: at panel widths the command is always long
+   enough to push the buttons onto their own line anyway, and letting them
+   wrap individually stacked them right-aligned against the edge. */
+.perm-gate .row { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
+.perm-gate .cmd { font-family: var(--mono); font-size: 12px; color: var(--cream); min-width: 0; overflow-wrap: anywhere; }
+.perm-gate .actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .perm-gate .actions .btn-line { padding: 6px 12px; }
 .perm-gate .actions .always { font-family: var(--mono); font-size: 9.5px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--steel); }
 .perm-gate .actions .always:hover { color: var(--cream); }
@@ -436,7 +447,7 @@ textarea::placeholder, input::placeholder { color: var(--steel); }
 .model-opt[aria-selected="true"] .nm { color: var(--cream); }
 .model-opt .note { font-size: 11px; line-height: 1.35; color: var(--steel); }
 
-.mode-btn { flex: none; height: 24px; padding: 0 6px; font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--steel); border-radius: 4px; }
+.mode-btn { flex: none; display: flex; align-items: center; gap: 5px; height: 24px; padding: 0 6px; font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--steel); border-radius: 4px; }
 .mode-btn:hover { color: var(--cream); }
 .tb-btn { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 4px; color: var(--steel); }
 .tb-btn:hover:not(:disabled) { color: var(--cream); background: #3a383f; }
@@ -484,8 +495,12 @@ textarea::placeholder, input::placeholder { color: var(--steel); }
 .fixk .row code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font-size: 10.5px; color: var(--fog); }
 .copied { margin-top: 4px; font-size: 11px; color: var(--green); }
 
-.actions { display: flex; flex-direction: column; gap: 6px; }
-.actions .btn { width: 100%; }
+/* Named for the TLS remediation block specifically. A bare `.actions` here
+   collided with the permission gate's own `.actions` row: that rule never
+   declares flex-direction, so this one's `column` leaked across and stacked
+   Allow/Always/Deny on top of each other. */
+.tls-actions { display: flex; flex-direction: column; gap: 6px; }
+.tls-actions .btn { width: 100%; }
 
 .upload label { font-size: 11px; color: var(--steel); display: block; margin-bottom: 6px; }
 .split { display: flex; }
