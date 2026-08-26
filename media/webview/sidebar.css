@@ -73,11 +73,14 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   padding: 0 10px 0 12px; position: relative;
   border-bottom: 1px solid var(--kx-line);
 }
-/* The wordmark: static, and the one place the display cut is allowed to speak.
+/* The wordmark: static, and the one place Michroma is allowed to speak.
    VS Code's own view header above it is blanked in package.json, so this is the
-   only KRYPTONITE on screen. */
+   only KRYPTONITE on screen.
+   Michroma has a single weight, so `font-weight: 700` here would synthesise a
+   bold the face does not have. The design sets it at 400 and lets the tracking
+   do the work. */
 .kx-wordmark {
-  font-family: var(--kx-display); font-size: 11px; font-weight: 700;
+  font-family: var(--kx-brand); font-size: 11px; font-weight: 400;
   letter-spacing: .2em; text-transform: uppercase; color: var(--kx-fg);
 }
 /* Number and meter together, in the header. The footer strip they used to
@@ -187,18 +190,60 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 
 #log { flex: 1; overflow-y: auto; padding: 14px 14px 4px; }
 
+/* The welcome screen, as the design draws it: the mark, the wordmark, one line
+   of prose, then two lists - what you could ask for, and what you were already
+   doing. Left-aligned below the intro, because a list of things to click is
+   read down its left edge and centring it makes every row start somewhere
+   different. */
 .welcome {
   min-height: 340px; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; text-align: center;
+  justify-content: center; align-items: flex-start; text-align: left;
+  padding: 24px 4px;
 }
-.welcome .crystal { opacity: .9; margin-bottom: 8px; }
-/* 17px clears the 15px bar, so the display cut is correct here. */
-.welcome h2 {
-  font-family: var(--kx-display); font-size: 17px; font-weight: 700; letter-spacing: -.01em;
+/* Left-aligned, as the design draws it, and not only for fidelity: everything
+   below the intro is a list of rows, and a centred mark above a left-aligned
+   list gives the column two different axes. One edge, top to bottom. */
+.welcome .crystal { opacity: .9; margin-bottom: 18px; }
+/* Michroma, at the one size and tracking it is drawn for. */
+.w-mark {
+  font-family: var(--kx-brand); font-size: 14px; font-weight: 400;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--kx-fg);
+  margin-bottom: 9px;
 }
 .welcome p {
   font-family: var(--kx-prose); font-size: 12.5px; line-height: 1.6;
-  color: var(--kx-fg-2); max-width: 30ch; margin: 4px 0 12px;
+  color: var(--kx-fg-2); max-width: 290px; margin: 0 0 20px;
+  text-wrap: pretty;
+}
+.welcome .w-sec { width: 100%; margin-top: 22px; }
+.w-label {
+  width: 100%; text-align: left;
+  font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--kx-fg-3);
+  margin-bottom: 8px;
+}
+.w-label.row { display: flex; align-items: baseline; gap: 8px; }
+.w-all {
+  font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--kx-fg-3);
+}
+.w-all:hover { color: var(--kx-fg); }
+.w-list { width: 100%; border-top: 1px solid var(--kx-line); }
+.w-row {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 9px 4px; text-align: left;
+  border-bottom: 1px solid var(--kx-line);
+  color: var(--kx-fg-3);
+}
+.w-row:hover { background: var(--kx-surface-3); }
+.w-row .t {
+  min-width: 0; flex: 1; font-size: 12px; line-height: 1.4; color: var(--kx-fg-2);
+}
+.w-row:hover .t { color: var(--kx-fg); }
+.w-dot { flex: none; width: 5px; height: 5px; background: var(--kx-accent); }
+.w-ago {
+  flex: none; font-family: var(--kx-mono); font-size: 9px;
+  letter-spacing: .06em; color: var(--kx-fg-3);
 }
 .chips { display: flex; flex-direction: column; gap: 6px; width: 100%; max-width: 300px; }
 .chip-btn {
@@ -1097,17 +1142,19 @@ li.doing .cbx { border-color: var(--kx-accent); }
 .qp-row.mdl[data-on="1"] .mdl-id { color: var(--kx-fg); }
 .mdl-note { font-size: 11px; line-height: 1.35; color: var(--kx-fg-3); }
 
-/* The kind. Sits where the mockup puts the context window - a right-aligned
-   mono tag on the first line - and takes the kind's hue rather than the
-   mockup's flat slate, because this slot now holds a CLASSIFICATION and
-   telling them apart at a glance is the whole reason the field exists. The
-   same argument the MCP tool chips make one pane over. */
-.mdl-kind {
+/* The context window, in the slot and the style the mockup puts it in: a
+   right-aligned mono figure on the first line, dimmer than the id it sits
+   beside. The kind used to live here; it moved to the group header, which is
+   where a classification shared by several rows belongs. */
+.mdl-ctx {
   flex: none; margin-top: 3px;
   font-family: var(--kx-mono); font-size: 9px;
-  letter-spacing: .1em; text-transform: uppercase;
+  letter-spacing: .1em; color: var(--kx-fg-3);
   white-space: nowrap;
 }
+/* The group header carries the kind, so in this listbox it carries the kind's
+   hue too - the colour is set inline from the same table the rows use. */
+.qp[data-mode="model"] .qp-group[data-kind] { color: inherit; }
 .qp-empty { padding: 8px 9px; font-size: 11.5px; color: var(--kx-fg-2); }
 
 /* #4 â€” one card, one control row. */

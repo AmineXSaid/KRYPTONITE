@@ -41,17 +41,27 @@ function makeNonce(): string {
 /**
  * Emit `@font-face` rules only when the woff2 files actually ship.
  *
- * Anthropic Sans in two optical sizes. The `Text` cut is drawn for 11–13px and
- * carries the whole interface; `Display` is tightened for 15px and above and is
- * used only on the two panel titles that reach that size. Setting Display at
- * 12px is the standard way to make a well-drawn family look wrong, so the two
- * are separate CSS families rather than one - the stylesheet has to opt into
- * Display deliberately.
+ * The three families the Genesis design is drawn in, and nothing else:
+ *
+ *   IBM Plex Sans  the whole interface. Shipped as the variable cut, which is
+ *                  one 45 KB file covering 400/500/600 - the three weights the
+ *                  design uses - rather than three static faces.
+ *   Space Mono     every mono run in the design, and there are many: tab
+ *                  labels, model ids, kind tags, timings, code. This is the
+ *                  one that was previously *named* in the CSS and never
+ *                  shipped, so it silently fell back to the platform mono and
+ *                  no mono in the panel was the drawn one.
+ *   Michroma       the GENESIS wordmark only. A display face at one size, used
+ *                  nowhere else, which is why it is its own family rather than
+ *                  a weight of the body face.
+ *
+ * All three are SIL Open Font License, so bundling them is redistribution the
+ * licence expressly permits - see media/fonts/LICENSE-NOTE.md, which this
+ * replaced an unresolved licensing question with.
  *
  * Absent files are skipped rather than 404'd, so a build with no `media/fonts/`
  * still renders on the system stack in the CSS. `font-src` is scoped to the
- * extension origin and nothing here is remote, so the CSP is unchanged. The
- * Light and Extrabold cuts are not referenced by the design and do not ship.
+ * extension origin and nothing here is remote, so the CSP is unchanged.
  */
 function fontFaces(extensionUri: vscode.Uri, webview: vscode.Webview): string {
   const dir = vscode.Uri.joinPath(extensionUri, "media", "fonts");
@@ -63,13 +73,12 @@ function fontFaces(extensionUri: vscode.Uri, webview: vscode.Webview): string {
   }
 
   const wanted: { file: string; family: string; weight: string; italic?: true }[] = [
-    { file: "AnthropicSans-Text-Regular.woff2", family: "Anthropic Sans", weight: "400" },
-    { file: "AnthropicSans-Text-RegularItalic.woff2", family: "Anthropic Sans", weight: "400", italic: true },
-    { file: "AnthropicSans-Text-Medium.woff2", family: "Anthropic Sans", weight: "500" },
-    { file: "AnthropicSans-Text-Semibold.woff2", family: "Anthropic Sans", weight: "600" },
-    { file: "AnthropicSans-Text-Bold.woff2", family: "Anthropic Sans", weight: "700" },
-    { file: "AnthropicSans-Display-Semibold.woff2", family: "Anthropic Sans Display", weight: "600" },
-    { file: "AnthropicSans-Display-Bold.woff2", family: "Anthropic Sans Display", weight: "700" },
+    // One variable file, declared across the range the design uses. A static
+    // face per weight would be three times the bytes for the same result.
+    { file: "IBMPlexSans-Variable.woff2", family: "IBM Plex Sans", weight: "100 700" },
+    { file: "SpaceMono-Regular.woff2", family: "Space Mono", weight: "400" },
+    { file: "SpaceMono-Bold.woff2", family: "Space Mono", weight: "700" },
+    { file: "Michroma-Regular.woff2", family: "Michroma", weight: "400" },
   ];
 
   const rules: string[] = [];

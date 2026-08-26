@@ -85,10 +85,27 @@ console.log("\n──── the model picker says what each endpoint serves ─�
   ok("the popup declares which picker it is",
     d.getElementById("qp").getAttribute("data-mode") === "model");
 
-  const badges = [...d.querySelectorAll("#qp .mdl-kind")].map((e) => e.textContent);
-  ok("each endpoint's kind is on its row",
-    badges.includes("Chat") && badges.includes("Reasoning") && badges.includes("Multimodal"),
-    badges.join(" | "));
+  // The kind is a GROUP HEADER, not a per-row tag. Endpoint was the obvious
+  // grouping and the wrong one: with one model per profile it put a header
+  // above every single row. What is being chosen between here is capability,
+  // so that is what the headers say.
+  const heads = [...d.querySelectorAll("#qp .qp-group[data-kind]")].map((e) => e.textContent);
+  ok("the list is split by kind", heads.length === 3, heads.join(" | "));
+  ok("and the headers name the kinds",
+    heads.join(",") === "Chat,Reasoning,Multimodal", heads.join(","));
+  ok("in a fixed order, not whatever order the profiles loaded in",
+    heads.indexOf("Chat") < heads.indexOf("Reasoning"), heads.join(","));
+  ok("each header is hue-coded",
+    [...d.querySelectorAll("#qp .qp-group[data-kind]")].every((e) => /color:/.test(e.getAttribute("style") || "")));
+  // The endpoint moves onto the row, which is what distinguishes two models of
+  // the same kind.
+  const notes = [...d.querySelectorAll("#qp .mdl-note")].map((e) => e.textContent);
+  ok("each row names the endpoint that serves it",
+    notes.includes("gw") && notes.includes("think") && notes.includes("eyes"),
+    notes.join(" | "));
+  ok("and how much context it has",
+    [...d.querySelectorAll("#qp .mdl-ctx")].map((e) => e.textContent).includes("128K"),
+    [...d.querySelectorAll("#qp .mdl-ctx")].map((e) => e.textContent).join(" | "));
 
   // The bug this pins: `data-active` is the keyboard cursor and `data-on` is
   // the endpoint in force. Binding the dot to the cursor lit two rows at once.
@@ -119,8 +136,11 @@ console.log("\n──── the model picker says what each endpoint serves ─�
     profiles: [PROFILE("gw", "telepathy", "gpt-4o", true)],
   }) }));
   d.getElementById("modelBtn").click();
-  const badge = d.querySelector("#qp .mdl-kind");
-  ok("an unknown kind falls back rather than throwing", Boolean(badge), badge && badge.textContent);
+  // It must land in a bucket rather than vanishing: bucketing walks the known
+  // kinds, so an unrecognised one has to resolve through llmKind() to chat.
+  const head = d.querySelector("#qp .qp-group[data-kind]");
+  ok("an unknown kind falls back rather than vanishing", Boolean(head), head && head.textContent);
+  ok("and its row is still offered", d.querySelectorAll("#qp .qp-row.mdl").length >= 1);
 }
 
 /* ── the form ──────────────────────────────────────────────────────────── */
@@ -223,7 +243,7 @@ console.log("\n──── the endpoints list carries it too ────");
 console.log("\n──── the listbox is styled, not just marked up ────");
 {
   const needed = [
-    ".qp-row.mdl", ".mdl-dot", ".mdl-col", ".mdl-id", ".mdl-note", ".mdl-kind",
+    ".qp-row.mdl", ".mdl-dot", ".mdl-col", ".mdl-id", ".mdl-note", ".mdl-ctx",
     '.qp[data-mode="model"]',
   ];
   const missing = needed.filter((s) => !CSS.includes(s));

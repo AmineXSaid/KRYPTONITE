@@ -1,55 +1,55 @@
-# Anthropic Sans — licensing status of the files in this folder
+# Fonts bundled with this extension
 
-**Read this before publishing the extension to a marketplace.**
+The four `.woff2` files in this folder are bundled into the packaged `.vsix`,
+which means the extension **redistributes** them to everyone who installs it.
+All four are under the **SIL Open Font License 1.1**, which expressly permits
+that, including inside a commercial product, provided the fonts are not sold on
+their own and the licence travels with them.
 
-The seven `.woff2` files in this folder are Anthropic Sans, converted from `.otf`
-originals. They are bundled in the packaged `.vsix`, which means the extension
-**redistributes** them to every person who installs it.
+| File | Family | Licence | Upstream |
+| --- | --- | --- | --- |
+| `IBMPlexSans-Variable.woff2` | IBM Plex Sans | OFL 1.1 | github.com/IBM/plex |
+| `SpaceMono-Regular.woff2` | Space Mono 400 | OFL 1.1 | github.com/googlefonts/spacemono |
+| `SpaceMono-Bold.woff2` | Space Mono 700 | OFL 1.1 | github.com/googlefonts/spacemono |
+| `Michroma-Regular.woff2` | Michroma | OFL 1.1 | github.com/googlefonts/michroma |
 
-## What the design handoff says
+These are the three families the Genesis design is drawn in: IBM Plex Sans for
+the interface, Space Mono for every mono run in it, and Michroma for the
+GENESIS wordmark alone.
 
-`FONTS.md`, from the design project this typography came from
-(`claude.ai/design/p/16299f11-5add-4606-a319-a8f087dd759a`), states verbatim:
+All four are the **latin subset** as served by Google Fonts
+(`U+0000-00FF` plus the usual punctuation and symbol ranges). IBM Plex Sans is
+the variable cut, so one 45 KB file covers the 400/500/600 the design uses
+instead of three static faces. 94 KB total.
+
+## What this replaced, and why it matters
+
+This folder previously held seven faces of **Anthropic Sans**, and this note
+recorded that bundling them was a **licensing matter unresolved**:
 
 > Anthropic Sans is a proprietary typeface commissioned by Anthropic. It is not
-> published under an open licence and is not distributed through Google Fonts or
-> Adobe Fonts. The files provided here came from a third-party mirror, which is not
-> a licence grant.
+> published under an open licence […] The files provided here came from a
+> third-party mirror, which is not a licence grant.
 >
-> Rendering it locally on a machine where it is already installed is one thing.
-> Bundling the binaries into a distributed extension is redistribution, and that is
-> a licensing matter to settle with Anthropic before release — not a build step.
+> Bundling the binaries into a distributed extension is redistribution, and that
+> is a licensing matter to settle with Anthropic before release.
 
-## The decision on record
+That note prescribed two ways out: obtain written permission, or fall back to a
+licensed face. The Genesis design specifies IBM Plex Sans, which **is** a
+licensed face, so matching the design and clearing the blocker turned out to be
+the same change. The Anthropic Sans binaries have been removed; nothing in the
+CSS references them.
 
-Bundling was chosen deliberately, with the above understood, so that the panel
-renders as designed on every machine rather than only on machines that already have
-the family installed. That trade is a licensing question, not a technical one, and it
-is **unresolved**: nothing here constitutes permission to redistribute.
+`git log` retains them if the decision is ever revisited.
 
-Before any public release, either
+## Note on the CSP
 
-1. obtain written permission from Anthropic to redistribute these binaries, or
-2. remove this folder from the package and fall back to a licensed face.
+The webview CSP is `default-src 'none'` with `font-src` scoped to the extension
+origin. A family that is merely *named* in the CSS cannot be fetched from Google
+Fonts at runtime — it has to be bundled here. That is not a hypothetical: for
+several releases `--kx-mono` named Space Mono without shipping it, so every mono
+run in the panel silently rendered in the platform monospace.
 
-## Falling back
-
-Option 2 is cheap by construction. `src/ui/shell.ts` emits `@font-face` only for
-files that are actually present, and every CSS stack already names system fallbacks
-after `'Anthropic Sans'`. Deleting this folder — or adding `media/fonts/**` to
-`.vscodeignore` — removes the fonts from the package with no code change; the panel
-then renders on the platform sans-serif.
-
-`FONTS.md` names Plus Jakarta Sans (SIL Open Font License, free to embed and
-redistribute) as the intended licensed substitute, and records that the design was
-measured against it. Note that it cannot be loaded from Google Fonts at runtime: the
-webview CSP is `default-src 'none'` with `font-src` scoped to the extension origin,
-so it would have to be bundled the same way these files are.
-
-## Provenance
-
-- Source: `.otf` static instances supplied with the design handoff.
-- Conversion: `fontTools` 4.63.0 + `brotli`, OTF → WOFF2, no subsetting.
-  419 KB → 236 KB across seven faces; all 684 glyphs retained (622 for the italic).
-- Faces shipped: Text 400/400-italic/500/600/700, Display 600/700. The Light and
-  Extrabold cuts are unreferenced by the design and are not included.
+`src/ui/shell.ts` emits `@font-face` only for files that are actually present,
+and every CSS stack names system fallbacks after the bundled family, so
+deleting a file here degrades the panel rather than breaking it.

@@ -165,6 +165,18 @@ function _sbRun() {
     "/tests": "tests", "/commit": "commit"
   };
 
+  /* The three openers on the welcome screen.
+   *
+   * Each is an existing capability rather than a sample prompt: `run` is either
+   * a slash command this panel already routes, or the literal text of one. They
+   * point at what the user has open - this file, these changes, this selection -
+   * so none of them can name code that does not exist here. */
+  var STARTERS = [
+    { icon: "i-file", text: "Explain the file I have open", run: "/explain" },
+    { icon: "i-diff", text: "Review my uncommitted changes", run: "review" },
+    { icon: "i-book", text: "Write tests for the selected function", run: "/tests" }
+  ];
+
   var REVIEW_PROMPT =
     "Review the changes currently in the workspace. Read the modified files, " +
     "summarise what changed, and flag anything risky or inconsistent.";
@@ -220,6 +232,25 @@ function _sbRun() {
    * capability block - and the form says so before the user commits, rather
    * than leaving them to diff the YAML afterwards. Mirrors capabilitiesFor()
    * in src/endpoints/llmKind.ts; test/llm-kind.cjs pins the pair. */
+  /* How much context the endpoint behind a model has, as the mockup writes it:
+     a short mono figure on the right of the row. Returns "" when the profile
+     never declared one, so the slot collapses rather than printing a zero.
+
+     Self-contained and at this level for the same brace-matching reason as
+     llmKind above - test/mcp-render.cjs lifts whole functions out of this file. */
+  function ctxLabel(endpointId) {
+    var win = 0;
+    for (var i = 0; i < S.profiles.length; i++) {
+      if (S.profiles[i].id !== endpointId) continue;
+      win = (S.profiles[i].capabilities && S.profiles[i].capabilities.contextWindow) || 0;
+      break;
+    }
+    if (!win) return "";
+    if (win >= 1000000) return (Math.round(win / 100000) / 10) + "M";
+    if (win >= 1000) return Math.round(win / 1000) + "K";
+    return String(win);
+  }
+
   function kindImplies(id) {
     if (id === "multimodal") return "Turns vision on.";
     if (id === "reasoning") return "Raises the output budget to 8192 - thinking spends tokens before the answer does.";
@@ -1445,21 +1476,49 @@ function _sbRun() {
       recent.push(sess);
     }
 
-    var body = crystal(46, "crystal") + "<h2>How can I help?</h2>";
-    if (!recent.length) {
-      body += "<p>Genesis is connected and ready. Ask anything to begin.</p>";
-    } else {
-      body += "<p>Genesis is connected and ready. Ask anything, or pick up where you left off.</p>" +
-        '<div class="chips resume">';
+    // The wordmark, not a sentence. "How can I help?" is what every assistant
+    // says; the mark says which one this is, and it is the one place Michroma
+    // appears outside the header.
+    var body = crystal(34, "crystal") +
+      '<div class="w-mark">Genesis</div>' +
+      '<p>' + (recent.length
+        ? "Pick up where you left off, or start something new."
+        : "I read your workspace, propose edits as diffs, and never write a file " +
+          "until you accept it. Ask anything about this repository.") + "</p>";
+
+    // Openers. These were removed once for being invented examples about a
+    // function nobody in the workspace has - and that objection was right about
+    // the old ones and does not apply to these. Every one is a real command
+    // this extension already has, aimed at what the user has open right now:
+    // no invented identifiers, nothing that can refer to somebody else's code.
+    body += '<div class="w-label">Try</div><div class="w-list">';
+    for (var si = 0; si < STARTERS.length; si++) {
+      body += '<button class="w-row" data-starter="' + esc(STARTERS[si].run) + '">' +
+        icon(STARTERS[si].icon, "ic-11") +
+        '<span class="t">' + esc(STARTERS[si].text) + "</span>" +
+        icon("i-chev", "ic-9") + "</button>";
+    }
+    body += "</div>";
+
+    if (recent.length) {
+      body += '<div class="w-sec">' +
+        '<div class="w-label row">Recent<span class="sp"></span>' +
+          '<button class="w-all" data-act="history">All</button></div>' +
+        '<div class="w-list">';
       for (var rj = 0; rj < recent.length; rj++) {
         var r = recent[rj];
+        // The design's row is title + relative time. The message count it drops
+        // is still worth having - a thread of one reads the same as a thread of
+        // forty from its title alone - so it moves into the title attribute
+        // rather than off the screen.
         var n = r.count === 1 ? "1 message" : r.count + " messages";
-        body += '<button class="chip-btn resume-btn" data-session="' + esc(r.id) + '">' +
-          icon("i-clock", "ic-11") +
-          '<span class="col"><span class="t ell">' + esc(r.title) + "</span>" +
-          '<span class="m">' + esc(r.when) + " · " + n + "</span></span></button>";
+        body += '<button class="w-row" data-session="' + esc(r.id) + '"' +
+          ' title="' + esc(r.title + " - " + n + ", " + r.when) + '">' +
+          '<span class="w-dot"></span>' +
+          '<span class="t ell">' + esc(r.title) + "</span>" +
+          '<span class="w-ago">' + esc(r.when) + "</span></button>";
       }
-      body += "</div>";
+      body += "</div></div>";
     }
     logEl.appendChild(div("welcome", body));
   }
@@ -2725,26 +2784,45 @@ function _sbRun() {
           active: pinned === ""
         });
       }
-      for (var i = 0; i < S.models.length; i++) {
-        var g = S.models[i];
-        rows.push({ group: g.group });
-        for (var j = 0; j < g.models.length; j++) {
-          rows.push({
-            endpoint: g.group,
-            model: g.models[j],
-            // The kind rides on the group: it is declared by the profile, so
-            // every model reached through that route shares it.
-            kind: g.kind,
+      // Grouped by KIND, not by endpoint.
+      //
+      // Endpoint was the obvious grouping and the wrong one: with one model per
+      // profile it produced a header per row, so the list was twice as tall as
+      // it needed to be and every header restated a name the row below already
+      // carried. What a user is choosing between here is capability - "I want
+      // the one that thinks", "I want the one that sees" - so that is what the
+      // headers say, and the endpoint moves onto the row where it belongs as
+      // the answer to "which of these serves it".
+      //
+      // Buckets are walked in LLM_KINDS order rather than in profile order, so
+      // the list reads the same way every time regardless of what order the
+      // endpoints happen to load in. A profile whose kind this build does not
+      // recognise resolves through llmKind() to chat rather than vanishing.
+      for (var k = 0; k < LLM_KINDS.length; k++) {
+        var bucket = [];
+        for (var bi = 0; bi < S.models.length; bi++) {
+          if (llmKind(S.models[bi].kind).id === LLM_KINDS[k].id) bucket.push(S.models[bi]);
+        }
+        if (!bucket.length) continue;
+        rows.push({ group: LLM_KINDS[k].label, groupKind: LLM_KINDS[k].id, groupHue: LLM_KINDS[k].hue });
+        for (var bj = 0; bj < bucket.length; bj++) {
+          var g = bucket[bj];
+          for (var j = 0; j < g.models.length; j++) {
+            rows.push({
+              endpoint: g.group,
+              model: g.models[j],
+              kind: g.kind,
             // Exactly one row in this list is the selection. With an Auto row
             // present it owns the unpinned state, so a model row is lit only
             // when it is pinned by name - otherwise Auto and the endpoint it
             // resolved to both lit up, which reads as two selections. With no
             // Auto row there is nothing else to own it, so the single resolved
             // endpoint is the selection.
-            active: hasAuto
-              ? pinned === g.group
-              : Boolean(current && current.id === g.group)
-          });
+              active: hasAuto
+                ? pinned === g.group
+                : Boolean(current && current.id === g.group)
+            });
+          }
         }
       }
       return rows;
@@ -2813,7 +2891,15 @@ function _sbRun() {
     var idx = -1, html = "";
     for (var i = 0; i < items.length; i++) {
       var r = items[i];
-      if (r.group) { html += '<div class="qp-group">' + esc(r.group) + "</div>"; continue; }
+      if (r.group) {
+        // In the model listbox the header IS the classification, so it carries
+        // the kind's hue. Everywhere else a group header is just a divider.
+        html += r.groupKind
+          ? '<div class="qp-group" data-kind="' + esc(r.groupKind) + '" style="color:' + r.groupHue + '">' +
+            esc(r.group) + "</div>"
+          : '<div class="qp-group">' + esc(r.group) + "</div>";
+        continue;
+      }
       idx++;
       var on = idx === S.qpIndex ? "1" : "0";
       if (r.skill) {
@@ -2864,17 +2950,23 @@ function _sbRun() {
         // actually in force. They are different rows most of the time, and the
         // design distinguishes them: the cursor moves the row background, the
         // selection lights the dot and brightens the id.
+        //
+        // The kind is on the header above, so the row spends its three slots
+        // on what distinguishes models WITHIN a kind: the id, which endpoint
+        // serves it, and how much context it has. That is the mockup's row
+        // exactly - id over a note, with a mono figure on the right.
+        var ctx = ctxLabel(r.endpoint);
         html += '<button class="qp-row mdl" role="option" data-active="' + on + '"' +
           ' data-on="' + (r.active ? "1" : "0") + '" aria-selected="' + (r.active ? "true" : "false") + '"' +
           ' data-i="' + idx + '"' +
-          ' title="' + esc(r.model + " - " + k.label + ". " + k.note + ".") + '">' +
+          ' title="' + esc(r.model + " - " + k.label + ". " + k.note + ". Served by " + r.endpoint + ".") + '">' +
           '<span class="mdl-dot"></span>' +
           '<span class="mdl-col">' +
             '<span class="mdl-id ell">' + esc(r.model) + "</span>" +
-            '<span class="mdl-note">' + esc(k.note) + "</span>" +
+            '<span class="mdl-note ell">' + esc(r.endpoint) + "</span>" +
           "</span>" +
-          '<span class="mdl-kind" data-kind="' + esc(k.id) + '" style="color:' + k.hue + '">' +
-            esc(k.label) + "</span></button>";
+          (ctx ? '<span class="mdl-ctx">' + esc(ctx) + "</span>" : "") +
+          "</button>";
       }
     }
     qp.innerHTML = html;
@@ -4040,7 +4132,10 @@ function _sbRun() {
       post("loadSession", { id: b.getAttribute("data-session") });
     });
     document.addEventListener("click", function (e) {
-      if (!e.target.closest(".kx-header")) closePops();
+      // The welcome screen's "All" opens the history popover, and it lives in
+      // the transcript rather than the header - without this exemption this
+      // closer fires on the same click and shuts it again.
+      if (!e.target.closest(".kx-header") && !e.target.closest('[data-act="history"]')) closePops();
       // The sheet covers the panel and handles its own backdrop click, so the
       // document-level closer must not also fire on it.
       if (!e.target.closest("#permBtn") && !e.target.closest("#permPop")) togglePerm(false);
@@ -4088,12 +4183,34 @@ function _sbRun() {
       if (recent) { post("loadSession", { id: recent.getAttribute("data-session") }); return; }
       var sug = e.target.closest("[data-sug]");
       if (sug) { sendText(sug.getAttribute("data-sug")); return; }
+      // A welcome opener. The slash ones go through runSlash so they behave
+      // exactly as if typed - /explain and /tests resolve their own target
+      // from the active editor and send nothing on their own - and "review"
+      // is a real prompt, so it is sent.
+      var st = e.target.closest("[data-starter]");
+      if (st) {
+        var run = st.getAttribute("data-starter");
+        var box = $("draft");
+        if (run === "review") sendText(REVIEW_PROMPT);
+        else { runSlash(run.slice(1), box); syncComposer(); box.focus(); }
+        return;
+      }
       var act = e.target.closest("[data-act]");
       if (!act) return;
       var a = act.getAttribute("data-act");
       if (a === "doctor") { setTab("diagnostics"); openSection("secTls"); post("runTrace"); }
       else if (a === "newEndpoint") post("newEndpoint");
       else if (a === "ccEndpoints") post("openControlCenter", { section: "endpoints" });
+      else if (a === "history") {
+        // Same sequence the header's history button uses: ask the host to
+        // refresh the list, render, then show. Skipping listSessions would
+        // open the popover on whatever was cached at boot.
+        closePops();
+        post("listSessions");
+        renderHistory();
+        $("historyPop").hidden = false;
+        $("histBtn").setAttribute("aria-expanded", "true");
+      }
     });
 
     var draft = $("draft");

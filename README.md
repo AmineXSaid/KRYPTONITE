@@ -44,6 +44,15 @@ reasoning model that also reads images is `kind: reasoning` with
 the field existed loads as `chat`; a misspelled one is refused, because the
 alternative is silently seeding the wrong capabilities.
 
+### Typography
+
+The panel ships the three families it is drawn in — **IBM Plex Sans** for the
+interface, **Space Mono** for every mono run, **Michroma** for the wordmark —
+all under the SIL Open Font License. They have to be bundled rather than linked:
+the webview CSP is `default-src 'none'` with `font-src` scoped to the extension
+origin, so a family merely named in the CSS renders in the platform fallback and
+nothing reports it. `media/fonts/LICENSE-NOTE.md` has the details.
+
 ### Why the transport is hand-built
 
 Node's global `fetch` ignores `NODE_EXTRA_CA_CERTS` in some extension-host

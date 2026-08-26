@@ -334,14 +334,25 @@ function boot() {
   {
     const b = bootWith([sess("cur", "Untitled", 0, "now", true)]);
     const w = b.d.querySelector(".welcome");
-    ok("a first run still welcomes", /How can I help/.test(w.textContent));
+    // The wordmark, not a sentence: "How can I help?" is what every assistant
+    // says, and the mark says which one this is.
+    ok("a first run still welcomes", !!w.querySelector(".w-mark"));
     ok("and offers nothing to resume", w.querySelectorAll("[data-session]").length === 0);
-    ok("saying so in the copy", /Ask anything to begin/.test(w.textContent), w.textContent.slice(0, 90));
+    ok("saying so in the copy", /Ask anything about this repository/.test(w.textContent),
+      w.textContent.slice(0, 90));
     // The invented examples are gone. Asserted on the markup rather than the
     // words, because the comment recording why they went still names them.
     ok("no fabricated suggestion buttons remain",
       !/data-sug="Add retry|data-sug="Write tests/.test(SRC),
       "they described code no workspace has");
+    // What replaced them. Every opener is an existing command aimed at what the
+    // user has open, so none of them can name code this workspace does not have.
+    const starters = [...w.querySelectorAll("[data-starter]")];
+    ok("but real openers are offered", starters.length === 3, String(starters.length));
+    ok("and each runs something that already exists",
+      starters.every((x) => /^(\/explain|\/tests|review)$/.test(x.getAttribute("data-starter"))),
+      starters.map((x) => x.getAttribute("data-starter")).join(","));
+    ok("even on a first run, when there is nothing to resume", starters.length === 3);
     b.dom.window.close();
   }
 
@@ -359,11 +370,18 @@ function boot() {
     ok("in the order given", chips.map((c) => c.getAttribute("data-session")).join(",") === "a,b,c",
       chips.map((c) => c.getAttribute("data-session")).join(","));
     ok("each names the conversation", /Fix the TLS handshake/.test(chips[0].textContent));
-    // A title alone reads the same for a thread of one message and one of forty.
-    ok("and says how big and how old it is",
-      /12 messages/.test(chips[0].textContent) && /2h ago/.test(chips[0].textContent),
-      chips[0].textContent);
-    ok("the copy invites resuming", /pick up where you left off/.test(b.d.querySelector(".welcome").textContent));
+    ok("and how old it is", /2h ago/.test(chips[0].textContent), chips[0].textContent);
+    // A title alone reads the same for a thread of one message and one of
+    // forty. The design's row has no room for the count, so it is on the title.
+    ok("how big it is is still reachable", /12 messages/.test(chips[0].title), chips[0].title);
+    ok("the copy invites resuming",
+      /Pick up where you left off/.test(b.d.querySelector(".welcome").textContent));
+    ok("and the whole history is one click away", !!b.d.querySelector('.welcome [data-act="history"]'));
+    b.sent.length = 0;
+    b.click('.welcome [data-act="history"]');
+    ok("which opens the history popover", !b.d.getElementById("historyPop").hidden);
+    ok("having asked the host to refresh it first",
+      b.sent.some((m) => m.type === "listSessions"), JSON.stringify(b.sent));
 
     b.sent.length = 0;
     chips[1].dispatchEvent(new b.w.MouseEvent("click", { bubbles: true }));
