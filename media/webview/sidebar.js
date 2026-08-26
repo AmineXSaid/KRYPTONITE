@@ -822,7 +822,7 @@ function _sbRun() {
           // Static, always. This is the product's one wordmark; the duplicate
           // that used to sit above it is VS Code's view header, blanked in
           // package.json rather than competing with this.
-          '<span class="kx-wordmark">Kryptonite</span><span class="sp"></span>' +
+          '<span class="kx-wordmark">Genesis</span><span class="sp"></span>' +
           // Context usage belongs up here, not in the footer: it is status, not
           // a control, and moving it up shortens the composer.
           // The meter lives here now. It used to sit in a strip under the
@@ -938,7 +938,7 @@ function _sbRun() {
               // marked, and the input above it is painted transparent.
               '<div class="draft-wrap">' +
                 '<div class="draft-mirror" id="draftMirror" aria-hidden="true"></div>' +
-                '<textarea id="draft" rows="1" aria-label="Message" placeholder="Ask Kryptonite anything…   ( / skills · @ files )"></textarea>' +
+                '<textarea id="draft" rows="1" aria-label="Message" placeholder="Ask Genesis anything…   ( / skills · @ files )"></textarea>' +
               '</div>' +
               '<div class="toolbar">' +
                 // #4 - the control row carries controls only. The keycap that
@@ -1324,15 +1324,15 @@ function _sbRun() {
     if (!S.workspace.open) {
       logEl.appendChild(div("welcome",
         crystal(46, "crystal") +
-        "<h2>Open a folder to use Kryptonite</h2>" +
-        "<p>Kryptonite reads endpoint profiles and skills from the folder you have open, and edits files inside it.</p>"));
+        "<h2>Open a folder to use Genesis</h2>" +
+        "<p>Genesis reads endpoint profiles and skills from the folder you have open, and edits files inside it.</p>"));
       return;
     }
     if (!hasEndpoint()) {
       logEl.appendChild(div("welcome",
         crystal(46, "crystal") +
         "<h2>No endpoint configured</h2>" +
-        "<p>Kryptonite works against endpoint profiles defined in .agent/endpoints/. Create one to get started.</p>" +
+        "<p>Genesis works against endpoint profiles defined in .agent/endpoints/. Create one to get started.</p>" +
         '<div class="chips">' +
           '<button class="btn primary" data-act="newEndpoint">Create endpoint profile</button>' +
           '<button class="btn" data-act="ccEndpoints">Open Control Center</button>' +
@@ -1361,9 +1361,9 @@ function _sbRun() {
 
     var body = crystal(46, "crystal") + "<h2>How can I help?</h2>";
     if (!recent.length) {
-      body += "<p>Kryptonite is connected and ready. Ask anything to begin.</p>";
+      body += "<p>Genesis is connected and ready. Ask anything to begin.</p>";
     } else {
-      body += "<p>Kryptonite is connected and ready. Ask anything, or pick up where you left off.</p>" +
+      body += "<p>Genesis is connected and ready. Ask anything, or pick up where you left off.</p>" +
         '<div class="chips resume">';
       for (var rj = 0; rj < recent.length; rj++) {
         var r = recent[rj];
@@ -2092,7 +2092,7 @@ function _sbRun() {
       (m.truncated ? '<div class="trunc-note" style="padding:0 9px 6px">' + icon("i-warn", "ic-11") +
         "<span>Patch truncated at 30,000 characters</span></div>" : "") +
       '<div class="diff-foot">' + crystal(16) +
-        "<span>Kryptonite: " + m.added + " additions, " + m.removed + " deletions</span>" +
+        "<span>Genesis: " + m.added + " additions, " + m.removed + " deletions</span>" +
         '<span class="sp"></span>' +
         '<button class="btn sm primary" data-diff="accept">Accept</button>' +
         '<button class="btn sm" data-diff="reject">Reject</button>' +
@@ -2359,7 +2359,7 @@ function _sbRun() {
     closeToolGroup();
     var el = add(div("perm",
       '<div class="perm-t">' + icon("i-warn", "ic-14") + "Permission required</div>" +
-      '<div class="perm-b">Kryptonite wants to:</div>' +
+      '<div class="perm-b">Genesis wants to:</div>' +
       '<div class="perm-cmd">' + esc(m.summary) + "</div>" +
       (m.detail ? '<div class="perm-cmd" style="margin-top:6px">' + esc(String(m.detail).slice(0, 4000)) + "</div>" : "") +
       '<div class="perm-actions">' +
@@ -2531,8 +2531,8 @@ function _sbRun() {
       : S.phase === "plan"
         ? "Describe what to plan…   ( / skills · @ files )"
         : S.phase === "ask"
-          ? "Ask Kryptonite anything…   ( / skills · @ files )"
-          : "Tell Kryptonite what to do…   ( / skills · @ files )";
+          ? "Ask Genesis anything…   ( / skills · @ files )"
+          : "Tell Genesis what to do…   ( / skills · @ files )";
 
     var send = $("sendBtn");
     var typing = draft.value.trim() || (S.attachments && S.attachments.length);

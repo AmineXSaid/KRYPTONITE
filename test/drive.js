@@ -47,20 +47,21 @@ const STATE = (over = {}) => ({ type: "stateSync", state: {
 {
   const { w, d } = boot();
   const defs = w.__kxCrystal.defs;
-  ok("crystal symbol is portrait 42:48", /viewBox="0 0 42 48"/.test(defs));
-  // Pinned so a palette change cannot silently wash out the silhouette, which
-  // is what gives the mark its shape against the panel.
-  ok("crystal has dark silhouette", defs.includes('fill="#03151A"'));
-  ok("crystal has four gradients",
-    ["kx-f1", "kx-f2", "kx-f3", "kx-f4"].every(g => defs.includes(`id="${g}"`)));
-  ok("crystal halo present", defs.includes('id="kx-halo"'));
+  ok("roundel symbol is square 24:24", /viewBox="0 0 24 24"/.test(defs));
+  // Pinned so a palette change cannot silently wash the notches out. They are
+  // the only non-currentColor part of the mark, and the reason it reads as a
+  // bezel rather than a plain ring.
+  ok("roundel notches keep their oxide fill", defs.includes('fill="#E03A2F"'));
+  ok("the dim plate recesses its notches", defs.includes('fill="#2C3242"'));
+  ok("all four mark variants are published",
+    ["i-kx", "g-roundel-dim", "g-roundel-sm", "g-notch"].every(g => defs.includes(`id="${g}"`)));
   const svg = w.__kxCrystal.svg(24);
-  ok("svg() derives width at correct ratio", /width="21"/.test(svg) && /height="24"/.test(svg));
+  ok("svg() is square, so no call site can stretch it", /width="24"/.test(svg) && /height="24"/.test(svg));
   ok("svg() references shared symbol", svg.includes('href="#i-kx"'));
   const header = d.querySelector(".kx-header svg");
-  ok("header renders crystal next to wordmark", !!header);
+  ok("header renders the roundel next to the wordmark", !!header);
   const wordmark = d.querySelector(".kx-wordmark");
-  ok("wordmark reads KRYPTONITE", /kryptonite/i.test(wordmark.textContent));
+  ok("wordmark reads GENESIS", /genesis/i.test(wordmark.textContent));
 }
 
 /* ── 2. aura while waiting ──────────────────────────────────────────── */
@@ -80,7 +81,7 @@ const STATE = (over = {}) => ({ type: "stateSync", state: {
   ok("aura has three ki arcs", rad.querySelectorAll(".ki").length === 3);
   ok("aura has shockwave", !!rad.querySelector(".shock"));
   ok("aura has three emitters", rad.querySelectorAll(".em").length === 3);
-  ok("aura wraps crystal", !!rad.querySelector("svg use"));
+  ok("aura wraps the roundel", !!rad.querySelector("svg use"));
   inbound({ type: "turnEnd" });
   ok("aura clears on turn end", !d.querySelector(".stream"));
 }
@@ -564,7 +565,7 @@ const pasteTests = (async () => {
   ok("13 Ask's banner promises no plan either",
     /no edits, no plan/.test(banner.querySelector(".sub").textContent));
   ok("13 Ask's placeholder asks a question",
-    /^Ask Kryptonite anything/.test(d.getElementById("draft").placeholder));
+    /^Ask Genesis anything/.test(d.getElementById("draft").placeholder));
 
   btn("plan").click();
   ok("13 Plan's banner is its own", banner.getAttribute("data-phase") === "plan" &&
@@ -575,7 +576,7 @@ const pasteTests = (async () => {
   btn("act").click();
   ok("13 Act hides the banner", banner.hidden === true);
   ok("13 Act's placeholder is a work order",
-    /^Tell Kryptonite what to do/.test(d.getElementById("draft").placeholder));
+    /^Tell Genesis what to do/.test(d.getElementById("draft").placeholder));
 
   // Shift+Tab cycles ask -> plan -> act -> ask. A two-state toggle cannot
   // reach a third phase, which is the bug this replaced.

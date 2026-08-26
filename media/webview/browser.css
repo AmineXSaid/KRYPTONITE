@@ -34,7 +34,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
    knows for choosing between them. */
 .tab {
   min-height: 24px; padding: 0 10px;
-  border: 0; border-radius: 6px; background: none; cursor: pointer;
+  border: 0; border-radius: 4px; background: none; cursor: pointer;
   font-size: 12px; color: var(--kx-fg-3);
   white-space: nowrap;
 }
@@ -47,7 +47,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .gh {
   display: inline-flex; align-items: center; justify-content: center;
   width: 26px; height: 26px; flex: none;
-  border: 0; border-radius: 6px; background: none; cursor: pointer;
+  border: 0; border-radius: 4px; background: none; cursor: pointer;
   color: var(--kx-fg-4);
 }
 .gh:hover:not(:disabled) { background: var(--kx-hover); color: var(--kx-fg); }
@@ -69,7 +69,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
    worth reaching for, so it gets the room and the only rounded shape. */
 .addr input {
   width: 100%; height: 30px; padding: 0 30px 0 14px;
-  border-radius: 999px;
+  border-radius: 4px;
   border: 1px solid transparent;
   background: var(--kx-surface-2);
   color: var(--kx-fg);
@@ -107,7 +107,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .frame-note {
   position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
   display: flex; align-items: center; gap: 10px; max-width: min(560px, calc(100% - 32px));
-  padding: 10px 12px; border-radius: 7px;
+  padding: 10px 12px; border-radius: 4px;
   background: var(--kx-surface-2); border: 1px solid var(--kx-line);
   box-shadow: 0 6px 22px var(--kx-shadow);
   font-size: 11.5px; line-height: 1.5; color: var(--kx-fg-2);
@@ -136,7 +136,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   overflow-wrap: anywhere; margin-bottom: 14px;
 }
 .reader .cut {
-  margin-bottom: 12px; padding: 6px 9px; border-radius: 5px;
+  margin-bottom: 12px; padding: 6px 9px; border-radius: 4px;
   background: var(--kx-warn-wash); color: var(--kx-warn); font-size: 11.5px;
 }
 .reader pre {
@@ -214,7 +214,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .srv {
   display: flex; align-items: center; gap: 10px; width: 100%;
   padding: 9px 10px 9px 12px; text-align: left;
-  border-radius: 10px;
+  border-radius: 4px;
   border: 1px solid var(--kx-line);
   background: var(--kx-surface);
   color: var(--kx-fg);
@@ -231,7 +231,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .srv-go {
   display: grid; place-items: center; flex: none;
-  width: 24px; height: 22px; border-radius: 6px;
+  width: 24px; height: 22px; border-radius: 4px;
   background: var(--kx-surface-3); color: var(--kx-fg-2);
 }
 .srv:hover .srv-go { background: var(--kx-accent); color: var(--kx-on-accent); }
@@ -255,7 +255,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
    and filling a narrow panel with it would distort every page shown. */
 .live-frame img {
   max-width: 100%; max-height: 100%; object-fit: contain;
-  border: 1px solid var(--kx-line); border-radius: 6px;
+  border: 1px solid var(--kx-line); border-radius: 4px;
   background: #fff;
 }
 .live-wait {

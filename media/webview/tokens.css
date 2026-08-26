@@ -1,157 +1,124 @@
 /* ─────────────────────────────────────────────────────────────────────────
-   KRYPTONITE design tokens - the single definition of the palette and type.
+   GENESIS / Pajamas palette, expressed in main's own token names.
 
-   Loaded before both surface stylesheets, for the same reason crystal.js is
-   shared: the sidebar and the Control Center are separate documents, and two
-   copies of a palette drift. Anything that needs a colour takes it from here.
+   Drop-in replacement for `media/webview/tokens.css` on current `main`.
 
-   The panel used to draw every structural colour from the --vscode-* variables
-   VS Code injects, which made it a chameleon - correct in any theme, and an
-   expression of none. Frame 1b of the design review replaces that with a fixed
-   warm-neutral system so the surface reads as one product.
+   This exists because main is already fully token-driven - its sidebar.css
+   makes 2 references to --vscode-* and several hundred to --kx-*. So the
+   whole surface, including the MCP and Agents tabs that already ship and
+   already work, re-themes from this one file without touching a line of the
+   4,550-line sidebar.js. That is the cheap, low-risk path to Genesis on
+   main, and it is the opposite of the reference port under this directory
+   (which rebuilt a 0.4.0 snapshot from scratch and therefore has no MCP or
+   Agents tab at all).
 
-   The trade is deliberate and total: the panel looks the same in a light theme
-   as in a dark one. (Redefining the VS Code variables instead would not have
-   worked - VS Code sets them as an inline style on <html>, which beats any
-   :root rule in a stylesheet.)
+   ── Two structural notes, because they are not cosmetic ──
+
+   1. MAIN'S SURFACE SCALE IS ASCENDING; GENESIS'S IS NOT.
+      main: bg-deep < bg < surface < surface-2 …  (cards sit ABOVE the panel)
+      Genesis: the panel is --ground #28272d and its cards, composer, popups
+      and dumps are --ink #18171d - BELOW it. So --kx-surface is mapped
+      darker than --kx-bg here. That inverts main's stated intent on
+      purpose; it is what the mockup does. Any rule on main that assumes
+      "surface is lighter than bg" will read inverted and needs a look.
+
+   2. MAIN HAS SEVEN ACCENT ROLES; GENESIS'S PALETTE HAS FIVE HUES.
+      Two of main's roles have no distinct Genesis hue and are folded:
+      --kx-under (tab position) folds into blue, alongside --kx-link and
+      --kx-info. Genesis genuinely uses one blue for links, focus and active
+      position, so this is faithful rather than lossy - but it does mean the
+      tab underline and a hyperlink are now the same colour.
+
+   Every value below is copied from the mockup, not invented. Where the
+   mockup states a literal (row hover, diff washes, dialog shadow,
+   scrollbar) that literal is reproduced exactly.
    ───────────────────────────────────────────────────────────────────────── */
 
 :root {
-  /* ── surfaces: warm near-black, ascending ── */
-  --kx-bg-deep:   #191918;  /* behind everything; code and terminal blocks   */
-  --kx-bg:        #1f1f1d;  /* the panel itself                              */
-  --kx-surface:   #262624;  /* cards, the composer, popovers                 */
-  --kx-surface-2: #2b2b29;  /* chips, inputs, inline code                    */
-  --kx-surface-3: #30302e;  /* raised: secondary buttons, badges             */
-  --kx-surface-4: #3f3f3c;  /* hover on a raised surface                     */
+  /* ── surfaces ──
+   * ink is the recessed colour (code, dumps, composer, popovers, modals) and
+   * ground is the panel. See structural note 1: this is inverted relative to
+   * main's ascending scale, deliberately. */
+  --kx-bg-deep:   #18171d;  /* ink    - dumps, code panes, diff bodies       */
+  --kx-bg:        #28272d;  /* ground - the panel itself                     */
+  --kx-surface:   #18171d;  /* ink    - cards, composer, popups, modals      */
+  --kx-surface-2: #211f26;  /* the effort block inside the model popup       */
+  --kx-surface-3: #3a383f;  /* raised: small-button hover, menu row hover    */
+  --kx-surface-4: #3f3e44;  /* slate  - hover on an already-raised surface   */
 
-  /* ── text: warm, descending prominence ── */
-  --kx-fg:   #faf9f5;  /* primary, active tabs, titles                       */
-  --kx-fg-2: #dedcd1;  /* body and labels - the workhorse                    */
-  --kx-fg-3: #c2c0b6;  /* inactive                                           */
-  --kx-fg-4: #9c9a92;  /* placeholder, line numbers                          */
-  --kx-fg-5: #52514d;  /* dimmest                                            */
+  /* ── text ── */
+  --kx-fg:   #fbfafd;  /* cream - titles, active tab, emphasis               */
+  --kx-fg-2: #b3b2b8;  /* fog   - body copy, the workhorse                   */
+  --kx-fg-3: #a8a7ad;  /* steel - labels, meta, secondary, inactive          */
+  --kx-fg-4: #7f7e85;  /* code-pane base text                                */
+  --kx-fg-5: #3f3e44;  /* dimmest - diff line numbers                        */
 
-  /* ── accents ──
+  /* ── accents, one role each ──
    *
-   * Each colour has exactly one job, and nothing may borrow one for decoration.
-   * Mint and violet were previously doing double duty - mint tinted inline code
-   * in every answer, the user's rail, history dots and picker ticks; violet
-   * tinted selected chips and the profile label - which left the panel reading
-   * green-and-purple rather than warm. A colour that appears everywhere stops
-   * meaning anything, and the surface it sits on stops being the subject.
-   *
-   * The palette is a painted doorway: turquoise wall, teal shadow, pink frame,
-   * amber lamp, burgundy recess, blue door, warm grey stone. Seven colours,
-   * and every role below is drawn from them rather than invented.
-   *
-   *   turquoise   success and health: a passing rung, an added line, a
-   *               finished todo, Act.
-   *   teal        capability from outside this extension - MCP servers and
-   *               the tools they expose. Adjacent to turquoise on purpose:
-   *               related claims, not identical ones.
-   *   pink        the Plan phase, and the tab underline that shows position.
-   *   amber       the Ask phase - reading to answer, never to act. Adjacent to
-   *               pink on the wheel but never the same role: Plan still ends
-   *               in a plan card, Ask never produces one.
-   *   blue        interaction: send, links, focus, selection, and the mark
-   *               that means "you".
-   *   burgundy    failure. Only failure.
-   *   rose        warning - the state between success and failure, mixed from
-   *               the pink and the burgundy so it stays inside the palette.
-   *   warm grey   every neutral: text, hairlines, disabled.
-   *
-   * Two adjustments the source swatches needed, both about legibility on a
-   * #1f1f1d panel rather than taste:
-   *
-   *   The burgundy is ~2:1 against the panel - fine as a fill, invisible as
-   *   text. It keeps its full strength in `--kx-error-deep` for fills and
-   *   washes, and `--kx-error` is the same hue lifted until it can be read.
-   *
-   *   The blue is likewise dark for small text, so `--kx-link` is lifted while
-   *   `--kx-action` keeps more of the door's depth for filled buttons, which
-   *   carry light text on top and want the darker ground. */
-  --kx-accent: #22c9d6;    /* turquoise wall: success & health only          */
-  --kx-mcp:    #17a9b8;    /* teal shadow: MCP servers and their tools       */
-  --kx-active: #d98cbe;    /* pink frame: Plan phase                         */
-  --kx-ask:    #e0b64a;    /* amber lamp: Ask phase                          */
-  --kx-under:  #d98cbe;    /* position: the 2px tab underline                */
-  --kx-link:   #4a92d8;    /* blue door, lifted for text: links, "you"       */
-  --kx-action: #1a6fb5;    /* blue door: send - a fill, so it stays deep     */
-  /* Lifted to a measured 4.5:1 on the panel, not to taste. The first attempt
-     was set by eye and came out at 3.48:1 - readable-looking, and below AA on
-     the one string a user most needs to read. test/contrast.cjs holds it. */
-  --kx-error:  #e8748f;    /* burgundy, lifted until it measures             */
-  --kx-error-deep: #78122f;/* the recess itself: fills and washes            */
-  --kx-warn:   #dd93b0;    /* rose: between the pink and the burgundy        */
-  /* Amber: the Ask phase, and only that. It had to be a fourth hue rather
-     than a reuse - Act's mint and Plan's violet already mean "go" and
-     "design", and rose already means "careful". Held to the same measured
-     4.5:1 as the rest by test/contrast.cjs rather than picked by eye. */
-  --kx-ask:    #e0b341;    /* amber: Ask phase - reading, changing nothing   */
-  --kx-info:   #4a92d8;    /* measured figures, meters, reported counts      */
-  /* Two grounds, two inks. The turquoise is bright enough to carry the near
-     black; the door blue is deep and wants light text on it. Sharing one ink
-     across both put the send button's label at 3.50:1. */
-  --kx-on-accent: #141413; /* ink for a bright fill: turquoise              */
-  --kx-on-action: #faf9f5; /* ink for a deep fill: the blue door            */
-  --kx-mcp-wash:  rgba(23, 169, 184, .16);
-  --kx-info-wash: rgba(74, 146, 216, .16);
+   * Mapped from REFACTOR-PROMPT.md's semantic assignment table:
+   *   ok / connected / added        → green
+   *   idle / warning / writes       → orange
+   *   failure / removed / error     → red
+   *   agent / live / queued / primary → purple
+   *   information / links / read-only / focus → blue
+   */
+  --kx-accent: #52b87a;  /* green    - success, health, added line, Act      */
+  --kx-mcp:    #ac93e3;  /* purple   - MCP servers and the tools they expose.
+                          * Genesis has no teal; purple is its "capability
+                          * from outside" hue (agent / live / queued), which
+                          * is the same claim main's teal was making.        */
+  --kx-active: #d99530;  /* orange   - the Plan phase: pending, attention    */
+  --kx-ask:    #63a6e9;  /* blue-300 - the Ask phase. main used amber here;
+                          * Genesis's table puts read-only on blue, and Ask
+                          * is literally read-only, so this is a closer fit
+                          * than amber was.                                  */
+  --kx-under:  #428fdc;  /* blue     - active-tab underline (see note 2)     */
+  --kx-link:   #63a6e9;  /* blue     - links                                 */
+  --kx-info:   #63a6e9;  /* blue     - informational                         */
+  --kx-action: #1f75cb;  /* oxide    - send, primary action                  */
+  --kx-error:  #f57f6c;  /* red-400  - failure, removed line                 */
+  --kx-error-deep: #dd2b0e;
+  --kx-warn:   #e9be74;  /* orange-300 - warning                             */
 
-  /* ── scrims: every one tinted from --kx-fg-2, never neutral grey. A cool
-        grey hairline on a warm surface is the most visible way this palette
-        goes wrong. ── */
-  --kx-hairline: rgba(222, 220, 209, .06);
-  --kx-divider:  rgba(222, 220, 209, .10);
-  --kx-line:     rgba(222, 220, 209, .14);
-  --kx-line-2:   rgba(222, 220, 209, .20);
-  --kx-raised:   rgba(222, 220, 209, .25);
-  --kx-hover:    rgba(222, 220, 209, .06);
-  --kx-scroll:       rgba(222, 220, 209, .13);
-  --kx-scroll-hover: rgba(222, 220, 209, .25);
-  --kx-shadow:   rgba(0, 0, 0, .6);
-  /* Derived from the palette above, so a hue change here cannot leave a wash
-     pointing at the colour it replaced. The deletion wash uses the burgundy at
-     full strength - as a ground behind text it is doing the job the swatch is
-     actually good at. */
-  /* Two strengths each, the way GitLab reads a diff: the weaker tint marks the
-     line that changed, the stronger one marks the words inside it that
-     actually differ. With one tint only, a line where a single identifier was
-     renamed paints its other ninety characters as though they had changed too.
-     The deletion pair moves from the burgundy to the rose, because burgundy at
-     the alpha a word tint needs is too dark to read text through. */
-  --kx-diff-add: rgba(34, 201, 214, .13);
-  --kx-diff-add-word: rgba(34, 201, 214, .34);
-  --kx-diff-del: rgba(232, 116, 143, .13);
-  --kx-diff-del-word: rgba(232, 116, 143, .32);
-  --kx-accent-wash: rgba(34, 201, 214, .14);
-  --kx-error-wash:  rgba(120, 18, 47, .32);
-  --kx-warn-wash:   rgba(201, 111, 146, .16);
+  --kx-on-accent: #18171d;  /* ink text on a filled accent                   */
+  --kx-on-action: #fbfafd;  /* cream text on the oxide action fill           */
+
+  /* ── washes ── */
+  --kx-accent-wash: rgba(45, 161, 96, .14);
+  --kx-mcp-wash:    rgba(148, 117, 219, .16);
+  --kx-info-wash:   rgba(66, 143, 220, .16);
+  --kx-warn-wash:   rgba(217, 149, 48, .16);
+  --kx-error-wash:  rgba(221, 43, 14, .32);
+
+  /* ── diff surfaces - exact values from the mockup ── */
+  --kx-diff-add:      rgba(45, 161, 96, .13);
+  --kx-diff-add-word: rgba(45, 161, 96, .34);
+  --kx-diff-del:      rgba(236, 89, 65, .13);
+  --kx-diff-del-word: rgba(236, 89, 65, .32);
+
+  /* ── rules and hovers ──
+   * Genesis draws dividers as a solid 1px --slate rather than main's alpha
+   * ramp, so --kx-line is solid here. The lighter alphas are kept for the
+   * places main uses them as a whisper rather than a rule. */
+  --kx-hairline: rgba(251, 250, 253, .06);
+  --kx-divider:  rgba(251, 250, 253, .10);
+  --kx-line:     #4c4b51;
+  --kx-line-2:   #5c5b61;
+  --kx-raised:   rgba(251, 250, 253, .25);
+  --kx-hover:    rgba(255, 255, 255, .04);  /* the mockup's row hover, exact */
+
+  --kx-scroll:       #4c4b51;
+  --kx-scroll-hover: #6e6d73;
+  --kx-shadow:       rgba(7, 10, 15, .7);   /* the mockup's dialog shadow    */
 
   /* ── type ──
-     Anthropic Sans in two optical sizes. --kx-ui is the Text cut and carries
-     everything at 11–13px; --kx-display is the Display cut, used only where the
-     design reaches 15px. Setting Display at 12px is the standard way to make a
-     well-drawn family look wrong, so they are separate variables and Display
-     has to be asked for.
-
-     Nothing is fetched remotely: the CSP is `default-src 'none'` with font-src
-     scoped to the extension origin. shell.ts emits @font-face for whichever
-     files are present in media/fonts/, and each stack falls through to the
-     platform sans when they are absent - see media/fonts/LICENSE-NOTE.md. */
-  --kx-ui: 'Anthropic Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+   * Anthropic Sans is already what main ships and what the project owner
+   * chose to keep. --kx-mono names Space Mono first for documentation only:
+   * no Space Mono binary is bundled and the webview CSP is
+   * `default-src 'none'`, so it always resolves to the system stack. */
+  --kx-ui:      'Anthropic Sans Text', 'Anthropic Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --kx-display: 'Anthropic Sans Display', 'Anthropic Sans', ui-sans-serif, system-ui, 'Segoe UI', sans-serif;
-  /* No monospace ships in media/fonts/, and naming one that does not is worse
-     than not naming it: the panel then renders in whichever of these the
-     machine happens to have, so the same build looks different on two
-     desktops - the exact inconsistency the @font-face rule above exists to
-     avoid. This is a deliberate platform stack, best cut first. Drop a woff2
-     into media/fonts/ and it can be named here instead. */
-  --kx-mono: ui-monospace, 'Cascadia Mono', 'SF Mono', 'JetBrains Mono', Menlo,
-             Consolas, 'DejaVu Sans Mono', monospace;
-
-  /* The brand face is now the Display cut rather than a separate family. */
-  --kx-brand: var(--kx-display);
-  /* Prose and UI share the Text cut; the design does not split them. */
-  --kx-prose: var(--kx-ui);
+  --kx-mono:    'Space Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --kx-brand:   var(--kx-display);
+  --kx-prose:   var(--kx-ui);
 }

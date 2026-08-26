@@ -528,7 +528,7 @@ function _run() {
       CRYSTAL_DEFS + ICON_DEFS + "</defs></svg>" +
       '<div id="cc">' +
         '<header class="cc-header">' + crystal(22) +
-          '<span class="cc-wordmark">Kryptonite</span>' +
+          '<span class="cc-wordmark">Genesis</span>' +
           '<span class="cc-sub ell">Control Center</span><span class="sp"></span>' +
           '<span class="profile-chip ell" id="ccChip">no profile</span>' +
           '<button class="hdr-btn" id="ccReload" title="Reload profiles" aria-label="Reload profiles">' +
@@ -604,7 +604,7 @@ function _run() {
     var pane = $("pane");
     if (!S.workspace.open) {
       pane.innerHTML = "<h3>No folder open</h3>" +
-        '<div class="explainer">Kryptonite reads endpoint profiles and skills from the folder you have open. ' +
+        '<div class="explainer">Genesis reads endpoint profiles and skills from the folder you have open. ' +
         "Open a folder to configure it.</div>";
       return;
     }

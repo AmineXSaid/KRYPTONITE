@@ -127,7 +127,7 @@ const sync = (b, over) => b.send({ type: "stateSync", state: state(over) });
   const b = boot();
   ok("mounts before any state arrives", !!b.d.getElementById("cc"));
   ok("with the strip and the pane", !!b.d.getElementById("strip") && !!b.pane());
-  ok("and the wordmark", /Kryptonite/.test(b.d.querySelector(".cc-wordmark").textContent));
+  ok("and the wordmark", /Genesis/.test(b.d.querySelector(".cc-wordmark").textContent));
   ok("the chip says there is no profile yet",
     /no profile/.test(b.d.getElementById("ccChip").textContent));
   // Nothing has been sent, so the panel must not claim a folder is open.

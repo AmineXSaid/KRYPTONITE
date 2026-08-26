@@ -1,53 +1,68 @@
-﻿/* KRYPTONITE crystal artwork â€” the single source for the brand mark.
+/* GENESIS Bezel Roundel, published under main's existing brand-mark API.
  *
- * Both webviews inject this same symbol set, so the mark can only ever change
- * in one place. It is loaded as its own nonced script before the surface
- * scripts and hangs one object off `window`; there is no bundler in the
- * webview layer and adding one for a single shared constant is not worth it.
+ * Drop-in replacement for `media/webview/crystal.js` on current `main`.
  *
- * The artwork is a faceted crystal cluster traced from the source logo:
- * a `#03151A` union silhouette behind eighteen facets over four emerald
- * gradients, plus three highlight slivers. The silhouette matters â€” without
- * it the gaps between facets show the host background, and on a light theme
- * the cluster reads as shattered rather than faceted.
+ * main's two surface scripts consume the mark through exactly two members -
+ * `window.__kxCrystal.defs` and `window.__kxCrystal.svg(height, cls)` - and
+ * reference the symbol id `i-kx` in their endpoint-icon table. Keeping that
+ * contract byte-for-byte means every call site in the 4,550-line sidebar.js
+ * and the 1,813-line controlCenter.js draws the roundel instead of the
+ * crystal with no edit to either file.
  *
- * Aspect ratio is 42:48 (portrait, 0.875). `kxCrystal(height)` derives the
- * width so no call site can stretch it.
+ * THE NOTCHES ARE COLOURED AND MUST STAY COLOURED. The four cardinal notches
+ * are oxide #E03A2F and the dim variant's are #2C3242; they are the only
+ * part of the mark that is not `currentColor`, and they are what makes it a
+ * bezel rather than a generic ring. Do not "simplify" them to currentColor -
+ * the mark loses its identity and reads as a donut. The sole exception is
+ * `media/icon.svg`, the activity-bar icon, which VS Code masks to a flat
+ * monochrome silhouette regardless of what the file says.
+ *
+ * Geometry is square 24x24. The old crystal was portrait 42:48 and derived
+ * its width from the height it was given; `svg(h)` here returns h x h, so a
+ * call site that passes only a height still cannot stretch it.
  */
 (function () {
   "use strict";
 
-  var DEFS =
-    '<radialGradient id="kx-halo" cx="50%" cy="50%" r="50%"><stop offset=".28" stop-color="#4AEAF6" stop-opacity=".40"/>' +
-    '<stop offset=".64" stop-color="#4AEAF6" stop-opacity=".12"/><stop offset="1" stop-color="#4AEAF6" stop-opacity="0"/></radialGradient>' +
-    '<linearGradient id="kx-f1" x1="0" y1="0" x2=".45" y2="1"><stop offset="0" stop-color="#D9FFEE"/><stop offset="1" stop-color="#5CEDF8"/>' +
-    '</linearGradient><linearGradient id="kx-f2" x1="0" y1="0" x2=".55" y2="1"><stop offset="0" stop-color="#7DF5FD"/>' +
-    '<stop offset="1" stop-color="#22B8C0"/></linearGradient><linearGradient id="kx-f3" x1=".1" y1="0" x2=".7" y2="1">' +
-    '<stop offset="0" stop-color="#31C6CE"/><stop offset="1" stop-color="#0B565B"/></linearGradient>' +
-    '<linearGradient id="kx-f4" x1=".1" y1="0" x2=".9" y2="1"><stop offset="0" stop-color="#17A0A8"/><stop offset="1" stop-color="#052A2E"/>' +
-    '</linearGradient><symbol id="i-kx" viewBox="0 0 42 48"><ellipse cx="21" cy="24" rx="21" ry="24" fill="url(#kx-halo)"/>' +
-    '<path d="M34.4 0.6 L23.1 7.5 L20.4 11.8 L15.6 6.2 L9.6 12.5 L10.7 21.7 L1.8 17.2 L0.6 19 L1.2 29 L11.3 42.1 L19.6 47.3 L23.1 47.1 L40.4 32.9 L41 24.8 L34.4 26 L39.5 15.7 L36 1.3Z" fill="#03151A"/>' +
-    '<path d="M29.3 11.9 L22.6 14 L17.1 22.8 L18.6 32.4 L23.2 33.3 L31.8 18.7Z" fill="url(#kx-f2)"/>' +
-    '<path d="M9.2 21.8 L5.2 26.9 L12.3 40.1 L14.8 39.9 L14.8 38.5 L11.7 25.8Z" fill="url(#kx-f3)"/>' +
-    '<path d="M35.5 1.5 L30.3 11.2 L32.8 17.9 L39 15.5Z" fill="url(#kx-f1)"/>' +
-    '<path d="M18.3 33.6 L15.9 40.3 L21.3 46.9 L24.4 40 L22.9 34.8Z" fill="url(#kx-f4)"/>' +
-    '<path d="M10.1 14.1 L15.7 37.5 L17.4 32.3 L14.9 17.9Z" fill="url(#kx-f2)"/><path d="M33.8 28 L24 34.4 L25.3 39.3 L35.8 32.2Z" fill="url(#kx-f4)"/>' +
-    '<path d="M38.7 16.9 L32.8 19.1 L25 32.4 L33 27Z" fill="url(#kx-f3)"/><path d="M34.4 1.1 L23.4 7.9 L22.9 12.7 L29.4 10.6Z" fill="url(#kx-f2)"/>' +
-    '<path d="M15.9 6.6 L10.1 12.7 L15.2 16.6 L19.3 12.9 L19.3 12.5Z" fill="url(#kx-f1)"/>' +
-    '<path d="M39.1 34 L36.6 33 L26.6 39.9 L31 40.6Z" fill="url(#kx-f3)"/><path d="M1.7 28.7 L10.6 40.6 L11.3 40.5 L4.4 27.7Z" fill="url(#kx-f4)"/>' +
-    '<path d="M1.7 17.7 L4.7 25.7 L8.6 20.8Z" fill="url(#kx-f2)"/><path d="M22 10.1 L20.4 13.3 L16 17.6 L16.6 21.5 L21.7 13.4Z" fill="url(#kx-f3)"/>' +
-    '<path d="M29.8 41.6 L25.3 40.9 L22.5 46.9Z" fill="url(#kx-f4)"/><path d="M40.5 25 L34.8 27.3 L36.6 31.1 L36.8 31Z" fill="url(#kx-f3)"/>' +
-    '<path d="M1.1 19.2 L1 27.6 L1.2 27.7 L3.3 26.8 L3.8 26.4Z" fill="url(#kx-f3)"/><path d="M11.5 41.6 L19.7 46.8 L15 41Z" fill="url(#kx-f4)"/>' +
-    '<path d="M41 26.3 L37.4 32 L39.6 33 L39.8 33Z" fill="url(#kx-f4)"/><path d="M35.5 1.5 L30.3 11.2 L33.4 8.1 Z" fill="#E4FFF2" opacity=".85"/>' +
-    '<path d="M15.9 6.6 L19.3 12.5 L17 10.5 Z" fill="#E4FFF2" opacity=".8"/><path d="M29.3 11.9 L22.6 14 L25.6 14.6 Z" fill="#9DF8FF" opacity=".55"/>' +
-    '</symbol>';
+  var RING  = '<circle cx="12" cy="12" r="10.2" fill="none" stroke="currentColor" stroke-width="2.4"/>';
+  var CORE  = '<path fill-rule="evenodd" fill="currentColor" d="M12 6.4 A5.6 5.6 0 1 1 11.99 6.4 Z M9 11 H15 V13 H9 Z"/>';
+  function notches(fill) {
+    return '<path d="M9.9 .744 A11.45 11.45 0 0 1 14.1 .744 L14.1 3.3 A8.95 8.95 0 0 0 9.9 3.3Z" fill="' + fill + '"/>' +
+           '<path d="M9.9 23.256 A11.45 11.45 0 0 0 14.1 23.256 L14.1 20.7 A8.95 8.95 0 0 1 9.9 20.7Z" fill="' + fill + '"/>' +
+           '<path d="M.744 9.9 A11.45 11.45 0 0 0 .744 14.1 L3.3 14.1 A8.95 8.95 0 0 1 3.3 9.9Z" fill="' + fill + '"/>' +
+           '<path d="M23.256 9.9 A11.45 11.45 0 0 1 23.256 14.1 L20.7 14.1 A8.95 8.95 0 0 0 20.7 9.9Z" fill="' + fill + '"/>';
+  }
 
-  /** Height-driven so the 42:48 aspect ratio cannot be broken by a call site. */
-  function svg(height, cls) {
-    var w = Math.round(height * 42 / 48);
-    return '<svg class="' + (cls || "") + '" width="' + w + '" height="' + height +
-      '" aria-hidden="true"><use href="#i-kx"/></svg>';
+  var DEFS =
+    /* `i-kx` is the id main's call sites already use - the full mark. */
+    '<symbol id="i-kx" viewBox="0 0 24 24">' + RING + notches("#E03A2F") + CORE + '</symbol>' +
+    '<symbol id="g-roundel" viewBox="0 0 24 24">' + RING + notches("#E03A2F") + CORE + '</symbol>' +
+    /* Idle/resting plate: same ring and core, notches recessed. */
+    '<symbol id="g-roundel-dim" viewBox="0 0 24 24">' + RING + notches("#2C3242") + CORE + '</symbol>' +
+    /* 16-24px: the notches become gaps cut through a heavier ring, because a
+       filled notch at that size disappears into the stroke. */
+    '<symbol id="g-roundel-sm" viewBox="0 0 24 24">' +
+      '<g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="butt">' +
+        '<path d="M21.482 13.502 A9.6 9.6 0 0 1 13.502 21.482"/>' +
+        '<path d="M10.498 21.482 A9.6 9.6 0 0 1 2.518 13.502"/>' +
+        '<path d="M2.518 10.498 A9.6 9.6 0 0 1 10.498 2.518"/>' +
+        '<path d="M13.502 2.518 A9.6 9.6 0 0 1 21.482 10.498"/>' +
+      '</g>' +
+      '<path fill-rule="evenodd" fill="currentColor" d="M12 6.9 A5.1 5.1 0 1 1 11.99 6.9 Z M9 10.9 H15 V13.1 H9 Z"/>' +
+    '</symbol>' +
+    /* One notch alone - the index that sweeps the ring while a turn runs. */
+    '<symbol id="g-notch" viewBox="0 0 24 24"><path d="M9.9 .744 A11.45 11.45 0 0 1 14.1 .744 L14.1 3.3 A8.95 8.95 0 0 0 9.9 3.3Z" fill="#E03A2F"/></symbol>';
+
+  /** Square by construction: a call site passing only a height cannot stretch it. */
+  function svg(size, cls, variant) {
+    var id = variant === "dim" ? "g-roundel-dim"
+      : variant === "sm" ? "g-roundel-sm"
+      : variant === "notch" ? "g-notch"
+      : "i-kx";
+    return '<svg class="' + (cls || "") + '" width="' + size + '" height="' + size +
+      '" viewBox="0 0 24 24" aria-hidden="true"><use href="#' + id + '"/></svg>';
   }
 
   window.__kxCrystal = { defs: DEFS, svg: svg };
+  window.__kxRoundel = { defs: DEFS, svg: svg };  /* the name the port uses */
 })();
