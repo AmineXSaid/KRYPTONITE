@@ -42,6 +42,7 @@ const scope = {
 };
 
 const code = [
+  grab("  function mcpToolWrites(name) {"),
   grab("  function mcpPill(state) {"),
   grab("  function renderMcp() {"),
   grab("  function renderMcpCount() {"),
@@ -181,6 +182,21 @@ console.log("\n──── missing fields ────");
   const r2 = render([{ name: "nofix", state: "failed" }]);
   ck(!/undefined/.test(r2.html), "a failure with no error string is safe");
   ck(!/mcp-err/.test(r2.html), "and shows no empty error card");
+}
+
+console.log("\n──── tool chips say what a tool can do ────");
+{
+  const r = render([{ name: "fs", state: "ready", toolCount: 4,
+    tools: ["read_text_file", "write_file", "search_files", "frobnicate_thing"] }]);
+  const chip = (n) => new RegExp('data-w="([01])"[^>]*>' + n + '<').exec(r.html);
+  ck(chip("read_text_file")[1] === "0", "a reading tool is marked read-only");
+  ck(chip("write_file")[1] === "1", "a writing tool is marked as a write");
+  ck(chip("search_files")[1] === "0", "search reads, it does not write");
+  // Conservative in the direction that keeps the amber meaningful: an
+  // unrecognised verb is read-only, not a warning nobody will believe.
+  ck(chip("frobnicate_thing")[1] === "0", "an unknown verb defaults to read-only");
+  ck((r.html.match(/class="mcp-chip" data-w="[01]" title="/g) || []).length === 4,
+    "every chip states its classification in a title");
 }
 
 console.log(`\n──── ${pass} passed, ${fail} failed ────`);

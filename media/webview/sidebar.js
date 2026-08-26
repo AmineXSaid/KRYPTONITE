@@ -3287,6 +3287,26 @@ function _sbRun() {
       "</svg>";
   }
 
+  /**
+   * Does this MCP tool change anything, or only read?
+   *
+   * McpServerDto carries tool NAMES and nothing else - the protocol has no
+   * write flag - so this is a heuristic over the leading verb, not a fact the
+   * server told us. It is conservative in the direction that keeps the amber
+   * meaningful: an unrecognised verb is treated as read-only rather than
+   * warned about, because crying wolf on every tool would make the warning
+   * worthless. The verdict is always stated in the chip's title, so the guess
+   * is visible rather than silently trusted.
+   *
+   * Kept self-contained and at this level on purpose: test/mcp-render.cjs
+   * lifts whole functions out of this file by brace matching, so a nested
+   * helper's closing brace would truncate whatever function encloses it.
+   */
+  function mcpToolWrites(name) {
+    return /^(write|create|delete|remove|update|patch|put|post|set|move|rename|append|edit|upload|publish|send|insert|drop|exec|execute|run|apply|commit|push|merge|revoke|grant|install|restart|kill)(_|$)/i
+      .test(String(name || ""));
+  }
+
   function mcpPill(state) {
     if (state === "ready") return '<span class="mcp-pill ok">' + icon("i-check", "ic-9") + "connected</span>";
     if (state === "starting") return '<span class="mcp-pill">starting…</span>';
@@ -3364,7 +3384,13 @@ function _sbRun() {
 
       if (ready && list.length) {
         var shown = list.slice(0, MCP_CHIP_CAP);
-        var chips = shown.map(function (t) { return '<span class="mcp-chip">' + esc(t) + "</span>"; }).join("");
+        var chips = shown.map(function (t) {
+          var w = mcpToolWrites(t);
+          var why = w
+            ? t + " - classified as a tool that writes, because its name leads with a verb that changes state. It can act on the server, not just read from it."
+            : t + " - classified read-only, because its name leads with no state-changing verb. Genesis expects it to read and return, never to modify.";
+          return '<span class="mcp-chip" data-w="' + (w ? "1" : "0") + '" title="' + esc(why) + '">' + esc(t) + "</span>";
+        }).join("");
         if (list.length > shown.length) {
           chips += '<span class="mcp-more" title="' + esc(list.join(", ")) + '">+' +
             (list.length - shown.length) + " more</span>";

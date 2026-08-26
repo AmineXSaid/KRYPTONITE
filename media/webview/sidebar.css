@@ -1613,15 +1613,25 @@ li.doing .cbx { border-color: var(--kx-accent); }
 
 /* Chips are capped in the renderer; the tail carries the rest in its tooltip. */
 .mcp-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 16px 12px 29px; }
-/* A chip is a tool the model gained from a server, so it carries the server's
-   colour at wash strength â€” related to the rail above it, not competing. */
+/* A chip is a tool the model gained from a server, and its colour says what
+   that tool can do rather than which server it came from. Read-only takes the
+   information blue; anything that writes takes the attention amber. Scanning
+   a server for "what can this thing change" is the question worth answering
+   at a glance - the server is already named on the row above.
+   The classification is a heuristic over the tool's name (see mcpToolWrites
+   in sidebar.js); every chip states it in its title. */
 .mcp-chip {
   display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 4px;
-  background: var(--kx-mcp-wash);
+  background: var(--kx-info-wash);
   /* A hairline of the same hue: the wash alone bleeds into the panel at this
      size, and a stack of chips reads as one block rather than several tools. */
-  border: 1px solid color-mix(in srgb, var(--kx-mcp) 22%, transparent);
-  font-family: var(--kx-mono); font-size: 11px; color: var(--kx-mcp);
+  border: 1px solid color-mix(in srgb, var(--kx-info) 22%, transparent);
+  font-family: var(--kx-mono); font-size: 11px; color: var(--kx-info);
+}
+.mcp-chip[data-w="1"] {
+  background: var(--kx-warn-wash);
+  border-color: color-mix(in srgb, var(--kx-warn) 22%, transparent);
+  color: var(--kx-warn);
 }
 .mcp-more {
   display: inline-flex; align-items: center; padding: 3px 8px;
