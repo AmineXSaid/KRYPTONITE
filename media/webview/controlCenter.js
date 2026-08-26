@@ -786,6 +786,23 @@ function _run() {
     return html;
   }
 
+  /* Mirrors LLM_KINDS in sidebar.js and the id list in
+     src/endpoints/llmKind.ts. test/llm-kind.cjs pins all three together. */
+  var LLM_KINDS = [
+    { id: "chat", label: "Chat", note: "General instruction-following turns" },
+    { id: "reasoning", label: "Reasoning", note: "Thinks before answering; slower, stronger" },
+    { id: "multimodal", label: "Multimodal", note: "Reads images as well as text" },
+    { id: "coding", label: "Coding", note: "Tuned for code edits and repo work" },
+    { id: "completion", label: "Completion", note: "Fill-in-the-middle; drives ghost text" }
+  ];
+
+  function llmKindNote(id) {
+    for (var i = 0; i < LLM_KINDS.length; i++) {
+      if (LLM_KINDS[i].id === id) return LLM_KINDS[i].note;
+    }
+    return "";
+  }
+
   function endpointForm() {
     var f = S.epForm;
     var types = ["anthropic", "openai-compatible", "azure", "local", "custom"], opts = "";
@@ -793,6 +810,11 @@ function _run() {
       opts += '<option value="' + types[i] + '"' + (f.type === types[i] ? " selected" : "") + ">" + types[i] + "</option>";
     }
     var needsKey = f.type !== "local";
+    var kindOpts = '<option value=""' + (f.kind ? "" : " selected") + " disabled>Choose one…</option>";
+    for (var ki = 0; ki < LLM_KINDS.length; ki++) {
+      kindOpts += '<option value="' + LLM_KINDS[ki].id + '"' +
+        (f.kind === LLM_KINDS[ki].id ? " selected" : "") + ">" + esc(LLM_KINDS[ki].label) + "</option>";
+    }
     return '<div class="form"><div class="t">' + (f.isNew ? "Add endpoint" : "Edit endpoint") + "</div>" +
       '<div class="fgrid">' +
         '<label for="fId">ID</label><input id="fId" value="' + esc(f.id) + '" placeholder="openrouter">' +
@@ -800,6 +822,13 @@ function _run() {
         '<label for="fUrl">Base URL</label><input id="fUrl" value="' + esc(f.url) + '" placeholder="https://openrouter.ai/api/v1">' +
         '<label for="fType">Provider Type</label><select id="fType">' + opts + "</select>" +
         '<label for="fModel">Model</label><input id="fModel" value="' + esc(f.model || "") + '" placeholder="openrouter/free">' +
+        // Mandatory. Sits under the model id because it is a statement about
+        // that id, and it seeds the profile's capability block.
+        '<label for="fKind">Model Type <span class="req" title="Required">*</span></label>' +
+        '<select id="fKind" data-empty="' + (f.kind ? "0" : "1") + '" aria-required="true">' + kindOpts + "</select>" +
+        '<span></span><span class="f-hint" id="fKindHint"' + (f.kind ? "" : ' data-err="1"') + ">" +
+          esc(f.kind ? llmKindNote(f.kind) + "." : "Required. The gateway cannot be asked what sort of model it serves.") +
+        "</span>" +
         (needsKey
           ? '<label for="fKey">API Key</label><input id="fKey" type="password" autocomplete="off" spellcheck="false" value="" placeholder="' +
             (f.hasStoredKey ? "stored - leave blank to keep" : "sk-…") + '">'
@@ -845,6 +874,7 @@ function _run() {
     S.epForm.name = $("fName").value.trim();
     S.epForm.url = $("fUrl").value.trim();
     S.epForm.type = $("fType").value;
+    S.epForm.kind = $("fKind") ? $("fKind").value : "";
     S.epForm.model = $("fModel") ? $("fModel").value.trim() : "";
     S.epForm.chatPath = $("fPath") ? $("fPath").value.trim() : "";
     // Seconds in the field, milliseconds in the profile.
@@ -858,7 +888,7 @@ function _run() {
   function epPayload(f) {
     var out = {
       id: f.id, name: f.name, url: f.url, type: f.type,
-      model: f.model || "", chatPath: f.chatPath || "",
+      kind: f.kind || "", model: f.model || "", chatPath: f.chatPath || "",
       http2: !!f.http2, hasStoredKey: !!f.hasStoredKey
     };
     if (f.timeoutMs) out.timeoutMs = f.timeoutMs;
@@ -1587,7 +1617,21 @@ function _run() {
       return;
     }
     if (action === "save") {
-      var form = epPayload(readEpForm());
+      var draftSave = readEpForm();
+      if (!draftSave) return;
+      // Same rule as the sidebar: refuse in the panel so the form stays open
+      // with everything typed still in it, rather than letting the host throw.
+      if (!draftSave.kind) {
+        render();
+        var kHint = $("fKindHint");
+        if (kHint) {
+          kHint.setAttribute("data-err", "1");
+          kHint.textContent = "Choose what kind of model this endpoint serves before saving.";
+        }
+        if ($("fKind") && $("fKind").focus) $("fKind").focus();
+        return;
+      }
+      var form = epPayload(draftSave);
       S.epForm = null;
       S.epCheck = null;
       render();

@@ -2,6 +2,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { parse as parseYaml } from "yaml";
+import { capabilitiesFor, DEFAULT_LLM_KIND, isLlmKind, LLM_KINDS, type LlmKind } from "./llmKind";
+
+export type { LlmKind };
 
 export type Wire = "openai" | "anthropic" | "raw";
 
@@ -141,6 +144,14 @@ export interface EndpointProfile {
   name: string;
   description?: string;
   wire: Wire;
+  /**
+   * What kind of model this endpoint serves - the one fact a gateway cannot be
+   * probed for. Required on every profile written by the UI; a hand-written
+   * file that predates the field loads as `chat` rather than failing, because
+   * refusing to parse a working profile over a missing label would be a worse
+   * trade than assuming the commonest case.
+   */
+  kind: LlmKind;
   baseUrl: string;
   /** Present only when the profile declares an `image:` block. */
   image?: ImageSpec;
@@ -229,6 +240,16 @@ export function loadProfile(file: string): EndpointProfile {
   if (doc.wire === "raw" && !doc.transform) {
     throw new ProfileError("wire: raw requires a transform module.", file);
   }
+  // Present-but-wrong is an error; absent is not. A typo'd kind would silently
+  // seed the wrong capabilities and the user would never learn why vision was
+  // off, so it is worth failing the parse over. A file written before the field
+  // existed is a different case and falls through to the default below.
+  if (doc.kind !== undefined && !isLlmKind(doc.kind)) {
+    throw new ProfileError(
+      `kind must be one of ${LLM_KINDS.join(", ")} - got "${doc.kind}"`,
+      file
+    );
+  }
   // An image block with no model would produce a tool the model can call and
   // that can only ever fail, which is worse than not offering it.
   if (doc.image !== undefined) {
@@ -240,10 +261,20 @@ export function loadProfile(file: string): EndpointProfile {
     }
   }
 
+  const kind = isLlmKind(doc.kind) ? doc.kind : DEFAULT_LLM_KIND;
+
   return {
     ...doc,
+    kind,
     auth: doc.auth ?? { kind: "none" },
-    capabilities: { ...DEFAULT_CAPS, ...(doc.capabilities ?? {}) },
+    // Three layers, weakest first: the global defaults, what the kind implies,
+    // then whatever the file actually says. The kind seeds; it never overrides,
+    // so a hand-written `vision: false` on a multimodal profile still wins.
+    capabilities: {
+      ...DEFAULT_CAPS,
+      ...capabilitiesFor(kind),
+      ...(doc.capabilities ?? {}),
+    },
     timeoutMs: doc.timeoutMs ?? 120_000,
     retries: doc.retries ?? 2,
     sourceFile: file,

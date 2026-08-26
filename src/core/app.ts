@@ -1175,6 +1175,7 @@ export class App {
         id: p.name,
         description: p.description ?? "",
         wire: p.wire,
+        kind: p.kind,
         model: p.model,
         baseUrl: p.baseUrl,
         chatPath: p.chatPath ?? null,
@@ -1213,6 +1214,10 @@ export class App {
       id: e.file ? path.basename(e.file) : "unknown.yaml",
       description: "",
       wire: "openai",
+      // A profile that failed to parse has no honest kind to report. `chat`
+      // is the placeholder the DTO needs to stay well-formed; the row renders
+      // from `status: "error"` and never shows it.
+      kind: "chat",
       model: "-",
       baseUrl: "-",
       chatPath: null,
@@ -1275,7 +1280,7 @@ export class App {
   }
 
   modelGroups(): ModelGroupDto[] {
-    return this.profiles.map((p) => ({ group: p.name, models: [p.model] }));
+    return this.profiles.map((p) => ({ group: p.name, kind: p.kind, models: [p.model] }));
   }
 
   configDto(): ConfigDto {

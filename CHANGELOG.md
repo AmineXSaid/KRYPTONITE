@@ -3,6 +3,35 @@
 ## Unreleased
 
 ### Added
+- **Every endpoint declares what kind of model it serves.** `kind:` is
+  mandatory on new profiles - one of `chat`, `reasoning`, `multimodal`,
+  `coding`, `completion` - and the Add-endpoint form refuses to save without
+  it. A gateway cannot be asked this: `model:` is an opaque id and `baseUrl` is
+  a hostname, so the extension was assuming "chat" and hoping, which is how a
+  fill-in-the-middle base model ends up being offered tools it has no grammar
+  for and fails on its first turn.
+
+  The field is load-bearing rather than a label. It seeds the capability block:
+  `multimodal` turns `vision` on, `reasoning` raises the output budget to 8192
+  because thinking spends tokens before the answer does, and `completion` turns
+  `tools` off and `fim` on. Seeding never overrides - a hand-written
+  `vision: false` on a multimodal profile still wins - so `kind` is the
+  headline and `capabilities:` stays the detail.
+
+  A profile written before the field existed loads as `chat` rather than
+  failing; a *misspelled* one is refused, because that is the case where
+  silently seeding the wrong capabilities leaves nothing to point at months
+  later.
+- **The model picker says which kind each endpoint serves.** The rows were a
+  tick and a model id, which told you nothing about what you were choosing
+  between. They now carry the Genesis listbox shape - a selection dot, the
+  model id over a sentence describing the kind, and a hue-coded tag - so eight
+  profiles can be told apart at a glance. Colour follows the same argument the
+  MCP tool chips make: the slot holds a classification, and telling them apart
+  is the point. The Endpoints list in Diagnostics carries the same tag, so the
+  answer is visible where endpoints are managed as well as where they are
+  chosen - a profile that failed to parse shows none, having no honest one to
+  report.
 - **Agents have a tab.** They were a collapsed section inside Diagnostics,
   which is where a thing goes to be inspected rather than used, three clicks
   from the composer and behind a heading nobody opens twice. The tab sits after
@@ -17,6 +46,26 @@
   told about while looking somewhere else.
 
 ### Changed
+- **The mode picker is a sheet, and it no longer offers Plan.** Plan is a
+  *phase*, and it already exists as the middle segment of the ASK/PLAN/ACT
+  control two inches to the left; offering it here too put one setting behind
+  two controls that could disagree. What is left - Manual, Accept edits, Auto -
+  maps one-to-one onto the three approval modes the host has always had.
+
+  The picker itself is now the Genesis sheet: the panel dims, it rises from the
+  bottom edge, and each mode states what it means in a sentence with a filled
+  radio rather than a tick. Its metrics are sized to the panel rather than to a
+  phone - the card is `height: auto` so it is exactly as tall as its three
+  rows, capped at `min(72%, 300px)` so it yields on a short panel, and its
+  gutters and type step down through `clamp()` as the panel narrows. Dropping
+  Plan is what makes that compact size honest: three rows fit without scrolling
+  at any panel height worth using.
+- **Exactly one row in the model picker claims to be the selection.** The dot
+  was bound to `data-active`, which is the *keyboard cursor* and moves with the
+  arrow keys - so Auto and the endpoint it had resolved to both lit up, which
+  reads as two selections. Selection is now its own state, and when Auto is in
+  force its row names the endpoint it resolved to rather than restating the
+  rule.
 - **The send control is a rounded square.** A disc reads as a media button, the
   thing a consumer app puts under a video, and every other control in the
   composer is a rectangle with soft corners, so it was the one shape belonging

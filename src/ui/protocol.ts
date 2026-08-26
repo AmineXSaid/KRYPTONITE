@@ -10,7 +10,8 @@
  *   Outbound = host    -> webview
  */
 
-import type { Capabilities, Wire } from "../endpoints/profile";
+import type { Capabilities, LlmKind, Wire } from "../endpoints/profile";
+export type { LlmKind };
 import type { Msg } from "../providers/client";
 
 /* ────────────────────────────── primitives ────────────────────────────── */
@@ -113,6 +114,8 @@ export interface ProfileDto {
   id: string;
   description: string;
   wire: Wire;
+  /** What kind of model this endpoint serves. Always set; see `LlmKind`. */
+  kind: LlmKind;
   model: string;
   baseUrl: string;
   chatPath: string | null;
@@ -214,9 +217,17 @@ export interface LogLine {
   msg: string;
 }
 
-/** One group in the model picker. One group per ready profile. */
+/**
+ * One group in the model picker. One group per ready profile.
+ *
+ * `kind` rides along with the group rather than with each model id because it
+ * is a property of the ENDPOINT, not of the string the gateway was told to
+ * serve: the profile declares what sort of model sits behind the route, and
+ * every model listed under that route is reached through the same declaration.
+ */
 export interface ModelGroupDto {
   group: string;
+  kind: LlmKind;
   models: string[];
 }
 
@@ -285,6 +296,16 @@ export interface EndpointForm {
   name: string;
   url: string;
   type: EndpointFormType;
+  /**
+   * What kind of model the gateway serves. Mandatory: the form refuses to save
+   * without it, because it is the one thing about the endpoint that cannot be
+   * discovered by probing and that silently changes how the agent behaves.
+   *
+   * Optional in the TYPE only so a half-filled draft can travel on
+   * `checkEndpoint` - a connection check does not need it. `saveEndpoint`
+   * rejects a form that reaches the host without one.
+   */
+  kind?: LlmKind;
   /**
    * The model id the gateway expects. Previously hardcoded per provider type
    * when the YAML was generated, which meant every endpoint added through the

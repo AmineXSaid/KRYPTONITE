@@ -70,7 +70,7 @@ function boot() {
   ok("the composer shows the mode in force", b.d.getElementById("permName").textContent === "Ask",
     b.d.getElementById("permName").textContent);
   ok("and the full sentence is still reachable",
-    /Ask each time - Every side effect waits for you\./.test(b.d.getElementById("permBtn").title),
+    /Manual - Always ask before making changes/.test(b.d.getElementById("permBtn").title),
     b.d.getElementById("permBtn").title);
   ok("it lives on the control row, not under the box",
     !!b.d.querySelector(".toolbar #permBtn"));
@@ -90,8 +90,21 @@ function boot() {
   // Ordered by how much control they give up, so the list reads as a scale.
   ok("ordered by how much they surrender", rows[0] === "ask" && rows[2] === "full-auto");
   ok("each says what happens, not what it is called",
-    [...b.d.querySelectorAll("#permPop .pop-row .m")].every((e) => e.textContent.trim().length > 10));
-  ok("the current one is ticked", !!b.d.querySelector('#permPop [data-perm="ask"] .perm-check svg'));
+    [...b.d.querySelectorAll("#permPop .perm-row .m")].every((e) => e.textContent.trim().length > 10));
+  // The sheet marks the mode in force with a filled radio rather than a tick,
+  // because these are exclusive choices and a radio is what says so.
+  ok("the current one is selected",
+    b.d.querySelector('#permPop [data-perm="ask"]').getAttribute("data-on") === "1");
+  ok("and says so to assistive tech",
+    b.d.querySelector('#permPop [data-perm="ask"]').getAttribute("aria-checked") === "true");
+  ok("and the others do not",
+    b.d.querySelector('#permPop [data-perm="full-auto"]').getAttribute("data-on") === "0");
+  // Plan is a PHASE and already exists as the middle segment of the
+  // ASK/PLAN/ACT control. Offering it here too would put one setting behind
+  // two controls that can disagree.
+  ok("plan is not offered as a mode",
+    !b.d.querySelector('#permPop [data-perm="plan"]'));
+  ok("because it is already a phase", !!b.d.querySelector('#phaseSeg [data-phase="plan"]'));
 
   b.sent.length = 0;
   b.click('#permPop [data-perm="full-auto"]');
@@ -113,13 +126,32 @@ function boot() {
     b.d.getElementById("permName").textContent === "Auto",
     b.d.getElementById("permName").textContent);
   ok("and the tooltip follows it",
-    /Allow all/.test(b.d.getElementById("permBtn").title),
+    /^Auto - /.test(b.d.getElementById("permBtn").title),
     b.d.getElementById("permBtn").title);
 
   b.click("#permBtn");
   b.d.body.dispatchEvent(new b.w.MouseEvent("click", { bubbles: true }));
   ok("clicking away closes it", b.d.getElementById("permPop").hidden);
   b.dom.window.close();
+}
+{
+  /* The sheet is sized to the panel rather than to a phone.
+     It is the control that decides what the agent may do to the workspace, so
+     it is a sheet rather than a menu - but a side panel can be 320px wide and
+     dragged shorter than a phone sheet is tall, so none of its metrics may be
+     fixed. */
+  ok("the sheet covers the panel, not just the composer it hangs off",
+    /\.perm-sheet\s*\{[^}]*position:\s*fixed/.test(CSS));
+  ok("the card is exactly as tall as its rows",
+    /\.perm-card\s*\{[^}]*height:\s*auto/.test(CSS));
+  ok("and never claims more of a short panel than it can use",
+    /\.perm-card\s*\{[^}]*max-height:\s*min\(/.test(CSS));
+  ok("the list is what scrolls, so the title survives a short panel",
+    /\.perm-list\s*\{[^}]*overflow-y:\s*auto/.test(CSS));
+  ok("row gutters step down as the panel narrows",
+    /\.perm-row\s*\{[^}]*padding:\s*clamp\(/.test(CSS));
+  ok("the chosen mode is a filled radio, not a tick",
+    /\.perm-row\[data-on="1"\] \.dot \{ background/.test(CSS));
 }
 {
   // Only the modes that stop asking are coloured, and the loudest one is the
@@ -243,7 +275,11 @@ function boot() {
   b.click("#modelBtn");
   const first = b.d.querySelector("#qp .qp-row");
   ok("Auto is offered first", /^Auto/.test(first.textContent.trim()), first.textContent.trim());
-  ok("and is ticked when nothing is pinned", !!first.querySelector(".qp-check svg"));
+  // The listbox marks the selection with a lit dot rather than a tick. It is
+  // deliberately NOT data-active, which is the keyboard cursor and moves
+  // independently of what is actually in force.
+  ok("and is marked as the selection when nothing is pinned",
+    first.getAttribute("data-on") === "1", first.getAttribute("data-on"));
 
   b.sent.length = 0;
   first.dispatchEvent(new b.w.MouseEvent("click", { bubbles: true }));

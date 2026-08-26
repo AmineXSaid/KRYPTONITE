@@ -19,6 +19,31 @@ environment, `${secret:NAME}` reads the VS Code secret store (key
 Supported wire formats: `openai`, `anthropic`, and `raw` with a sandboxed
 JavaScript transform module that reshapes anything neither adapter can express.
 
+### What kind of model is behind it
+
+Every profile declares a `kind`, and the Add-endpoint form will not save
+without one:
+
+| `kind` | what it means | what it sets for you |
+| --- | --- | --- |
+| `chat` | General instruction-following turns | the stock defaults |
+| `reasoning` | Thinks before answering; slower, stronger | `maxOutputTokens: 8192` |
+| `multimodal` | Reads images as well as text | `vision: true` |
+| `coding` | Tuned for code edits and repo work | the stock defaults |
+| `completion` | Fill-in-the-middle; drives ghost text | `tools: false`, `fim: true` |
+
+A gateway will not tell you which of these it is serving — `model:` is an
+opaque id and `baseUrl` is a hostname — but you always know, and the agent
+behaves differently for each. So it is asked once, when the endpoint is added,
+rather than guessed on every turn. The model picker shows it against each
+endpoint, so eight profiles can be told apart at a glance.
+
+`kind` is the headline; `capabilities:` is still the detail, and it wins. A
+reasoning model that also reads images is `kind: reasoning` with
+`vision: true` — the kind seeds, it never overrides. A profile written before
+the field existed loads as `chat`; a misspelled one is refused, because the
+alternative is silently seeding the wrong capabilities.
+
 ### Why the transport is hand-built
 
 Node's global `fetch` ignores `NODE_EXTRA_CA_CERTS` in some extension-host

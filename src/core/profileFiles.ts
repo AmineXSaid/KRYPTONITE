@@ -1,6 +1,14 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { EndpointProfile } from "../endpoints/profile";
+import {
+  capabilitiesFor,
+  DEFAULT_LLM_KIND,
+  isLlmKind,
+  LLM_KIND_NOTE,
+  LLM_KINDS,
+  type LlmKind,
+} from "../endpoints/llmKind";
 import type { EndpointForm, EndpointFormType } from "../ui/protocol";
 
 /**
@@ -78,6 +86,11 @@ export function renderProfileYaml(form: EndpointForm): string {
   const model = form.model?.trim() || defaultModel(form.type);
   const local = form.type === "local";
   const displayName = form.name.trim() || form.id;
+  // The form makes this mandatory, so a form arriving without one is a caller
+  // that skipped the UI - a template write, or a test. Defaulting keeps those
+  // paths working; `saveEndpointFile` is where a real save is refused.
+  const kind: LlmKind = isLlmKind(form.kind) ? form.kind : DEFAULT_LLM_KIND;
+  const seeded = capabilitiesFor(kind);
 
   const lines: string[] = [];
   lines.push(`# ${displayName}`);
@@ -88,6 +101,11 @@ export function renderProfileYaml(form: EndpointForm): string {
   lines.push(`wire: ${wire}                      # openai | anthropic | raw`);
   lines.push(`baseUrl: ${quote(form.url)}`);
   lines.push(`model: ${model}`);
+  lines.push(`kind: ${kind}` + `${" ".repeat(Math.max(1, 26 - kind.length))}# ${LLM_KINDS.join(" | ")}`);
+  lines.push(`# ${LLM_KIND_NOTE[kind]}.`);
+  lines.push(`# The kind is the headline - what you reach for this endpoint for.`);
+  lines.push(`# capabilities: below is the detail. A reasoning model that also`);
+  lines.push(`# reads images is kind: reasoning with vision: true.`);
   lines.push(``);
 
   if (chatPath) {
@@ -175,16 +193,26 @@ export function renderProfileYaml(form: EndpointForm): string {
   }
   lines.push(``);
 
+  const capBool = (key: string, fallback: boolean): string =>
+    String(seeded[key] === undefined ? fallback : seeded[key]);
+
   lines.push(`capabilities:`);
   lines.push(`  streaming: true`);
-  lines.push(`  tools: true`);
-  lines.push(`  vision: false`);
+  // These three are the ones a kind has an opinion about, so they are written
+  // from the seed rather than hardcoded. A `completion` profile lands with
+  // tools off and fim on, which is the difference between a profile that works
+  // and one whose first turn is a 400.
+  lines.push(`  tools: ${capBool("tools", true)}`);
+  lines.push(`  vision: ${capBool("vision", false)}`);
   lines.push(`  systemRole: message             # message | top-level | prepend-user`);
   lines.push(`  contextWindow: ${local ? 32768 : 128000}`);
-  lines.push(`  maxOutputTokens: 4096`);
+  lines.push(`  maxOutputTokens: ${seeded.maxOutputTokens ?? 4096}`);
   lines.push(`  tokenCounting: heuristic        # api | heuristic`);
   lines.push(`  maxImageBytes: 1500000          # base64 image bytes per request; oldest dropped first`);
   lines.push(`  parallelToolCalls: false`);
+  if (seeded.fim === true) {
+    lines.push(`  fim: true                       # drives ghost text at the cursor`);
+  }
   lines.push(``);
 
   return lines.join("\n");
@@ -197,6 +225,7 @@ export function newEndpointForm(): EndpointForm {
     name: "New endpoint",
     url: "https://gateway.internal.example",
     type: "openai-compatible",
+    kind: DEFAULT_LLM_KIND,
   };
 }
 
@@ -218,6 +247,13 @@ export function saveEndpointFile(
   if (!PROFILE_ID_RE.test(form.id)) {
     throw new Error(
       `Invalid profile id "${form.id}". Use letters, digits, dot, dash or underscore, starting with a word character.`
+    );
+  }
+  // Enforced here rather than only in the webview so the rule holds for every
+  // caller. A profile with no kind is one whose capabilities were guessed.
+  if (!isLlmKind(form.kind)) {
+    throw new Error(
+      `Choose what kind of model "${form.id}" serves - one of ${LLM_KINDS.join(", ")}.`
     );
   }
   fs.mkdirSync(dir, { recursive: true });

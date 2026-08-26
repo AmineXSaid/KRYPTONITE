@@ -40,6 +40,12 @@ function _sbRun() {
     '<symbol id="i-clip" viewBox="0 0 24 24"><path d="M17.5 10.5l-6.8 6.8a3 3 0 01-4.2-4.2l7.5-7.5a4.5 4.5 0 016.4 6.4l-7.5 7.5" ' + S6 + ' stroke-width="1.5"/></symbol>' +
     '<symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6" ' + S6 + ' stroke-width="1.7"/></symbol>' +
     '<symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor"/></symbol>' +
+    /* The three mode glyphs, lifted from the Genesis defs unchanged: an open
+       palm for "stop and ask", angle brackets for "edits go through", a bolt
+       for "decide for me". */
+    '<symbol id="i-hand" viewBox="0 0 24 24"><path d="M9 11.4V5.6a1.4 1.4 0 0 1 2.8 0v5.8m0 0V4.7a1.4 1.4 0 0 1 2.8 0v6.7m0 0V6.6a1.4 1.4 0 0 1 2.8 0V13c0 4.4-2.3 7.6-6.1 7.6S6.2 17.4 6.2 13v-2.1a1.4 1.4 0 0 1 2.8 0v.5" ' + S6 + ' stroke-width="1.5"/></symbol>' +
+    '<symbol id="i-code" viewBox="0 0 24 24"><path d="M9.5 7.5L5 12l4.5 4.5M14.5 7.5L19 12l-4.5 4.5" ' + S6 + ' stroke-width="1.7"/></symbol>' +
+    '<symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13.2 3L6 13.6h4.6L10.2 21 17.4 10.4h-4.6z" ' + S6 + ' stroke-width="1.5"/></symbol>' +
     '<symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" ' + S6 + ' stroke-width="1.5"/><path d="M3.5 12h17M12 3.5c-4.5 5-4.5 12 0 17 4.5-5 4.5-12 0-17z" ' + S6 + ' stroke-width="1.4"/></symbol>' +
     '<symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="12" rx="1.5" ' + S6 + ' stroke-width="1.5"/><path d="M9 20h6M12 16.5V20" ' + S6 + ' stroke-width="1.5"/></symbol>' +
     '<symbol id="i-pencil" viewBox="0 0 24 24"><path d="M16.5 3.8l3.7 3.7L8.4 19.3l-4.7.9.9-4.7z" ' + S6 + ' stroke-width="1.5"/></symbol>' +
@@ -167,6 +173,59 @@ function _sbRun() {
     anthropic: "i-kx", "openai-compatible": "i-globe", azure: "i-globe",
     local: "i-monitor", custom: "i-globe", raw: "i-globe", openai: "i-globe"
   };
+
+  /* What kind of model an endpoint serves, as the picker and the form say it.
+   *
+   * The IDS are the contract with src/endpoints/llmKind.ts and must not drift -
+   * test/llm-kind.cjs pins the two lists against each other. What lives here
+   * and nowhere else is the PRESENTATION: the label, the one-line note, and the
+   * hue. That split is deliberate; the host owns which kinds exist and what
+   * capabilities each one implies, and the webview owns what they look like.
+   *
+   * The hues are the Genesis accent roles, one per kind, chosen so the badge
+   * survives a glance down a list of eight endpoints:
+   *   chat        neutral   - the baseline. A badge earns colour by being
+   *                           unusual, and "an ordinary chat model" is not.
+   *   reasoning   purple    - the "capability from outside" hue, same claim
+   *                           the MCP chips make.
+   *   multimodal  green     - it can do something the others cannot.
+   *   coding      blue      - information / the working default for this tool.
+   *   completion  orange    - attention: it cannot drive the agent loop.
+   */
+  var LLM_KINDS = [
+    { id: "chat", label: "Chat", note: "General instruction-following turns", hue: "var(--kx-fg-3)" },
+    { id: "reasoning", label: "Reasoning", note: "Thinks before answering; slower, stronger", hue: "var(--kx-mcp)" },
+    { id: "multimodal", label: "Multimodal", note: "Reads images as well as text", hue: "var(--kx-accent)" },
+    { id: "coding", label: "Coding", note: "Tuned for code edits and repo work", hue: "var(--kx-ask)" },
+    { id: "completion", label: "Completion", note: "Fill-in-the-middle; drives ghost text", hue: "var(--kx-active)" }
+  ];
+
+  /* Resolve a kind id to its descriptor.
+   *
+   * Falls back to chat rather than returning undefined: a profile written by
+   * hand can carry a kind this build has never heard of, and a picker row that
+   * throws is worse than one that under-claims. Kept self-contained and at this
+   * level because test/mcp-render.cjs and friends lift whole functions out of
+   * this file by brace matching. */
+  function llmKind(id) {
+    for (var i = 0; i < LLM_KINDS.length; i++) {
+      if (LLM_KINDS[i].id === id) return LLM_KINDS[i];
+    }
+    return LLM_KINDS[0];
+  }
+
+  /* What choosing this kind will actually do to the generated profile.
+   *
+   * The field would be decorative if it only set a label, so it seeds the
+   * capability block - and the form says so before the user commits, rather
+   * than leaving them to diff the YAML afterwards. Mirrors capabilitiesFor()
+   * in src/endpoints/llmKind.ts; test/llm-kind.cjs pins the pair. */
+  function kindImplies(id) {
+    if (id === "multimodal") return "Turns vision on.";
+    if (id === "reasoning") return "Raises the output budget to 8192 - thinking spends tokens before the answer does.";
+    if (id === "completion") return "Turns tools OFF and fim on: a fill-in-the-middle model cannot drive the agent loop.";
+    return "Uses the stock capability defaults.";
+  }
 
   /* Chars of a tool result rendered before the Show-more expander.
    *
@@ -982,9 +1041,23 @@ function _sbRun() {
                 '<button id="sendBtn" data-ready="0" data-mode="send" title="Send" aria-label="Send">' + icon("i-up", "ic-13") + '</button>' +
               '</div>' +
             '</div>' +
-            // The approval menu hangs off the composer rather than off a
-            // footer, so it opens over the transcript above its button.
-            '<div class="popover perm-pop" id="permPop" role="menu" hidden></div>' +
+            // The mode picker is a sheet over the whole panel rather than a
+            // menu hanging off its button. It is the control that decides what
+            // the agent may do to the workspace without asking, and the design
+            // treats it as a decision worth stopping for: the panel dims, the
+            // sheet rises from the bottom edge, and each mode states what it
+            // means in a sentence rather than a word.
+            '<div class="perm-sheet" id="permPop" hidden>' +
+              '<div class="perm-card" role="dialog" aria-modal="true" aria-label="Select mode">' +
+                '<div class="perm-grip"><span></span></div>' +
+                '<div class="perm-head">' +
+                  '<button class="perm-x" data-perm-close="1" aria-label="Close">' + icon("i-x", "ic-13") + '</button>' +
+                  '<div class="t">Select mode</div>' +
+                  '<div class="s">Choose what the agent may do without asking</div>' +
+                '</div>' +
+                '<div class="perm-list" id="permList" role="radiogroup" aria-label="Mode"></div>' +
+              '</div>' +
+            '</div>' +
           '</div>' +
         '</section>' +
         '<section class="view" id="viewMcp" role="tabpanel" aria-labelledby="tabMcp" hidden>' +
@@ -1244,9 +1317,18 @@ function _sbRun() {
      send". The sentence still appears in the menu, which is where someone is
      deciding rather than glancing. */
   var PERMS = [
-    ["ask", "Ask each time", "Every side effect waits for you.", "Ask"],
-    ["edits-auto", "Auto-edit", "File edits run. Shell commands still ask.", "Edits"],
-    ["full-auto", "Allow all", "Runs everything without asking.", "Auto"]
+    // id, sheet title, sentence, the one word the composer button shows,
+    // glyph, hue.
+    //
+    // These are the Genesis mode rows with `plan` dropped. Plan is a PHASE,
+    // not a permission - it already exists as the middle segment of the
+    // ASK/PLAN/ACT control two inches to the left, and offering it in both
+    // places would put the same setting behind two controls that disagree.
+    // What is left maps one-to-one onto the three approval modes the host has
+    // always had.
+    ["ask", "Manual", "Always ask before making changes", "Ask", "i-hand", "var(--kx-fg)"],
+    ["edits-auto", "Accept edits", "File edits run automatically. Shell commands still ask.", "Edits", "i-code", "var(--kx-mcp)"],
+    ["full-auto", "Auto", "The agent handles permission decisions itself", "Auto", "i-bolt", "var(--kx-error)"]
   ];
 
   function permLabel(mode, short) {
@@ -1273,15 +1355,19 @@ function _sbRun() {
     }
     var pop = $("permPop");
     if (!pop || pop.hidden) return;
+    var list = $("permList");
+    if (!list) return;
     var html = "";
     for (var i = 0; i < PERMS.length; i++) {
       var on = PERMS[i][0] === mode;
-      html += '<button class="pop-row" role="menuitem" data-perm="' + esc(PERMS[i][0]) + '">' +
-        '<span class="perm-check">' + (on ? icon("i-check", "ic-13") : "") + "</span>" +
+      html += '<button class="perm-row" role="radio" aria-checked="' + (on ? "true" : "false") +
+        '" data-on="' + (on ? "1" : "0") + '" data-perm="' + esc(PERMS[i][0]) + '">' +
+        '<span class="ic" style="color:' + PERMS[i][5] + '">' + icon(PERMS[i][4], "ic-18") + "</span>" +
         '<span class="col"><span class="t">' + esc(PERMS[i][1]) + "</span>" +
-        '<span class="m">' + esc(PERMS[i][2]) + "</span></span></button>";
+        '<span class="m">' + esc(PERMS[i][2]) + "</span></span>" +
+        '<span class="ring"><span class="dot"></span></span></button>';
     }
-    pop.innerHTML = html;
+    list.innerHTML = html;
   }
 
   function togglePerm(open) {
@@ -2624,11 +2710,18 @@ function _sbRun() {
       // "let the extension pick" and "pick that one" are the same instruction,
       // and offering both invites the user to wonder what the difference is.
       var pinned = (S.config && S.config.activeProfile) || "";
-      if (S.models.length > 1) {
+      var hasAuto = S.models.length > 1;
+      if (hasAuto) {
         rows.push({
           auto: true,
           model: "Auto",
-          desc: "Follow the first healthy endpoint",
+          // When Auto is what is in force, say what it currently resolves to.
+          // "Follow the first healthy endpoint" describes the rule; naming the
+          // answer is what the user actually wants to know, and it is the only
+          // way the endpoint in use stays visible once the dot moves up here.
+          desc: pinned === "" && current
+            ? "Following " + current.id + " - the first healthy endpoint"
+            : "Follow the first healthy endpoint",
           active: pinned === ""
         });
       }
@@ -2639,7 +2732,18 @@ function _sbRun() {
           rows.push({
             endpoint: g.group,
             model: g.models[j],
-            active: Boolean(current && current.id === g.group)
+            // The kind rides on the group: it is declared by the profile, so
+            // every model reached through that route shares it.
+            kind: g.kind,
+            // Exactly one row in this list is the selection. With an Auto row
+            // present it owns the unpinned state, so a model row is lit only
+            // when it is pinned by name - otherwise Auto and the endpoint it
+            // resolved to both lit up, which reads as two selections. With no
+            // Auto row there is nothing else to own it, so the single resolved
+            // endpoint is the selection.
+            active: hasAuto
+              ? pinned === g.group
+              : Boolean(current && current.id === g.group)
           });
         }
       }
@@ -2736,17 +2840,48 @@ function _sbRun() {
           '<span class="n ell">' + esc(r.agent || "None") + "</span>" +
           '<span class="d ell" title="' + esc(r.scope || r.desc) + '">' + esc(r.desc) + "</span></button>";
       } else if (r.auto) {
-        html += '<button class="qp-row" role="option" data-active="' + on + '" data-i="' + idx + '">' +
-          '<span class="qp-check">' + (r.active ? icon("i-check", "ic-13") : "") + "</span>" +
-          '<span class="n">' + esc(r.model) + "</span>" +
-          '<span class="d ell">' + esc(r.desc) + "</span></button>";
+        // Same row shape as a real model, because it sits in the same list and
+        // is chosen the same way. Its kind slot stays empty rather than saying
+        // "AUTO": which kind it resolves to depends on which endpoint is
+        // healthy at the time, and claiming one would be a guess.
+        html += '<button class="qp-row mdl" role="option" data-active="' + on + '"' +
+          ' data-on="' + (r.active ? "1" : "0") + '" aria-selected="' + (r.active ? "true" : "false") + '"' +
+          ' data-i="' + idx + '">' +
+          '<span class="mdl-dot"></span>' +
+          '<span class="mdl-col">' +
+            '<span class="mdl-id ell">' + esc(r.model) + "</span>" +
+            '<span class="mdl-note">' + esc(r.desc) + "</span>" +
+          "</span></button>";
       } else {
-        html += '<button class="qp-row" role="option" data-active="' + on + '" data-i="' + idx + '">' +
-          '<span class="qp-check">' + (r.active ? icon("i-check", "ic-13") : "") + "</span>" +
-          '<span class="n ell">' + esc(r.model) + "</span></button>";
+        /* The model row is the one picker row that carries three facts rather
+           than one: which endpoint, what sort of model it is, and what that
+           means. It follows the Genesis model listbox exactly - a 5px selection
+           dot, a stacked id-over-note column, and a right-hand mono tag - which
+           is why it is its own row shape instead of the single-line default the
+           file, skill and command rows use. */
+        var k = llmKind(r.kind);
+        // `data-active` is the KEYBOARD cursor and `data-on` is the endpoint
+        // actually in force. They are different rows most of the time, and the
+        // design distinguishes them: the cursor moves the row background, the
+        // selection lights the dot and brightens the id.
+        html += '<button class="qp-row mdl" role="option" data-active="' + on + '"' +
+          ' data-on="' + (r.active ? "1" : "0") + '" aria-selected="' + (r.active ? "true" : "false") + '"' +
+          ' data-i="' + idx + '"' +
+          ' title="' + esc(r.model + " - " + k.label + ". " + k.note + ".") + '">' +
+          '<span class="mdl-dot"></span>' +
+          '<span class="mdl-col">' +
+            '<span class="mdl-id ell">' + esc(r.model) + "</span>" +
+            '<span class="mdl-note">' + esc(k.note) + "</span>" +
+          "</span>" +
+          '<span class="mdl-kind" data-kind="' + esc(k.id) + '" style="color:' + k.hue + '">' +
+            esc(k.label) + "</span></button>";
       }
     }
     qp.innerHTML = html;
+    // Which picker this is. The model listbox is drawn as a list of things to
+    // compare rather than a fuzzy-find dropdown, and the CSS keys off this
+    // rather than guessing from the rows it happens to contain.
+    qp.setAttribute("data-mode", S.modelOpen ? "model" : S.agentOpen ? "agent" : "find");
     qp.hidden = false;
     $("modelBtn").setAttribute("aria-expanded", S.modelOpen ? "true" : "false");
     var active = qp.querySelector('[data-active="1"]');
@@ -3124,6 +3259,15 @@ function _sbRun() {
         '<span class="ell"><span class="id ell">' + esc(p.id) + "</span>" +
         '<span class="url ell" title="' + esc(p.status === "error" ? p.error || "" : p.baseUrl) + '">' +
         esc(p.status === "error" ? (p.error || "Failed to parse") : p.baseUrl) + "</span></span>" +
+        // The kind, on the row that manages endpoints as well as on the one
+        // that picks between them. It is a required field now; having to open
+        // the edit form to find out what an endpoint is would undo the point
+        // of asking. Suppressed for a profile that failed to parse, which has
+        // no honest kind to report.
+        (p.status === "error" ? "" :
+          '<span class="ep-kind" style="color:' + llmKind(p.kind).hue + '"' +
+          ' title="' + esc(llmKind(p.kind).label + " - " + llmKind(p.kind).note) + '">' +
+          esc(llmKind(p.kind).label) + "</span>") +
         '<span class="acts">' +
           '<button class="mini" data-ep="edit" data-id="' + esc(p.id) + '" title="Edit endpoint" aria-label="Edit endpoint">' + icon("i-pencil", "ic-13") + "</button>" +
           '<button class="mini danger" data-ep="del" data-id="' + esc(p.id) + '" title="Delete endpoint" aria-label="Delete endpoint">' + icon("i-trash", "ic-13") + "</button>" +
@@ -3140,6 +3284,13 @@ function _sbRun() {
       var types = ["anthropic", "openai-compatible", "azure", "local", "custom"], opts = "";
       for (var t = 0; t < types.length; t++) {
         opts += '<option value="' + types[t] + '"' + (f.type === types[t] ? " selected" : "") + ">" + types[t] + "</option>";
+      }
+      // A disabled placeholder rather than a pre-selected kind, so an
+      // unanswered field looks unanswered instead of looking like "chat".
+      var kindOpts = '<option value=""' + (f.kind ? "" : " selected") + " disabled>Choose one…</option>";
+      for (var kq = 0; kq < LLM_KINDS.length; kq++) {
+        kindOpts += '<option value="' + LLM_KINDS[kq].id + '"' +
+          (f.kind === LLM_KINDS[kq].id ? " selected" : "") + ">" + esc(LLM_KINDS[kq].label) + "</option>";
       }
       var needsKey = f.type !== "local";
       html += '<div class="form"><div class="t">' + (f.isNew ? "Add endpoint" : "Edit endpoint") + "</div>" +
@@ -3176,6 +3327,17 @@ function _sbRun() {
             '<button type="button" class="btn sm" data-ep="models" title="Ask the gateway which models it serves">Load</button>' +
           "</span>" +
           '<span></span><span class="f-hint" id="fModelHint"></span>' +
+          // Directly under the model id, because it is a statement ABOUT that
+          // id. Mandatory and unset by default: it is the one thing a gateway
+          // cannot be probed for, and it silently decides whether vision is on
+          // and whether tools are offered at all.
+          '<label for="fKind">Model Type <span class="req" title="Required">*</span></label>' +
+          '<select id="fKind" data-empty="' + (f.kind ? "0" : "1") + '" aria-required="true">' + kindOpts + "</select>" +
+          '<span></span><span class="f-hint" id="fKindHint"' + (f.kind ? "" : ' data-err="1"') + ">" +
+            esc(f.kind
+              ? llmKind(f.kind).note + ". " + kindImplies(f.kind)
+              : "Required. The gateway cannot be asked what sort of model it serves.") +
+          "</span>" +
           '<label for="fPath">Route</label><input id="fPath" value="' + esc(f.chatPath || "") + '" placeholder="auto - derived from Base URL">' +
           '<label for="fTimeout">Timeout</label>' +
           '<div class="fsplit">' +
@@ -3218,6 +3380,7 @@ function _sbRun() {
     S.epForm.name = $("fName").value.trim();
     S.epForm.url = $("fUrl").value.trim();
     S.epForm.type = $("fType").value;
+    S.epForm.kind = $("fKind") ? $("fKind").value : "";
     S.epForm.model = $("fModel") ? $("fModel").value.trim() : "";
     S.epForm.chatPath = $("fPath") ? $("fPath").value.trim() : "";
     // Entered in seconds because nobody thinks in milliseconds; stored in ms
@@ -3878,6 +4041,8 @@ function _sbRun() {
     });
     document.addEventListener("click", function (e) {
       if (!e.target.closest(".kx-header")) closePops();
+      // The sheet covers the panel and handles its own backdrop click, so the
+      // document-level closer must not also fire on it.
       if (!e.target.closest("#permBtn") && !e.target.closest("#permPop")) togglePerm(false);
       if (S.modelOpen && !e.target.closest("#modelBtn") && !e.target.closest("#qp")) {
         S.modelOpen = false;
@@ -4004,6 +4169,13 @@ function _sbRun() {
       togglePerm();
     });
     $("permPop").addEventListener("click", function (e) {
+      // The X, and the dimmed backdrop itself. A modal sheet that can only be
+      // dismissed by choosing something is a trap; clicking away is how every
+      // other sheet on the platform closes.
+      if (e.target.closest("[data-perm-close]") || !e.target.closest(".perm-card")) {
+        togglePerm(false);
+        return;
+      }
       var b = e.target.closest("[data-perm]");
       if (!b) return;
       // Straight to the host: approvalMode is a real setting, so the panel
@@ -4040,6 +4212,25 @@ function _sbRun() {
     $("viewAgents").addEventListener("click", onAgentClick);
     $("tlsBody").addEventListener("click", onTlsClick);
     $("epBody").addEventListener("click", onEpClick);
+    // Delegated, because the form is re-rendered wholesale on every check rung
+    // and a listener bound to the select would not survive that. The hint has
+    // to move with the answer: it states what the chosen kind will do to the
+    // generated capability block, so a stale one is worse than none.
+    $("epBody").addEventListener("change", function (e) {
+      var sel = e.target.closest && e.target.closest("#fKind");
+      if (!sel) return;
+      readEpForm();
+      var hint = $("fKindHint");
+      if (!hint) return;
+      if (sel.value) {
+        hint.removeAttribute("data-err");
+        hint.textContent = llmKind(sel.value).note + ". " + kindImplies(sel.value);
+      } else {
+        hint.setAttribute("data-err", "1");
+        hint.textContent = "Required. The gateway cannot be asked what sort of model it serves.";
+      }
+      sel.setAttribute("data-empty", sel.value ? "0" : "1");
+    });
     $("skBody").addEventListener("click", onSkillClick);
     $("mcpBody").addEventListener("click", onMcpClick);
     $("tabMcp").addEventListener("click", function () { setTab("mcp"); });
@@ -4116,8 +4307,12 @@ function _sbRun() {
     var a = b.getAttribute("data-ep"), id = b.getAttribute("data-id");
     if (a === "add") {
       S.epForm = {
+        // `kind` starts empty on purpose. It is the one field with no safe
+        // default: guessing it would seed the wrong capabilities silently, and
+        // a pre-selected value is a question nobody reads. Save refuses until
+        // it is answered.
         isNew: true, id: "", name: "", url: "", type: "openai-compatible",
-        model: "", chatPath: "", apiKey: "", hasStoredKey: false,
+        kind: "", model: "", chatPath: "", apiKey: "", hasStoredKey: false,
         timeoutMs: 0, http2: false
       };
       S.epCheck = null;
@@ -4134,6 +4329,7 @@ function _sbRun() {
           isNew: false, id: p.id, name: p.description || p.id,
           url: p.baseUrl === "-" ? "" : p.baseUrl,
           type: p.wire === "anthropic" ? "anthropic" : "openai-compatible",
+          kind: p.kind || "",
           model: p.model === "-" ? "" : p.model,
           chatPath: p.chatPath || "",
           timeoutMs: p.timeoutMs || 0,
@@ -4170,7 +4366,23 @@ function _sbRun() {
       renderEndpoints();
       post("checkEndpoint", { endpoint: epPayload(draft) });
     } else if (a === "save") {
-      var form = epPayload(readEpForm());
+      var draftSave = readEpForm();
+      if (!draftSave) return;
+      // Mandatory, and enforced here rather than only on the host: the host
+      // throws, and a thrown save closes the form and loses everything typed.
+      // Catching it in the panel keeps the form open with the answer one click
+      // away, which is the difference between a validation and a punishment.
+      if (!draftSave.kind) {
+        renderEndpoints();
+        var kSel = $("fKind"), kHint = $("fKindHint");
+        if (kHint) {
+          kHint.setAttribute("data-err", "1");
+          kHint.textContent = "Choose what kind of model this endpoint serves before saving.";
+        }
+        if (kSel && kSel.focus) kSel.focus();
+        return;
+      }
+      var form = epPayload(draftSave);
       S.epForm = null;
       S.epCheck = null;
       renderEndpoints();
@@ -4182,7 +4394,7 @@ function _sbRun() {
   function epPayload(f) {
     var out = {
       id: f.id, name: f.name, url: f.url, type: f.type,
-      model: f.model || "", chatPath: f.chatPath || "",
+      kind: f.kind || "", model: f.model || "", chatPath: f.chatPath || "",
       http2: !!f.http2, hasStoredKey: !!f.hasStoredKey
     };
     if (f.timeoutMs) out.timeoutMs = f.timeoutMs;

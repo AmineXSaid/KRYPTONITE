@@ -394,6 +394,16 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
   border: 1px solid var(--kx-line);
 }
 .fgrid input:focus, .fgrid select:focus { border-color: var(--kx-link); }
+/* The one required field in the form. Same treatment as the sidebar's copy:
+   a marked label, and a placeholder option that reads as unanswered rather
+   than as a deliberate choice of the first entry. */
+.fgrid label .req { color: var(--kx-error); font-weight: 700; }
+#fKind[data-empty="1"] { color: var(--kx-fg-4); }
+.f-hint {
+  font-size: 10.5px; line-height: 1.45; color: var(--kx-fg-2);
+  min-width: 0;
+}
+.f-hint[data-err="1"] { color: var(--kx-warn); }
 .fsplit { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .fsplit input[type="number"] { width: 68px; flex: none; }
 .fsplit input[type="checkbox"] { width: 14px; height: 14px; flex: none; accent-color: var(--kx-accent); }
