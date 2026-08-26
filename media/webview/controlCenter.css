@@ -486,3 +486,12 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 
 /* See sidebar.css: centred text plus letter-spacing lands left of centre. */
 .btn, .btn.sm { text-indent: .12em; }
+
+/* The Control Center's section strip is the same control as the sidebar's tab
+   bar and must read as the same control: mono, 9px, uppercase. It was left in
+   sentence case, so moving between the two surfaces looked like moving
+   between two products. */
+.strip button {
+  font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
+  letter-spacing: .14em; text-transform: uppercase;
+}

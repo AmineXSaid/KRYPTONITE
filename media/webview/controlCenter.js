@@ -747,8 +747,10 @@ function _run() {
         ["Model", a.model],
         ["Timeout", a.timeoutMs + " ms"],
         ["Retries", String(a.retries)],
-        ["Context window", a.capabilities ? String(a.capabilities.contextWindow) : "-"],
-        ["Max output", a.capabilities ? String(a.capabilities.maxOutputTokens) : "-"],
+        ["Context window", a.capabilities && a.capabilities.contextWindow != null
+          ? String(a.capabilities.contextWindow) : "-"],
+        ["Max output", a.capabilities && a.capabilities.maxOutputTokens != null
+          ? String(a.capabilities.maxOutputTokens) : "-"],
         // Only when the endpoint can be sent pictures at all. On a text-only
         // profile this is a budget for something that never happens.
         ["Image budget", a.capabilities && a.capabilities.vision

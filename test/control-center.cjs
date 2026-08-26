@@ -393,6 +393,28 @@ const sync = (b, over) => b.send({ type: "stateSync", state: state(over) });
   b.dom.window.close();
 }
 
+/* A PARTIAL capabilities object, which is the common case rather than the
+   exotic one: a profile may declare a context window and say nothing about
+   max output. Guarding only the container (`a.capabilities ? ... : "-"`) let
+   the literal string "undefined" reach the card, which is what the panel
+   actually showed. */
+{
+  const b = boot();
+  sync(b, { profiles: [profile({ capabilities: { contextWindow: 200000 } })] });
+  for (const id of SECTIONS) {
+    b.click(`[data-section="${id}"]`);
+    ok(`${id}: prints no undefined for partial capabilities`,
+      !/\bundefined\b/.test(b.pane().textContent));
+  }
+  b.click('[data-section="endpoints"]');
+  ok("an undeclared capability reads as a dash",
+    /Max output[\s\S]{0,40}-/.test(b.pane().textContent));
+  // jsdom is booted with pretendToBeVisual, which starts a requestAnimationFrame
+  // loop. Leaving the window open holds the event loop and the whole suite hangs
+  // AFTER printing its summary - every other block here closes for this reason.
+  b.dom.window.close();
+}
+
 if (failures.length) {
   for (const f of failures) console.log("FAIL  " + f);
 }

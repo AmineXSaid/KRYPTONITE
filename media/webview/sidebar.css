@@ -1941,3 +1941,29 @@ li.doing .tx { color: var(--kx-fg); font-weight: 600; }
    of its box. */
 .btn, .btn.sm { text-indent: .12em; }
 .ag-live { text-indent: .05em; }
+
+/* ── Composer toolbar at panel widths (audit A1 / C12) ──
+   The panel is draggable down to ~280px, and at that width the phase
+   segment, model button, mode chip, @, attach and send do not fit on one
+   line. Unwrapped, send and attach left the panel entirely - the two
+   controls you cannot do without. Let the row wrap, and let the model
+   button be the thing that gives, since its label already ellipsises. */
+.toolbar { flex-wrap: wrap; row-gap: 6px; }
+#modelBtn { min-width: 0; flex: 1 1 auto; }
+/* The actions stay together as a group and hug the right, so a wrap puts
+   @ / attach / send on one line rather than orphaning send by itself. */
+.toolbar .sp { flex: 1 1 0; min-width: 0; }
+
+/* The model button may SHRINK so the toolbar can wrap at 280px, but it must
+   not GROW: with `flex: 1 1 auto` it ballooned at 900px and stranded the mode
+   chip in the middle of an empty row. Shrink-only keeps both widths honest. */
+#modelBtn { flex: 0 1 auto; }
+
+/* ── Measure at wide widths ──
+   The panel is draggable to ~900px and the transcript had no measure cap, so
+   prose ran the full width and became genuinely hard to track line to line.
+   Cap the reading column; leave the composer, trays and code/diff surfaces
+   full-bleed, since those are scanned rather than read and their content
+   carries its own horizontal scroll. */
+#log > * { max-width: 78ch; }
+#log > .diff-card, #log > .code-block, #log > pre, #log > .tool { max-width: none; }
