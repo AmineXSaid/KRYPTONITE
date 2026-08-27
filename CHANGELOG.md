@@ -3,6 +3,106 @@
 ## Unreleased
 
 ### Added
+- **A read-only MCP server can now be used in Ask and Plan.** Mark it
+  `"readOnly": true` in `.agent/mcp.json` and its tools are offered in the two
+  modes that previously withheld MCP entirely.
+
+  The old blanket rule was defensible - MCP has no way for a server to declare
+  a tool read-only, so there was nothing to check - but it produced a bad
+  outcome: a server that genuinely only reads was locked out of Ask, the
+  read-only mode, and you had to enter Act, the mode that can also edit files,
+  to run a search. The safest servers were excluded from the safest mode.
+
+  What was missing is not something the protocol can supply. It is a statement
+  by the person who configured the server, so now they can make it. **It is a
+  claim, not a proof**: nothing inspects what the server does, exactly as
+  nothing checks that `approval: "auto"` was wise. The MCP tab shows a
+  `READ-ONLY` chip on a marked server whose tooltip says you declared it and
+  the extension did not verify it - a claim nobody can see is a claim nobody
+  can audit.
+
+  Unmarked servers are entirely unaffected: still withheld in Ask and Plan,
+  still refused at the call if the model names one anyway. Only a literal
+  `true` counts - `readOnly: "true"` is warned about and treated as false,
+  because widening what those modes may reach on the strength of a typo is
+  exactly the failure this flag must not have.
+- **The panel now ships the fonts it is drawn in.** IBM Plex Sans for the
+  interface, Space Mono for every mono run in it, and Michroma for the GENESIS
+  wordmark - the three families the Genesis design specifies. None of them were
+  previously rendering. `--kx-mono` had *named* Space Mono for several releases
+  without bundling a binary, and the webview CSP is `default-src 'none'` with
+  `font-src` scoped to the extension, so a named-but-absent family cannot be
+  fetched: every mono run in the panel - tab labels, model ids, timings, code -
+  was silently the platform monospace. Naming a font is not shipping one, and
+  nothing reported the difference.
+
+  This also settles a licensing question that was blocking release. The seven
+  Anthropic Sans faces bundled before are proprietary, and
+  `media/fonts/LICENSE-NOTE.md` recorded their redistribution as *unresolved*,
+  prescribing either written permission or a fall back to a licensed face. All
+  three families the design specifies are SIL Open Font License, so matching
+  the design and clearing the blocker turned out to be one change. The
+  Anthropic Sans binaries are removed; `git log` retains them. 94 KB ships in
+  their place, down from 236 KB.
+
+  Michroma is on its own `--kx-brand` token rather than `--kx-display`. It has
+  one weight and is drawn to be set once under heavy tracking; pointing the
+  display token at it would have set every markdown heading in the transcript
+  in a display face at a weight it does not have.
+- **The welcome screen is the one the design draws.** It was a centred crystal
+  over "How can I help?" - which is what every assistant says - and up to three
+  resume chips. It now opens with the mark and the GENESIS wordmark, then two
+  lists: **Try**, three openers, and **Recent**, the conversations already in
+  progress with an All that opens the full history.
+
+  The openers are the part worth being careful about. Invented suggestions were
+  removed from this screen once before, correctly, for naming code no workspace
+  has. These name none: each is a command the extension already has, aimed at
+  what the user has open right now - explain the open file, review the
+  uncommitted changes, write tests for the selection.
+
+  The whole column is left-aligned, as the design has it. Everything below the
+  intro is a list of rows, and a centred mark above a left-aligned list gives
+  the column two different axes.
+- **Every endpoint declares what kind of model it serves.** `kind:` is
+  mandatory on new profiles - one of `chat`, `reasoning`, `multimodal`,
+  `coding`, `completion` - and the Add-endpoint form refuses to save without
+  it. A gateway cannot be asked this: `model:` is an opaque id and `baseUrl` is
+  a hostname, so the extension was assuming "chat" and hoping, which is how a
+  fill-in-the-middle base model ends up being offered tools it has no grammar
+  for and fails on its first turn.
+
+  The field is load-bearing rather than a label. It seeds the capability block:
+  `multimodal` turns `vision` on, `reasoning` raises the output budget to 8192
+  because thinking spends tokens before the answer does, and `completion` turns
+  `tools` off and `fim` on. Seeding never overrides - a hand-written
+  `vision: false` on a multimodal profile still wins - so `kind` is the
+  headline and `capabilities:` stays the detail.
+
+  A profile written before the field existed loads as `chat` rather than
+  failing; a *misspelled* one is refused, because that is the case where
+  silently seeding the wrong capabilities leaves nothing to point at months
+  later.
+- **The model picker says which kind each endpoint serves.** The rows were a
+  tick and a model id, which told you nothing about what you were choosing
+  between. They now carry the Genesis listbox shape - a selection dot, the
+  model id over a sentence describing the kind, and a hue-coded tag - so eight
+  profiles can be told apart at a glance. Colour follows the same argument the
+  MCP tool chips make: the slot holds a classification, and telling them apart
+  is the point. The Endpoints list in Diagnostics carries the same tag, so the
+  answer is visible where endpoints are managed as well as where they are
+  chosen - a profile that failed to parse shows none, having no honest one to
+  report.
+
+  The picker groups **by kind**, not by endpoint. Endpoint was the obvious
+  grouping and the wrong one: with one model per profile it put a header above
+  every single row, so the list was twice as tall as it needed to be and every
+  header restated the name the row below already carried. What a user is
+  choosing between here is capability - the one that thinks, the one that sees -
+  so that is what the headers say, hue-coded, in a fixed order that does not
+  depend on which order the profiles happened to load in. The endpoint moves
+  onto the row, where it answers "which of these serves it", and the context
+  window takes the right-hand slot the design puts a figure in.
 - **Agents have a tab.** They were a collapsed section inside Diagnostics,
   which is where a thing goes to be inspected rather than used, three clicks
   from the composer and behind a heading nobody opens twice. The tab sits after
@@ -17,6 +117,26 @@
   told about while looking somewhere else.
 
 ### Changed
+- **The mode picker is a sheet, and it no longer offers Plan.** Plan is a
+  *phase*, and it already exists as the middle segment of the ASK/PLAN/ACT
+  control two inches to the left; offering it here too put one setting behind
+  two controls that could disagree. What is left - Manual, Accept edits, Auto -
+  maps one-to-one onto the three approval modes the host has always had.
+
+  The picker itself is now the Genesis sheet: the panel dims, it rises from the
+  bottom edge, and each mode states what it means in a sentence with a filled
+  radio rather than a tick. Its metrics are sized to the panel rather than to a
+  phone - the card is `height: auto` so it is exactly as tall as its three
+  rows, capped at `min(72%, 300px)` so it yields on a short panel, and its
+  gutters and type step down through `clamp()` as the panel narrows. Dropping
+  Plan is what makes that compact size honest: three rows fit without scrolling
+  at any panel height worth using.
+- **Exactly one row in the model picker claims to be the selection.** The dot
+  was bound to `data-active`, which is the *keyboard cursor* and moves with the
+  arrow keys - so Auto and the endpoint it had resolved to both lit up, which
+  reads as two selections. Selection is now its own state, and when Auto is in
+  force its row names the endpoint it resolved to rather than restating the
+  rule.
 - **The send control is a rounded square.** A disc reads as a media button, the
   thing a consumer app puts under a video, and every other control in the
   composer is a rectangle with soft corners, so it was the one shape belonging

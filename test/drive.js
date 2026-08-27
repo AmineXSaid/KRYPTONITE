@@ -1173,19 +1173,25 @@ function composer(over) {
   const { d, sent, inbound } = boot();
   inbound(STATE());
   ok("WB a first run shows the welcome", !!d.querySelector("#log .welcome"));
-  ok("WB with nothing to go back to", !d.querySelector(".chips.resume"));
+  // The Recent SECTION is what appears only when there is something to resume.
+  // The Try openers are always there - they need no history to be useful.
+  ok("WB with nothing to go back to", !d.querySelector(".welcome .w-sec"));
+  ok("WB but the openers are offered anyway",
+    d.querySelectorAll(".welcome [data-starter]").length === 3);
 
   inbound({ type: "sessionsListed", sessions: [
     { id: "s1", title: "This one", when: "now", count: 4, active: true },
     { id: "s2", title: "TLS handshake triage", when: "2h ago", count: 12, active: false },
     { id: "s3", title: "Empty one", when: "1d ago", count: 0, active: false },
   ] });
-  ok("WB previous conversations appear on the empty screen", !!d.querySelector(".chips.resume"));
-  const rows = d.querySelectorAll(".resume-btn");
+  ok("WB previous conversations appear on the empty screen", !!d.querySelector(".welcome .w-sec"));
+  const rows = d.querySelectorAll(".welcome [data-session]");
   ok("WB the current one is not offered", rows.length === 1);
-  ok("WB nor an empty one", !/Empty one/.test(d.querySelector(".chips.resume").textContent));
+  ok("WB nor an empty one", !/Empty one/.test(d.querySelector(".welcome .w-sec").textContent));
   ok("WB the row names the conversation", /TLS handshake triage/.test(rows[0].textContent));
-  ok("WB and how much is in it", /12 messages/.test(rows[0].textContent));
+  ok("WB and when it was", /2h ago/.test(rows[0].textContent));
+  // The count no longer fits the row the design draws, so it is on the title.
+  ok("WB with how much is in it still reachable", /12 messages/.test(rows[0].title));
   rows[0].click();
   ok("WB clicking one loads it", sent.some((m) => m.type === "loadSession" && m.id === "s2"));
 
@@ -1194,7 +1200,7 @@ function composer(over) {
   c.inbound(STATE({ session: { id: "s1", title: "t", messages: [{ role: "user", content: "hi" }] },
     sessions: [{ id: "s2", title: "Other", when: "now", count: 3, active: false }] }));
   ok("WB a conversation with messages shows no welcome", !c.d.querySelector(".welcome"));
-  ok("WB and no recent list", !c.d.querySelector(".chips.resume"));
+  ok("WB and no recent list", !c.d.querySelector(".welcome .w-sec"));
 }
 
 /* ══ A queued message keeps its attachments on screen ═════ */

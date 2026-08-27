@@ -60,6 +60,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 .ic-11 { width: 11px; height: 11px; }
 .ic-13 { width: 13px; height: 13px; }
 .ic-14 { width: 14px; height: 14px; }
+.ic-18 { width: 18px; height: 18px; }
 .sp { flex: 1; }
 .mono { font-family: var(--kx-mono); }
 .tnum { font-variant-numeric: tabular-nums; }
@@ -72,11 +73,14 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   padding: 0 10px 0 12px; position: relative;
   border-bottom: 1px solid var(--kx-line);
 }
-/* The wordmark: static, and the one place the display cut is allowed to speak.
+/* The wordmark: static, and the one place Michroma is allowed to speak.
    VS Code's own view header above it is blanked in package.json, so this is the
-   only KRYPTONITE on screen. */
+   only KRYPTONITE on screen.
+   Michroma has a single weight, so `font-weight: 700` here would synthesise a
+   bold the face does not have. The design sets it at 400 and lets the tracking
+   do the work. */
 .kx-wordmark {
-  font-family: var(--kx-display); font-size: 11px; font-weight: 700;
+  font-family: var(--kx-brand); font-size: 11px; font-weight: 400;
   letter-spacing: .2em; text-transform: uppercase; color: var(--kx-fg);
 }
 /* Number and meter together, in the header. The footer strip they used to
@@ -195,18 +199,60 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 
 #log { flex: 1; overflow-y: auto; padding: 14px 14px 4px; }
 
+/* The welcome screen, as the design draws it: the mark, the wordmark, one line
+   of prose, then two lists - what you could ask for, and what you were already
+   doing. Left-aligned below the intro, because a list of things to click is
+   read down its left edge and centring it makes every row start somewhere
+   different. */
 .welcome {
   min-height: 340px; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; text-align: center;
+  justify-content: center; align-items: flex-start; text-align: left;
+  padding: 24px 4px;
 }
-.welcome .crystal { opacity: .9; margin-bottom: 8px; }
-/* 17px clears the 15px bar, so the display cut is correct here. */
-.welcome h2 {
-  font-family: var(--kx-display); font-size: 17px; font-weight: 700; letter-spacing: -.01em;
+/* Left-aligned, as the design draws it, and not only for fidelity: everything
+   below the intro is a list of rows, and a centred mark above a left-aligned
+   list gives the column two different axes. One edge, top to bottom. */
+.welcome .crystal { opacity: .9; margin-bottom: 18px; }
+/* Michroma, at the one size and tracking it is drawn for. */
+.w-mark {
+  font-family: var(--kx-brand); font-size: 14px; font-weight: 400;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--kx-fg);
+  margin-bottom: 9px;
 }
 .welcome p {
   font-family: var(--kx-prose); font-size: 12.5px; line-height: 1.6;
-  color: var(--kx-fg-2); max-width: 30ch; margin: 4px 0 12px;
+  color: var(--kx-fg-2); max-width: 290px; margin: 0 0 20px;
+  text-wrap: pretty;
+}
+.welcome .w-sec { width: 100%; margin-top: 22px; }
+.w-label {
+  width: 100%; text-align: left;
+  font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--kx-fg-3);
+  margin-bottom: 8px;
+}
+.w-label.row { display: flex; align-items: baseline; gap: 8px; }
+.w-all {
+  font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--kx-fg-3);
+}
+.w-all:hover { color: var(--kx-fg); }
+.w-list { width: 100%; border-top: 1px solid var(--kx-line); }
+.w-row {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 9px 4px; text-align: left;
+  border-bottom: 1px solid var(--kx-line);
+  color: var(--kx-fg-3);
+}
+.w-row:hover { background: var(--kx-surface-3); }
+.w-row .t {
+  min-width: 0; flex: 1; font-size: 12px; line-height: 1.4; color: var(--kx-fg-2);
+}
+.w-row:hover .t { color: var(--kx-fg); }
+.w-dot { flex: none; width: 5px; height: 5px; background: var(--kx-accent); }
+.w-ago {
+  flex: none; font-family: var(--kx-mono); font-size: 9px;
+  letter-spacing: .06em; color: var(--kx-fg-3);
 }
 .chips { display: flex; flex-direction: column; gap: 6px; width: 100%; max-width: 300px; }
 .chip-btn {
@@ -706,6 +752,15 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   border-left: 1px solid var(--kx-line);
 }
 .todo-list li.doing { border-left-color: var(--kx-action); }
+/* The base checkbox, which the SKILLS list still uses. main declared this
+   once and the todo list borrowed it; the todo list has since stopped being a
+   checklist of boxes, so the box lives here for skills and the todo list
+   overrides it below. Deleting it takes the skills checkbox with it. */
+.cbx {
+  width: 14px; height: 14px; flex: none; margin-top: 2px; border-radius: 3px;
+  display: grid; place-items: center; background: transparent;
+  border: 1px solid var(--kx-line);
+}
 .todo-list .cbx {
   width: 9px; height: auto; flex: none; margin: 0; display: block;
   border: none; border-radius: 0; background: none;
@@ -1072,6 +1127,68 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   color: var(--kx-fg-3);
 }
 .qp-check { width: 13px; flex: none; display: grid; place-items: center; color: var(--kx-link); }
+
+/* ── the model listbox ────────────────────────────────────────────────────
+   The one picker that is a LIST OF THINGS TO COMPARE rather than a fuzzy-find
+   dropdown, and the Genesis model listbox is drawn accordingly: no container
+   padding, rows separated edge-to-edge by a hairline, and each row carrying a
+   selection dot, a stacked id-over-note column and a right-hand tag.
+
+   Every number below is the mockup's. Kept in one block, scoped to
+   [data-mode="model"], so the file / skill / command pickers keep the compact
+   single-line row they want and nothing here reaches them. */
+.qp[data-mode="model"] { padding: 0; }
+.qp[data-mode="model"] .qp-group {
+  padding: 8px 11px 6px;
+  font-size: 9px; font-weight: 700; letter-spacing: .14em;
+  color: var(--kx-fg-3);
+  border-bottom: 1px solid var(--kx-line);
+}
+.qp-row.mdl {
+  display: flex; align-items: flex-start; gap: 9px;
+  width: 100%; padding: 8px 11px; text-align: left;
+  border-radius: 0;
+  border-bottom: 1px solid var(--kx-line);
+}
+/* The last row in the popup closes the box; the border below it would double
+   up with the popup's own. */
+.qp[data-mode="model"] .qp-row.mdl:last-child { border-bottom: none; }
+.qp-row.mdl:hover { background: var(--kx-surface-3); }
+/* The keyboard cursor. Moves with the arrow keys and says "this is what Enter
+   takes"; it is not the same thing as the endpoint currently in force. */
+.qp-row.mdl[data-active="1"] { background: var(--kx-surface-3); }
+
+/* 5px square, nudged to sit on the cap-height of the id above it rather than
+   centred on the two-line block. */
+.mdl-dot {
+  flex: none; width: 5px; height: 5px; margin-top: 5px;
+  background: var(--kx-line);
+}
+/* The selection - the endpoint actually in force. Lights the dot, exactly as
+   the mockup does with its oxide fill. */
+.qp-row.mdl[data-on="1"] .mdl-dot { background: var(--kx-action); }
+
+.mdl-col { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.mdl-id {
+  font-family: var(--kx-mono); font-size: 10.5px; letter-spacing: .02em;
+  color: var(--kx-fg-2);
+}
+.qp-row.mdl[data-on="1"] .mdl-id { color: var(--kx-fg); }
+.mdl-note { font-size: 11px; line-height: 1.35; color: var(--kx-fg-3); }
+
+/* The context window, in the slot and the style the mockup puts it in: a
+   right-aligned mono figure on the first line, dimmer than the id it sits
+   beside. The kind used to live here; it moved to the group header, which is
+   where a classification shared by several rows belongs. */
+.mdl-ctx {
+  flex: none; margin-top: 3px;
+  font-family: var(--kx-mono); font-size: 9px;
+  letter-spacing: .1em; color: var(--kx-fg-3);
+  white-space: nowrap;
+}
+/* The group header carries the kind, so in this listbox it carries the kind's
+   hue too - the colour is set inline from the same table the rows use. */
+.qp[data-mode="model"] .qp-group[data-kind] { color: inherit; }
 .qp-empty { padding: 8px 9px; font-size: 11.5px; color: var(--kx-fg-2); }
 
 /* #4 â€” one card, one control row. */
@@ -1448,12 +1565,88 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 /* Opens upward, over the transcript, anchored to the composer rather than to
    the old footer. Left-aligned because the button it belongs to now sits on
    the left of the control row. */
-.perm-pop {
-  top: auto; bottom: 52px; left: 10px; right: auto; width: 250px;
+/* ── the mode sheet ───────────────────────────────────────────────────────
+   Genesis draws this as a sheet rising from the bottom edge over a dimmed
+   panel, and that is right for what it is: the control that decides what the
+   agent may do to the workspace without asking.
+
+   The mockup's metrics are phone-sized, though - 56px rows, 15px title, 18px
+   gutters - and this lives in a side panel that is often 320px wide and can be
+   dragged shorter than the sheet is tall. So every number here is sized to the
+   PANEL rather than fixed:
+
+     - the card is `height: auto`, so it is exactly as tall as its three rows
+       and no taller. It never claims a share of the panel it is not using.
+     - `max-height: min(72%, 300px)` caps it on a tall panel and yields on a
+       short one, with the list scrolling rather than the sheet overflowing.
+     - the row gutters and type step down through `clamp()` as the panel
+       narrows, so a 280px panel gets tighter padding instead of wrapped text.
+
+   Dropping `plan` from the list is what makes the compact size honest: three
+   rows fit without scrolling at any panel height worth using. */
+/* `fixed`, not `absolute`. The markup lives inside `.composer-wrap` so the
+   sheet stays next to the button it belongs to, but that wrapper is
+   `position: relative` and only a few rows tall - an absolutely positioned
+   sheet would be confined to it and hang off the bottom of the panel. Fixed
+   resolves against the webview viewport, which is exactly the panel. */
+.perm-sheet {
+  position: fixed; inset: 0; z-index: 90;
+  display: flex; align-items: flex-end;
+  background: rgba(24, 23, 29, .62);
 }
-.perm-pop .pop-row { align-items: flex-start; gap: 7px; }
-.perm-pop .perm-check { flex: none; width: 13px; margin-top: 1px; color: var(--kx-accent); }
-.perm-pop .col { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.perm-sheet[hidden] { display: none; }
+.perm-card {
+  width: 100%; height: auto; max-height: min(72%, 300px);
+  display: flex; flex-direction: column; min-height: 0;
+  background: var(--kx-bg);
+  border-top: 1px solid var(--kx-line);
+  border-radius: 4px 4px 0 0;
+  box-shadow: 0 -14px 34px var(--kx-shadow);
+  padding-bottom: 8px;
+}
+/* The grab handle. Decorative - the sheet is not draggable - but it is what
+   tells you at a glance that the thing rose from the bottom edge. */
+.perm-grip { display: flex; justify-content: center; padding: 7px 0 2px; flex: none; }
+.perm-grip span { width: 40px; height: 4px; border-radius: 2px; background: var(--kx-line); }
+
+.perm-head { position: relative; padding: 5px 40px 9px; text-align: center; flex: none; }
+.perm-head .t { font-size: 13.5px; font-weight: 600; color: var(--kx-fg); }
+.perm-head .s {
+  margin-top: 2px; font-size: 11.5px; line-height: 1.35; color: var(--kx-fg-3);
+  text-wrap: pretty;
+}
+.perm-x {
+  position: absolute; left: 8px; top: 2px;
+  width: 26px; height: 26px; display: grid; place-items: center;
+  border-radius: 4px; color: var(--kx-fg);
+}
+.perm-x:hover { background: var(--kx-surface-3); }
+
+/* The list is the only part that scrolls, so a short panel loses rows off the
+   bottom rather than losing the title that says what the sheet is. */
+.perm-list { min-height: 0; overflow-y: auto; }
+.perm-row {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center; gap: clamp(9px, 3.2vw, 13px);
+  width: 100%; padding: clamp(8px, 2.4vw, 11px) clamp(11px, 4vw, 16px);
+  text-align: left;
+}
+.perm-row:hover { background: var(--kx-hover); }
+.perm-row .ic { flex: none; }
+.perm-row .col { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.perm-row .t { font-size: 13px; font-weight: 500; color: var(--kx-fg); }
+.perm-row .m {
+  font-size: 11.5px; line-height: 1.35; color: var(--kx-fg-3); text-wrap: pretty;
+}
+/* The radio. Purple ring and fill when chosen, per the mockup - the row's own
+   glyph hue says what the mode IS, this says which one is on. */
+.perm-row .ring {
+  flex: none; width: 18px; height: 18px; display: grid; place-items: center;
+  border-radius: 50%; border: 1.7px solid var(--kx-line);
+}
+.perm-row .dot { width: 8px; height: 8px; border-radius: 50%; background: transparent; }
+.perm-row[data-on="1"] .ring { border-color: var(--kx-mcp); }
+.perm-row[data-on="1"] .dot { background: var(--kx-mcp); }
 .ep { display: flex; align-items: center; gap: 5px; min-width: 0; }
 .ep .dot { width: 5px; height: 5px; flex: none; border-radius: 50%; background: var(--kx-accent); }
 .ep[data-err="1"] { color: var(--kx-error); }
@@ -1648,6 +1841,21 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .mcp-pill.idle { background: var(--kx-warn-wash); color: var(--kx-active); }
 .mcp-pill.err { background: var(--kx-error-wash); color: var(--kx-error); }
 
+/* The user's read-only claim, and the reason this server's tools work in Ask
+   and Plan at all. Deliberately quieter than the state pill beside it - the
+   state is a fact the extension observed, this is something a person asserted,
+   and the two should not carry equal weight. Takes the information blue the
+   read-only tool chips below already use, so the same idea reads the same way
+   twice on one row. */
+.mcp-ro {
+  display: inline-flex; align-items: center; flex: none;
+  padding: 2px 7px; border-radius: 4px;
+  font-family: var(--kx-mono); font-size: 9px;
+  letter-spacing: .1em; text-transform: uppercase;
+  background: var(--kx-info-wash); color: var(--kx-info);
+  border: 1px solid color-mix(in srgb, var(--kx-info) 22%, transparent);
+}
+
 /* Chips are capped in the renderer; the tail carries the rest in its tooltip. */
 .mcp-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 16px 12px 29px; }
 /* A chip is a tool the model gained from a server, and its colour says what
@@ -1833,8 +2041,12 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 
 .tbl { border: 1px solid var(--kx-line); border-radius: 4px; overflow: hidden; }
+/* Four columns now: the wire glyph, the id over its URL, the model kind, and
+   the two row actions. The kind column is `auto` rather than fixed so a narrow
+   panel spends its width on the URL - the one field here that is long and
+   worth reading - instead of reserving room for a word. */
 .trow {
-  display: grid; grid-template-columns: 26px minmax(0, 1fr) 54px;
+  display: grid; grid-template-columns: 26px minmax(0, 1fr) auto 54px;
   align-items: center; gap: 8px; padding: 8px 10px;
 }
 .trow + .trow { border-top: 1px solid var(--kx-line); }
@@ -1846,6 +2058,15 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 .trow[data-status="error"] .id { color: var(--kx-error); }
 .trow .acts { display: flex; gap: 2px; justify-content: flex-end; }
+/* Same tag as the model picker's, in the same hues, so the two lists agree
+   about what an endpoint is. */
+.ep-kind {
+  font-family: var(--kx-mono); font-size: 9px;
+  letter-spacing: .1em; text-transform: uppercase; white-space: nowrap;
+}
+/* A profile that failed to parse has no kind, so its row keeps the old three
+   columns rather than leaving a gap where the tag would be. */
+.trow[data-status="error"] { grid-template-columns: 26px minmax(0, 1fr) 54px; }
 .mini {
   width: 22px; height: 22px; display: grid; place-items: center; border-radius: 4px;
   color: var(--kx-fg-2);
@@ -1893,6 +2114,16 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   border-color: var(--kx-line-2);
 }
 #fKey:focus { border-color: var(--kx-link); }
+/* The one required field in the form, and the only one whose label carries a
+   marker. Marked rather than merely validated on submit, because the cost of
+   getting it wrong is invisible: a wrong kind seeds the wrong capabilities and
+   the endpoint simply behaves oddly, months later, with nothing to point at. */
+.fgrid label .req { color: var(--kx-error); font-weight: 700; }
+/* Unanswered reads as unanswered. The placeholder option is dimmed to the
+   same grey as an input's placeholder text, so an untouched select does not
+   masquerade as a deliberate choice of the first entry. */
+#fKind[data-empty="1"] { color: var(--kx-fg-4); border-color: var(--kx-line-2); }
+#fKind[data-empty="1"]:focus { border-color: var(--kx-link); }
 /* A field with a unit or an explanation beside it. */
 .fsplit { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .fsplit input[type="number"] { width: 68px; flex: none; }
@@ -1947,29 +2178,17 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    panel's right edge at 420px. Give it the section's own gutter. */
 #viewAgents .sk-foot { padding: 0 14px 12px; }
 
-/* ── Panel C todo treatment (B12) ──
-   The mockup drops the card and the checkbox entirely: a todo's state reads
-   from a coloured rule, weight and colour, never from a box or a strike.
-   The earlier design review called the boxed-and-struck version "cheap", and
-   a strikethrough on a done item makes the one thing you finished the one
-   thing you can no longer read. */
-.todo-list li { position: relative; padding-left: 11px; gap: 9px; align-items: center; }
-.todo-list li::before {
-  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 1px;
-  background: var(--kx-line);
-}
-.todo-list li.done::before  { background: var(--kx-accent); }
-.todo-list li.doing::before { background: var(--kx-action); }
-/* The checkbox becomes a bare mono glyph in the accent colour. */
-.cbx {
-  width: 9px; height: auto; margin-top: 0; border: none; background: none;
-  border-radius: 0; color: var(--kx-accent);
-  font-family: var(--kx-mono); font-size: 10px;
-}
-li.done .cbx { background: none; border: none; color: var(--kx-accent); }
-li.doing .cbx { border: none; }
-li.done .tx  { color: var(--kx-fg-3); text-decoration: none; }
-li.doing .tx { color: var(--kx-fg); font-weight: 600; }
+/* The Panel C todo treatment lives with the rest of the todo rules, near the
+   top of this file, not here. It was written twice - once as a border-left
+   rail and once as an absolutely-positioned ::before - and the two stacked
+   into a double rule. The surviving copy is the scoped one, for two reasons
+   the duplicate got wrong:
+
+   - `.cbx` is shared with the SKILLS list. Restyling it unscoped turned the
+     skills checkbox into a 9px glyph column with no box.
+   - The mockup colours the rail by POSITION, not by completion: oxide on the
+     item being worked, slate on everything else. Painting a done item's rail
+     green says the rail tracks progress, which is what the counter is for. */
 
 /* Letter-spacing is applied after the LAST character as well as between
    characters, so centred + tracked text sits half a space left of true
@@ -2016,30 +2235,11 @@ li.doing .tx { color: var(--kx-fg); font-weight: 600; }
 #log > * { max-width: 78ch; }
 #log > .diff-card, #log > .code-block, #log > pre, #log > .tool { max-width: none; }
 
-/* What the model IS, beside its name in the picker. "chat" renders nothing:
-   a tag on every row would be noise, and the whole value of the field is that
-   an unusual model announces itself. Embedding is the loud one on purpose -
-   it cannot answer a chat turn at all. */
-.kind-tag {
-  flex: none; margin-left: auto; padding: 1px 6px; border-radius: 4px;
-  font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
-  letter-spacing: .1em; text-transform: uppercase; text-indent: .1em;
-  background: var(--kx-mcp-wash); color: var(--kx-mcp);
-}
-.kind-tag[data-kind="multimodal"] { background: var(--kx-info-wash); color: var(--kx-info); }
-.kind-tag[data-kind="embedding"]  { background: var(--kx-warn-wash); color: var(--kx-warn); }
-
 /* Model kind: the one form field the panel refuses to save without, so the
    asterisk is the only accent a label carries here. */
 .req { color: var(--kx-error); font-weight: 700; }
-.seg-row { display: inline-flex; flex-wrap: wrap; gap: 4px; }
-.seg-b {
-  padding: 3px 8px; border-radius: 4px; border: 1px solid var(--kx-line);
-  background: transparent; color: var(--kx-fg-3);
-  font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
-  letter-spacing: .1em; text-transform: uppercase; text-indent: .1em;
-}
-.seg-b:hover { color: var(--kx-fg); background: var(--kx-surface-3); }
-.seg-b[aria-checked="true"] {
-  background: var(--kx-mcp); border-color: var(--kx-mcp); color: var(--kx-on-accent);
-}
+
+/* `.kind-tag`, `.seg-row` and `.seg-b` used to live here. They belonged to a
+   segmented four-button picker and a per-row kind badge, and both were replaced
+   by the model picker's kind HEADERS and the form's <select>. Nothing renders
+   either class any more, so the rules are gone rather than left to rot. */

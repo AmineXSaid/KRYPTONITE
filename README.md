@@ -19,6 +19,40 @@ environment, `${secret:NAME}` reads the VS Code secret store (key
 Supported wire formats: `openai`, `anthropic`, and `raw` with a sandboxed
 JavaScript transform module that reshapes anything neither adapter can express.
 
+### What kind of model is behind it
+
+Every profile declares a `kind`, and the Add-endpoint form will not save
+without one:
+
+| `kind` | what it means | what it sets for you |
+| --- | --- | --- |
+| `chat` | General instruction-following turns | the stock defaults |
+| `reasoning` | Thinks before answering; slower, stronger | `maxOutputTokens: 8192` |
+| `multimodal` | Reads images as well as text | `vision: true` |
+| `coding` | Tuned for code edits and repo work | the stock defaults |
+| `completion` | Fill-in-the-middle; drives ghost text | `tools: false`, `fim: true` |
+
+A gateway will not tell you which of these it is serving — `model:` is an
+opaque id and `baseUrl` is a hostname — but you always know, and the agent
+behaves differently for each. So it is asked once, when the endpoint is added,
+rather than guessed on every turn. The model picker shows it against each
+endpoint, so eight profiles can be told apart at a glance.
+
+`kind` is the headline; `capabilities:` is still the detail, and it wins. A
+reasoning model that also reads images is `kind: reasoning` with
+`vision: true` — the kind seeds, it never overrides. A profile written before
+the field existed loads as `chat`; a misspelled one is refused, because the
+alternative is silently seeding the wrong capabilities.
+
+### Typography
+
+The panel ships the three families it is drawn in — **IBM Plex Sans** for the
+interface, **Space Mono** for every mono run, **Michroma** for the wordmark —
+all under the SIL Open Font License. They have to be bundled rather than linked:
+the webview CSP is `default-src 'none'` with `font-src` scoped to the extension
+origin, so a family merely named in the CSS renders in the platform fallback and
+nothing reports it. `media/fonts/LICENSE-NOTE.md` has the details.
+
 ### Why the transport is hand-built
 
 Node's global `fetch` ignores `NODE_EXTRA_CA_CERTS` in some extension-host
@@ -102,6 +136,50 @@ wrong.
 `/agent` in the composer and the command palette reach the same list. While one
 is active a bar under the tabs names it and states its scope; nothing is drawn
 when none is.
+
+## MCP servers
+
+Configured in `.agent/mcp.json`, in the shape Claude Desktop and Claude Code
+use, so a server block copies between them verbatim. Tools reach the model as
+`mcp__<server>__<tool>`.
+
+Two keys are this extension's own:
+
+| key | meaning |
+| --- | --- |
+| `approval` | `ask` routes every call through the permission gate; `auto` does not |
+| `readOnly` | **your** claim that the server only reads — see below |
+
+### `readOnly`, and why it is your claim to make
+
+Ask and Plan promise the model can only look. MCP gives a server no way to
+declare a tool read-only, so by default those two modes withhold MCP entirely —
+there is nothing for the extension to check.
+
+That is safe but blunt: a server that genuinely only reads gets locked out of
+the read-only modes, and you end up in Act — which can also edit files — just to
+run a search.
+
+`"readOnly": true` is you saying you checked. It is the only thing that opens
+Ask and Plan to a server's tools:
+
+```json
+"jira": {
+  "command": "/path/to/.venv/bin/jira-mcp",
+  "approval": "ask",
+  "readOnly": true
+}
+```
+
+**Nothing verifies it.** The extension cannot introspect what a server does, and
+pretending otherwise would be worse than the honest label — so a marked server
+carries a `READ-ONLY` chip in the MCP tab whose tooltip says you declared it and
+the extension did not check. Set it only for a server you have actually read,
+the same judgement `approval: "auto"` asks for.
+
+Only a literal `true` counts. `readOnly: "true"` produces a warning and is
+treated as false; widening what Ask and Plan may reach because of a typo is
+precisely what this flag must not do.
 
 ## In the editor
 

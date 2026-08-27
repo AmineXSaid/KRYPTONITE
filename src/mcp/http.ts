@@ -57,6 +57,11 @@ export class McpHttpClient {
     return this.spec.approval ?? "ask";
   }
 
+  /** The user's read-only claim. Absent means false, never "unknown". */
+  get readOnly(): boolean {
+    return this.spec.readOnly === true;
+  }
+
   async start(_defaultCwd: string): Promise<void> {
     if (this.state === "ready" || this.state === "starting") return;
     this.state = "starting";
@@ -315,6 +320,11 @@ export class McpSseClient {
 
   get approval(): "ask" | "auto" {
     return this.spec.approval ?? "ask";
+  }
+
+  /** The user's read-only claim. Absent means false, never "unknown". */
+  get readOnly(): boolean {
+    return this.spec.readOnly === true;
   }
 
   async start(_defaultCwd: string): Promise<void> {

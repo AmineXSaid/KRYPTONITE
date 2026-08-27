@@ -82,6 +82,14 @@ const AGENT: Agent = {
 /** Every MCP call the registry actually received, scoped or not. */
 const reached: string[] = [];
 
+/**
+ * Servers the harness treats as vouched-for read-only, mirroring
+ * `readOnly: true` in `.agent/mcp.json`. `readonly-search` is marked;
+ * `filesystem` deliberately is not, so every assertion below can distinguish
+ * "the flag works" from "the gate stopped working".
+ */
+const VOUCHED = new Set(["readonly-search"]);
+
 function ctxFor(agent: Agent | undefined): ToolContext {
   return {
     root,
@@ -91,6 +99,10 @@ function ctxFor(agent: Agent | undefined): ToolContext {
     mcp: {
       has: (name: string) => name.startsWith("mcp__"),
       needsApproval: () => false,
+      isReadOnly: (name: string) => {
+        const rest = name.slice("mcp__".length);
+        return VOUCHED.has(rest.slice(0, rest.indexOf("__")));
+      },
       call: async (name: string) => {
         // The scoped facade the SessionController builds, reproduced here so
         // this suite tests the same shape the extension runs.
@@ -130,6 +142,9 @@ async function drive(
       { name: "mcp__filesystem__read_text_file", description: "read", parameters: { type: "object" } },
       { name: "mcp__filesystem__write_file", description: "write", parameters: { type: "object" } },
       { name: "mcp__github__create_issue", description: "issue", parameters: { type: "object" } },
+      // From a server the user marked `readOnly: true`. Present in every
+      // phase's candidate list; only the gate decides whether it survives.
+      { name: "mcp__readonly-search__search", description: "search", parameters: { type: "object" } },
     ],
     agent: agent ? { agent } : undefined,
   })) {
@@ -163,10 +178,19 @@ const call = (name: string, args: any = {}): ToolCall => ({ id: "c1", name, argu
     // MCP scoping happens in the caller, which owns the registry; the loop is
     // handed an already-filtered list. What matters here is that the loop does
     // not undo it.
+    // Asserted by content rather than by count, so adding a tool to the
+    // harness above cannot silently turn this into a weaker check.
+    const MCP_SUPPLIED = [
+      "mcp__filesystem__read_text_file",
+      "mcp__filesystem__write_file",
+      "mcp__github__create_issue",
+      "mcp__readonly-search__search",
+    ];
+    const gotMcp = offered.filter((n) => n.startsWith("mcp__")).sort();
     ck(
-      offered.filter((n) => n.startsWith("mcp__")).length === 3,
+      gotMcp.join(",") === [...MCP_SUPPLIED].sort().join(","),
       "the MCP list the caller supplied is passed through untouched",
-      offered.filter((n) => n.startsWith("mcp__")).join(", ")
+      gotMcp.join(", ")
     );
   }
 
@@ -225,6 +249,53 @@ const call = (name: string, args: any = {}): ToolCall => ({ id: "c1", name, argu
     const { results } = await drive(AGENT, [call("run_command", { command: "echo hi" })], "act");
     ck(results[0].isError === true, "in Act, the agent is what refuses a shell command");
     ck(/reader/.test(results[0].result), "and says so");
+  }
+
+  /* ── 4. the read-only claim opens Ask and Plan ─────────────────────── */
+  console.log("\n──── a vouched-for MCP server in Ask and Plan ────");
+  {
+    const wide: Agent = { ...AGENT, name: "wide", tools: [], allMcp: true, mcp: [] };
+    const vouchedCall = call("mcp__readonly-search__search", { q: "x" });
+
+    for (const phase of ["ask", "plan"] as const) {
+      reached.length = 0;
+      const { offered, results } = await drive(wide, [vouchedCall], phase);
+      ck(offered.includes("mcp__readonly-search__search"),
+        `${phase} offers a server the user marked read-only`);
+      ck(results[0].isError !== true,
+        `${phase} lets the call through`, results[0].result);
+      // Advertisement is not enough - the call has to actually reach the
+      // server, or the two gates disagree and the model is offered something
+      // it can never use.
+      ck(reached.includes("mcp__readonly-search__search"),
+        `and it reaches the server in ${phase}`);
+    }
+  }
+  {
+    // The regression guard that matters most: the flag widens access ONLY
+    // where a claim exists. An unmarked server is exactly as withheld as it
+    // was before this feature.
+    const wide: Agent = { ...AGENT, name: "wide", tools: [], allMcp: true, mcp: [] };
+    reached.length = 0;
+    const { offered, results } = await drive(
+      wide, [call("mcp__filesystem__read_text_file", { path: "a" })], "ask"
+    );
+    ck(!offered.includes("mcp__filesystem__read_text_file"),
+      "an UNMARKED server is still withheld in Ask");
+    ck(results[0].isError === true, "and refused when the model names it anyway");
+    ck(/Ask mode/.test(results[0].result),
+      "with the phase's reason", results[0].result);
+    ck(reached.length === 0, "and never reaches the server");
+  }
+  {
+    // Act is unchanged: it never needed the claim.
+    const wide: Agent = { ...AGENT, name: "wide", tools: [], allMcp: true, mcp: [] };
+    reached.length = 0;
+    const { results } = await drive(
+      wide, [call("mcp__filesystem__read_text_file", { path: "a" })], "act"
+    );
+    ck(results[0].isError !== true, "Act still allows an unmarked server");
+    ck(reached.length === 1, "and it reaches the server");
   }
 
   try {

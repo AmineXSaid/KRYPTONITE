@@ -786,25 +786,21 @@ function _run() {
     return html;
   }
 
-
-  /* What the model IS, which the wire cannot report and which we must not
-     guess: an embedding model offered in the chat picker is a support ticket,
-     not a cosmetic slip. Rendered as a segmented control because the values
-     are few, short and mutually exclusive. */
-  var MODEL_KINDS = [
-    ["chat", "General instruction-following. The default assumption."],
-    ["reasoning", "Spends hidden tokens thinking before answering. Slower and dearer per call."],
-    ["multimodal", "Accepts images as well as text, so attachments are meaningful."],
-    ["embedding", "Returns vectors, not replies. Never offered for a chat turn."],
+  /* Mirrors LLM_KINDS in sidebar.js and the id list in
+     src/endpoints/llmKind.ts. test/llm-kind.cjs pins all three together. */
+  var LLM_KINDS = [
+    { id: "chat", label: "Chat", note: "General instruction-following turns" },
+    { id: "reasoning", label: "Reasoning", note: "Thinks before answering; slower, stronger" },
+    { id: "multimodal", label: "Multimodal", note: "Reads images as well as text" },
+    { id: "coding", label: "Coding", note: "Tuned for code edits and repo work" },
+    { id: "completion", label: "Completion", note: "Fill-in-the-middle; drives ghost text" }
   ];
-  function kindPicker(f) {
-    var out = '<span class="seg-row" role="radiogroup" aria-label="Model kind" aria-required="true">';
-    for (var i = 0; i < MODEL_KINDS.length; i++) {
-      var k = MODEL_KINDS[i][0], why = MODEL_KINDS[i][1], on = f.kind === k;
-      out += '<button type="button" class="seg-b" role="radio" data-kind="' + k + '"' +
-        ' aria-checked="' + (on ? "true" : "false") + '" title="' + esc(why) + '">' + k + "</button>";
+
+  function llmKindNote(id) {
+    for (var i = 0; i < LLM_KINDS.length; i++) {
+      if (LLM_KINDS[i].id === id) return LLM_KINDS[i].note;
     }
-    return out + "</span>";
+    return "";
   }
 
   function endpointForm() {
@@ -814,14 +810,25 @@ function _run() {
       opts += '<option value="' + types[i] + '"' + (f.type === types[i] ? " selected" : "") + ">" + types[i] + "</option>";
     }
     var needsKey = f.type !== "local";
+    var kindOpts = '<option value=""' + (f.kind ? "" : " selected") + " disabled>Choose one…</option>";
+    for (var ki = 0; ki < LLM_KINDS.length; ki++) {
+      kindOpts += '<option value="' + LLM_KINDS[ki].id + '"' +
+        (f.kind === LLM_KINDS[ki].id ? " selected" : "") + ">" + esc(LLM_KINDS[ki].label) + "</option>";
+    }
     return '<div class="form"><div class="t">' + (f.isNew ? "Add endpoint" : "Edit endpoint") + "</div>" +
       '<div class="fgrid">' +
         '<label for="fId">ID</label><input id="fId" value="' + esc(f.id) + '" placeholder="openrouter">' +
         '<label for="fName">Display Name</label><input id="fName" value="' + esc(f.name) + '" placeholder="OpenRouter">' +
         '<label for="fUrl">Base URL</label><input id="fUrl" value="' + esc(f.url) + '" placeholder="https://openrouter.ai/api/v1">' +
         '<label for="fType">Provider Type</label><select id="fType">' + opts + "</select>" +
-        '<label>Model kind <b class="req" title="Required">*</b></label>' + kindPicker(f) +
         '<label for="fModel">Model</label><input id="fModel" value="' + esc(f.model || "") + '" placeholder="openrouter/free">' +
+        // Mandatory. Sits under the model id because it is a statement about
+        // that id, and it seeds the profile's capability block.
+        '<label for="fKind">Model Type <span class="req" title="Required">*</span></label>' +
+        '<select id="fKind" data-empty="' + (f.kind ? "0" : "1") + '" aria-required="true">' + kindOpts + "</select>" +
+        '<span></span><span class="f-hint" id="fKindHint"' + (f.kind ? "" : ' data-err="1"') + ">" +
+          esc(f.kind ? llmKindNote(f.kind) + "." : "Required. The gateway cannot be asked what sort of model it serves.") +
+        "</span>" +
         (needsKey
           ? '<label for="fKey">API Key</label><input id="fKey" type="password" autocomplete="off" spellcheck="false" value="" placeholder="' +
             (f.hasStoredKey ? "stored - leave blank to keep" : "sk-…") + '">'
@@ -838,15 +845,11 @@ function _run() {
         ? '<div class="hint2">Stored in VS Code SecretStorage. The YAML holds only a <code>${secret:…}</code> reference.</div>'
         : "") +
       epCheckPanel() +
-      (f.kind ? "" :
-        '<div class="hint2 blocked">Pick a model kind before saving. Genesis cannot infer it from the ' +
-        'gateway, and guessing from the model id is how an embedding model ends up in the chat picker.</div>') +
       '<div class="row"><button class="btn" data-ep="cancel">Cancel</button>' +
       '<button class="btn wait" data-ep="check"' + (S.epCheck && S.epCheck.running ? " disabled" : "") + ">" +
       (S.epCheck && S.epCheck.running ? spinner(13) + "<span>Checking…</span>" : "<span>Check connection</span>") +
       "</button>" +
-      '<button class="btn primary" data-ep="save"' + (f.kind ? "" : ' disabled aria-disabled="true"') +
-      '>Save</button></div></div>';
+      '<button class="btn primary" data-ep="save">Save</button></div></div>';
   }
 
   /** Same ladder rows the Diagnostics section renders, scoped to the form. */
@@ -871,6 +874,7 @@ function _run() {
     S.epForm.name = $("fName").value.trim();
     S.epForm.url = $("fUrl").value.trim();
     S.epForm.type = $("fType").value;
+    S.epForm.kind = $("fKind") ? $("fKind").value : "";
     S.epForm.model = $("fModel") ? $("fModel").value.trim() : "";
     S.epForm.chatPath = $("fPath") ? $("fPath").value.trim() : "";
     // Seconds in the field, milliseconds in the profile.
@@ -884,7 +888,7 @@ function _run() {
   function epPayload(f) {
     var out = {
       id: f.id, name: f.name, url: f.url, type: f.type,
-      model: f.model || "", chatPath: f.chatPath || "",
+      kind: f.kind || "", model: f.model || "", chatPath: f.chatPath || "",
       http2: !!f.http2, hasStoredKey: !!f.hasStoredKey
     };
     if (f.timeoutMs) out.timeoutMs = f.timeoutMs;
@@ -1568,14 +1572,6 @@ function _run() {
       return;
     }
 
-    if ((t = e.target.closest("[data-kind]"))) {
-      // Snapshot the other inputs first: re-rendering the form to show the new
-      // selection would otherwise discard whatever is half-typed in them.
-      readEpForm();
-      if (S.epForm) { S.epForm.kind = t.getAttribute("data-kind"); render(); }
-      return;
-    }
-
     if ((t = e.target.closest("[data-ep]"))) {
       onEndpointAction(t.getAttribute("data-ep"), t.getAttribute("data-id"));
       return;
@@ -1621,7 +1617,21 @@ function _run() {
       return;
     }
     if (action === "save") {
-      var form = epPayload(readEpForm());
+      var draftSave = readEpForm();
+      if (!draftSave) return;
+      // Same rule as the sidebar: refuse in the panel so the form stays open
+      // with everything typed still in it, rather than letting the host throw.
+      if (!draftSave.kind) {
+        render();
+        var kHint = $("fKindHint");
+        if (kHint) {
+          kHint.setAttribute("data-err", "1");
+          kHint.textContent = "Choose what kind of model this endpoint serves before saving.";
+        }
+        if ($("fKind") && $("fKind").focus) $("fKind").focus();
+        return;
+      }
+      var form = epPayload(draftSave);
       S.epForm = null;
       S.epCheck = null;
       render();

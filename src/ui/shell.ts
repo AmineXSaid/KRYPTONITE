@@ -41,17 +41,27 @@ function makeNonce(): string {
 /**
  * Emit `@font-face` rules only when the woff2 files actually ship.
  *
- * Anthropic Sans in two optical sizes. The `Text` cut is drawn for 11–13px and
- * carries the whole interface; `Display` is tightened for 15px and above and is
- * used only on the two panel titles that reach that size. Setting Display at
- * 12px is the standard way to make a well-drawn family look wrong, so the two
- * are separate CSS families rather than one - the stylesheet has to opt into
- * Display deliberately.
+ * The three families the Genesis design is drawn in, and nothing else:
+ *
+ *   IBM Plex Sans  the whole interface. Shipped as the variable cut, which is
+ *                  one 45 KB file covering 400/500/600 - the three weights the
+ *                  design uses - rather than three static faces.
+ *   Space Mono     every mono run in the design, and there are many: tab
+ *                  labels, model ids, kind tags, timings, code. This is the
+ *                  one that was previously *named* in the CSS and never
+ *                  shipped, so it silently fell back to the platform mono and
+ *                  no mono in the panel was the drawn one.
+ *   Michroma       the GENESIS wordmark only. A display face at one size, used
+ *                  nowhere else, which is why it is its own family rather than
+ *                  a weight of the body face.
+ *
+ * All three are SIL Open Font License, so bundling them is redistribution the
+ * licence expressly permits - see media/fonts/LICENSE-NOTE.md, which this
+ * replaced an unresolved licensing question with.
  *
  * Absent files are skipped rather than 404'd, so a build with no `media/fonts/`
  * still renders on the system stack in the CSS. `font-src` is scoped to the
- * extension origin and nothing here is remote, so the CSP is unchanged. The
- * Light and Extrabold cuts are not referenced by the design and do not ship.
+ * extension origin and nothing here is remote, so the CSP is unchanged.
  */
 function fontFaces(extensionUri: vscode.Uri, webview: vscode.Webview): string {
   const dir = vscode.Uri.joinPath(extensionUri, "media", "fonts");
@@ -62,25 +72,13 @@ function fontFaces(extensionUri: vscode.Uri, webview: vscode.Webview): string {
     return "";
   }
 
-  /* The Genesis design names three OFL families. Unlike Anthropic Sans they
-     are free to redistribute, so bundling them raises no licensing question.
-     They must be bundled rather than linked: the webview CSP is
-     `default-src 'none'` with font-src scoped to the extension origin, so the
-     Google Fonts <link> the mockup uses would simply be blocked.
-
-     IBM Plex Sans ships as a single VARIABLE font - Google serves one file for
-     400/500/600 - so it is registered once across a weight RANGE. Declaring it
-     three times with one weight each would make the browser synthesise the
-     intermediate weights it already has. */
   const wanted: { file: string; family: string; weight: string; italic?: true }[] = [
-    { file: "IBMPlexSans-var.woff2", family: "IBM Plex Sans", weight: "100 700" },
-    { file: "IBMPlexSans-var-ext.woff2", family: "IBM Plex Sans", weight: "100 700" },
-    { file: "SpaceMono-400.woff2", family: "Space Mono", weight: "400" },
-    { file: "SpaceMono-400-ext.woff2", family: "Space Mono", weight: "400" },
-    { file: "SpaceMono-700.woff2", family: "Space Mono", weight: "700" },
-    { file: "SpaceMono-700-ext.woff2", family: "Space Mono", weight: "700" },
-    { file: "Michroma-400.woff2", family: "Michroma", weight: "400" },
-    { file: "Michroma-400-ext.woff2", family: "Michroma", weight: "400" },
+    // One variable file, declared across the range the design uses. A static
+    // face per weight would be three times the bytes for the same result.
+    { file: "IBMPlexSans-Variable.woff2", family: "IBM Plex Sans", weight: "100 700" },
+    { file: "SpaceMono-Regular.woff2", family: "Space Mono", weight: "400" },
+    { file: "SpaceMono-Bold.woff2", family: "Space Mono", weight: "700" },
+    { file: "Michroma-Regular.woff2", family: "Michroma", weight: "400" },
   ];
 
   const rules: string[] = [];

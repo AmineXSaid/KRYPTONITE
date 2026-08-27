@@ -10,7 +10,8 @@
  *   Outbound = host    -> webview
  */
 
-import type { Capabilities, Wire } from "../endpoints/profile";
+import type { Capabilities, LlmKind, Wire } from "../endpoints/profile";
+export type { LlmKind };
 import type { Msg } from "../providers/client";
 
 /* ────────────────────────────── primitives ────────────────────────────── */
@@ -113,8 +114,8 @@ export interface ProfileDto {
   id: string;
   description: string;
   wire: Wire;
-  /** What the model is; defaults to "chat" for profiles written before this existed. */
-  kind: ModelKind;
+  /** What kind of model this endpoint serves. Always set; see `LlmKind`. */
+  kind: LlmKind;
   model: string;
   baseUrl: string;
   chatPath: string | null;
@@ -216,12 +217,18 @@ export interface LogLine {
   msg: string;
 }
 
-/** One group in the model picker. One group per ready profile. */
+/**
+ * One group in the model picker. One group per ready profile.
+ *
+ * `kind` rides along with the group rather than with each model id because it
+ * is a property of the ENDPOINT, not of the string the gateway was told to
+ * serve: the profile declares what sort of model sits behind the route, and
+ * every model listed under that route is reached through the same declaration.
+ */
 export interface ModelGroupDto {
   group: string;
+  kind: LlmKind;
   models: string[];
-  /** The kind declared by the profile this group came from. */
-  kind?: ModelKind;
 }
 
 /** One MCP server an agent may reach, and the filter over its tools. */
@@ -284,33 +291,21 @@ export interface FileChangeDto {
   exact: boolean;
 }
 
-/**
- * What KIND of model an endpoint serves.
- *
- * This is not a capability flag - `Capabilities` already records what the wire
- * supports (streaming, tools, vision). This records what the model IS, which
- * the wire cannot tell you and which changes how the panel should treat it:
- *
- *   chat        general instruction-following. The default assumption.
- *   reasoning   spends hidden tokens thinking before it answers. Slower and
- *               dearer per call, and worth a different default timeout.
- *   multimodal  accepts images as well as text, so attachments are meaningful.
- *   embedding   returns vectors, not replies. It cannot hold a conversation,
- *               so it must never be offered as the model for a chat turn.
- *
- * Required when adding an endpoint: a gateway will not tell us, and guessing
- * from the model id is how you end up offering an embedding model in the chat
- * picker.
- */
-export type ModelKind = "chat" | "reasoning" | "multimodal" | "embedding";
-
 export interface EndpointForm {
   id: string;
   name: string;
   url: string;
   type: EndpointFormType;
-  /** What the model is. Required - see ModelKind. */
-  kind: ModelKind;
+  /**
+   * What kind of model the gateway serves. Mandatory: the form refuses to save
+   * without it, because it is the one thing about the endpoint that cannot be
+   * discovered by probing and that silently changes how the agent behaves.
+   *
+   * Optional in the TYPE only so a half-filled draft can travel on
+   * `checkEndpoint` - a connection check does not need it. `saveEndpoint`
+   * rejects a form that reaches the host without one.
+   */
+  kind?: LlmKind;
   /**
    * The model id the gateway expects. Previously hardcoded per provider type
    * when the YAML was generated, which meant every endpoint added through the
@@ -680,6 +675,12 @@ export interface McpServerDto {
   toolCount: number;
   tools: string[];
   approval: "ask" | "auto";
+  /**
+   * The user declared this server read-only in `.agent/mcp.json`, which is what
+   * lets its tools be used in Ask and Plan. Surfaced so the panel can show the
+   * claim - an invisible claim is one nobody can audit.
+   */
+  readOnly: boolean;
   serverInfo?: { name: string; version: string };
 }
 /** Servers connected, failed, or reloaded. Carries config warnings too. */

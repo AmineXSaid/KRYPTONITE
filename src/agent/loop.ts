@@ -89,13 +89,23 @@ export type Phase = (typeof PHASES)[number];
  * handed that name straight to `runTool` and the write landed - the read-only
  * promise held only as long as the model chose to honour it.
  *
- * MCP tools are refused outside Act by prefix rather than by lookup: the
- * protocol has no way for a server to declare a tool read-only, so there is
- * nothing to check and the only safe answer is no.
+ * MCP tools are refused outside Act unless the user vouched for their server.
+ * The protocol has no way for a server to declare a tool read-only, so there is
+ * nothing this code can check - but the person who wrote `.agent/mcp.json` can
+ * check, and `readOnly: true` is them saying they did. That claim is the only
+ * thing that opens Ask and Plan to an MCP tool.
+ *
+ * `mcpReadOnly` is optional, and its absence means "no server is vouched for".
+ * A caller that does not pass it gets the old blanket refusal, which is the
+ * right default for any call site that has no registry to ask.
  */
-export function toolAllowedIn(phase: Phase, name: string): boolean {
+export function toolAllowedIn(
+  phase: Phase,
+  name: string,
+  mcpReadOnly?: (name: string) => boolean
+): boolean {
   if (phase === "act") return true;
-  if (name.startsWith("mcp__")) return false;
+  if (name.startsWith("mcp__")) return Boolean(mcpReadOnly?.(name));
   return (phase === "ask" ? ASK_ONLY : READ_ONLY).has(name);
 }
 
@@ -109,8 +119,13 @@ export function toolAllowedIn(phase: Phase, name: string): boolean {
  */
 export function refusalFor(phase: Phase, name: string): string {
   const where = phase === "ask" ? "Ask" : "Plan";
+  // Names the fix, because for MCP there now is one: the user can mark the
+  // server read-only. Saying only "withheld" would leave them re-reading the
+  // phase docs for a rule that has an escape hatch one config key away.
   const why = name.startsWith("mcp__")
-    ? `MCP tools are withheld in ${where} mode - the protocol cannot declare a tool read-only.`
+    ? `MCP tools are withheld in ${where} mode unless their server is marked ` +
+      `"readOnly": true in .agent/mcp.json - the protocol itself cannot declare ` +
+      `a tool read-only, so that claim has to come from the user.`
     : `${where} mode offers read-only tools only.`;
   const go =
     phase === "ask"
@@ -570,22 +585,27 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
   // set, so a write is impossible rather than merely discouraged. Ask's set is
   // the narrower ASK_ONLY; plan additionally gets update_todos.
   //
-  // MCP tools are withheld entirely in both. MCP has no way to declare a tool
-  // read-only, so there is nothing to check - and a plan (or an answer) that
-  // quietly filed a GitHub issue would break the one promise each mode makes.
+  // MCP tools are withheld in both UNLESS the user marked their server
+  // `readOnly: true` in .agent/mcp.json. MCP has no way to declare a tool
+  // read-only, so this code cannot check - but the person who configured the
+  // server can, and that claim is the only thing that opens Ask and Plan. An
+  // unmarked server stays withheld: a plan (or an answer) that quietly filed a
+  // GitHub issue would break the one promise each mode makes.
   // generate_image is offered only when the active profile declares an image
   // model. Advertising a tool that can only ever answer "not configured" costs
   // tokens on every request and invites the model to reach for it.
   const builtins = ctx.image ? TOOL_DEFS : TOOL_DEFS.filter((t) => t.name !== "generate_image");
 
   // Both branches run the same predicate, so "what Ask may call" is stated
-  // once. MCP tools are only in the candidate list at all in act phase; in the
-  // others toolAllowedIn would reject each one anyway, and building the array
-  // just to filter it away wastes the mapping.
-  const candidates: ToolDef[] =
-    phase === "act" ? [...builtins, ...(opts.mcpTools ?? [])] : builtins;
+  // once. MCP tools now join the candidate list in every phase, because
+  // toolAllowedIn - not this line - decides which of them survive. Filtering
+  // here as well would mean two places had to agree about the same rule.
+  const mcpReadOnly = ctx.mcp ? (n: string) => ctx.mcp!.isReadOnly(n) : undefined;
+  const candidates: ToolDef[] = [...builtins, ...(opts.mcpTools ?? [])];
   const availableTools: ToolDef[] = candidates.filter(
-    (t) => toolAllowedIn(phase, t.name) && (t.name.startsWith("mcp__") || agentAllowsTool(agent, t.name))
+    (t) =>
+      toolAllowedIn(phase, t.name, mcpReadOnly) &&
+      (t.name.startsWith("mcp__") || agentAllowsTool(agent, t.name))
   );
 
   const messages: Msg[] = [
@@ -833,7 +853,10 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
     // to the list it was offered. Everything above this line is advisory; this
     // is where Ask and Plan stop being a promise and become a property.
     const invoke = (c: ToolCall): Promise<ToolResult> => {
-      if (!toolAllowedIn(phase, c.name)) {
+      // Same predicate as the advertisement gate above, and it has to be the
+      // same: a marked server's tool that was offered must not then be refused
+      // here, and an unmarked one the model produced from memory must still be.
+      if (!toolAllowedIn(phase, c.name, mcpReadOnly)) {
         return Promise.resolve({ content: refusalFor(phase, c.name), isError: true });
       }
       // The agent gate, for the same reason as the phase gate above: the list

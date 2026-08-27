@@ -149,23 +149,29 @@ Ink on all three phase fills clears AA without help (5.25 / 4.94 / 7.03).
 
 ## Model kind - a mandatory field on an endpoint
 
-Adding an endpoint now requires saying what the model is: **chat**,
-**reasoning**, **multimodal** or **embedding**. Save stays blocked until one is
-picked, and the model picker tags each entry with its kind.
+This branch and a parallel session both built this field, and the merge kept
+the parallel one, which is the better design. It is recorded here because the
+two disagreed on something real.
 
-It is mandatory rather than defaulted because there is nowhere to get it from.
+The kinds are **chat**, **reasoning**, **multimodal**, **coding** and
+**completion** - `src/endpoints/llmKind.ts`. This branch had proposed `chat |
+reasoning | multimodal | embedding`, and `embedding` was the wrong fifth: an
+embedding endpoint is not something you select as the chat model at all, so
+listing it makes the picker offer a choice that can only be a mistake. What
+the field is actually for is telling apart three models you *would* pick
+between, and a FIM base model, which cannot drive a tool-calling loop.
+
+The surviving version is also load-bearing rather than decorative: a kind
+seeds capability defaults, so choosing multimodal turns vision on and choosing
+completion turns tools off.
+
+Mandatory rather than defaulted, because there is nowhere to get it from.
 Genesis cannot ask an OpenAI-compatible gateway what a model is, and guessing
-from the id is how an embedding model ends up selected as the chat model and
-fails on the first turn with a shape error rather than a useful message.
+from the id is how a fill-in-the-middle base model ends up selected as the chat
+model and fails on its first turn with a shape error instead of a sentence.
 
-- `ModelKind` in `src/ui/protocol.ts`; `EndpointForm.kind`, `ProfileDto.kind`,
-  `ModelGroupDto.kind`.
-- `EndpointProfile.kind` is **optional** in `src/endpoints/profile.ts`. Profiles
-  already on disk have no `kind:` line and must keep loading; `src/core/app.ts`
-  reads them as `chat`.
-- `src/core/profileFiles.ts` writes the line, commented with the four values.
-- The form lives in the **sidebar**, under Diagnostics -> Endpoints ->
-  "+ Add endpoint". See the dead-code note below.
+The form lives in the **sidebar**, under Diagnostics -> Endpoints ->
+"+ Add endpoint". See the dead-code note below.
 
 ### Defects found and fixed while building
 
@@ -223,7 +229,7 @@ nothing is wrong. The mockup paints idle orange, which is what pointed at it.
 
 ## Verification
 
-`npm test`: **2304 assertions, 0 failed, exit 0.**
+`npm test`: **2457 assertions, 0 failed, exit 0.**
 Every tab and the Control Center screenshotted with 0 runtime errors, driven
 by a fixture shaped to main's real DTOs, plus an automated overflow probe at
 280px and 900px that fails the run rather than being eyeballed.

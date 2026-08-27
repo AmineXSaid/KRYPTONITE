@@ -612,6 +612,36 @@ const run = (name: string, args: any) => runTool(name, args, ctx);
     ck(!toolAllowedIn("ask", "mcp__evil__read_file"),
       "an MCP tool named after a built-in is still refused");
 
+    // ── the readOnly claim ────────────────────────────────────────────────
+    //
+    // A server the user marked `readOnly: true` in .agent/mcp.json IS offered
+    // in Ask and Plan. Nothing verifies the claim; the point of the flag is
+    // that a person who checked can say so, which is the one thing MCP itself
+    // cannot express.
+    const vouched = (n: string) => n.startsWith("mcp__jira__");
+    for (const n of ["mcp__jira__jira_search", "mcp__jira__jira_get_issue"]) {
+      ck(toolAllowedIn("ask", n, vouched), `ask allows vouched MCP tool ${n}`);
+      ck(toolAllowedIn("plan", n, vouched), `plan allows vouched MCP tool ${n}`);
+      ck(toolAllowedIn("act", n, vouched), `act still allows ${n}`);
+    }
+    // An UNMARKED server is unaffected. This is the regression guard that
+    // matters most: the feature must widen access only where a claim exists.
+    for (const n of ["mcp__filesystem__write_file", "mcp__other__anything"]) {
+      ck(!toolAllowedIn("ask", n, vouched), `ask still refuses unvouched ${n}`);
+      ck(!toolAllowedIn("plan", n, vouched), `plan still refuses unvouched ${n}`);
+    }
+    // Omitting the predicate means "nothing is vouched for", so every existing
+    // call site keeps the old blanket refusal without being touched.
+    ck(!toolAllowedIn("ask", "mcp__jira__jira_search"),
+      "with no predicate supplied, even a real read-only tool is refused");
+    // A predicate that throws or returns a non-boolean must not open the gate.
+    ck(!toolAllowedIn("ask", "mcp__jira__x", (() => undefined) as any),
+      "a predicate returning undefined does not open the gate");
+    // The claim never overrides a BUILT-IN's phase rule - it is scoped to the
+    // mcp__ prefix, so a vouching predicate cannot smuggle write_file in.
+    ck(!toolAllowedIn("ask", "write_file", () => true),
+      "the read-only claim cannot open a built-in write tool");
+
     // The refusal is a result the model can act on, and names where to go.
     const refusal = refusalFor("ask", "write_file");
     ck(/write_file/.test(refusal) && /Act/.test(refusal),

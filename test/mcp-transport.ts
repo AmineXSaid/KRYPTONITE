@@ -113,6 +113,35 @@ const quiet = () => {};
     ck(warnings.length === 0, "and is not warned about");
   }
   {
+    // The readOnly claim. It is what opens Ask and Plan to a server's tools,
+    // so the parse has to be strict: only a literal `true` counts.
+    const { specs } = loadMcpConfig(
+      write({ mcpServers: {
+        ro: { command: "x", readOnly: true },
+        rw: { command: "y", readOnly: false },
+        legacy: { command: "z" },
+      } }), {} as any
+    );
+    const by = (n: string) => specs.find((s) => s.name === n);
+    ck(by("ro")?.readOnly === true, "readOnly: true is carried through");
+    ck(by("rw")?.readOnly === false, "readOnly: false stays false");
+    // Absent means false, never undefined: a tri-state here would let
+    // `?? true` somewhere downstream quietly open the gate.
+    ck(by("legacy")?.readOnly === false, "an absent readOnly key defaults to false");
+  }
+  {
+    // `readOnly: "true"` is what a person writes by accident. Coercing it
+    // would widen what Ask and Plan may reach on the strength of a typo.
+    const { specs, warnings } = loadMcpConfig(
+      write({ mcpServers: { oops: { command: "x", readOnly: "true" } } }), {} as any
+    );
+    ck(specs[0]?.readOnly === false, "a string 'true' is NOT treated as a claim");
+    ck(/readOnly must be true or false/.test(warnings.join(" ")),
+      "and the warning says what was expected", warnings[0]);
+    ck(/withheld in Ask and Plan/.test(warnings.join(" ")),
+      "and what the consequence is");
+  }
+  {
     const { specs, warnings } = loadMcpConfig(
       write({ mcpServers: { x: { url: "not a url" } } }), {} as any
     );

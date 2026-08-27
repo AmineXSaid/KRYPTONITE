@@ -1,5 +1,6 @@
 import { request } from "undici";
 import type { EndpointProfile, Capabilities } from "./profile";
+import { DEFAULT_LLM_KIND, isLlmKind } from "./llmKind";
 import type { EndpointForm } from "../ui/protocol";
 import { wireForType, secretKeyFor } from "../core/profileFiles";
 import { defaultChatPath } from "../providers/client";
@@ -190,6 +191,10 @@ export function draftProfile(form: EndpointForm): EndpointProfile {
     name: form.id || "draft",
     description: form.name || form.id,
     wire,
+    // The check probes DNS, TLS, the proxy and the credential - none of which
+    // depend on what sort of model answers - so a draft that has not picked a
+    // kind yet still checks. Only the save is gated on it.
+    kind: isLlmKind(form.kind) ? form.kind : DEFAULT_LLM_KIND,
     baseUrl,
     chatPath,
     model: form.model?.trim() || "",

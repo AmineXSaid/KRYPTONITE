@@ -132,15 +132,28 @@
   --kx-shadow:       rgba(7, 10, 15, .7);   /* the mockup's dialog shadow    */
 
   /* ── type ──
-   * The mockup's three families, and all three are now bundled under
-   * media/fonts and declared by src/ui/shell.ts, so none of them falls back:
-   * Michroma for the wordmark, Space Mono for every 9px uppercase label, and
-   * IBM Plex Sans (one variable file, weights 100-700) for body copy.
-   * All three are SIL Open Font License 1.1. Anthropic Sans, which main used
-   * to ship, is gone: the mockup does not name it. */
-  --kx-ui:      'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-  --kx-display: 'Michroma','IBM Plex Sans',-apple-system,sans-serif;
-  --kx-mono:    'Space Mono',ui-monospace,'SF Mono',Menlo,Consolas,monospace;
-  --kx-brand:   var(--kx-display);
+   * The three families the Genesis design is actually drawn in, and all three
+   * now SHIP - see src/ui/shell.ts and media/fonts/LICENSE-NOTE.md.
+   *
+   * This previously named Anthropic Sans for the UI and Space Mono for the
+   * mono, and only the first of those was bundled. The webview CSP is
+   * `default-src 'none'` with `font-src` scoped to the extension, so a named
+   * family that is not bundled cannot be fetched: every mono run in the panel
+   * - tab labels, model ids, kind tags, timings, code - was silently falling
+   * back to the platform monospace, and the wordmark had no display face at
+   * all. Naming a font is not shipping one.
+   *
+   * Michroma is --kx-BRAND, not --kx-display, and the distinction is the whole
+   * point. It is a wide geometric face with a single weight, drawn to be set
+   * once at 11-14px under heavy letter-spacing: it is the GENESIS wordmark and
+   * nothing else. --kx-display is what prose headings use - a markdown h1, the
+   * welcome line, a browser panel title - and in this design that is simply the
+   * body face. Pointing --kx-display at Michroma would set every markdown
+   * heading in the transcript in a display face at a weight it does not have,
+   * which is the standard way to make a well-drawn family look broken. */
+  --kx-ui:      'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --kx-display: 'IBM Plex Sans', ui-sans-serif, system-ui, 'Segoe UI', sans-serif;
+  --kx-mono:    'Space Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --kx-brand:   'Michroma', 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
   --kx-prose:   var(--kx-ui);
 }

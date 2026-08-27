@@ -173,9 +173,14 @@ const MCP_CONFIG_TEMPLATE = `{
     "env, cwd, url and headers - so a token never has to be written into this",
     "file, which lives in the workspace and usually gets committed.",
     "",
-    "Tools reach the model as mcp__<server>__<tool>. They are withheld entirely in",
-    "Ask and Plan mode - neither promises the model can only look, and MCP has",
-    "no way to declare a tool read-only, so there is nothing to check."
+    "Tools reach the model as mcp__<server>__<tool>. They are withheld in Ask and",
+    "Plan mode, which promise the model can only look, because MCP has no way for",
+    "a server to declare a tool read-only - so there is nothing to check.",
+    "",
+    "  readOnly  YOUR claim that a server only reads. It is the one thing that",
+    "            lets its tools be used in Ask and Plan. Nothing verifies it:",
+    "            set it only for a server you have actually checked, the same",
+    "            judgement 'approval: auto' asks for. Defaults false."
   ],
   "mcpServers": {
     "filesystem": {
@@ -190,6 +195,12 @@ const MCP_CONFIG_TEMPLATE = `{
       "args": ["/absolute/path/to/your/mcp_server.py"],
       "approval": "ask",
       "timeoutMs": 120000,
+      "enabled": false
+    },
+    "read-only-search": {
+      "command": "/absolute/path/to/your/search-server",
+      "approval": "ask",
+      "readOnly": true,
       "enabled": false
     },
     "example-remote": {
@@ -1175,7 +1186,7 @@ export class App {
         id: p.name,
         description: p.description ?? "",
         wire: p.wire,
-        kind: p.kind ?? "chat",
+        kind: p.kind,
         model: p.model,
         baseUrl: p.baseUrl,
         chatPath: p.chatPath ?? null,
@@ -1214,6 +1225,9 @@ export class App {
       id: e.file ? path.basename(e.file) : "unknown.yaml",
       description: "",
       wire: "openai",
+      // A profile that failed to parse has no honest kind to report. `chat`
+      // is the placeholder the DTO needs to stay well-formed; the row renders
+      // from `status: "error"` and never shows it.
       kind: "chat",
       model: "-",
       baseUrl: "-",
@@ -1277,11 +1291,7 @@ export class App {
   }
 
   modelGroups(): ModelGroupDto[] {
-    return this.profiles.map((p) => ({
-      group: p.name,
-      models: [p.model],
-      kind: p.kind ?? "chat",
-    }));
+    return this.profiles.map((p) => ({ group: p.name, kind: p.kind, models: [p.model] }));
   }
 
   configDto(): ConfigDto {
