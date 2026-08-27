@@ -140,12 +140,18 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   color: var(--kx-fg-3);
 }
 .kx-tab:hover { color: var(--kx-fg-2); }
+/* One hue per tab, as the mockup assigns them, carried on the 2px underline.
+   The bar is the only place the hue appears, so the strip stays quiet while
+   still telling you which of four rooms you are standing in without reading
+   the label. --kx-under is the fallback for any tab not named here. */
 .kx-tab[aria-selected="true"] {
   color: var(--kx-fg);
-  /* Its own violet, not the Plan-phase one: a selected tab and an active phase
-     are different meanings and must not share a colour. */
   box-shadow: inset 0 -2px 0 var(--kx-under);
 }
+#tabSession[aria-selected="true"] { box-shadow: inset 0 -2px 0 var(--kx-tab-session); }
+#tabMcp[aria-selected="true"]     { box-shadow: inset 0 -2px 0 var(--kx-tab-mcp); }
+#tabAgents[aria-selected="true"]  { box-shadow: inset 0 -2px 0 var(--kx-tab-agents); }
+#tabDiag[aria-selected="true"]    { box-shadow: inset 0 -2px 0 var(--kx-tab-diag); }
 .tab-count {
   font-family: var(--kx-mono); font-size: 11px; font-weight: 500;
   letter-spacing: 0; color: var(--kx-error);
@@ -168,8 +174,11 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 .phase-banner .sub { font-size: 11.5px; color: var(--kx-fg-2); }
 .phase-banner[data-phase="ask"] .dot { background: var(--kx-ask); }
 .phase-banner[data-phase="ask"] .lbl { color: var(--kx-ask); }
-.phase-banner[data-phase="plan"] .dot { background: var(--kx-active); }
-.phase-banner[data-phase="plan"] .lbl { color: var(--kx-active); }
+.phase-banner[data-phase="plan"] .dot { background: var(--kx-phase-plan); }
+/* The dot is a 6px fill and may be the mockup's purple exactly; the label is
+   text on --kx-bg, where that purple sits at 4.11, so the label lifts one
+   step to purple-300. */
+.phase-banner[data-phase="plan"] .lbl { color: var(--kx-plan-fg); }
 
 .view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
@@ -667,28 +676,44 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .rung .ms .kx-spin { vertical-align: -2px; }
 
 /* â”€â”€ todo card â”€â”€ */
-.card { border: 1px solid var(--kx-line); border-radius: 4px; padding: 10px 11px; margin-bottom: 14px; }
-.todo-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.todo-head .t { font-size: 12px; font-weight: 600; }
+/* -- todos --
+   The mockup gives todos no card and no checkbox: a mono uppercase caption, a
+   counter, a 1px progress track, and then one row per item hung off a 1px
+   rail. The rail is oxide on the row being worked and slate elsewhere, so the
+   current item is found by position rather than by a badge competing with the
+   transcript. A completed item keeps a green check and drops to fog. Nothing
+   is struck through - a struck line is measurably harder to read, and the
+   point of a checklist is that the finished items stay readable.
+
+   .cbx is shared with the skills list, so every rule here is scoped under
+   .todo-list; unscoped, the 9px glyph column would eat the skills checkbox. */
+.card { margin-bottom: 16px; }
+.todo-head { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; }
+.todo-head .t {
+  font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--kx-fg-3);
+}
 .todo-head .n {
-  margin-left: auto; font-family: var(--kx-mono); font-size: 11px;
-  color: var(--kx-fg-2);
+  font-family: var(--kx-mono); font-size: 9px; letter-spacing: .14em;
+  color: var(--kx-fg);
 }
-.todo-bar {
-  width: 54px; height: 3px; flex: none; border-radius: 2px; overflow: hidden;
-  background: var(--kx-line);
+.todo-bar { flex: 1; height: 1px; background: var(--kx-line); overflow: hidden; }
+.todo-bar i { display: block; height: 1px; background: var(--kx-action); }
+.todo-list { list-style: none; display: flex; flex-direction: column; }
+.todo-list li {
+  display: flex; align-items: center; gap: 11px; min-height: 28px;
+  padding: 4px 0 4px 11px; font-size: 13px;
+  border-left: 1px solid var(--kx-line);
 }
-.todo-bar i { display: block; height: 100%; background: var(--kx-fg-2); }
-.todo-list { list-style: none; display: flex; flex-direction: column; gap: 6px; }
-.todo-list li { display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; }
-.cbx {
-  width: 14px; height: 14px; flex: none; margin-top: 2px; border-radius: 3px;
-  display: grid; place-items: center; background: transparent;
-  border: 1px solid var(--kx-line);
+.todo-list li.doing { border-left-color: var(--kx-action); }
+.todo-list .cbx {
+  width: 9px; height: auto; flex: none; margin: 0; display: block;
+  border: none; border-radius: 0; background: none;
+  font-family: var(--kx-mono); font-size: 10px; color: var(--kx-accent);
 }
-li.done .cbx { background: var(--kx-accent); border-color: var(--kx-accent); color: var(--kx-bg); }
-li.done .tx { color: var(--kx-fg-2); text-decoration: line-through; }
-li.doing .cbx { border-color: var(--kx-accent); }
+.todo-list .tx { color: var(--kx-fg-3); }
+.todo-list li.doing .tx { color: var(--kx-fg); font-weight: 500; }
+.todo-list li.done .tx { color: var(--kx-fg-2); font-weight: 400; }
 
 /* â”€â”€ permission card â”€â”€ */
 .perm {
@@ -1226,40 +1251,28 @@ li.doing .cbx { border-color: var(--kx-accent); }
   display: flex; flex: none; border-radius: 4px; overflow: hidden;
   border: 1px solid var(--kx-line);
 }
-.seg button { font-size: 12px; padding: 4px 9px; text-align: center; color: var(--kx-fg-2); }
+/* The mockup's segmented control, reproduced exactly.
+ *
+ * mono 9px / 700 / .12em / uppercase, 5px 7px padding, a border-left hairline
+ * between segments and none before the first, and the ACTIVE segment filled
+ * with its phase hue carrying ink text. An earlier pass here used coloured
+ * text on a raised plate instead; that was a reasonable idea and it is not
+ * what the design says, so it is gone.
+ *
+ * The three hues are the mockup's: Ask blue, Plan purple, Act orange. Ink on
+ * each clears AA comfortably (5.25 / 4.94 / 7.03), so the fills are the
+ * mockup's -400 values unaltered. */
+.seg button {
+  font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase; text-indent: .12em;
+  padding: 5px 7px; text-align: center; color: var(--kx-fg-3);
+  background: transparent;
+}
 .seg button + button { border-left: 1px solid var(--kx-line); }
-.seg button[data-on="1"] { font-weight: 600; }
-/* The active phase is carried by the label, not by a filled block.
- *
- * Two solid swatches â€” mint and violet â€” sat permanently in the composer and
- * were the loudest colour in the panel, which made the whole surface read
- * green-and-purple rather than warm. A raised segment plus coloured text says
- * the same thing in about a tenth of the painted area, and the hue still maps:
- * violet is Plan, mint is Act.
- *
- * Plan takes the lighter violet, not --kx-active: the darker one is drawn for
- * a white foreground and has too little contrast as text on a raised surface.
- *
- * Ask joined later, in the palette's amber - a third read-only phase that,
- * unlike Plan, never ends in a plan card, so it earns its own hue rather than
- * sharing Plan's violet. */
-.seg button[data-on="1"] { background: var(--kx-surface-3); }
-.seg button[data-phase="ask"][data-on="1"] { color: var(--kx-ask); font-weight: 700; }
-.seg button[data-phase="plan"][data-on="1"] { color: var(--kx-under); font-weight: 700; }
-.seg button[data-phase="act"][data-on="1"] { color: var(--kx-accent); font-weight: 700; }
-/* Ask takes the amber. It reads as "held" next to Act's mint go and Plan's
-   violet - which is what the mode is: the model is reading and answering, and
-   nothing it does can reach the workspace. */
-.seg button[data-phase="ask"][data-on="1"] { color: var(--kx-ask); font-weight: 700; }
-
-/* A 2px underline in the phase's own hue, under the active segment only.
- *
- * Colour alone carried the active state, which fails twice: the three hues sit
- * at similar lightness for a red-green colour-blind reader, and a raised
- * surface is a weak cue at 12px. The bar restores a second, positional signal
- * without repainting the control - the same trick the tab strip already uses,
- * so the panel stays one vocabulary. */
-.seg button[data-on="1"] { box-shadow: inset 0 -2px 0 currentColor; }
+.seg button[data-on="1"] { color: var(--kx-on-accent); }
+.seg button[data-phase="ask"][data-on="1"]  { background: var(--kx-phase-ask); }
+.seg button[data-phase="plan"][data-on="1"] { background: var(--kx-phase-plan); }
+.seg button[data-phase="act"][data-on="1"]  { background: var(--kx-phase-act); }
 .seg button:hover:not([data-on="1"]) { background: var(--kx-hover); color: var(--kx-fg); }
 
 
@@ -1399,20 +1412,38 @@ li.doing .cbx { border-color: var(--kx-accent); }
    Shaped to match the model button beside it rather than the phase segment,
    because like the model it is a current value you can change, not one of
    three states you pick between. */
-.perm {
+/* NAMED .perm-btn, NOT .perm.
+   `.perm` was already taken by the permission CARD 700 lines above. Both are
+   the same specificity and this block is the later one, so it was handing the
+   card `background: none`, `border: 1px solid transparent` and
+   `display: flex` - quietly stripping the card of its surface and laying its
+   title, body and command dump out in a row. Same failure mode as the
+   `.actions` collision found earlier in this file. One of the two had to be
+   renamed; the button is the newer arrival, so it moved.
+
+   Typography is the mockup's: mono 9px / 700 / .12em / uppercase in steel,
+   24px tall, cream on hover. The shield icon stays, which the mockup has no
+   need for: main's default approval mode is literally called "ask", the same
+   word as the Ask phase two controls to the left, and the glyph is what keeps
+   those two from reading as one setting. The mockup sidesteps this by naming
+   the mode "Manual" instead, but renaming a settings enum is a behaviour
+   change, not a theme, so the icon carries it here. */
+.perm-btn {
   display: flex; align-items: center; gap: 5px; flex: none;
-  min-height: 24px; padding: 0 8px; border-radius: 4px;
-  font-size: 11.5px; color: var(--kx-fg-3);
+  min-height: 24px; padding: 0 6px; border-radius: 4px;
+  font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase; text-indent: .12em;
+  color: var(--kx-fg-3);
   border: 1px solid transparent; background: none;
 }
-.perm .ic-11 { color: currentColor; }
-.perm:hover { background: var(--kx-hover); color: var(--kx-fg); }
-.perm[aria-expanded="true"] { background: var(--kx-hover); border-color: var(--kx-line); }
+.perm-btn .ic-11 { color: currentColor; }
+.perm-btn:hover { background: var(--kx-hover); color: var(--kx-fg); }
+.perm-btn[aria-expanded="true"] { background: var(--kx-hover); border-color: var(--kx-line); }
 /* Only the mode that stops asking is coloured. "Ask each time" is the
    default and needs no marking; "Allow all" is a state someone should be
    able to notice from across the room. */
-.perm[data-mode="edits-auto"] { color: var(--kx-ask); }
-.perm[data-mode="full-auto"] { color: var(--kx-error); }
+.perm-btn[data-mode="edits-auto"] { color: var(--kx-ask); }
+.perm-btn[data-mode="full-auto"] { color: var(--kx-error); }
 
 /* Opens upward, over the transcript, anchored to the composer rather than to
    the old footer. Left-aligned because the button it belongs to now sits on
@@ -1568,22 +1599,27 @@ li.doing .cbx { border-color: var(--kx-accent); }
   border-top: 1px solid var(--kx-hairline);
   transition: background .12s ease;
 }
-/* A connected server is the one row that gained the agent something, so it
-   gets the faintest turquoise ground rather than another badge competing for
-   attention. The hover is the same colour one step up, so the row feels
-   continuous with its own rail instead of flashing a neutral grey. */
-.mcp-row[data-state="ready"] { background: color-mix(in srgb, var(--kx-mcp) 4%, transparent); }
-.mcp-row:hover { background: color-mix(in srgb, var(--kx-mcp) 9%, transparent); }
+/* MCP status colours are the mockup's, not an invention.
+ *
+ * The mockup's server list assigns green-400 to a connected server and
+ * orange-400 to an idle one, and its MCP tab underline is green. An earlier
+ * pass here painted a connected server purple on the reasoning that "tools
+ * from outside" deserved its own hue; the design disagrees, and the design is
+ * the specification. Purple stays where the mockup puts it - on agents.
+ *
+ * The rail and the pill read the same field, so they cannot disagree. */
+.mcp-row[data-state="ready"] { background: color-mix(in srgb, var(--kx-accent) 4%, transparent); }
+.mcp-row:hover { background: color-mix(in srgb, var(--kx-accent) 9%, transparent); }
 .mcp-row[data-state="failed"]:hover { background: color-mix(in srgb, var(--kx-error) 8%, transparent); }
 @media (prefers-reduced-motion: reduce) { .mcp-row { transition: none; } }
-/* The rail and the pill read the same field, so they cannot disagree. */
 .mcp-row .rail { align-self: stretch; border-radius: 2px; background: var(--kx-fg-5); }
-/* Turquoise, not mint. A connected MCP server is not the same claim as a
-   passing health check â€” it says the agent gained tools it did not ship with,
-   so it earns its own colour and the two cannot be misread for each other. */
-.mcp-row[data-state="ready"] .rail { background: var(--kx-mcp); }
+.mcp-row[data-state="ready"] .rail { background: var(--kx-accent); }
 .mcp-row[data-state="failed"] .rail { background: var(--kx-error); }
 .mcp-row[data-state="starting"] .rail { background: var(--kx-warn); }
+/* Stopped is the mockup's "idle": declared, reachable, nothing asked of it
+   this session. Orange, not red - it is not a failure. */
+.mcp-row[data-state="idle"] .rail,
+.mcp-row[data-state="stopped"] .rail { background: var(--kx-active); }
 /* Declared but deliberately not started: present, and visibly inert. */
 /* --kx-border was never a token, so this rail rendered with no colour at all
    and a disabled server lost the one mark that lines it up with the others. */
@@ -1608,7 +1644,8 @@ li.doing .cbx { border-color: var(--kx-accent); }
   font-size: 10.5px; font-weight: 600; letter-spacing: .02em;
   background: var(--kx-surface-3); color: var(--kx-fg-2);
 }
-.mcp-pill.ok { background: var(--kx-mcp-wash); color: var(--kx-mcp); }
+.mcp-pill.ok { background: var(--kx-accent-wash); color: var(--kx-accent); }
+.mcp-pill.idle { background: var(--kx-warn-wash); color: var(--kx-active); }
 .mcp-pill.err { background: var(--kx-error-wash); color: var(--kx-error); }
 
 /* Chips are capped in the renderer; the tail carries the rest in its tooltip. */
@@ -1948,16 +1985,27 @@ li.doing .tx { color: var(--kx-fg); font-weight: 600; }
    line. Unwrapped, send and attach left the panel entirely - the two
    controls you cannot do without. Let the row wrap, and let the model
    button be the thing that gives, since its label already ellipsises. */
-.toolbar { flex-wrap: wrap; row-gap: 6px; }
+.toolbar { flex-wrap: wrap; gap: 6px; }
 #modelBtn { min-width: 0; flex: 1 1 auto; }
 /* The actions stay together as a group and hug the right, so a wrap puts
-   @ / attach / send on one line rather than orphaning send by itself. */
-.toolbar .sp { flex: 1 1 0; min-width: 0; }
+   @ / attach / send on one line rather than orphaning send by itself.
+   `.sp` takes the slack; `.tb-actions` is the group it pushes over. */
+/* The old spacer was a flex-grow span, which is itself a wrappable item: at
+   420px every control fitted on one line and the empty span was pushed onto a
+   second, zero-height row that still cost a row-gap. An auto margin does the
+   same job and cannot wrap, so the spacer is out of the flow here. */
+.toolbar > .sp { display: none; }
+.tb-actions { display: flex; align-items: center; gap: 6px; flex: none; margin-left: auto; }
 
 /* The model button may SHRINK so the toolbar can wrap at 280px, but it must
    not GROW: with `flex: 1 1 auto` it ballooned at 900px and stranded the mode
    chip in the middle of an empty row. Shrink-only keeps both widths honest. */
-#modelBtn { flex: 0 1 auto; }
+/* The mockup gives the model button `flex: 1 1 80px; min-width: 0` so it takes
+   the slack in a 380px panel and shrinks before the phase segments do. Left at
+   that alone it kept growing, and at a 900px panel width the model name sat in
+   a button half the composer wide. The basis and shrink are the mockup's; the
+   max-width is the cap the mockup never needed. */
+#modelBtn { flex: 1 1 48px; min-width: 0; max-width: 26ch; }
 
 /* ── Measure at wide widths ──
    The panel is draggable to ~900px and the transcript had no measure cap, so
@@ -1967,3 +2015,31 @@ li.doing .tx { color: var(--kx-fg); font-weight: 600; }
    carries its own horizontal scroll. */
 #log > * { max-width: 78ch; }
 #log > .diff-card, #log > .code-block, #log > pre, #log > .tool { max-width: none; }
+
+/* What the model IS, beside its name in the picker. "chat" renders nothing:
+   a tag on every row would be noise, and the whole value of the field is that
+   an unusual model announces itself. Embedding is the loud one on purpose -
+   it cannot answer a chat turn at all. */
+.kind-tag {
+  flex: none; margin-left: auto; padding: 1px 6px; border-radius: 4px;
+  font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase; text-indent: .1em;
+  background: var(--kx-mcp-wash); color: var(--kx-mcp);
+}
+.kind-tag[data-kind="multimodal"] { background: var(--kx-info-wash); color: var(--kx-info); }
+.kind-tag[data-kind="embedding"]  { background: var(--kx-warn-wash); color: var(--kx-warn); }
+
+/* Model kind: the one form field the panel refuses to save without, so the
+   asterisk is the only accent a label carries here. */
+.req { color: var(--kx-error); font-weight: 700; }
+.seg-row { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.seg-b {
+  padding: 3px 8px; border-radius: 4px; border: 1px solid var(--kx-line);
+  background: transparent; color: var(--kx-fg-3);
+  font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase; text-indent: .1em;
+}
+.seg-b:hover { color: var(--kx-fg); background: var(--kx-surface-3); }
+.seg-b[aria-checked="true"] {
+  background: var(--kx-mcp); border-color: var(--kx-mcp); color: var(--kx-on-accent);
+}

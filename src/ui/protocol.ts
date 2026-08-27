@@ -113,6 +113,8 @@ export interface ProfileDto {
   id: string;
   description: string;
   wire: Wire;
+  /** What the model is; defaults to "chat" for profiles written before this existed. */
+  kind: ModelKind;
   model: string;
   baseUrl: string;
   chatPath: string | null;
@@ -218,6 +220,8 @@ export interface LogLine {
 export interface ModelGroupDto {
   group: string;
   models: string[];
+  /** The kind declared by the profile this group came from. */
+  kind?: ModelKind;
 }
 
 /** One MCP server an agent may reach, and the filter over its tools. */
@@ -280,11 +284,33 @@ export interface FileChangeDto {
   exact: boolean;
 }
 
+/**
+ * What KIND of model an endpoint serves.
+ *
+ * This is not a capability flag - `Capabilities` already records what the wire
+ * supports (streaming, tools, vision). This records what the model IS, which
+ * the wire cannot tell you and which changes how the panel should treat it:
+ *
+ *   chat        general instruction-following. The default assumption.
+ *   reasoning   spends hidden tokens thinking before it answers. Slower and
+ *               dearer per call, and worth a different default timeout.
+ *   multimodal  accepts images as well as text, so attachments are meaningful.
+ *   embedding   returns vectors, not replies. It cannot hold a conversation,
+ *               so it must never be offered as the model for a chat turn.
+ *
+ * Required when adding an endpoint: a gateway will not tell us, and guessing
+ * from the model id is how you end up offering an embedding model in the chat
+ * picker.
+ */
+export type ModelKind = "chat" | "reasoning" | "multimodal" | "embedding";
+
 export interface EndpointForm {
   id: string;
   name: string;
   url: string;
   type: EndpointFormType;
+  /** What the model is. Required - see ModelKind. */
+  kind: ModelKind;
   /**
    * The model id the gateway expects. Previously hardcoded per provider type
    * when the YAML was generated, which meant every endpoint added through the

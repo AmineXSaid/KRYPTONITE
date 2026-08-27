@@ -88,6 +88,7 @@ export function renderProfileYaml(form: EndpointForm): string {
   lines.push(`wire: ${wire}                      # openai | anthropic | raw`);
   lines.push(`baseUrl: ${quote(form.url)}`);
   lines.push(`model: ${model}`);
+  lines.push(`kind: ${form.kind}                       # chat | reasoning | multimodal | embedding`);
   lines.push(``);
 
   if (chatPath) {
@@ -197,6 +198,8 @@ export function newEndpointForm(): EndpointForm {
     name: "New endpoint",
     url: "https://gateway.internal.example",
     type: "openai-compatible",
+    // Seeded, but the form still forces a deliberate choice before Save.
+    kind: "chat",
   };
 }
 

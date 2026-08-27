@@ -1175,6 +1175,7 @@ export class App {
         id: p.name,
         description: p.description ?? "",
         wire: p.wire,
+        kind: p.kind ?? "chat",
         model: p.model,
         baseUrl: p.baseUrl,
         chatPath: p.chatPath ?? null,
@@ -1213,6 +1214,7 @@ export class App {
       id: e.file ? path.basename(e.file) : "unknown.yaml",
       description: "",
       wire: "openai",
+      kind: "chat",
       model: "-",
       baseUrl: "-",
       chatPath: null,
@@ -1275,7 +1277,11 @@ export class App {
   }
 
   modelGroups(): ModelGroupDto[] {
-    return this.profiles.map((p) => ({ group: p.name, models: [p.model] }));
+    return this.profiles.map((p) => ({
+      group: p.name,
+      models: [p.model],
+      kind: p.kind ?? "chat",
+    }));
   }
 
   configDto(): ConfigDto {

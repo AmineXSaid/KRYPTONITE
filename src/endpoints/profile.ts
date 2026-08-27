@@ -141,6 +141,13 @@ export interface EndpointProfile {
   name: string;
   description?: string;
   wire: Wire;
+  /**
+   * What the model is: chat | reasoning | multimodal | embedding.
+   * Absent in profiles written before this field existed, which is why every
+   * reader defaults it rather than requiring it - an older YAML must keep
+   * working untouched.
+   */
+  kind?: "chat" | "reasoning" | "multimodal" | "embedding";
   baseUrl: string;
   /** Present only when the profile declares an `image:` block. */
   image?: ImageSpec;

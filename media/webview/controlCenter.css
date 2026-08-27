@@ -495,3 +495,20 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
   font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
   letter-spacing: .14em; text-transform: uppercase;
 }
+
+/* Model kind: a required segmented control. The asterisk is the only place a
+   form label carries an accent, because it is the only field the panel will
+   refuse to save without. */
+.req { color: var(--kx-error); font-weight: 700; }
+.seg-row { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.seg-b {
+  padding: 3px 8px; border-radius: 4px; border: 1px solid var(--kx-line);
+  background: transparent; color: var(--kx-fg-3);
+  font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase; text-indent: .1em;
+}
+.seg-b:hover { color: var(--kx-fg); background: var(--kx-surface-3); }
+.seg-b[aria-checked="true"] {
+  background: var(--kx-mcp); border-color: var(--kx-mcp); color: var(--kx-on-accent);
+}
+.hint2.blocked { color: var(--kx-warn); }

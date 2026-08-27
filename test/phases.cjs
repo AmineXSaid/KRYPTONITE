@@ -85,14 +85,23 @@ const TOKENS = fs.readFileSync(path.join(ROOT, "media/webview/tokens.css"), "utf
 
 /* ── the colour ─────────────────────────────────────────────────────────── */
 {
-  ok("Ask has its own token", /--kx-ask:\s*#[0-9a-f]{6}/i.test(TOKENS));
-  ok("and the segment uses it",
-    /\[data-phase="ask"\]\[data-on="1"\]\s*\{[^}]*var\(--kx-ask\)/.test(CSS));
+  // The segment FILLS with the phase hue and writes the label in ink, so each
+  // phase needs its own fill token. --kx-ask stays as the Ask hue used for
+  // TEXT (the banner), which is a lighter step of the same blue.
+  const hue = (t) => (TOKENS.match(new RegExp(t + ":\\s*(#[0-9a-f]{6})", "i")) || [])[1];
+  for (const ph of ["ask", "plan", "act"]) {
+    ok(`${ph} has its own fill token`, !!hue(`--kx-phase-${ph}`));
+    ok(`and the ${ph} segment uses it`,
+      new RegExp(`\\[data-phase="${ph}"\\]\\[data-on="1"\\]\\s*\\{[^}]*var\\(--kx-phase-${ph}\\)`).test(CSS));
+  }
   // Reusing another phase's hue would say the two modes are the same thing.
-  const askHue = (TOKENS.match(/--kx-ask:\s*(#[0-9a-f]{6})/i) || [])[1];
-  const others = ["--kx-accent", "--kx-active", "--kx-under", "--kx-warn", "--kx-error"]
-    .map((t) => (TOKENS.match(new RegExp(t + ":\\s*(#[0-9a-f]{6})", "i")) || [])[1]);
-  ok("that no other phase already uses", !others.includes(askHue), `${askHue} vs ${others.join(",")}`);
+  const fills = ["ask", "plan", "act"].map((p) => hue(`--kx-phase-${p}`));
+  ok("and the three fills are all different",
+    new Set(fills).size === 3, fills.join(","));
+  ok("the label on a filled segment is ink, not another accent",
+    /\.seg button\[data-on="1"\]\s*\{[^}]*var\(--kx-on-accent\)/.test(CSS));
+  ok("Ask still has its own text token for the banner",
+    /--kx-ask:\s*#[0-9a-f]{6}/i.test(TOKENS));
   ok("the banner takes the phase colour too",
     /\.phase-banner\[data-phase="ask"\][^}]*var\(--kx-ask\)/.test(CSS));
 }

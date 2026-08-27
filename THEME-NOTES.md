@@ -2,10 +2,16 @@
 
 Branch: `genesis-theme`, cut from `main` at `870d9f9`. Not merged, no PR.
 
-This is a **render-layer** change. `src/` is untouched apart from nothing at
-all so far: every edit lives in `media/webview/*` and `test/*`. The agent
-runtime, MCP client, browser tooling, endpoint/auth/TLS plumbing, settings
-schema and command registrations are exactly as `main` has them.
+This started as a **render-layer** change and is no longer only that. Two
+things reach `src/`:
+
+1. **Fonts.** `src/ui/shell.ts` declares the three families the design names.
+2. **Model kind.** A mandatory field on an endpoint profile, which needed the
+   protocol, the profile type, the DTO and the YAML template.
+
+Everything else in `src/` is untouched: the agent runtime, MCP client, browser
+tooling, endpoint/auth/TLS plumbing, settings schema and command registrations
+are exactly as `main` has them.
 
 ## Why this branch exists separately from `genesis-theme-reference`
 
@@ -116,6 +122,50 @@ branch changes them.
 - Todos stripped of card and checkbox chrome; no strikethrough.
 - Webview copy says Genesis.
 - MCP tool chips coloured by capability (audit D4).
+- **The three fonts the design names**, bundled and declared: Michroma for the
+  wordmark, Space Mono for every uppercase label, IBM Plex Sans for body copy.
+  All three are OFL 1.1 and their licences ship beside them in `media/fonts`.
+  Anthropic Sans is removed - see "Reversals" below.
+- **Model kind on an endpoint profile**, mandatory, end to end.
+
+## Colours taken literally from the mockup
+
+The colour work went through a pass where it was reproduced from the mockup
+value by value rather than from a semantic table. Four things changed, and
+all four were places where an earlier reading of the design was wrong:
+
+| Surface | Was | Is | Why |
+|---|---|---|---|
+| Active phase segment | coloured text on a raised plate | filled with the phase hue, ink label | the mockup fills it |
+| Phase hues | Ask blue-300, Plan orange, Act green | Ask blue-400, Plan purple-400, Act orange-400 | the mockup's own assignment |
+| Tab underline | one blue for all four | Session blue, MCP green, Agents purple, Diagnostics orange | the mockup gives each tab a hue |
+| Connected MCP server | purple rail and pill | green rail and pill | purple belongs to agents; the mockup puts green on a connected server |
+
+Fills are the mockup's `-400` values unaltered. Only **text** is lifted, and
+only where the mockup's own value misses WCAG AA on the ground it sits on:
+`--kx-fg-2`, `--kx-fg-3`, `--kx-error`, `--kx-mcp`, and the Plan banner label,
+which takes purple-300 because purple-400 as text on `--kx-bg` is 4.11:1.
+Ink on all three phase fills clears AA without help (5.25 / 4.94 / 7.03).
+
+## Model kind - a mandatory field on an endpoint
+
+Adding an endpoint now requires saying what the model is: **chat**,
+**reasoning**, **multimodal** or **embedding**. Save stays blocked until one is
+picked, and the model picker tags each entry with its kind.
+
+It is mandatory rather than defaulted because there is nowhere to get it from.
+Genesis cannot ask an OpenAI-compatible gateway what a model is, and guessing
+from the id is how an embedding model ends up selected as the chat model and
+fails on the first turn with a shape error rather than a useful message.
+
+- `ModelKind` in `src/ui/protocol.ts`; `EndpointForm.kind`, `ProfileDto.kind`,
+  `ModelGroupDto.kind`.
+- `EndpointProfile.kind` is **optional** in `src/endpoints/profile.ts`. Profiles
+  already on disk have no `kind:` line and must keep loading; `src/core/app.ts`
+  reads them as `chat`.
+- `src/core/profileFiles.ts` writes the line, commented with the four values.
+- The form lives in the **sidebar**, under Diagnostics -> Endpoints ->
+  "+ Add endpoint". See the dead-code note below.
 
 ### Defects found and fixed while building
 
@@ -136,11 +186,50 @@ branch changes them.
    and grepping for FAIL lines is not**. The helper is now self-contained
    beside `mcpPill`, and the test grabs it explicitly.
 
+## Reversals, stated plainly
+
+**Anthropic Sans was removed** after the project owner had earlier chosen to
+keep it. The later instruction was "same fonts, colors, design" against a
+mockup that names Michroma, Space Mono and IBM Plex Sans and does not name
+Anthropic Sans. Keeping it would have meant shipping a font the design does
+not use, whose redistribution terms for this repository were never settled.
+The seven woff2 files are deleted, not orphaned. Reverting is a `git revert`
+of the commit that removed them.
+
+## Dead code found, not written
+
+`endpointForm()` in `media/webview/controlCenter.js` **cannot render**. Nothing
+in that file ever sets `S.epForm`, and `kryptonite.newEndpoint` writes a YAML
+file and opens it in the editor instead. The mandatory model-kind field was
+added there first and had to be moved to the sidebar form, which is the one a
+user can actually reach. The Control Center copy is left in place and left
+consistent; deleting it is a separate decision from theming it.
+
+## Two class collisions, same failure mode
+
+`.actions` and `.perm` were each declared twice in `sidebar.css` for two
+unrelated components. Same specificity, so the later block silently won:
+`.perm` was handing the permission **card** `background: none`,
+`border: 1px solid transparent` and `display: flex`, stripping its surface and
+laying its title, body and command dump out in a row. The button is renamed
+`.perm-btn`. Worth grepping the rest of the file for a third.
+
+## A real bug in the MCP tab, found by matching the mockup
+
+`mcpPill()` had no branch for `idle`, so an idle server - declared, reachable,
+nothing asked of it this session - fell through to the red **unavailable**
+pill. The loudest thing the tab can say, about the one state that means
+nothing is wrong. The mockup paints idle orange, which is what pointed at it.
+
 ## Verification
 
-`npm test`: **2282 assertions, 0 failed, exit 0.**
+`npm test`: **2304 assertions, 0 failed, exit 0.**
 Every tab and the Control Center screenshotted with 0 runtime errors, driven
-by a fixture shaped to main's real DTOs.
+by a fixture shaped to main's real DTOs, plus an automated overflow probe at
+280px and 900px that fails the run rather than being eyeballed.
+
+The exit code is the signal. A crash is not a FAIL line and a hang is not a
+failure, and an exit code you never received is not an exit code of zero.
 
 Tests were updated for the rename, never weakened: the crystal-artwork
 assertions now pin the roundel's four variants and its oxide notch fills, and
@@ -160,6 +249,9 @@ not built yet on this branch:
 - **C8/C9** - thinking toggle and effort selector. `SelectModelMsg` carries
   endpoint and model only.
 - **F3** - focus trap and focus restore on the modals.
+- The Agents tab carries **two identical "New agent" buttons**, one in the
+  header and one in the footer. Pre-existing on `main`; removing a control is
+  a product decision, not a theme one.
 - **G1-G5** - the Control tab as the audit describes it.
 - **H3/H4/H5/H8** - the `s_client`, endpoint, skills and live-command dumps.
 - **J4** - the per-feature regression pass over all 20 commands.

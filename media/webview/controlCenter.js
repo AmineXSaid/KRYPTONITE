@@ -786,6 +786,27 @@ function _run() {
     return html;
   }
 
+
+  /* What the model IS, which the wire cannot report and which we must not
+     guess: an embedding model offered in the chat picker is a support ticket,
+     not a cosmetic slip. Rendered as a segmented control because the values
+     are few, short and mutually exclusive. */
+  var MODEL_KINDS = [
+    ["chat", "General instruction-following. The default assumption."],
+    ["reasoning", "Spends hidden tokens thinking before answering. Slower and dearer per call."],
+    ["multimodal", "Accepts images as well as text, so attachments are meaningful."],
+    ["embedding", "Returns vectors, not replies. Never offered for a chat turn."],
+  ];
+  function kindPicker(f) {
+    var out = '<span class="seg-row" role="radiogroup" aria-label="Model kind" aria-required="true">';
+    for (var i = 0; i < MODEL_KINDS.length; i++) {
+      var k = MODEL_KINDS[i][0], why = MODEL_KINDS[i][1], on = f.kind === k;
+      out += '<button type="button" class="seg-b" role="radio" data-kind="' + k + '"' +
+        ' aria-checked="' + (on ? "true" : "false") + '" title="' + esc(why) + '">' + k + "</button>";
+    }
+    return out + "</span>";
+  }
+
   function endpointForm() {
     var f = S.epForm;
     var types = ["anthropic", "openai-compatible", "azure", "local", "custom"], opts = "";
@@ -799,6 +820,7 @@ function _run() {
         '<label for="fName">Display Name</label><input id="fName" value="' + esc(f.name) + '" placeholder="OpenRouter">' +
         '<label for="fUrl">Base URL</label><input id="fUrl" value="' + esc(f.url) + '" placeholder="https://openrouter.ai/api/v1">' +
         '<label for="fType">Provider Type</label><select id="fType">' + opts + "</select>" +
+        '<label>Model kind <b class="req" title="Required">*</b></label>' + kindPicker(f) +
         '<label for="fModel">Model</label><input id="fModel" value="' + esc(f.model || "") + '" placeholder="openrouter/free">' +
         (needsKey
           ? '<label for="fKey">API Key</label><input id="fKey" type="password" autocomplete="off" spellcheck="false" value="" placeholder="' +
@@ -816,11 +838,15 @@ function _run() {
         ? '<div class="hint2">Stored in VS Code SecretStorage. The YAML holds only a <code>${secret:…}</code> reference.</div>'
         : "") +
       epCheckPanel() +
+      (f.kind ? "" :
+        '<div class="hint2 blocked">Pick a model kind before saving. Genesis cannot infer it from the ' +
+        'gateway, and guessing from the model id is how an embedding model ends up in the chat picker.</div>') +
       '<div class="row"><button class="btn" data-ep="cancel">Cancel</button>' +
       '<button class="btn wait" data-ep="check"' + (S.epCheck && S.epCheck.running ? " disabled" : "") + ">" +
       (S.epCheck && S.epCheck.running ? spinner(13) + "<span>Checking…</span>" : "<span>Check connection</span>") +
       "</button>" +
-      '<button class="btn primary" data-ep="save">Save</button></div></div>';
+      '<button class="btn primary" data-ep="save"' + (f.kind ? "" : ' disabled aria-disabled="true"') +
+      '>Save</button></div></div>';
   }
 
   /** Same ladder rows the Diagnostics section renders, scoped to the form. */
@@ -1539,6 +1565,14 @@ function _run() {
 
     if ((t = e.target.closest("[data-mcp]"))) {
       if (t.getAttribute("data-mcp") === "reconnect") post("mcpReconnect", { name: t.getAttribute("data-name") });
+      return;
+    }
+
+    if ((t = e.target.closest("[data-kind]"))) {
+      // Snapshot the other inputs first: re-rendering the form to show the new
+      // selection would otherwise discard whatever is half-typed in them.
+      readEpForm();
+      if (S.epForm) { S.epForm.kind = t.getAttribute("data-kind"); render(); }
       return;
     }
 

@@ -62,14 +62,25 @@ function fontFaces(extensionUri: vscode.Uri, webview: vscode.Webview): string {
     return "";
   }
 
+  /* The Genesis design names three OFL families. Unlike Anthropic Sans they
+     are free to redistribute, so bundling them raises no licensing question.
+     They must be bundled rather than linked: the webview CSP is
+     `default-src 'none'` with font-src scoped to the extension origin, so the
+     Google Fonts <link> the mockup uses would simply be blocked.
+
+     IBM Plex Sans ships as a single VARIABLE font - Google serves one file for
+     400/500/600 - so it is registered once across a weight RANGE. Declaring it
+     three times with one weight each would make the browser synthesise the
+     intermediate weights it already has. */
   const wanted: { file: string; family: string; weight: string; italic?: true }[] = [
-    { file: "AnthropicSans-Text-Regular.woff2", family: "Anthropic Sans", weight: "400" },
-    { file: "AnthropicSans-Text-RegularItalic.woff2", family: "Anthropic Sans", weight: "400", italic: true },
-    { file: "AnthropicSans-Text-Medium.woff2", family: "Anthropic Sans", weight: "500" },
-    { file: "AnthropicSans-Text-Semibold.woff2", family: "Anthropic Sans", weight: "600" },
-    { file: "AnthropicSans-Text-Bold.woff2", family: "Anthropic Sans", weight: "700" },
-    { file: "AnthropicSans-Display-Semibold.woff2", family: "Anthropic Sans Display", weight: "600" },
-    { file: "AnthropicSans-Display-Bold.woff2", family: "Anthropic Sans Display", weight: "700" },
+    { file: "IBMPlexSans-var.woff2", family: "IBM Plex Sans", weight: "100 700" },
+    { file: "IBMPlexSans-var-ext.woff2", family: "IBM Plex Sans", weight: "100 700" },
+    { file: "SpaceMono-400.woff2", family: "Space Mono", weight: "400" },
+    { file: "SpaceMono-400-ext.woff2", family: "Space Mono", weight: "400" },
+    { file: "SpaceMono-700.woff2", family: "Space Mono", weight: "700" },
+    { file: "SpaceMono-700-ext.woff2", family: "Space Mono", weight: "700" },
+    { file: "Michroma-400.woff2", family: "Michroma", weight: "400" },
+    { file: "Michroma-400-ext.woff2", family: "Michroma", weight: "400" },
   ];
 
   const rules: string[] = [];

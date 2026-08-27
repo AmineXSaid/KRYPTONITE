@@ -44,13 +44,13 @@
   --kx-surface:   #18171d;  /* ink    - cards, composer, popups, modals      */
   --kx-surface-2: #211f26;  /* the effort block inside the model popup       */
   --kx-surface-3: #3a383f;  /* raised: small-button hover, menu row hover    */
-  --kx-surface-4: #3f3e44;  /* slate  - hover on an already-raised surface   */
+  --kx-surface-4: #4c4b51;  /* slate  - hover on an already-raised surface   */
 
   /* ── text ── */
   --kx-fg:   #fbfafd;  /* cream - titles, active tab, emphasis               */
-  --kx-fg-2: #b3b2b8;  /* fog   - body copy, the workhorse                   */
-  --kx-fg-3: #a8a7ad;  /* steel - labels, meta, secondary, inactive          */
-  --kx-fg-4: #7f7e85;  /* code-pane base text                                */
+  --kx-fg-2: #bcbbbf;  /* fog   - body copy, the workhorse                   */
+  --kx-fg-3: #a3a2a5;  /* steel - labels, meta, secondary, inactive          */
+  --kx-fg-4: #747179;  /* code-pane base text                                */
   --kx-fg-5: #3f3e44;  /* dimmest - diff line numbers                        */
 
   /* ── accents, one role each ──
@@ -62,8 +62,8 @@
    *   agent / live / queued / primary → purple
    *   information / links / read-only / focus → blue
    */
-  --kx-accent: #52b87a;  /* green    - success, health, added line, Act      */
-  --kx-mcp:    #ac93e3;  /* purple   - MCP servers and the tools they expose.
+  --kx-accent: #2ea562;  /* green    - success, health, added line, Act      */
+  --kx-mcp:    #9a7edd;  /* purple   - MCP servers and the tools they expose.
                           * Genesis has no teal; purple is its "capability
                           * from outside" hue (agent / live / queued), which
                           * is the same claim main's teal was making.        */
@@ -72,13 +72,33 @@
                           * Genesis's table puts read-only on blue, and Ask
                           * is literally read-only, so this is a closer fit
                           * than amber was.                                  */
-  --kx-under:  #428fdc;  /* blue     - active-tab underline (see note 2)     */
-  --kx-link:   #63a6e9;  /* blue     - links                                 */
-  --kx-info:   #63a6e9;  /* blue     - informational                         */
+  --kx-under:  #4692dd;  /* blue     - active-tab underline (see note 2)     */
+  --kx-link:   #4692dd;  /* blue     - links                                 */
+  --kx-info:   #4692dd;  /* blue     - informational                         */
   --kx-action: #1f75cb;  /* oxide    - send, primary action                  */
-  --kx-error:  #f57f6c;  /* red-400  - failure, removed line                 */
+  --kx-error:  #ec624c;  /* red-400  - failure, removed line                 */
   --kx-error-deep: #dd2b0e;
   --kx-warn:   #e9be74;  /* orange-300 - warning                             */
+
+  /* -- the three phases, taken literally from the mockup --
+   * The mockup fills the active segment with the phase hue and sets the label
+   * to ink, so these are FILL colours and are the mockup's -400 step exactly.
+   * The phase banner writes the same meaning as TEXT on --kx-bg, where the
+   * blue and purple -400 land at 4.37 and 4.11; the banner therefore uses the
+   * -300 step (--kx-ask / --kx-plan-fg) instead. Fills exact, text lifted. */
+  --kx-phase-ask:  #428fdc;  /* blue-400   - read-only, answers a question   */
+  --kx-phase-plan: #9475db;  /* purple-400 - read-only, produces a plan      */
+  --kx-phase-act:  #d99530;  /* orange-400 - full tools, makes changes       */
+  --kx-plan-fg:    #ac93e3;  /* purple-300 - Plan as text on a dark ground   */
+
+  /* -- per-tab underline, one hue each, exactly as the mockup assigns them --
+   * Session is the blue of information, MCP the green of a healthy outside
+   * connection, Agents the purple of borrowed capability, Diagnostics the
+   * orange of attention. --kx-under stays as the neutral fallback. */
+  --kx-tab-session: #428fdc;
+  --kx-tab-mcp:     #52b87a;
+  --kx-tab-agents:  #9475db;
+  --kx-tab-diag:    #d99530;
 
   --kx-on-accent: #18171d;  /* ink text on a filled accent                   */
   --kx-on-action: #fbfafd;  /* cream text on the oxide action fill           */
@@ -112,13 +132,15 @@
   --kx-shadow:       rgba(7, 10, 15, .7);   /* the mockup's dialog shadow    */
 
   /* ── type ──
-   * Anthropic Sans is already what main ships and what the project owner
-   * chose to keep. --kx-mono names Space Mono first for documentation only:
-   * no Space Mono binary is bundled and the webview CSP is
-   * `default-src 'none'`, so it always resolves to the system stack. */
-  --kx-ui:      'Anthropic Sans Text', 'Anthropic Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --kx-display: 'Anthropic Sans Display', 'Anthropic Sans', ui-sans-serif, system-ui, 'Segoe UI', sans-serif;
-  --kx-mono:    'Space Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+   * The mockup's three families, and all three are now bundled under
+   * media/fonts and declared by src/ui/shell.ts, so none of them falls back:
+   * Michroma for the wordmark, Space Mono for every 9px uppercase label, and
+   * IBM Plex Sans (one variable file, weights 100-700) for body copy.
+   * All three are SIL Open Font License 1.1. Anthropic Sans, which main used
+   * to ship, is gone: the mockup does not name it. */
+  --kx-ui:      'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --kx-display: 'Michroma','IBM Plex Sans',-apple-system,sans-serif;
+  --kx-mono:    'Space Mono',ui-monospace,'SF Mono',Menlo,Consolas,monospace;
   --kx-brand:   var(--kx-display);
   --kx-prose:   var(--kx-ui);
 }

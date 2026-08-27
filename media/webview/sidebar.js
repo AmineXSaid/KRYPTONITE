@@ -972,14 +972,20 @@ function _sbRun() {
                 // press send": what it may do, which model does it, and
                 // whether it will ask first. It used to sit under the box in a
                 // footer, which is where things go to be ignored.
-                '<button class="perm" id="permBtn" aria-haspopup="menu" aria-expanded="false"' +
+                '<button class="perm-btn" id="permBtn" aria-haspopup="menu" aria-expanded="false"' +
                   ' title="What the agent may do without asking">' +
                   icon("i-shield", "ic-11") + '<span class="nm" id="permName">Ask</span>' +
                 '</button>' +
                 '<span class="sp"></span>' +
-                '<button class="tb-btn" id="atBtn" title="Reference a file" aria-label="Reference a file">@</button>' +
-                '<button class="tb-btn" id="clipBtn" title="Attach files" aria-label="Attach files">' + icon("i-clip", "ic-13") + '</button>' +
-                '<button id="sendBtn" data-ready="0" data-mode="send" title="Send" aria-label="Send">' + icon("i-up", "ic-13") + '</button>' +
+                // @ / attach / send are one group, not three siblings. As
+                // siblings the toolbar's wrap point landed between attach and
+                // send and orphaned send on a row of its own; grouped, the
+                // three move together and stay hugged to the right edge.
+                '<span class="tb-actions">' +
+                  '<button class="tb-btn" id="atBtn" title="Reference a file" aria-label="Reference a file">@</button>' +
+                  '<button class="tb-btn" id="clipBtn" title="Attach files" aria-label="Attach files">' + icon("i-clip", "ic-13") + '</button>' +
+                  '<button id="sendBtn" data-ready="0" data-mode="send" title="Send" aria-label="Send">' + icon("i-up", "ic-13") + '</button>' +
+                '</span>' +
               '</div>' +
             '</div>' +
             // The approval menu hangs off the composer rather than off a
@@ -2639,6 +2645,7 @@ function _sbRun() {
           rows.push({
             endpoint: g.group,
             model: g.models[j],
+            kind: g.kind || "chat",
             active: Boolean(current && current.id === g.group)
           });
         }
@@ -2743,7 +2750,7 @@ function _sbRun() {
       } else {
         html += '<button class="qp-row" role="option" data-active="' + on + '" data-i="' + idx + '">' +
           '<span class="qp-check">' + (r.active ? icon("i-check", "ic-13") : "") + "</span>" +
-          '<span class="n ell">' + esc(r.model) + "</span></button>";
+          '<span class="n ell">' + esc(r.model) + "</span>" + kindTag(r.kind) + "</button>";
       }
     }
     qp.innerHTML = html;
@@ -3148,6 +3155,7 @@ function _sbRun() {
           '<label for="fName">Display Name</label><input id="fName" value="' + esc(f.name) + '" placeholder="OpenRouter">' +
           '<label for="fUrl">Base URL</label><input id="fUrl" value="' + esc(f.url) + '" placeholder="https://openrouter.ai/api/v1">' +
           '<label for="fType">Provider Type</label><select id="fType">' + opts + "</select>" +
+          '<label>Model kind <b class="req" title="Required">*</b></label>' + kindPicker(f) +
           // The credential comes before the model, because it is what makes the
           // model field usable: Load asks the gateway, and no gateway answers
           // without a key. The old order put the Load button above the field
@@ -3192,11 +3200,14 @@ function _sbRun() {
           ? '<div class="hint2">The key is stored in VS Code SecretStorage. The YAML only holds a <code>${secret:…}</code> reference, so the profile is safe to commit.</div>'
           : "") +
         renderEpCheck() +
+        (f.kind ? "" :
+          '<div class="warn-line">Pick a model kind before saving. Genesis cannot ask the gateway, ' +
+          'and guessing from the model id is how an embedding model ends up in the chat picker.</div>') +
         '<div class="row"><button class="btn" data-ep="cancel">Cancel</button>' +
         '<button class="btn wait" data-ep="check"' + (S.epCheck && S.epCheck.running ? " disabled" : "") + ">" +
         (S.epCheck && S.epCheck.running ? spinner(13) + "<span>Checking…</span>" : "<span>Check connection</span>") +
         "</button>" +
-        '<button class="btn primary" data-ep="save">Save</button></div></div>';
+        '<button class="btn primary" data-ep="save"' + (f.kind ? "" : ' disabled aria-disabled="true"') + '>Save</button></div></div>';
     }
     $("epBody").innerHTML = html;
     // Re-rendering replaces the whole subtree, and check rungs re-render on
@@ -3218,6 +3229,8 @@ function _sbRun() {
     S.epForm.name = $("fName").value.trim();
     S.epForm.url = $("fUrl").value.trim();
     S.epForm.type = $("fType").value;
+    // kind is set by its segmented control, not an <input>, so it is already
+    // on S.epForm - re-reading here would clobber it with undefined.
     S.epForm.model = $("fModel") ? $("fModel").value.trim() : "";
     S.epForm.chatPath = $("fPath") ? $("fPath").value.trim() : "";
     // Entered in seconds because nobody thinks in milliseconds; stored in ms
@@ -3302,6 +3315,39 @@ function _sbRun() {
    * lifts whole functions out of this file by brace matching, so a nested
    * helper's closing brace would truncate whatever function encloses it.
    */
+
+  /* The kind a profile declared, shown beside its model in the picker. The
+     point of asking for it at all is that it shows up HERE: "chat" is the
+     unremarkable default and stays silent, so the tag only appears when the
+     model differs from what you would assume. */
+
+  var MODEL_KINDS = [
+    ["chat", "General instruction-following. The default assumption."],
+    ["reasoning", "Spends hidden tokens thinking before answering. Slower and dearer per call."],
+    ["multimodal", "Accepts images as well as text, so attachments are meaningful."],
+    ["embedding", "Returns vectors, not replies. Never offered for a chat turn."],
+  ];
+  function kindPicker(f) {
+    var out = '<span class="seg-row" role="radiogroup" aria-label="Model kind" aria-required="true">';
+    for (var i = 0; i < MODEL_KINDS.length; i++) {
+      var k = MODEL_KINDS[i][0], on = f.kind === k;
+      out += '<button type="button" class="seg-b" role="radio" data-kind="' + k + '"' +
+        ' aria-checked="' + (on ? "true" : "false") + '" title="' + esc(MODEL_KINDS[i][1]) + '">' + k + "</button>";
+    }
+    return out + "</span>";
+  }
+
+  var KIND_WHY = {
+    reasoning: "Reasoning model - spends hidden tokens thinking before it answers. Slower and dearer per call.",
+    multimodal: "Multimodal - accepts images as well as text, so attachments are meaningful.",
+    embedding: "Embedding model - returns vectors, not replies. It cannot hold a conversation.",
+  };
+  function kindTag(kind) {
+    if (!kind || kind === "chat") return "";
+    return '<span class="kind-tag" data-kind="' + esc(kind) + '" title="' +
+      esc(KIND_WHY[kind] || kind) + '">' + esc(kind) + "</span>";
+  }
+
   function mcpToolWrites(name) {
     return /^(write|create|delete|remove|update|patch|put|post|set|move|rename|append|edit|upload|publish|send|insert|drop|exec|execute|run|apply|commit|push|merge|revoke|grant|install|restart|kill)(_|$)/i
       .test(String(name || ""));
@@ -3310,7 +3356,14 @@ function _sbRun() {
   function mcpPill(state) {
     if (state === "ready") return '<span class="mcp-pill ok">' + icon("i-check", "ic-9") + "connected</span>";
     if (state === "starting") return '<span class="mcp-pill">starting…</span>';
-    if (state === "stopped") return '<span class="mcp-pill">stopped</span>';
+    // `idle` and `stopped` are both "declared, reachable, nothing asked of it".
+    // They fell through to the red `unavailable` pill, which said a healthy
+    // server had failed - the loudest thing the tab can say, about the one
+    // state that means nothing is wrong. The mockup paints this orange and
+    // calls it Idle; both words are kept because main's protocol distinguishes
+    // "never started" from "was running, now stopped".
+    if (state === "idle") return '<span class="mcp-pill idle">idle</span>';
+    if (state === "stopped") return '<span class="mcp-pill idle">stopped</span>';
     // Declared with enabled:false. Not an error - it was never started on
     // purpose - so it must not wear the red "unavailable" pill.
     if (state === "disabled") return '<span class="mcp-pill">disabled</span>';
@@ -4111,12 +4164,24 @@ function _sbRun() {
   }
 
   function onEpClick(e) {
+    var kb = e.target.closest("[data-kind]");
+    if (kb && S.epForm) {
+      // Snapshot first: re-rendering to show the selection would otherwise
+      // discard every other half-typed field.
+      readEpForm();
+      S.epForm.kind = kb.getAttribute("data-kind");
+      renderEndpoints();
+      return;
+    }
     var b = e.target.closest("[data-ep]");
     if (!b) return;
     var a = b.getAttribute("data-ep"), id = b.getAttribute("data-id");
     if (a === "add") {
       S.epForm = {
         isNew: true, id: "", name: "", url: "", type: "openai-compatible",
+        // Deliberately absent: Save stays blocked until the user picks one.
+        // A default here would silently file every new endpoint as "chat".
+        kind: "",
         model: "", chatPath: "", apiKey: "", hasStoredKey: false,
         timeoutMs: 0, http2: false
       };
@@ -4134,6 +4199,7 @@ function _sbRun() {
           isNew: false, id: p.id, name: p.description || p.id,
           url: p.baseUrl === "-" ? "" : p.baseUrl,
           type: p.wire === "anthropic" ? "anthropic" : "openai-compatible",
+          kind: p.kind || "chat",
           model: p.model === "-" ? "" : p.model,
           chatPath: p.chatPath || "",
           timeoutMs: p.timeoutMs || 0,
@@ -4182,6 +4248,9 @@ function _sbRun() {
   function epPayload(f) {
     var out = {
       id: f.id, name: f.name, url: f.url, type: f.type,
+      // Required by EndpointForm; "chat" only as the wire-level floor, since
+      // Save is already blocked until the user has actually chosen.
+      kind: f.kind || "chat",
       model: f.model || "", chatPath: f.chatPath || "",
       http2: !!f.http2, hasStoredKey: !!f.hasStoredKey
     };

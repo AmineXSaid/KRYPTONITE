@@ -87,7 +87,11 @@ console.log("\n──── fills ────");
 
 /* Text sitting on a filled accent, e.g. the send button. */
 console.log("\n──── text on filled accents ────");
-for (const [ink, fill] of [["kx-on-action", "kx-action"], ["kx-on-accent", "kx-accent"]]) {
+for (const [ink, fill] of [["kx-on-action", "kx-action"], ["kx-on-accent", "kx-accent"],
+  // The active phase segment is a filled block with an ink label, and so
+  // is the selected model-kind chip and the primary button.
+  ["kx-on-accent", "kx-phase-ask"], ["kx-on-accent", "kx-phase-plan"],
+  ["kx-on-accent", "kx-phase-act"], ["kx-on-accent", "kx-mcp"]]) {
   const r = ratio(token(ink), token(fill));
   console.log(`  ${r >= 4.5 ? "PASS" : "FAIL"}  ${ink} over ${fill.padEnd(10)} ${r.toFixed(2)}:1`);
   ck(ink + " over " + fill, r, 4.5);

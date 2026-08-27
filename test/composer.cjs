@@ -124,11 +124,11 @@ function boot() {
 {
   // Only the modes that stop asking are coloured, and the loudest one is the
   // one that never asks.
-  ok("auto-edit is marked", /\.perm\[data-mode="edits-auto"\][^}]*var\(--kx-ask\)/.test(CSS));
+  ok("auto-edit is marked", /\.perm-btn\[data-mode="edits-auto"\][^}]*var\(--kx-ask\)/.test(CSS));
   ok("allow-all is marked in the alarm colour",
-    /\.perm\[data-mode="full-auto"\][^}]*var\(--kx-error\)/.test(CSS));
+    /\.perm-btn\[data-mode="full-auto"\][^}]*var\(--kx-error\)/.test(CSS));
   ok("and the default is not coloured at all",
-    !/\.perm\[data-mode="ask"\]/.test(CSS));
+    !/\.perm-btn\[data-mode="ask"\]/.test(CSS));
 }
 
 /* ── the tip strip ──────────────────────────────────────────────────────── */
