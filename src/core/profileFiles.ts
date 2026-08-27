@@ -25,7 +25,7 @@ export const PROFILE_ID_RE = /^[\w][\w.-]*$/;
 /**
  * The SecretStorage name a profile's API key lives under.
  *
- * `App` prefixes every lookup with `kryptonite.`, and `interpolate()` resolves
+ * `App` prefixes every lookup with `genesis.`, and `interpolate()` resolves
  * `${secret:<this>}` at request time. Keeping the derivation in one function is
  * what lets the YAML writer, the save handler and the pre-save check agree on
  * where the key is without passing it between them.
@@ -145,12 +145,12 @@ export function renderProfileYaml(form: EndpointForm): string {
       // committed to the repo and one that leaks a credential on first push.
       lines.push(`  value: ` + "${secret:" + secretKeyFor(form.id) + "}");
       lines.push(`  # The key is in VS Code SecretStorage under`);
-      lines.push(`  # kryptonite.${secretKeyFor(form.id)} - not in this file.`);
+      lines.push(`  # genesis.${secretKeyFor(form.id)} - not in this file.`);
       lines.push(`  # Swap in ` + "${env:VAR}" + ` or ` + "${file:path}" + ` if you prefer.`);
     } else {
       lines.push(`  value: ` + "${env:GENESIS_API_KEY}");
       lines.push(`  # Secrets never live in this file. Use ` + "${env:VAR}, ${secret:NAME}");
-      lines.push(`  # (VS Code SecretStorage, key kryptonite.<NAME>) or ` + "${file:path}.");
+      lines.push(`  # (VS Code SecretStorage, key genesis.<NAME>) or ` + "${file:path}.");
     }
   }
   lines.push(`  #`);

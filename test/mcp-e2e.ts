@@ -34,7 +34,7 @@ function writeConfig(dir: string, doc: unknown): string {
 
 async function main() {
   fs.mkdirSync(ROOT, { recursive: true });
-  fs.writeFileSync(path.join(ROOT, "hello.txt"), "kryptonite mcp works\n", "utf8");
+  fs.writeFileSync(path.join(ROOT, "hello.txt"), "genesis mcp works\n", "utf8");
   const agentDir = path.join(ROOT, ".agent");
 
   /* ── 1. name qualification ── */
@@ -77,7 +77,7 @@ async function main() {
   /* ── 3. a server that cannot start ── */
   console.log("\n──── server that cannot start ────");
   const brokenCfg = writeConfig(path.join(ROOT, "broken"), {
-    mcpServers: { ghost: { command: "kryptonite-no-such-binary-xyz" } },
+    mcpServers: { ghost: { command: "genesis-no-such-binary-xyz" } },
   });
   const r1 = new McpRegistry(() => {});
   await r1.reload(brokenCfg, ROOT);
@@ -149,7 +149,7 @@ async function main() {
   }
   if (readTool) {
     const res = await reg.call(readTool.name, { path: path.join(ROOT, "hello.txt") });
-    check(!res.isError && /kryptonite mcp works/.test(res.content), "read returned the file body",
+    check(!res.isError && /genesis mcp works/.test(res.content), "read returned the file body",
       res.content.trim().slice(0, 60));
   }
 

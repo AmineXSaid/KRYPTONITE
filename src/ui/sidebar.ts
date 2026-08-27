@@ -13,7 +13,7 @@ import { sidebarHtml, webviewOptions } from "./shell";
  * replay buffer when it comes back.
  */
 export class SidebarProvider implements vscode.WebviewViewProvider {
-  static readonly viewId = "kryptonite.sidebar";
+  static readonly viewId = "genesis.sidebar";
 
   private view?: vscode.WebviewView;
 

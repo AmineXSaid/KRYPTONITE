@@ -155,7 +155,7 @@
 
 ## 0.8.0
 
-The editor surface. Kryptonite had one place to work, a panel, and everything
+The editor surface. Genesis had one place to work, a panel, and everything
 it could do had to be asked for there. This release is the other half: the
 model reaches the file you are looking at, the cursor you are at, and the
 errors already on screen, and it answers in the editor rather than beside it.
@@ -166,7 +166,7 @@ had never reached main.
 ### Added
 - **Ghost-text completion.** Suggestions at the cursor, behind two gates that
   both default off: `capabilities.fim` on the profile and
-  `kryptonite.inlineCompletion` in settings. Either one off and not a single
+  `genesis.inlineCompletion` in settings. Either one off and not a single
   request is sent. Fill-in-the-middle needs a fast endpoint and most corporate
   gateways are not one, so this asks twice before it costs anything.
 - **Quick edit.** Select code, say what to change, apply or discard the diff
@@ -185,7 +185,7 @@ had never reached main.
   tabs, 12 problems and 200 characters each, about 160 tokens on a busy editor,
   and it rides in the user message rather than the system prompt because that
   prompt is a cache key and this text changes whenever the cursor moves.
-  `kryptonite.editorContext` turns it off.
+  `genesis.editorContext` turns it off.
 - **A project instructions file.** `.agent/instructions.md`, prepended to every
   system prompt, for conventions that hold on every turn. Skills are the
   on-demand half of the same idea. Capped, with truncation stated in-band so a
@@ -193,14 +193,14 @@ had never reached main.
   next turn rather than the next window.
 - **Web search without a browser.** `web_search` for the questions that do not
   need a page opened. DuckDuckGo by default and needs no key; Brave, Google and
-  Bing take `kryptonite.searchApiKey`, which accepts `${env:}` and `${file:}` so
+  Bing take `genesis.searchApiKey`, which accepts `${env:}` and `${file:}` so
   it need not sit in settings in the clear.
 - **Untrusted-content marking.** Anything fetched from the internet reaches the
   model wrapped and labelled, so a page attempting to issue instructions is read
   as a page that says so rather than as an instruction.
 - **Browser actions and vision.** Click and type by ref, read a page as prose
   with its images described, and a window to watch it work in
-  (`kryptonite.browserHeaded`, `kryptonite.browserProfile`).
+  (`genesis.browserHeaded`, `genesis.browserProfile`).
 - **Background streaming across conversation switches.** A turn now carries its
   own abort, its own replay buffer and a reference to the transcript it appends
   to. Switching conversations mid-stream moves what is on screen and nothing
@@ -251,7 +251,7 @@ agent is doing to the workspace while it does it.
   private storage directory, which is the right shape for the extension and the
   wrong shape for a person: there was no way to hand a conversation to a
   colleague, attach it to a bug report, or feed it to a script. Two new
-  commands - `KRYPTONITE: Export chat as JSON` and `Export all chats as JSON` -
+  commands - `Genesis: Export chat as JSON` and `Export all chats as JSON` -
   two rows in the header's overflow menu, and `/export` in the composer, all
   write one readable document through a save dialog. The conversation the
   composer is writing into is taken from the controller rather than from disk,
@@ -440,8 +440,8 @@ Ask joins Plan and Act, a second live MCP example, and small chat-surface polish
   `"ask"` (a phase with no mutating calls to confirm) are different axes and
   never interact - Ask phase offers nothing `approvalMode` would ever gate.
   Documented at the point both are read, not only here.
-- The composer placeholder splits three ways: "Ask Kryptonite anything…" now
-  belongs to Ask, where it always literally applied; Act gets "Tell Kryptonite
+- The composer placeholder splits three ways: "Ask Genesis anything…" now
+  belongs to Ask, where it always literally applied; Act gets "Tell Genesis
   what to do…" instead of inheriting Ask's old text.
 - The idle-verb pool gains `ASK_VERBS` ("Reading up…", "Following the
   trail…", …), so a waiting Ask turn reads differently from a waiting Act
@@ -550,7 +550,7 @@ Bundled skills, Act button in brand green, and a Control Center fix.
 - `THIRD-PARTY-NOTICES.md` from the Anthropic skills repository.
 
 ### Changed
-- **Act button is Kryptonite green.** The Plan / Act segment now reads as
+- **Act button is Genesis green.** The Plan / Act segment now reads as
   purple / emerald — `--kx-active` for Plan, `--kx-accent` for Act — matching
   the brand identity. Previously Act used `--vscode-button-secondaryBackground`
   which was a nondescript grey.
@@ -638,7 +638,7 @@ New brand mark, and a rebuilt session mechanism.
 
 ## 0.2.0
 
-First release under the KRYPTONITE name.
+First release under the GENESIS name.
 
 ### Added
 - Sidebar webview: session transcript, tool cards, per-file diff cards, todo
@@ -659,6 +659,6 @@ First release under the KRYPTONITE name.
   the standard early refresh: stop using the token 30s **before** it expires.
 
 ### Changed
-- Config namespace is `kryptonite.*` with five keys.
+- Config namespace is `genesis.*` with five keys.
 - Approval modes are `ask | edits-auto | full-auto`.
 - Approvals render in the transcript rather than as modal dialogs.

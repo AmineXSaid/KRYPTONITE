@@ -69,9 +69,27 @@ export const __cfg = cfgStore;
 
 export const workspace: any = {
   workspaceFolders: undefined,
-  getConfiguration: () => ({
+  getConfiguration: (section?: string) => ({
     get: (k: string, d?: unknown) => (cfgStore.has(k) ? cfgStore.get(k) : d),
     update: async (k: string, v: unknown) => { cfgStore.set(k, v); },
+    /**
+     * The shape `WorkspaceConfiguration.inspect` returns, enough of it for the
+     * Kryptonite-to-Genesis migration to run.
+     *
+     * The store is flat and knows nothing about sections, so a value that is
+     * present is reported as a workspaceValue - which is what makes a migration
+     * test able to plant an old value and see it carried over. `undefined` for
+     * an absent key is the part that matters: the migration only writes when
+     * the destination is undefined, so a stub that returned an object here
+     * would make it skip everything.
+     */
+    inspect: (k: string) => ({
+      key: section ? `${section}.${k}` : k,
+      defaultValue: undefined,
+      globalValue: undefined,
+      workspaceValue: cfgStore.has(k) ? cfgStore.get(k) : undefined,
+      workspaceFolderValue: undefined,
+    }),
   }),
   createFileSystemWatcher: () => ({
     onDidChange: () => new Disposable(),

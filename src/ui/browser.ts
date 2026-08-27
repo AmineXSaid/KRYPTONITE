@@ -28,7 +28,7 @@ import { fetchPage, normaliseUrl } from "../browser/fetchPage";
  * refused, because a blank box is the worst possible answer.
  */
 export class BrowserPanel {
-  static readonly viewType = "kryptonite.browser";
+  static readonly viewType = "genesis.browser";
   private static current?: BrowserPanel;
 
   private disposables: vscode.Disposable[] = [];

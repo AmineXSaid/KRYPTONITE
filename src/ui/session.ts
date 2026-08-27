@@ -584,8 +584,8 @@ export class SessionController {
           throw new Error(
             `${cfg.provider} answered HTTP ${res.statusCode}. ` +
             (res.statusCode === 401 || res.statusCode === 403
-              ? "The API key is missing or rejected; check kryptonite.searchApiKey."
-              : "Try again, or switch kryptonite.searchProvider.")
+              ? "The API key is missing or rejected; check genesis.searchApiKey."
+              : "Try again, or switch genesis.searchProvider.")
           );
         }
         const results = parseProvider(req.kind, body, limit);

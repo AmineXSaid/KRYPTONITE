@@ -79,7 +79,7 @@ const cfg = mcpConfigPath(root);
     // Read a file that certainly exists, through the whole path the agent uses.
     const res = await reg.call(readTool.name, { path: path.join(root, "package.json") });
     ck(!res.isError, "a real tool call succeeds", res.content.slice(0, 120));
-    ck(/"name"\s*:\s*"kryptonite"/.test(res.content),
+    ck(/"name"\s*:\s*"genesis"/.test(res.content),
       "and returns the actual file contents", res.content.slice(0, 80));
   }
   {

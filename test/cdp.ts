@@ -60,9 +60,9 @@ const SECOND = `<!doctype html><html><head><title>Second Page</title></head>
     ck(findBrowser({} as any) === undefined, "and findBrowser agrees");
     // The override exists for a build in an unusual place, and has to win.
     const self = process.execPath;
-    const over = listBrowsers({ KRYPTONITE_BROWSER: self } as any);
-    ck(over[0]?.path === self, "KRYPTONITE_BROWSER takes precedence", over[0]?.path);
-    ck(listBrowsers({ KRYPTONITE_BROWSER: "C:/nope/none.exe" } as any).every((f) => f.path !== "C:/nope/none.exe"),
+    const over = listBrowsers({ GENESIS_BROWSER: self } as any);
+    ck(over[0]?.path === self, "GENESIS_BROWSER takes precedence", over[0]?.path);
+    ck(listBrowsers({ GENESIS_BROWSER: "C:/nope/none.exe" } as any).every((f) => f.path !== "C:/nope/none.exe"),
       "an override pointing at nothing is ignored rather than trusted");
   }
 

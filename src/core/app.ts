@@ -294,7 +294,7 @@ export class App {
     this.output = vscode.window.createOutputChannel("Genesis");
     this.sessions = new SessionStore(context, this.root);
     this.status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-    this.status.command = "kryptonite.focusSidebar";
+    this.status.command = "genesis.focusSidebar";
     this.session = new SessionController(this);
   }
 
@@ -303,19 +303,97 @@ export class App {
   }
 
   private cfg() {
-    return vscode.workspace.getConfiguration("kryptonite");
+    return vscode.workspace.getConfiguration("genesis");
   }
 
   /* ───────────────────────────── lifecycle ───────────────────────────── */
 
+  /**
+   * Carry everything the old name owned across to the new one, once.
+   *
+   * The extension was called Kryptonite and is called Genesis. Every namespaced
+   * key moved with it: `kryptonite.*` settings, `kryptonite.*` workspaceState,
+   * and - the one that actually costs something - `kryptonite.<profile>`
+   * SecretStorage entries holding API keys somebody typed in by hand.
+   *
+   * A rename without this is not a rename, it is a reset: the settings still
+   * sit in settings.json under a section nothing reads, and every endpoint
+   * comes up with no credential and no explanation.
+   *
+   * Runs before anything is read. Idempotent by construction - it only writes
+   * when the new key is absent - so a second window, or a downgrade and
+   * upgrade, cannot double-apply it or clobber a newer value. The old keys are
+   * left in place rather than deleted: they cost nothing, and leaving them
+   * means going back to the previous build still finds its own state.
+   */
+  private async migrateFromKryptonite(): Promise<void> {
+    const ws = this.context.workspaceState;
+    for (const key of [
+      "uiConfig", "disabledSkills", "alwaysAllowedCommands",
+      "activeSessionId", "activeAgent",
+    ]) {
+      if (ws.get(`genesis.${key}`) !== undefined) continue;
+      const old = ws.get(`kryptonite.${key}`);
+      if (old !== undefined) await ws.update(`genesis.${key}`, old);
+    }
+
+    // Settings. Only what the user actually set is copied: reading the
+    // effective value would write every default into their settings.json,
+    // which is why this goes through `inspect` rather than `get`.
+    const oldCfg = vscode.workspace.getConfiguration("kryptonite");
+    const newCfg = vscode.workspace.getConfiguration("genesis");
+    // A host that does not implement `inspect` cannot be asked which scope a
+    // value came from, and guessing would write defaults into settings.json.
+    // Skipping is the only safe answer; the state and secret halves still run.
+    if (typeof oldCfg.inspect !== "function") return;
+    for (const key of [
+      "profileDirectory", "skillsDirectory", "instructionsFile", "editorContext",
+      "readOutsideWorkspace", "browserHeaded", "activeProfile", "approvalMode",
+      "caBundlePath", "codeLens", "codeActions", "inlineCompletion",
+      "searchProvider", "searchApiKey", "searchEngineId", "browserProfile",
+    ]) {
+      const from = oldCfg.inspect(key);
+      const to = newCfg.inspect(key);
+      for (const [scope, target] of [
+        ["workspaceValue", vscode.ConfigurationTarget.Workspace],
+        ["globalValue", vscode.ConfigurationTarget.Global],
+      ] as const) {
+        const v = from?.[scope];
+        if (v === undefined || to?.[scope] !== undefined) continue;
+        try { await newCfg.update(key, v, target); } catch { /* read-only scope */ }
+      }
+    }
+
+  }
+
+  /**
+   * The secrets half of the migration, which has to run LATER.
+   *
+   * SecretStorage has no way to enumerate keys, so the only way to find them is
+   * to ask for the key of each profile by name - and the profiles are not
+   * loaded until `reload()`. Running this beside the settings migration would
+   * iterate an empty list and silently migrate nothing, which is exactly the
+   * failure it exists to prevent.
+   */
+  private async migrateSecretsFromKryptonite(): Promise<void> {
+    for (const p of this.profiles) {
+      const k = secretKeyFor(p.name);
+      if (await this.context.secrets.get(`genesis.${k}`)) continue;
+      const old = await this.context.secrets.get(`kryptonite.${k}`);
+      if (old) await this.context.secrets.store(`genesis.${k}`, old);
+    }
+  }
+
   async init(): Promise<void> {
+    // Before the first read of anything namespaced.
+    await this.migrateFromKryptonite();
     this.uiConfig = {
       ...UI_DEFAULTS,
-      ...(this.context.workspaceState.get<Partial<UiConfigDto>>("kryptonite.uiConfig") ?? {}),
+      ...(this.context.workspaceState.get<Partial<UiConfigDto>>("genesis.uiConfig") ?? {}),
     };
-    this.disabledSkills = this.context.workspaceState.get<string[]>("kryptonite.disabledSkills", []);
+    this.disabledSkills = this.context.workspaceState.get<string[]>("genesis.disabledSkills", []);
     this.alwaysAllowedCommands = this.context.workspaceState.get<string[]>(
-      "kryptonite.alwaysAllowedCommands",
+      "genesis.alwaysAllowedCommands",
       []
     );
     // Pick the conversation back up where the last window left it.
@@ -326,6 +404,8 @@ export class App {
     }
 
     await this.reload("activation");
+    // Now that the profiles exist, their stored API keys can be found.
+    await this.migrateSecretsFromKryptonite();
     this.reloadInstructions();
     this.installWatcher();
     this.installSelectionListener();
@@ -744,7 +824,7 @@ export class App {
     // one round trip after another during activation.
     const resolved = await Promise.all(
       [...names].map(
-        async (name) => [name, await this.context.secrets.get(`kryptonite.${name}`)] as const
+        async (name) => [name, await this.context.secrets.get(`genesis.${name}`)] as const
       )
     );
     for (const [name, v] of resolved) if (v) this.secretCache.set(name, v);
@@ -959,7 +1039,7 @@ export class App {
    * file keeps knowing nothing about the panel classes.
    */
   async revealBrowser(): Promise<void> {
-    await vscode.commands.executeCommand("kryptonite.watchAgentBrowser");
+    await vscode.commands.executeCommand("genesis.watchAgentBrowser");
   }
 
   async openPreview(abs: string): Promise<void> {
@@ -1019,7 +1099,7 @@ export class App {
     if (this.alwaysAllowedCommands.includes(token)) return;
     this.alwaysAllowedCommands = [...this.alwaysAllowedCommands, token];
     await this.context.workspaceState.update(
-      "kryptonite.alwaysAllowedCommands",
+      "genesis.alwaysAllowedCommands",
       this.alwaysAllowedCommands
     );
     this.log("info", `Always allowing shell command: ${token}`);
@@ -1031,12 +1111,12 @@ export class App {
 
   /** The conversation this workspace was last writing into, if any. */
   lastSessionId(): string | undefined {
-    return this.context.workspaceState.get<string>("kryptonite.activeSessionId");
+    return this.context.workspaceState.get<string>("genesis.activeSessionId");
   }
 
   async rememberSession(id: string): Promise<void> {
     if (this.lastSessionId() === id) return;
-    await this.context.workspaceState.update("kryptonite.activeSessionId", id);
+    await this.context.workspaceState.update("genesis.activeSessionId", id);
   }
 
   /* ───────────────────────────── agents ───────────────────────────── */
@@ -1053,7 +1133,7 @@ export class App {
    * global settings across every window is not what anyone means by it.
    */
   get activeAgentName(): string {
-    return this.context.workspaceState.get<string>("kryptonite.activeAgent", "") ?? "";
+    return this.context.workspaceState.get<string>("genesis.activeAgent", "") ?? "";
   }
 
   activeAgent(): Agent | undefined {
@@ -1064,7 +1144,7 @@ export class App {
 
   async setActiveAgent(name: string): Promise<void> {
     const next = this.agents.some((a) => a.name === name) ? name : "";
-    await this.context.workspaceState.update("kryptonite.activeAgent", next);
+    await this.context.workspaceState.update("genesis.activeAgent", next);
     this.broadcast({ type: "agentChanged", agent: next ? this.agentDto(this.activeAgent()!) : null });
     this.updateStatus();
     if (next) this.log("info", `Agent: ${next}.`);
@@ -1458,7 +1538,7 @@ export class App {
     const id = form.id || "draft";
     let apiKey = form.apiKey?.trim() ?? "";
     if (!apiKey) {
-      apiKey = (await this.context.secrets.get(`kryptonite.${secretKeyFor(id)}`)) ?? "";
+      apiKey = (await this.context.secrets.get(`genesis.${secretKeyFor(id)}`)) ?? "";
     }
     const profile = draftProfile(form);
     const { models, listed, error } = await listModels(profile, (k) =>
@@ -1555,7 +1635,7 @@ export class App {
 
     let apiKey = form.apiKey?.trim() ?? "";
     if (!apiKey) {
-      apiKey = (await this.context.secrets.get(`kryptonite.${secretKeyFor(id)}`)) ?? "";
+      apiKey = (await this.context.secrets.get(`genesis.${secretKeyFor(id)}`)) ?? "";
     }
 
     this.postTo(source, { type: "endpointCheckStarted", id });
@@ -1709,17 +1789,17 @@ export class App {
         // write can never leave a profile pointing at a secret that is absent.
         const typedKey = form.apiKey?.trim();
         if (typedKey) {
-          await this.context.secrets.store(`kryptonite.${secretKeyFor(form.id)}`, typedKey);
+          await this.context.secrets.store(`genesis.${secretKeyFor(form.id)}`, typedKey);
           this.log("info", `Stored the API key for ${form.id} in SecretStorage.`);
         }
         // On rename the key moves with the profile, otherwise the renamed
         // profile would resolve to an empty credential.
         const previousId = form.originalId;
         if (previousId && previousId !== form.id && !typedKey) {
-          const old = await this.context.secrets.get(`kryptonite.${secretKeyFor(previousId)}`);
+          const old = await this.context.secrets.get(`genesis.${secretKeyFor(previousId)}`);
           if (old) {
-            await this.context.secrets.store(`kryptonite.${secretKeyFor(form.id)}`, old);
-            await this.context.secrets.delete(`kryptonite.${secretKeyFor(previousId)}`);
+            await this.context.secrets.store(`genesis.${secretKeyFor(form.id)}`, old);
+            await this.context.secrets.delete(`genesis.${secretKeyFor(previousId)}`);
           }
         }
         const { file, removed } = saveEndpointFile(this.profileDir(), form, this.profiles);
@@ -1823,7 +1903,7 @@ export class App {
         if (removed) this.log("info", `Deleted endpoint ${msg.id}.`);
         // Leaving the credential behind would silently re-arm a later profile
         // that happened to reuse the id.
-        await this.context.secrets.delete(`kryptonite.${secretKeyFor(msg.id)}`);
+        await this.context.secrets.delete(`genesis.${secretKeyFor(msg.id)}`);
         clearAuthCache();
         await this.reload("endpoint deleted");
         return;
@@ -1834,7 +1914,7 @@ export class App {
         if (msg.enabled) set.delete(msg.name);
         else set.add(msg.name);
         this.disabledSkills = [...set];
-        await this.context.workspaceState.update("kryptonite.disabledSkills", this.disabledSkills);
+        await this.context.workspaceState.update("genesis.disabledSkills", this.disabledSkills);
         this.broadcast({
           type: "skillsReloaded",
           skills: this.skillDtos(),
@@ -1900,7 +1980,7 @@ export class App {
       }
 
       case "openSettings":
-        await vscode.commands.executeCommand("workbench.action.openSettings", "kryptonite");
+        await vscode.commands.executeCommand("workbench.action.openSettings", "genesis");
         return;
 
       case "openYaml": {
@@ -1915,7 +1995,7 @@ export class App {
       }
 
       case "openControlCenter":
-        await vscode.commands.executeCommand("kryptonite.openControlCenter", msg.section);
+        await vscode.commands.executeCommand("genesis.openControlCenter", msg.section);
         return;
 
       case "editorCommand": {
@@ -1924,11 +2004,11 @@ export class App {
         // them. Mapped explicitly instead of interpolating the name into a
         // command id, which would let the webview invoke anything registered.
         const map = {
-          fix: "kryptonite.fixProblem",
-          doc: "kryptonite.documentSymbol",
-          explain: "kryptonite.explainSelection",
-          tests: "kryptonite.writeTests",
-          commit: "kryptonite.generateCommitMessage",
+          fix: "genesis.fixProblem",
+          doc: "genesis.documentSymbol",
+          explain: "genesis.explainSelection",
+          tests: "genesis.writeTests",
+          commit: "genesis.generateCommitMessage",
         } as const;
         const id = map[msg.command];
         if (id) await vscode.commands.executeCommand(id);
@@ -2157,7 +2237,7 @@ export class App {
       // broken the setting the moment it was toggled.
       const coerced = key === "inputWhileRunning" ? (value === "steer" ? "steer" : "queue") : Boolean(value);
       this.uiConfig = { ...this.uiConfig, [key]: coerced };
-      await this.context.workspaceState.update("kryptonite.uiConfig", this.uiConfig);
+      await this.context.workspaceState.update("genesis.uiConfig", this.uiConfig);
     }
     this.broadcast({ type: "configChanged", config: this.configDto() });
     this.updateStatus();
@@ -2189,7 +2269,7 @@ export class App {
     const root = this.requireRoot();
     const profileDir = this.cfg().get<string>("profileDirectory", ".agent/endpoints");
     const skillsDir = this.cfg().get<string>("skillsDirectory", ".agent/skills");
-    const out = path.join(root, "dist", "kryptonite-offline-bundle");
+    const out = path.join(root, "dist", "genesis-offline-bundle");
     const agentOut = path.join(out, ".agent");
 
     fs.mkdirSync(agentOut, { recursive: true });
@@ -2264,7 +2344,7 @@ export class App {
 
     const folder = vscode.workspace.workspaceFolders?.[0];
     const doc = {
-      format: "kryptonite-chat",
+      format: "genesis-chat",
       formatVersion: 1,
       extensionVersion: String(this.context.extension.packageJSON.version ?? "0.0.0"),
       exportedAt: new Date().toISOString(),
@@ -2276,8 +2356,8 @@ export class App {
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
     const name =
       scope === "all"
-        ? `kryptonite-chats-${stamp}.json`
-        : `kryptonite-${slugForFile(live.title)}-${stamp}.json`;
+        ? `genesis-chats-${stamp}.json`
+        : `genesis-${slugForFile(live.title)}-${stamp}.json`;
     // Defaulting into the workspace is deliberate: it is the directory the user
     // is already looking at. Nothing is written there without the dialog.
     const base = folder?.uri.fsPath ?? os.homedir();

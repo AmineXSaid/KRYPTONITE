@@ -26,7 +26,7 @@ import { unfence } from "../agent/oneShot";
  * proposal could be reopened later and applied against a changed file.
  */
 export class ProposedContent implements vscode.TextDocumentContentProvider {
-  static readonly scheme = "kryptonite-proposed";
+  static readonly scheme = "genesis-proposed";
 
   private store = new Map<string, string>();
   private emitter = new vscode.EventEmitter<vscode.Uri>();

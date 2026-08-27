@@ -148,7 +148,7 @@ const context = {
     await app.rememberSession(s.sessionId);
 
     ok("active session id is persisted",
-      ws.get("kryptonite.activeSessionId") === first);
+      ws.get("genesis.activeSessionId") === first);
 
     // A second message must stay in the same conversation.
     s.history.push({ role: "assistant", content: "reply" });
@@ -219,7 +219,7 @@ const context = {
     ok("export returns the path it wrote", written === out);
     ok("export writes the file", fs.existsSync(out));
     const doc = JSON.parse(fs.readFileSync(out, "utf8"));
-    ok("export is tagged with its format", doc.format === "kryptonite-chat" && doc.formatVersion === 1);
+    ok("export is tagged with its format", doc.format === "genesis-chat" && doc.formatVersion === 1);
     ok("export stamps when it was made", typeof doc.exportedAt === "string");
     ok("export carries one conversation", doc.sessions.length === 1);
     ok("export carries the live transcript", doc.sessions[0].messages.length === 1);

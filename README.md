@@ -1,4 +1,4 @@
-# KRYPTONITE
+# GENESIS
 
 A VS Code coding agent for endpoints that don't behave.
 
@@ -7,14 +7,14 @@ URL, paste a key, hope. That works for a public API. It falls apart behind a
 proxy that re-signs TLS, a gateway that wants a client certificate, an SSO flow
 handing out ten-minute tokens, or a machine with no internet at all.
 
-Kryptonite treats the endpoint as the product.
+Genesis treats the endpoint as the product.
 
 ## Endpoint profiles
 
 Profiles are YAML files in `.agent/endpoints/` — in your repo, versioned,
 shared with your team. Secrets never live in them: `${env:VAR}` reads the
 environment, `${secret:NAME}` reads the VS Code secret store (key
-`kryptonite.NAME`), `${file:path}` reads a file, all resolved at request time.
+`genesis.NAME`), `${file:path}` reads a file, all resolved at request time.
 
 Supported wire formats: `openai`, `anthropic`, and `raw` with a sandboxed
 JavaScript transform module that reshapes anything neither adapter can express.
@@ -188,7 +188,7 @@ profile, through the same transport, so a gateway that works in the panel works
 here too.
 
 **Ghost text at the cursor.** Off by default, behind two gates: the profile must
-declare `capabilities.fim` and `kryptonite.inlineCompletion` must be on. Either
+declare `capabilities.fim` and `genesis.inlineCompletion` must be on. Either
 one off and not a single request is sent. Fill-in-the-middle needs a fast
 endpoint, and most corporate gateways are not one, so this asks twice before it
 costs anything.
@@ -197,11 +197,11 @@ costs anything.
 without leaving the file.
 
 **CodeLens and code actions.** Explain, Document and Tests above functions and
-classes; Kryptonite's fixes in the lightbulb menu. Both are on by default and
+classes; Genesis's fixes in the lightbulb menu. Both are on by default and
 both have a setting, because a lens on every function is either the feature or
 the annoyance depending on the file.
 
-**Commit messages.** `KRYPTONITE: Generate commit message` writes into the Source
+**Commit messages.** `Genesis: Generate commit message` writes into the Source
 Control box, through the Git extension's API rather than by shelling out, so it
 knows which repository is in front of you.
 
@@ -210,7 +210,7 @@ split, the open tabs and the compiler's errors for that file ride along with
 each message. It is what makes "fix this" resolve to anything. It costs a few
 hundred tokens a turn and rides in the user message rather than the system
 prompt, because the system prompt is a cache key and this text changes whenever
-the cursor moves. `kryptonite.editorContext` turns it off for windows too small
+the cursor moves. `genesis.editorContext` turns it off for windows too small
 to afford it.
 
 ## Project instructions
@@ -226,7 +226,7 @@ model reading a fragment is told it is reading one.
 `web_search` answers without opening the browser, which is the cheaper path when
 the question is "what is the current syntax for X" rather than "what does this
 page say". `duckduckgo` is the default and needs no key. Brave, Google and Bing
-need `kryptonite.searchApiKey`, and Google also needs `kryptonite.searchEngineId`.
+need `genesis.searchApiKey`, and Google also needs `genesis.searchEngineId`.
 The key takes `${env:NAME}` and `${file:path}` like an endpoint profile does, so
 it need not sit in settings in the clear.
 
@@ -314,7 +314,7 @@ seven lines renders clamped under a fade with its own expander, so a pasted
 stack trace stops pushing the answer it is asking about off the panel. Nothing
 is truncated, only hidden.
 
-`KRYPTONITE: Export chat as JSON` writes the current conversation, or every
+`Genesis: Export chat as JSON` writes the current conversation, or every
 conversation in the workspace, as one document through a save dialog. `/export`
 does the same from the composer. The conversation the composer is writing into
 comes from memory rather than from disk, so a turn still in flight exports what
@@ -382,22 +382,22 @@ write tool reachable without it and refused with it.
 
 | Key | Default | Purpose |
 |---|---|---|
-| `kryptonite.profileDirectory` | `.agent/endpoints` | Where profiles live |
-| `kryptonite.skillsDirectory` | `.agent/skills` | Where skills live |
-| `kryptonite.activeProfile` | *(first valid)* | Active profile name |
-| `kryptonite.approvalMode` | `ask` | `ask` / `edits-auto` / `full-auto` |
+| `genesis.profileDirectory` | `.agent/endpoints` | Where profiles live |
+| `genesis.skillsDirectory` | `.agent/skills` | Where skills live |
+| `genesis.activeProfile` | *(first valid)* | Active profile name |
+| `genesis.approvalMode` | `ask` | `ask` / `edits-auto` / `full-auto` |
 | *(agents)* | `.agent/agents` | Not a setting - the path is fixed |
-| `kryptonite.caBundlePath` | — | Global CA merged into every profile |
-| `kryptonite.instructionsFile` | `.agent/instructions.md` | Conventions prepended to every system prompt |
-| `kryptonite.editorContext` | `true` | Send the focused file, open tabs and its errors with each message |
-| `kryptonite.codeLens` | `true` | Explain / Document / Tests above functions and classes |
-| `kryptonite.codeActions` | `true` | Kryptonite fixes and rewrites in the lightbulb menu |
-| `kryptonite.inlineCompletion` | `false` | Ghost text at the cursor. Also needs `capabilities.fim` |
-| `kryptonite.browserHeaded` | `false` | Show the agent's browser instead of running it headless |
-| `kryptonite.browserProfile` | `persistent` | `persistent` keeps its cookies, `fresh` starts empty |
-| `kryptonite.searchProvider` | `duckduckgo` | `duckduckgo` / `brave` / `google` / `bing` |
-| `kryptonite.searchApiKey` | — | Key for the provider. Takes `${env:}` and `${file:}` |
-| `kryptonite.searchEngineId` | — | Google Programmable Search `cx`. Google only |
+| `genesis.caBundlePath` | — | Global CA merged into every profile |
+| `genesis.instructionsFile` | `.agent/instructions.md` | Conventions prepended to every system prompt |
+| `genesis.editorContext` | `true` | Send the focused file, open tabs and its errors with each message |
+| `genesis.codeLens` | `true` | Explain / Document / Tests above functions and classes |
+| `genesis.codeActions` | `true` | Genesis fixes and rewrites in the lightbulb menu |
+| `genesis.inlineCompletion` | `false` | Ghost text at the cursor. Also needs `capabilities.fim` |
+| `genesis.browserHeaded` | `false` | Show the agent's browser instead of running it headless |
+| `genesis.browserProfile` | `persistent` | `persistent` keeps its cookies, `fresh` starts empty |
+| `genesis.searchProvider` | `duckduckgo` | `duckduckgo` / `brave` / `google` / `bing` |
+| `genesis.searchApiKey` | — | Key for the provider. Takes `${env:}` and `${file:}` |
+| `genesis.searchEngineId` | — | Google Programmable Search `cx`. Google only |
 
 ## Where the panel opens
 

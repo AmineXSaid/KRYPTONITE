@@ -259,7 +259,7 @@ function readable(ctx: { root: string; readOutsideWorkspace?: boolean }, p: stri
   if (!ctx.readOutsideWorkspace) {
     throw new Error(
       `Path ${p} is outside the workspace, and reading outside it is turned off. ` +
-      `Set "kryptonite.readOutsideWorkspace": true to allow it, or bring the file ` +
+      `Set "genesis.readOutsideWorkspace": true to allow it, or bring the file ` +
       `into the workspace. Writes stay inside the workspace either way.`
     );
   }

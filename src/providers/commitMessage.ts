@@ -75,7 +75,7 @@ async function pickRepo(api: GitApi, hint?: any): Promise<GitRepository | undefi
 }
 
 export function registerCommitMessage(app: App): vscode.Disposable {
-  return vscode.commands.registerCommand("kryptonite.generateCommitMessage", async (hint?: any) => {
+  return vscode.commands.registerCommand("genesis.generateCommitMessage", async (hint?: any) => {
     const api = gitApi();
     if (!api) {
       void vscode.window.showWarningMessage(

@@ -142,7 +142,7 @@ export class DiagnosticsService {
    * Run the ladder, forwarding each rung as it resolves, and decide whether the
    * outcome constitutes a live TLS error.
    *
-   * `currentCaBundle` is the `kryptonite.caBundlePath` setting; it becomes the
+   * `currentCaBundle` is the `genesis.caBundlePath` setting; it becomes the
    * fix card's suggested value so the user sees what is already configured
    * rather than a placeholder that would overwrite it.
    */
@@ -196,7 +196,7 @@ export class DiagnosticsService {
       certSubject: peer.subject,
       certIssuer: peer.issuer,
       tlsVersion: peer.version,
-      fixKey: "kryptonite.caBundlePath",
+      fixKey: "genesis.caBundlePath",
       fixValue: currentCaBundle || "/path/to/corp-root-ca.pem",
     };
 

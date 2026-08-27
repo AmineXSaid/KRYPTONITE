@@ -268,7 +268,7 @@ export class McpClient {
         {
           protocolVersion: PROTOCOL_VERSION,
           capabilities: CLIENT_CAPABILITIES,
-          clientInfo: { name: "kryptonite", version: "0.5.0" },
+          clientInfo: { name: "genesis", version: "0.8.0" },
         },
         Math.max(HANDSHAKE_FLOOR_MS, this.spec.timeoutMs ?? 0)
       )) as any;

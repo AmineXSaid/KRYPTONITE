@@ -11,7 +11,7 @@ import { controlCenterHtml, webviewOptions } from "./shell";
  * would silently stop receiving updates.
  */
 export class ControlCenterPanel {
-  static readonly viewType = "kryptonite.controlCenter";
+  static readonly viewType = "genesis.controlCenter";
   private static current?: ControlCenterPanel;
 
   private disposables: vscode.Disposable[] = [];

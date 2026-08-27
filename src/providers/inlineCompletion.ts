@@ -9,7 +9,7 @@
  * suggestion nobody asked for is worse than no suggestion.
  *
  * So it takes both `capabilities.fim` on the profile (does this endpoint have
- * any business doing this?) and `kryptonite.inlineCompletion` in settings (do
+ * any business doing this?) and `genesis.inlineCompletion` in settings (do
  * you want it?). Either one off means not a single request is sent.
  */
 
@@ -38,7 +38,7 @@ export class InlineCompletions implements vscode.InlineCompletionItemProvider {
   constructor(private readonly app: App) {}
 
   private enabled(): boolean {
-    if (!vscode.workspace.getConfiguration("kryptonite").get<boolean>("inlineCompletion", false)) {
+    if (!vscode.workspace.getConfiguration("genesis").get<boolean>("inlineCompletion", false)) {
       return false;
     }
     return this.app.activeProfile()?.capabilities.fim === true;

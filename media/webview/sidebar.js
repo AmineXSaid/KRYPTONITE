@@ -3410,7 +3410,7 @@ function _sbRun() {
         html += '<div class="upload"><label for="caPath">CA bundle file (.pem, .crt, .cer)</label>' +
           '<div class="split"><input id="caPath" readonly placeholder="No file selected…" value="' + esc(S.caUpload.path) + '">' +
           '<button class="btn" data-tls="browse">Browse…</button></div>' +
-          '<div class="hint2">The selected path will be written to <code>kryptonite.caBundlePath</code> (Workspace settings).</div>' +
+          '<div class="hint2">The selected path will be written to <code>genesis.caBundlePath</code> (Workspace settings).</div>' +
           '<div class="row"><button class="btn" data-tls="cancelUpload">Cancel</button>' +
           '<button class="btn primary" data-tls="saveCa"' + (S.caUpload.path ? "" : " disabled") + ">Save &amp; Retry</button></div></div>";
       } else {

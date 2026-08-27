@@ -1,23 +1,28 @@
 /**
- * The product is called Genesis. This asserts that nothing a user can SEE
- * still calls it Kryptonite.
+ * The product is called Genesis, and the rename is COMPLETE - identifiers
+ * included.
  *
- * It exists because the rename was done once by hand and missed five places -
- * the editor tab, the Output channel, the git author on every checkpoint, the
- * header comment written into every generated profile, and the MCP explainer -
- * each of which is somewhere a user actually looks.
+ * The first pass renamed only what was rendered, leaving `kryptonite.*`
+ * command IDs, setting IDs, workspaceState keys and SecretStorage keys in
+ * place because they are contracts. The owner asked for all of it, so all of
+ * it moved, and `App.migrateFromKryptonite()` carries the old values across on
+ * first activation - settings, workspace state, and the API keys in
+ * SecretStorage - so a rename is a rename rather than a reset.
  *
- * What is deliberately NOT swept, and why:
+ * Two things still say Kryptonite ON PURPOSE, and both are asserted below
+ * rather than merely tolerated:
  *
- *   - `kryptonite.*` setting and command IDs. These are a contract with
- *     settings.json, keybindings.json and any task that invokes a command.
- *     Renaming them silently breaks every existing configuration.
- *   - `KRYPTONITE_BROWSER`. An environment variable somebody may already have
- *     exported. `GENESIS_BROWSER` is the documented name and is read first;
- *     the old one still works.
- *   - `KryptoniteCodeLens` / `KryptoniteCodeActions`. Class names, never
- *     rendered.
- *   - The repository URL, which is the actual URL.
+ *   - `KRYPTONITE_BROWSER`, read as a fallback after `GENESIS_BROWSER`. It is
+ *     an environment variable somebody may already have exported.
+ *   - the `kryptonite.*` keys inside the migration itself, which is the code
+ *     whose entire job is reading the old names.
+ *
+ * The repository URL is the actual URL and is not a product name.
+ *
+ * Comments are not swept: they are never rendered, and several name the old
+ * product deliberately - including the block explaining why the ki aura was
+ * removed. A sweep forcing those to be deleted would delete the explanation of
+ * the change it exists to protect.
  *
  * Run: node test/naming.cjs
  */
@@ -34,20 +39,15 @@ function ok(label, cond, detail = "") {
 const ROOT = path.join(__dirname, "..");
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
 
-// The occurrences that are allowed to stay, each for a stated reason.
-// Anything the sweep finds outside this list is a leak.
+// The only occurrences allowed to remain, each for a reason asserted below.
 const ALLOWED = [
-  /kryptonite\.[a-zA-Z]/,            // setting and command IDs
-  /kryptonite\.(\$\{|<|`)/,          // SecretStorage keys - see below
-  /with `kryptonite\.`/,             // prose naming that same prefix
-  /kryptonite\."/,                   // that prefix as a string being shown
-  /KRYPTONITE_BROWSER/,              // env var kept working on purpose
-  /Kryptonite(CodeLens|CodeActions)/,// class names
+  /KRYPTONITE_BROWSER/,                  // env var kept working on purpose
   /github\.com\/AmineXSaid\/KRYPTONITE/, // the repository URL
-  /"kryptonite"/,                    // the view-container / package id
-  /kryptonite-/,                     // storage keys and temp dir prefixes
+  /kryptonite\.\$\{|"kryptonite\.|`kryptonite\./, // the migration reading old keys
+  /getConfiguration\("kryptonite"\)/,    // ditto
+  /migrate(Secrets)?FromKryptonite/,     // the migration's own name
 ];
-// SecretStorage keys are `kryptonite.<profile>` and hold real API keys somebody
+// SecretStorage keys are `genesis.<profile>` and hold real API keys somebody
 // has already typed in. Renaming the prefix does not migrate them - it orphans
 // them, and every endpoint silently loses its credential.
 
@@ -67,11 +67,11 @@ ok("every command title is prefixed Genesis",
 ok("and there are still all twenty of them", cmds.length === 20, String(cmds.length));
 // The IDs are a contract and must NOT have been renamed along with the titles.
 ok("but the command IDs are untouched, being a contract",
-  cmds.every((c) => c.command.startsWith("kryptonite.")),
-  cmds.filter((c) => !c.command.startsWith("kryptonite.")).map((c) => c.command).join(", "));
+  cmds.every((c) => c.command.startsWith("genesis.")),
+  cmds.filter((c) => !c.command.startsWith("genesis.")).map((c) => c.command).join(", "));
 ok("and so are the setting IDs",
-  Object.keys(pkg.contributes.configuration.properties).every((k) => k.startsWith("kryptonite.")));
-// `#kryptonite.searchApiKey#` is VS Code's setting-link syntax and has to name
+  Object.keys(pkg.contributes.configuration.properties).every((k) => k.startsWith("genesis.")));
+// `#genesis.searchApiKey#` is VS Code's setting-link syntax and has to name
 // the real id, so descriptions are checked with the same allow-list as source.
 const strip = (t) => {
   let rest = t;
@@ -144,6 +144,25 @@ ok("the generated profile header", /# Generated by Genesis\./.test(read("src/cor
 ok("the browser user-agent", /"user-agent": "Genesis\//.test(read("src/browser/fetchPage.ts")));
 ok("the system prompt", /inside the Genesis extension/.test(read("src/agent/loop.ts")));
 ok("and the webview wordmark", /kx-wordmark">Genesis</.test(read("media/webview/sidebar.js")));
+
+console.log("──── nothing is orphaned by the rename ────");
+const app = read("src/core/app.ts");
+ok("there is a migration at all", /migrateFromKryptonite/.test(app));
+ok("it runs before anything namespaced is read",
+  app.indexOf("await this.migrateFromKryptonite()") < app.indexOf('workspaceState.get<Partial<UiConfigDto>>'));
+ok("it carries workspace state across",
+  /ws\.get\(`kryptonite\.\$\{key\}`\)/.test(app));
+ok("and settings, by scope rather than effective value",
+  /getConfiguration\("kryptonite"\)/.test(app) && /\.inspect\(key\)/.test(app));
+ok("and the API keys in SecretStorage",
+  /secrets\.get\(`kryptonite\.\$\{k\}`\)/.test(app));
+// Secrets cannot be enumerated, so they can only be migrated once the profile
+// list exists - which is after reload(), not before it.
+ok("with the secrets half deferred until the profiles are loaded",
+  app.indexOf('await this.reload("activation")') <
+  app.indexOf("await this.migrateSecretsFromKryptonite()"));
+ok("and it only writes when the destination is empty, so it cannot clobber",
+  /if \(ws\.get\(`genesis\.\$\{key\}`\) !== undefined\) continue/.test(app));
 
 console.log("──── the old browser override still works ────");
 ok("GENESIS_BROWSER is read first",

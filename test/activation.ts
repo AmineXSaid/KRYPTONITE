@@ -67,31 +67,31 @@ async function main() {
   // A command registered but not declared never reaches the palette; one
   // declared but not registered fails the moment it is invoked.
   const EXPECTED = [
-    "kryptonite.focusSidebar",
-    "kryptonite.openControlCenter",
-    "kryptonite.openBrowser",
-    "kryptonite.closeBrowser",
-    "kryptonite.newChat",
-    "kryptonite.runDiagnostics",
-    "kryptonite.selectEndpoint",
-    "kryptonite.newEndpoint",
-    "kryptonite.restoreCheckpoint",
-    "kryptonite.selectAgent",
-    "kryptonite.newAgent",
-    "kryptonite.exportChat",
-    "kryptonite.exportAllChats",
-    "kryptonite.exportBundle",
+    "genesis.focusSidebar",
+    "genesis.openControlCenter",
+    "genesis.openBrowser",
+    "genesis.closeBrowser",
+    "genesis.newChat",
+    "genesis.runDiagnostics",
+    "genesis.selectEndpoint",
+    "genesis.newEndpoint",
+    "genesis.restoreCheckpoint",
+    "genesis.selectAgent",
+    "genesis.newAgent",
+    "genesis.exportChat",
+    "genesis.exportAllChats",
+    "genesis.exportBundle",
     // The editor-side features. These are also invoked as CodeLens and code
     // action targets, where a missing registration surfaces as a link that
     // does nothing rather than as an error.
-    "kryptonite.fixProblem",
-    "kryptonite.documentSymbol",
-    "kryptonite.explainSelection",
-    "kryptonite.writeTests",
-    "kryptonite.generateCommitMessage",
+    "genesis.fixProblem",
+    "genesis.documentSymbol",
+    "genesis.explainSelection",
+    "genesis.writeTests",
+    "genesis.generateCommitMessage",
     // Distinct from openBrowser: lands on the agent's view and starts
     // watching, which is what the model launching a browser calls for.
-    "kryptonite.watchAgentBrowser",
+    "genesis.watchAgentBrowser",
   ];
   for (const name of EXPECTED) {
     ck(recorded.commands.includes(name), `1.1 ${name} is registered`);
@@ -188,8 +188,8 @@ async function main() {
       Object.keys(containers).join(", ")
     );
     ck(
-      containers.secondarySidebar[0].id === "kryptonite" &&
-        Array.isArray(manifest.contributes.views.kryptonite),
+      containers.secondarySidebar[0].id === "genesis" &&
+        Array.isArray(manifest.contributes.views.genesis),
       "1.1 and the view is declared inside it"
     );
   }

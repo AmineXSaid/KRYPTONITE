@@ -48,7 +48,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("kryptonite.focusSidebar", async () => {
+    vscode.commands.registerCommand("genesis.focusSidebar", async () => {
       // `<viewId>.focus` is registered by VS Code for every contributed view and
       // opens whichever part the view currently lives in. The container command
       // would only find it in its declared home, so dragging the panel to the
@@ -57,49 +57,49 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       sidebar.reveal();
     }),
 
-    vscode.commands.registerCommand("kryptonite.openControlCenter", (section?: CcSection) => {
+    vscode.commands.registerCommand("genesis.openControlCenter", (section?: CcSection) => {
       ControlCenterPanel.show(instance, context.extensionUri, section);
     }),
 
-    vscode.commands.registerCommand("kryptonite.openBrowser", (url?: string) => {
+    vscode.commands.registerCommand("genesis.openBrowser", (url?: string) => {
       BrowserPanel.show(instance, context.extensionUri, url);
     }),
 
     // Distinct from openBrowser: this one lands on the agent's view and starts
     // watching, which is what "the model just launched a browser" calls for.
-    vscode.commands.registerCommand("kryptonite.watchAgentBrowser", () => {
+    vscode.commands.registerCommand("genesis.watchAgentBrowser", () => {
       BrowserPanel.showAgent(instance, context.extensionUri);
     }),
 
     // A separate command rather than only the tab's close button, so it can be
     // bound to a key and closed without reaching for the mouse.
-    vscode.commands.registerCommand("kryptonite.closeBrowser", () => {
+    vscode.commands.registerCommand("genesis.closeBrowser", () => {
       BrowserPanel.close();
     }),
 
-    vscode.commands.registerCommand("kryptonite.newChat", async () => {
+    vscode.commands.registerCommand("genesis.newChat", async () => {
       instance.session.newChat();
-      await vscode.commands.executeCommand("kryptonite.focusSidebar");
+      await vscode.commands.executeCommand("genesis.focusSidebar");
     }),
 
-    vscode.commands.registerCommand("kryptonite.runDiagnostics", async () => {
-      await vscode.commands.executeCommand("kryptonite.focusSidebar");
+    vscode.commands.registerCommand("genesis.runDiagnostics", async () => {
+      await vscode.commands.executeCommand("genesis.focusSidebar");
       await instance.runTrace();
     }),
 
-    vscode.commands.registerCommand("kryptonite.selectEndpoint", () => instance.pickEndpoint()),
+    vscode.commands.registerCommand("genesis.selectEndpoint", () => instance.pickEndpoint()),
 
-    vscode.commands.registerCommand("kryptonite.newEndpoint", () =>
+    vscode.commands.registerCommand("genesis.newEndpoint", () =>
       instance.handleMessage({ type: "newEndpoint" }, "sidebar")
     ),
 
-    vscode.commands.registerCommand("kryptonite.restoreCheckpoint", () =>
+    vscode.commands.registerCommand("genesis.restoreCheckpoint", () =>
       instance.pickCheckpointRestore()
     ),
 
-    vscode.commands.registerCommand("kryptonite.selectAgent", () => instance.pickAgent()),
+    vscode.commands.registerCommand("genesis.selectAgent", () => instance.pickAgent()),
 
-    vscode.commands.registerCommand("kryptonite.newAgent", async () => {
+    vscode.commands.registerCommand("genesis.newAgent", async () => {
       try {
         await instance.newAgent();
       } catch (e) {
@@ -109,11 +109,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     // Two entries rather than one with a picker: "export this chat" is the
     // common case and should not cost a second dialog before the save dialog.
-    vscode.commands.registerCommand("kryptonite.exportChat", () => exportChat(instance, "current")),
+    vscode.commands.registerCommand("genesis.exportChat", () => exportChat(instance, "current")),
 
-    vscode.commands.registerCommand("kryptonite.exportAllChats", () => exportChat(instance, "all")),
+    vscode.commands.registerCommand("genesis.exportAllChats", () => exportChat(instance, "all")),
 
-    vscode.commands.registerCommand("kryptonite.exportBundle", async () => {
+    vscode.commands.registerCommand("genesis.exportBundle", async () => {
       try {
         await instance.exportBundle();
         vscode.window.showInformationMessage("Offline bundle written to dist/.");
@@ -169,7 +169,7 @@ async function exportChat(instance: App, scope: "current" | "all"): Promise<void
  * right-hand Explorer this extension put there, so it is this extension's job
  * to put it back.
  */
-export const SIDEBAR_STATE_KEY = "kryptonite.sidebarSideApplied";
+export const SIDEBAR_STATE_KEY = "genesis.sidebarSideApplied";
 
 /**
  * Undo the Primary Side Bar move that older versions applied, once.

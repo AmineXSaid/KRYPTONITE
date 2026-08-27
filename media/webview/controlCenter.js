@@ -1162,7 +1162,7 @@ function _run() {
     var re = /\$\{(env|secret|file):([^}]+)\}/g, m;
     while ((m = re.exec(json))) {
       refs.push([m[0], m[1], m[1] === "env" ? "process environment"
-        : m[1] === "secret" ? "SecretStorage · kryptonite." + m[2] : m[2]]);
+        : m[1] === "secret" ? "SecretStorage · genesis." + m[2] : m[2]]);
     }
     if (!refs.length) {
       return '<div class="tr2"><span class="empty">No interpolated references.</span><span></span><span></span></div>';
@@ -1501,7 +1501,7 @@ function _run() {
       ])) +
       card("Offline bundle",
         '<div class="explainer" style="margin:0 0 8px">Copies the configured profile and skills directories, plus a manifest, ' +
-        "into <code>dist/kryptonite-offline-bundle/</code>.</div>" +
+        "into <code>dist/genesis-offline-bundle/</code>.</div>" +
         '<button class="btn primary" data-act="export">' +
         flash("export", "Bundle written to dist/", "Export offline bundle") + "</button>") +
       "</div>";

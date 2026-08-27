@@ -1,5 +1,5 @@
 {
-  "name": "kryptonite",
+  "name": "genesis",
   "displayName": "Genesis",
   "description": "A coding agent for endpoints that don't behave. mTLS, corporate CAs, token exchange, air-gapped.",
   "version": "0.8.0",
@@ -27,143 +27,143 @@
     "viewsContainers": {
       "secondarySidebar": [
         {
-          "id": "kryptonite",
+          "id": "genesis",
           "title": "Genesis",
           "icon": "media/icon.svg"
         }
       ]
     },
     "views": {
-      "kryptonite": [
+      "genesis": [
         {
           "type": "webview",
-          "id": "kryptonite.sidebar",
+          "id": "genesis.sidebar",
           "name": ""
         }
       ]
     },
     "commands": [
       {
-        "command": "kryptonite.focusSidebar",
+        "command": "genesis.focusSidebar",
         "title": "Genesis: Focus sidebar"
       },
       {
-        "command": "kryptonite.openControlCenter",
+        "command": "genesis.openControlCenter",
         "title": "Genesis: Open Control Center"
       },
       {
-        "command": "kryptonite.openBrowser",
+        "command": "genesis.openBrowser",
         "title": "Genesis: Open browser"
       },
       {
-        "command": "kryptonite.closeBrowser",
+        "command": "genesis.closeBrowser",
         "title": "Genesis: Close browser"
       },
       {
-        "command": "kryptonite.newChat",
+        "command": "genesis.newChat",
         "title": "Genesis: New chat"
       },
       {
-        "command": "kryptonite.runDiagnostics",
+        "command": "genesis.runDiagnostics",
         "title": "Genesis: Run connection diagnostics"
       },
       {
-        "command": "kryptonite.selectEndpoint",
+        "command": "genesis.selectEndpoint",
         "title": "Genesis: Select active endpoint"
       },
       {
-        "command": "kryptonite.newEndpoint",
+        "command": "genesis.newEndpoint",
         "title": "Genesis: Create endpoint profile"
       },
       {
-        "command": "kryptonite.restoreCheckpoint",
+        "command": "genesis.restoreCheckpoint",
         "title": "Genesis: Restore checkpoint"
       },
       {
-        "command": "kryptonite.exportBundle",
+        "command": "genesis.exportBundle",
         "title": "Genesis: Export offline bundle"
       },
       {
-        "command": "kryptonite.selectAgent",
+        "command": "genesis.selectAgent",
         "title": "Genesis: Select agent"
       },
       {
-        "command": "kryptonite.newAgent",
+        "command": "genesis.newAgent",
         "title": "Genesis: Create agent"
       },
       {
-        "command": "kryptonite.exportChat",
+        "command": "genesis.exportChat",
         "title": "Genesis: Export chat as JSON"
       },
       {
-        "command": "kryptonite.exportAllChats",
+        "command": "genesis.exportAllChats",
         "title": "Genesis: Export all chats as JSON"
       },
       {
-        "command": "kryptonite.fixProblem",
+        "command": "genesis.fixProblem",
         "title": "Genesis: Fix this problem"
       },
       {
-        "command": "kryptonite.documentSymbol",
+        "command": "genesis.documentSymbol",
         "title": "Genesis: Document this"
       },
       {
-        "command": "kryptonite.explainSelection",
+        "command": "genesis.explainSelection",
         "title": "Genesis: Explain this"
       },
       {
-        "command": "kryptonite.writeTests",
+        "command": "genesis.writeTests",
         "title": "Genesis: Write tests for this"
       },
       {
-        "command": "kryptonite.generateCommitMessage",
+        "command": "genesis.generateCommitMessage",
         "title": "Genesis: Generate commit message",
         "icon": "$(sparkle)"
       },
       {
-        "command": "kryptonite.watchAgentBrowser",
+        "command": "genesis.watchAgentBrowser",
         "title": "Genesis: Watch the agent browser"
       }
     ],
     "configuration": {
       "title": "Genesis",
       "properties": {
-        "kryptonite.profileDirectory": {
+        "genesis.profileDirectory": {
           "type": "string",
           "default": ".agent/endpoints",
           "description": "Workspace-relative folder holding endpoint profiles."
         },
-        "kryptonite.skillsDirectory": {
+        "genesis.skillsDirectory": {
           "type": "string",
           "default": ".agent/skills",
           "description": "Workspace-relative folder holding skills."
         },
-        "kryptonite.instructionsFile": {
+        "genesis.instructionsFile": {
           "type": "string",
           "default": ".agent/instructions.md",
           "markdownDescription": "Workspace-relative markdown file whose contents are prepended to every system prompt, for conventions that must hold on every turn. Absent is fine and is not warned about. Skills are the on-demand equivalent; this is the always-on one. Capped at 16,000 characters, with the truncation stated to the model."
         },
-        "kryptonite.editorContext": {
+        "genesis.editorContext": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "Append what is on screen - the focused file, the open tabs, and the compiler's errors for that file - to each message you send. Costs a few hundred tokens per turn and is what makes \"fix this\" resolve to something. Turn it off on a very small context window."
         },
-        "kryptonite.readOutsideWorkspace": {
+        "genesis.readOutsideWorkspace": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "Let the agent **read** files outside the workspace folder - a Python `site-packages`, a Go module cache, a config under `/etc`. Without it, asking about a library your code imports gets \"outside the workspace\" and no answer, because the dependency source is never in the checkout.\n\n**Writes are always confined to the workspace**, whatever this is set to, and paths whose whole purpose is holding a credential - `.ssh`, `.aws`, `.gnupg`, `.kube`, `id_rsa`, `.netrc` and similar - are refused even when this is on. Turn it off to confine reads to the workspace as well."
         },
-        "kryptonite.browserHeaded": {
+        "genesis.browserHeaded": {
           "type": "boolean",
           "default": false,
           "markdownDescription": "Show the browser the agent drives in a real window instead of running it headless. Off by default, because a window appearing over your editor every time the agent looks something up is worse than not seeing it - but turn it on when you want to watch what it is doing, or drive it yourself mid-task. Takes effect the next time the browser starts."
         },
-        "kryptonite.activeProfile": {
+        "genesis.activeProfile": {
           "type": "string",
           "default": "",
           "description": "Name of the active endpoint profile. First valid profile is used when empty."
         },
-        "kryptonite.approvalMode": {
+        "genesis.approvalMode": {
           "type": "string",
           "enum": [
             "ask",
@@ -173,27 +173,27 @@
           "default": "ask",
           "description": "When tools run without confirming: ask = every side effect; edits-auto = file edits auto, shell commands ask; full-auto = never ask."
         },
-        "kryptonite.caBundlePath": {
+        "genesis.caBundlePath": {
           "type": "string",
           "default": "",
           "description": "Global fallback CA bundle merged into every profile's tls.caBundle at load time. Accepts a file path or the literal 'system'."
         },
-        "kryptonite.codeLens": {
+        "genesis.codeLens": {
           "type": "boolean",
           "default": true,
           "description": "Show Explain / Document / Tests above functions and classes."
         },
-        "kryptonite.codeActions": {
+        "genesis.codeActions": {
           "type": "boolean",
           "default": true,
           "description": "Offer Genesis fixes and rewrites in the lightbulb menu."
         },
-        "kryptonite.inlineCompletion": {
+        "genesis.inlineCompletion": {
           "type": "boolean",
           "default": false,
           "markdownDescription": "Suggest code at the cursor as ghost text. Off by default: this needs a fast fill-in-the-middle endpoint, which most corporate gateways are not. The active profile must also set `capabilities.fim: true`."
         },
-        "kryptonite.searchProvider": {
+        "genesis.searchProvider": {
           "type": "string",
           "enum": [
             "duckduckgo",
@@ -202,19 +202,19 @@
             "bing"
           ],
           "default": "duckduckgo",
-          "markdownDescription": "Which service `web_search` queries. `duckduckgo` needs no key and is the default. The others need `#kryptonite.searchApiKey#`, and Google also needs `#kryptonite.searchEngineId#`. A provider named without its credential falls back to `duckduckgo` rather than failing."
+          "markdownDescription": "Which service `web_search` queries. `duckduckgo` needs no key and is the default. The others need `#genesis.searchApiKey#`, and Google also needs `#genesis.searchEngineId#`. A provider named without its credential falls back to `duckduckgo` rather than failing."
         },
-        "kryptonite.searchApiKey": {
+        "genesis.searchApiKey": {
           "type": "string",
           "default": "",
           "markdownDescription": "API key for the search provider. Supports `${env:NAME}` and `${file:path}`, the same as an endpoint profile, so the key need not sit here in the clear."
         },
-        "kryptonite.searchEngineId": {
+        "genesis.searchEngineId": {
           "type": "string",
           "default": "",
           "markdownDescription": "Google Programmable Search engine id (`cx`). Google only."
         },
-        "kryptonite.browserProfile": {
+        "genesis.browserProfile": {
           "type": "string",
           "enum": [
             "persistent",
@@ -228,7 +228,7 @@
     "menus": {
       "scm/title": [
         {
-          "command": "kryptonite.generateCommitMessage",
+          "command": "genesis.generateCommitMessage",
           "group": "navigation",
           "when": "scmProvider == git"
         }

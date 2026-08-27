@@ -26,7 +26,7 @@ import { innermostAt, actionable, SymbolLike } from "../agent/symbols";
 
 /** Everything in this file is off one setting, so it can be turned off whole. */
 function enabled(key: "codeLens" | "codeActions"): boolean {
-  return vscode.workspace.getConfiguration("kryptonite").get<boolean>(key, true);
+  return vscode.workspace.getConfiguration("genesis").get<boolean>(key, true);
 }
 
 async function symbolsOf(uri: vscode.Uri): Promise<SymbolLike[] | undefined> {
@@ -72,7 +72,7 @@ export async function targetRange(
 
 /* ── code actions ───────────────────────────────────────────────────────── */
 
-export class KryptoniteCodeActions implements vscode.CodeActionProvider {
+export class GenesisCodeActions implements vscode.CodeActionProvider {
   /**
    * A function rather than a static field.
    *
@@ -110,7 +110,7 @@ export class KryptoniteCodeActions implements vscode.CodeActionProvider {
       );
       a.diagnostics = [...problems];
       a.command = {
-        command: "kryptonite.fixProblem",
+        command: "genesis.fixProblem",
         title: "Fix with Genesis",
         // Diagnostics are passed rather than re-read. By the time the command
         // runs the user may have moved, and the fix must address the squiggle
@@ -122,7 +122,7 @@ export class KryptoniteCodeActions implements vscode.CodeActionProvider {
 
     const doc_ = new vscode.CodeAction("Document with Genesis", vscode.CodeActionKind.RefactorRewrite);
     doc_.command = {
-      command: "kryptonite.documentSymbol",
+      command: "genesis.documentSymbol",
       title: "Document with Genesis",
       arguments: [doc.uri, range],
     };
@@ -130,7 +130,7 @@ export class KryptoniteCodeActions implements vscode.CodeActionProvider {
 
     const explain = new vscode.CodeAction("Explain with Genesis", vscode.CodeActionKind.Empty);
     explain.command = {
-      command: "kryptonite.explainSelection",
+      command: "genesis.explainSelection",
       title: "Explain with Genesis",
       arguments: [doc.uri, range],
     };
@@ -155,7 +155,7 @@ function plain(d: vscode.Diagnostic) {
 
 /* ── code lens ──────────────────────────────────────────────────────────── */
 
-export class KryptoniteCodeLens implements vscode.CodeLensProvider {
+export class GenesisCodeLens implements vscode.CodeLensProvider {
   private emitter = new vscode.EventEmitter<void>();
   readonly onDidChangeCodeLenses = this.emitter.event;
 
@@ -176,9 +176,9 @@ export class KryptoniteCodeLens implements vscode.CodeLensProvider {
       const at = new vscode.Range(s.range.start.line, 0, s.range.start.line, 0);
       const args = [doc.uri, new vscode.Range(s.range.start.line, 0, s.range.end.line, 0)];
       out.push(
-        new vscode.CodeLens(at, { title: "Explain", command: "kryptonite.explainSelection", arguments: args }),
-        new vscode.CodeLens(at, { title: "Document", command: "kryptonite.documentSymbol", arguments: args }),
-        new vscode.CodeLens(at, { title: "Tests", command: "kryptonite.writeTests", arguments: args })
+        new vscode.CodeLens(at, { title: "Explain", command: "genesis.explainSelection", arguments: args }),
+        new vscode.CodeLens(at, { title: "Document", command: "genesis.documentSymbol", arguments: args }),
+        new vscode.CodeLens(at, { title: "Tests", command: "genesis.writeTests", arguments: args })
       );
     }
     return out;
@@ -192,7 +192,7 @@ export class KryptoniteCodeLens implements vscode.CodeLensProvider {
 /* ── the commands behind them ───────────────────────────────────────────── */
 
 export function registerEditorFeatures(app: App, quick: QuickEdit): vscode.Disposable[] {
-  const lens = new KryptoniteCodeLens();
+  const lens = new GenesisCodeLens();
 
   /** Resolve the arguments a command may or may not have been given. */
   const resolve = async (
@@ -215,7 +215,7 @@ export function registerEditorFeatures(app: App, quick: QuickEdit): vscode.Dispo
 
   /** Explain and Tests both put a prompt in the chat and reveal it. */
   const toChat = async (prompt: string): Promise<void> => {
-    await vscode.commands.executeCommand("kryptonite.focusSidebar");
+    await vscode.commands.executeCommand("genesis.focusSidebar");
     await app.session.send(prompt);
   };
 
@@ -223,17 +223,17 @@ export function registerEditorFeatures(app: App, quick: QuickEdit): vscode.Dispo
     lens,
     vscode.languages.registerCodeActionsProvider(
       { scheme: "file" },
-      new KryptoniteCodeActions(),
-      KryptoniteCodeActions.metadata()
+      new GenesisCodeActions(),
+      GenesisCodeActions.metadata()
     ),
     vscode.languages.registerCodeLensProvider({ scheme: "file" }, lens),
 
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration("kryptonite.codeLens")) lens.refresh();
+      if (e.affectsConfiguration("genesis.codeLens")) lens.refresh();
     }),
 
     vscode.commands.registerCommand(
-      "kryptonite.fixProblem",
+      "genesis.fixProblem",
       async (uri?: vscode.Uri, range?: vscode.Range, problems?: any[]) => {
         const r = await resolve(uri, range);
         if (!r) return;
@@ -253,7 +253,7 @@ export function registerEditorFeatures(app: App, quick: QuickEdit): vscode.Dispo
     ),
 
     vscode.commands.registerCommand(
-      "kryptonite.documentSymbol",
+      "genesis.documentSymbol",
       async (uri?: vscode.Uri, range?: vscode.Range) => {
         const r = await resolve(uri, range);
         if (!r) return;
@@ -272,7 +272,7 @@ export function registerEditorFeatures(app: App, quick: QuickEdit): vscode.Dispo
     ),
 
     vscode.commands.registerCommand(
-      "kryptonite.explainSelection",
+      "genesis.explainSelection",
       async (uri?: vscode.Uri, range?: vscode.Range) => {
         const r = await resolve(uri, range);
         if (!r) return;
@@ -288,7 +288,7 @@ export function registerEditorFeatures(app: App, quick: QuickEdit): vscode.Dispo
     ),
 
     vscode.commands.registerCommand(
-      "kryptonite.writeTests",
+      "genesis.writeTests",
       async (uri?: vscode.Uri, range?: vscode.Range) => {
         const r = await resolve(uri, range);
         if (!r) return;

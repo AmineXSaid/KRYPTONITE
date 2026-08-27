@@ -45,7 +45,7 @@ export type LogLevel = "info" | "warn" | "error";
 
 /**
  * Keys accepted by `setConfig`. The first five round-trip to real VS Code
- * settings; the last three live in workspaceState under `kryptonite.uiConfig`.
+ * settings; the last three live in workspaceState under `genesis.uiConfig`.
  */
 export type ConfigKey =
   | "profileDirectory" | "skillsDirectory" | "activeProfile"

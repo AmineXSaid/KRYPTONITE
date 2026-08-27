@@ -74,7 +74,7 @@ export class McpHttpClient {
       const init = (await this.rpc("initialize", {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: CLIENT_CAPABILITIES,
-        clientInfo: { name: "kryptonite", version: "0.5.0" },
+        clientInfo: { name: "genesis", version: "0.8.0" },
       })) as any;
 
       this.serverInfo = init?.serverInfo;
@@ -364,7 +364,7 @@ export class McpSseClient {
       const init = (await this.rpc("initialize", {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: CLIENT_CAPABILITIES,
-        clientInfo: { name: "kryptonite", version: "0.5.0" },
+        clientInfo: { name: "genesis", version: "0.8.0" },
       })) as any;
       this.serverInfo = init?.serverInfo;
       await this.post({ jsonrpc: "2.0", method: "notifications/initialized", params: {} })

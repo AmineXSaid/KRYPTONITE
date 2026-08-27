@@ -29,40 +29,40 @@ Taken from `package.json` and `src/`, not from memory.
 
 | Command | Title |
 |---|---|
-| `kryptonite.focusSidebar` | Focus sidebar |
-| `kryptonite.openControlCenter` | Open Control Center |
-| `kryptonite.openBrowser` | Open browser |
-| `kryptonite.closeBrowser` | Close browser |
-| `kryptonite.newChat` | New chat |
-| `kryptonite.runDiagnostics` | Run connection diagnostics |
-| `kryptonite.selectEndpoint` | Select active endpoint |
-| `kryptonite.newEndpoint` | Create endpoint profile |
-| `kryptonite.restoreCheckpoint` | Restore checkpoint |
-| `kryptonite.exportBundle` | Export offline bundle |
-| `kryptonite.selectAgent` | Select agent |
-| `kryptonite.newAgent` | Create agent |
-| `kryptonite.exportChat` | Export chat as JSON |
-| `kryptonite.exportAllChats` | Export all chats as JSON |
-| `kryptonite.fixProblem` | Fix this problem |
-| `kryptonite.documentSymbol` | Document this |
-| `kryptonite.explainSelection` | Explain this |
-| `kryptonite.writeTests` | Write tests for this |
-| `kryptonite.generateCommitMessage` | Generate commit message |
-| `kryptonite.watchAgentBrowser` | Watch the agent browser |
+| `genesis.focusSidebar` | Focus sidebar |
+| `genesis.openControlCenter` | Open Control Center |
+| `genesis.openBrowser` | Open browser |
+| `genesis.closeBrowser` | Close browser |
+| `genesis.newChat` | New chat |
+| `genesis.runDiagnostics` | Run connection diagnostics |
+| `genesis.selectEndpoint` | Select active endpoint |
+| `genesis.newEndpoint` | Create endpoint profile |
+| `genesis.restoreCheckpoint` | Restore checkpoint |
+| `genesis.exportBundle` | Export offline bundle |
+| `genesis.selectAgent` | Select agent |
+| `genesis.newAgent` | Create agent |
+| `genesis.exportChat` | Export chat as JSON |
+| `genesis.exportAllChats` | Export all chats as JSON |
+| `genesis.fixProblem` | Fix this problem |
+| `genesis.documentSymbol` | Document this |
+| `genesis.explainSelection` | Explain this |
+| `genesis.writeTests` | Write tests for this |
+| `genesis.generateCommitMessage` | Generate commit message |
+| `genesis.watchAgentBrowser` | Watch the agent browser |
 
 ### Settings (15)
 
 `profileDirectory`, `skillsDirectory`, `instructionsFile`, `editorContext`,
 `browserHeaded`, `activeProfile`, `approvalMode`, `caBundlePath`, `codeLens`,
 `codeActions`, `inlineCompletion`, `searchProvider`, `searchApiKey`,
-`searchEngineId`, `browserProfile` - all under the `kryptonite.*` namespace.
+`searchEngineId`, `browserProfile` - all under the `genesis.*` namespace.
 
 ### Views, providers and surfaces
 
 | Contribution | Detail |
 |---|---|
-| View container | `kryptonite` in the **secondary** sidebar, icon `media/icon.svg` |
-| Webview view | `kryptonite.sidebar` |
+| View container | `genesis` in the **secondary** sidebar, icon `media/icon.svg` |
+| Webview view | `genesis.sidebar` |
 | Webview panels | Control Center, Agent browser (`createWebviewPanel` x2) |
 | Inline completion provider | 1 |
 | CodeLens provider | 1 |
@@ -205,7 +205,7 @@ of the commit that removed them.
 ## Dead code found, not written
 
 `endpointForm()` in `media/webview/controlCenter.js` **cannot render**. Nothing
-in that file ever sets `S.epForm`, and `kryptonite.newEndpoint` writes a YAML
+in that file ever sets `S.epForm`, and `genesis.newEndpoint` writes a YAML
 file and opens it in the editor instead. The mandatory model-kind field was
 added there first and had to be moved to the sidebar form, which is the one a
 user can actually reach. The Control Center copy is left in place and left
