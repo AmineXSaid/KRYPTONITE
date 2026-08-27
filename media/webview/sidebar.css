@@ -249,7 +249,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   min-width: 0; flex: 1; font-size: 12px; line-height: 1.4; color: var(--kx-fg-2);
 }
 .w-row:hover .t { color: var(--kx-fg); }
-.w-dot { flex: none; width: 5px; height: 5px; background: var(--kx-accent); }
+.w-dot { flex: none; width: 5px; height: 5px; background: var(--kx-line); }
 .w-ago {
   flex: none; font-family: var(--kx-mono); font-size: 9px;
   letter-spacing: .06em; color: var(--kx-fg-3);

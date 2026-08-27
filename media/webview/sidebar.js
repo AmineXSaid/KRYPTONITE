@@ -1520,6 +1520,12 @@ function _sbRun() {
         var n = r.count === 1 ? "1 message" : r.count + " messages";
         body += '<button class="w-row" data-session="' + esc(r.id) + '"' +
           ' title="' + esc(r.title + " - " + n + ", " + r.when) + '">' +
+          // Slate, always. The mockup's rule is `dot: c.live ? oxide : slate`,
+          // and the oxide case cannot arise here: the loop above skips
+          // `sess.active`, so the live conversation is never in this list by
+          // construction. A `data-on` branch for it would be dead markup. It
+          // was a flat GREEN before, which spent the panel's success colour to
+          // say "this is a row".
           '<span class="w-dot"></span>' +
           '<span class="t ell">' + esc(r.title) + "</span>" +
           '<span class="w-ago">' + esc(r.when) + "</span></button>";
