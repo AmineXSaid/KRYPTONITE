@@ -948,7 +948,7 @@ export class SessionController {
       throw new Error(
         "No Chromium-family browser is installed. Genesis drives Chrome, Edge, " +
         "Brave, Vivaldi or Chromium - whichever the machine already has - and bundles " +
-        "none of them. Install one, or set KRYPTONITE_BROWSER to its executable. " +
+        "none of them. Install one, or set GENESIS_BROWSER to its executable. " +
         "fetch_url still works without any browser."
       );
     }

@@ -1,4 +1,4 @@
-/* KRYPTONITE sidebar frontend. Plain DOM, zero dependencies.
+/* Genesis sidebar frontend. Plain DOM, zero dependencies.
  *
  * The store mirrors what the host sends; nothing here is authoritative. The
  * transcript is append-only - a full re-render on every stream delta would

@@ -11,7 +11,7 @@ import * as path from "node:path";
  * anything. This file is the second shape: one document, always present, at
  * the stable head of the prompt.
  *
- * It lives at `.agent/instructions.md` rather than the `.kryptonite/` a
+ * It lives at `.agent/instructions.md` rather than the `.genesis/` a
  * Copilot user might expect, because everything else this extension reads is
  * already under `.agent/` - endpoints, skills, transforms, mcp.json. A second
  * dot-directory would be a second convention for no gain, and the path is a

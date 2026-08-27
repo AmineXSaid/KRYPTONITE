@@ -496,7 +496,7 @@ export class McpClient {
       this.send({
         jsonrpc: "2.0",
         id,
-        error: { code: -32601, message: "kryptonite implements no server-to-client requests" },
+        error: { code: -32601, message: "genesis implements no server-to-client requests" },
       });
     } catch {
       /* the server is gone; nothing to answer */

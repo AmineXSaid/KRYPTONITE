@@ -103,7 +103,12 @@ export function listBrowsers(env: NodeJS.ProcessEnv = process.env): FoundBrowser
 
   // An explicit override leads, for a browser installed somewhere unusual or
   // a specific build somebody wants driven.
-  const explicit = env.KRYPTONITE_BROWSER;
+  //
+  // Both names are read. GENESIS_BROWSER is the one to use; KRYPTONITE_BROWSER
+  // still works because it is an environment variable somebody may already
+  // have exported in a shell profile or a devcontainer, and a rename that
+  // silently stops honouring it would look like the override had broken.
+  const explicit = env.GENESIS_BROWSER || env.KRYPTONITE_BROWSER;
   if (explicit && exists(explicit)) {
     found.push({ name: "Configured", path: explicit });
     seen.add(explicit.toLowerCase());

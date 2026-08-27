@@ -1,4 +1,4 @@
-/* KRYPTONITE Control Center frontend. Plain DOM, zero dependencies.
+/* Genesis Control Center frontend. Plain DOM, zero dependencies.
  *
  * Ten sections over one shared store. Only the active section is rendered, so
  * a broadcast re-renders at most one pane. Three toggles are functional; the
@@ -1476,7 +1476,7 @@ function _run() {
   /* ── logs & export ── */
   function secLogs() {
     var html = secHead("logs", "Logs & export",
-      "The last 200 lines from the KRYPTONITE output channel.") +
+      "The last 200 lines from the Genesis output channel.") +
       '<div class="watch-mark">' + icon("i-check", "ic-11") + "watcher active on .agent/</div>";
 
     if (!S.logs.length) {

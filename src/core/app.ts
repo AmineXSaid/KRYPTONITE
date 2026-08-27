@@ -136,7 +136,7 @@ function slugForFile(title: string): string {
  */
 const MCP_CONFIG_TEMPLATE = `{
   "_readme": [
-    "MCP servers Kryptonite may start. Same shape as Claude Desktop and Claude Code,",
+    "MCP servers Genesis may start. Same shape as Claude Desktop and Claude Code,",
     "so a server block can be copied between them verbatim.",
     "",
     "LOCAL (stdio) - the server runs as a child process on this machine:",
@@ -291,7 +291,7 @@ export class App {
   private disposables: vscode.Disposable[] = [];
 
   constructor(private context: vscode.ExtensionContext) {
-    this.output = vscode.window.createOutputChannel("KRYPTONITE");
+    this.output = vscode.window.createOutputChannel("Genesis");
     this.sessions = new SessionStore(context, this.root);
     this.status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     this.status.command = "kryptonite.focusSidebar";

@@ -1,4 +1,4 @@
-/* KRYPTONITE browser surface. Plain DOM, zero dependencies.
+/* Genesis browser surface. Plain DOM, zero dependencies.
  *
  * Two views of one address:
  *

@@ -33,8 +33,8 @@ export class ShadowRepo {
       fs.mkdirSync(this.git, { recursive: true });
       await pexec("git", ["--git-dir", this.git, "init", "--bare"]);
       await this.run(["config", "core.excludesFile", ""]);
-      await this.run(["config", "user.email", "kryptonite@localhost"]);
-      await this.run(["config", "user.name", "Kryptonite"]);
+      await this.run(["config", "user.email", "genesis@localhost"]);
+      await this.run(["config", "user.name", "Genesis"]);
       // Respect the user's .gitignore so we don't snapshot node_modules.
       const info = path.join(this.git, "info");
       fs.mkdirSync(info, { recursive: true });
