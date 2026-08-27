@@ -22,8 +22,15 @@ test/**
 # Workspace fixtures that must never travel inside the extension
 .agent/**
 
+# The logo SOURCE, not the shipped mark. media/logo.png is what package.json
+# names and what the README shows; this is the vector it was rendered from,
+# kept in the repo so the mark can be regenerated at any size. Nothing loads
+# it at runtime, and vsce forbids SVG in a README, so it has no business in
+# the .vsix.
+media/logo.svg
+
 # Generated offline bundles live under dist/ but are not part of the extension
-dist/kryptonite-offline-bundle/**
+dist/genesis-offline-bundle/**
 # dist/extension.js is the only artifact that ships. Test bundles are built into
 # dist/ too, and shipping one would put a harness in front of users.
 dist/*.cjs

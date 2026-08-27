@@ -1,4 +1,4 @@
-<img src="media/logo.svg" width="72" height="72" alt="">
+<img src="media/logo.png" width="72" height="72" alt="Genesis">
 
 # GENESIS
 
