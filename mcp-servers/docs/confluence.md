@@ -14,11 +14,11 @@ account can see, and nothing more.
 4. **Create token**. Name it e.g. `mcp-readonly-<yourname>`.
 5. Set an expiry. Shorter is better; you can always issue another.
 6. **Copy it now** — Confluence shows it exactly once.
-7. Put it in `.env` as `ATLASSIAN_PAT`.
+7. Put it in `.env` as `ATLASSIAN_TOKEN`.
 
 > On most corporate deployments Jira and Confluence share an identity provider,
 > and **one PAT works against both** — you usually do not need two. If yours
-> issues them separately, run each server with its own `ATLASSIAN_PAT`.
+> issues them separately, run each server with its own `ATLASSIAN_TOKEN`.
 
 > No **Personal Access Tokens** entry? Either PATs are disabled instance-wide,
 > or this is Confluence Cloud. Run `python probe.py --confluence`.
@@ -28,7 +28,7 @@ account can see, and nothing more.
 ```bash
 CONFLUENCE_BASE_URL=https://confluence.company.internal
 ATLASSIAN_AUTH_MODE=bearer
-ATLASSIAN_PAT=<your token>
+ATLASSIAN_TOKEN=<your token>
 ```
 
 > **Data Center takes no `/wiki` prefix.** Confluence Cloud is
@@ -49,12 +49,12 @@ python probe.py --confluence
 {
   "mcpServers": {
     "confluence": {
-      "command": "/absolute/path/to/atlassian-mcp/.venv/bin/confluence-mcp",
+      "command": "/absolute/path/to/mcp-servers/.venv/bin/confluence-mcp",
       "env": {
         "CONFLUENCE_BASE_URL": "https://confluence.company.internal",
         "ATLASSIAN_AUTH_MODE": "bearer",
-        "ATLASSIAN_PAT": "<your token>",
-        "MAX_RESULTS_CAP": "50"
+        "ATLASSIAN_TOKEN": "<your token>",
+        "MCP_MAX_RESULTS_CAP": "50"
       }
     }
   }

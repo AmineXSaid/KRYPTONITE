@@ -1,9 +1,10 @@
-"""Every REST path either server uses, in one place, with its provenance.
+"""Every Jira and Confluence REST path, in one place, with its provenance.
 
-Why one module: a path that appears inline at its call site gets copied, and
-the copy is what drifts when the instance turns out to be Cloud rather than
-Data Center. Centralising them means a wrong assumption is a one-line fix in a
-file whose whole job is to be audited, rather than a hunt through two servers.
+Why one module per product: a path that appears inline at its call site gets
+copied, and the copy is what drifts when the instance turns out to be Cloud
+rather than Data Center. Centralising them means a wrong assumption is a
+one-line fix in a file whose whole job is to be audited, rather than a hunt
+through two servers.
 
 ── VERIFICATION STATUS, HONESTLY ────────────────────────────────────────────
 The build environment for this package cannot reach the target instance
@@ -98,11 +99,23 @@ CONFLUENCE_SPACES = "/rest/api/space"
 # instead of a URL. That is a read operation wearing POST's clothing, and it is
 # permitted ONLY against the exact paths listed here.
 #
-# This is a tuple, and membership is tested by exact match after normalising
-# the path, so it cannot be widened by a prefix trick like
+# This tuple is passed to load_config() by the Jira server alone. It is NOT a
+# module global the client consults, because that would let Jira's one
+# exception apply to a GitLab or Jenkins client that never asked for it.
+# Membership is tested by exact match after normalising the path, so it cannot
+# be widened by a prefix trick like
 # /rest/api/2/search/../issue/KEY-1/transitions.
 SEARCH_POST_ALLOWLIST: tuple[str, ...] = (JIRA_SEARCH,)
 
-# Methods the client will build a request for at all. Anything else raises
-# before a connection is opened.
-ALLOWED_METHODS: frozenset[str] = frozenset({"GET", "POST"})
+# Every request carries this. Atlassian DC returns an HTML login page instead
+# of a 401 to clients it thinks are browsers; this header is what makes it
+# answer with JSON, and without it a bad token surfaces as an unparseable 200.
+EXTRA_HEADERS: dict[str, str] = {"X-Atlassian-Token": "no-check"}
+
+# Appended to the HTML-404 message. Named here because this is the file that
+# knows how the two deployments differ.
+WRONG_PATH_HINT = (
+    "Check the deployment type too: Data Center uses /rest/api/2 (Jira) and "
+    "/rest/api with no /wiki prefix (Confluence); Cloud uses /rest/api/3 and "
+    "/wiki/rest/api."
+)

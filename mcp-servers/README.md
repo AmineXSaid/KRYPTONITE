@@ -1,20 +1,25 @@
-# atlassian-mcp
+# Read-only MCP servers
 
-Two read-only MCP servers for an internal Atlassian instance: **jira-mcp** and
-**confluence-mcp**. Search-only. They cannot write to your instance.
+MCP servers for the internal systems a coding agent needs to read and must
+never write to. Search-only, by construction rather than by convention.
 
 | | |
 | --- | --- |
-| `src/atlassian_client/` | shared auth, HTTP client, read-only guard, error mapping, redaction |
+| `src/readonly_client/` | shared auth, HTTP client, read-only guard, error mapping, redaction |
+| `src/readonly_client/paths/` | every REST path, one module per product, each with its provenance |
 | `src/jira_mcp/` | Jira server — [README](docs/jira.md) |
 | `src/confluence_mcp/` | Confluence server — [README](docs/confluence.md) |
 | `probe.py` | standalone connectivity + deployment-type check. **Run this first.** |
+
+The shared core is named for the property it enforces, not for the first vendor
+that used it: it began as `atlassian_client`, and that name stopped being true
+the moment a second vendor's server imported it.
 
 ---
 
 ## ⚠️ Read this before you trust the endpoint paths
 
-**The paths in `src/atlassian_client/paths.py` have not been verified against
+**The paths in `src/readonly_client/paths/` have not been verified against
 your instance.** The environment this was built in cannot reach
 `*.company.internal`, and its egress proxy blocks `developer.atlassian.com` and
 `docs.atlassian.com`, so the Data Center API shapes are corroborated from
@@ -48,22 +53,40 @@ Python 3.11+. Two dependencies: `mcp` and `httpx`.
 Copy `.env.example` to `.env` and fill it in. `.env.example` contains no
 secrets and is safe to commit; `.env` is gitignored.
 
+Every setting is read as `<PREFIX>_NAME` first and `MCP_NAME` second, so one
+`MCP_CA_BUNDLE` covers every server while `JENKINS_READ_TIMEOUT` still wins for
+the one that needs longer. Credentials have no shared form — four services do
+not share a token.
+
 | Variable | Required | Notes |
 | --- | --- | --- |
 | `JIRA_BASE_URL` | jira-mcp | Instance root, no `/rest` path |
 | `CONFLUENCE_BASE_URL` | confluence-mcp | Instance root. Cloud needs the `/wiki` suffix |
 | `ATLASSIAN_AUTH_MODE` | yes | `bearer` (DC PAT) or `basic` (Cloud email+token) |
-| `ATLASSIAN_PAT` | bearer mode | Your own PAT |
-| `ATLASSIAN_EMAIL` | basic mode | |
-| `ATLASSIAN_API_TOKEN` | basic mode | |
-| `ATLASSIAN_CA_BUNDLE` | optional | PEM bundle for a corporate root CA |
+| `ATLASSIAN_TOKEN` | yes | Your own PAT, or Cloud API token |
+| `ATLASSIAN_USER` | basic mode | Your account email |
+| `<PREFIX>_CA_BUNDLE` / `MCP_CA_BUNDLE` | optional | PEM bundle for a corporate root CA |
 | `HTTPS_PROXY` / `NO_PROXY` | optional | Standard vars, honoured automatically |
-| `MAX_RESULTS_CAP` | optional | Default 50, hard ceiling 100 |
-| `ATLASSIAN_CONNECT_TIMEOUT` | optional | Default 10s |
-| `ATLASSIAN_READ_TIMEOUT` | optional | Default 30s |
+| `<PREFIX>_MAX_RESULTS_CAP` / `MCP_…` | optional | Default 50, hard ceiling 100 |
+| `<PREFIX>_CONNECT_TIMEOUT` / `MCP_…` | optional | Default 10s |
+| `<PREFIX>_READ_TIMEOUT` / `MCP_…` | optional | Default 30s |
 
 A missing or blank required variable **fails at startup** with a message naming
-it. The servers never start half-configured.
+it — and naming the variable it actually read, so a bad `MCP_MAX_RESULTS_CAP`
+does not send you looking for an `ATLASSIAN_MAX_RESULTS_CAP` you never wrote.
+The servers never start half-configured.
+
+### Auth modes
+
+| mode | header sent | who uses it |
+| --- | --- | --- |
+| `bearer` | `Authorization: Bearer <token>` | Jira/Confluence Data Center PAT |
+| `basic` | `Authorization: Basic base64(user:token)` | Atlassian Cloud, Jenkins |
+| `header` | `<name>: <token>` | GitLab's `PRIVATE-TOKEN` |
+
+Each server declares which modes it will accept, because offering one that
+cannot work is offering a choice that can only be a mistake — and it fails as a
+401 that looks exactly like a bad token, rather than as a config error.
 
 ## Run
 
@@ -75,28 +98,33 @@ confluence-mcp    # or: python -m confluence_mcp.server
 ## Test
 
 ```bash
-pytest            # 116 tests, no network access required
+pytest            # 137 tests, no network access required
 ```
 
 ---
 
 ## How read-only is enforced
 
-Not by convention — in the HTTP layer, in `src/atlassian_client/http.py`:
+Not by convention — in the HTTP layer, in `src/readonly_client/http.py`:
 
 ```python
-def assert_read_only(method: str, path: str) -> None:
+def assert_read_only(method: str, path: str, allowlist: Iterable[str] = ()) -> None:
     if method.upper() not in {"GET", "POST"}:
         raise ReadOnlyViolation(...)          # before a request object exists
-    if method.upper() == "POST" and normalise_path(path) not in SEARCH_POST_ALLOWLIST:
+    if method.upper() == "POST" and normalise_path(path) not in tuple(allowlist):
         raise ReadOnlyViolation(...)
 ```
 
-`SEARCH_POST_ALLOWLIST` is `("/rest/api/2/search",)` — Atlassian requires POST
-there so a long JQL string can travel in a body instead of a URL. That is the
-only POST this client can make.
+The only allowlist in the codebase is Jira's `("/rest/api/2/search",)` —
+Atlassian requires POST there so a long JQL string can travel in a body instead
+of a URL. Every other client passes none and is therefore GET-only.
 
-Three details that matter:
+Four details that matter:
+
+- **The allowlist travels on the config, and defaults to empty.** It is not a
+  module global the client consults, because that would let Jira's one
+  exception silently apply to a GitLab or Jenkins client that never asked for
+  it. A product that names no allowlist gets GET and only GET.
 
 - **The guard runs before the request is built**, so a refusal cannot have
   reached the network. The error says "No request was made".
@@ -146,12 +174,15 @@ hundred null custom fields.
 
 | | |
 | --- | --- |
-| **401** | "Token rejected." Names `ATLASSIAN_PAT` and the auth mode. |
-| **403** | "Authenticated, but no permission on this project/space." Says explicitly that regenerating the token will not help. |
-| **404 + HTML** | Reads as a wrong path — points at the Cloud/DC split and `probe.py`. |
-| **404 + JSON** | Item missing *or* invisible. Both products return 404 rather than 403 for content you cannot see, so these genuinely cannot be told apart. |
+| **401** | "Token rejected." Names `<PREFIX>_TOKEN` and the auth mode. |
+| **403** | "Authenticated, but no permission on this resource." Says explicitly that regenerating the token will not help. |
+| **404 + HTML** | Reads as a wrong path — appends the product's own hint about what a wrong API root looks like, and points at `probe.py`. |
+| **404 + JSON** | Item missing *or* invisible. These products return 404 rather than 403 for content you cannot see, so these genuinely cannot be told apart. |
 | **429** | Honours `Retry-After`, exponential backoff, capped at 3 retries. |
-| **TLS** | Names the real cause and points at `ATLASSIAN_CA_BUNDLE`. |
+| **TLS** | Names the real cause and points at `<PREFIX>_CA_BUNDLE` / `MCP_CA_BUNDLE`. |
+
+Every message names the variable for the server that raised it. A GitLab
+failure that says `ATLASSIAN_TOKEN` is worse than one that names nothing.
 
 401 and 403 are never collapsed. They are opposite problems with opposite
 fixes, and merging them sends people to re-issue a credential that was working.
@@ -166,7 +197,8 @@ intercepting it. A test asserts the string never appears in the error message.
 1. **Deployment type.** Run `probe.py` and send me the output. If it reports
    Cloud, the Jira path set needs to move to `/rest/api/3` with
    `/rest/api/3/search/jql` and `nextPageToken` paging, and Confluence needs the
-   `/wiki` prefix — a `paths.py` change plus paging changes in two tools.
+   `/wiki` prefix — a `paths/atlassian.py` change plus paging changes in two
+   tools.
 2. **`jira_list_projects` pagination.** I used `/rest/api/2/project`
    (unpaginated, filtered client-side) rather than `/rest/api/2/project/search`,
    because I could not confirm the paginated path exists on your DC version.
@@ -176,5 +208,9 @@ intercepting it. A test asserts the string never appears in the error message.
 3. **MCP SDK version.** You asked for FastMCP; the current SDK is 2.x, where it
    was renamed `MCPServer`. `mcp_compat.py` resolves whichever is installed, so
    both work. Pin `mcp<2` if you want the 1.x line specifically.
-4. **Where should this live?** It is currently a standalone directory. It is not
-   in the KRYPTONITE repo, which is unrelated. Tell me the repo and I will push.
+4. **Reading large text.** `get_text()` streams and caps text bodies, with
+   `tail=True` for the case that matters — a stack trace is the last thing a
+   failing build prints, so a cap that keeps the first 2 MB of a 200 MB log
+   keeps everything except the answer. Truncation is reported alongside the
+   text rather than hidden, because a truncated log that looks whole makes an
+   agent report that a build failed for no visible reason.

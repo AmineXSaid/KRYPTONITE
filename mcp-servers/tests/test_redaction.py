@@ -13,9 +13,9 @@ import base64
 
 import pytest
 
-from atlassian_client import redaction
-from atlassian_client.config import AtlassianConfig, load_config
-from atlassian_client.redaction import (
+from readonly_client import redaction
+from readonly_client.config import ServiceConfig, load_config
+from readonly_client.redaction import (
     PLACEHOLDER,
     register_secret,
     safe_exception_text,
@@ -105,12 +105,14 @@ def test_safe_exception_text_redacts_and_omits_traceback() -> None:
 def test_bearer_config_registers_pat_and_header(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("JIRA_BASE_URL", "https://jira.test.internal")
     monkeypatch.setenv("ATLASSIAN_AUTH_MODE", "bearer")
-    monkeypatch.setenv("ATLASSIAN_PAT", TOKEN)
-    cfg = load_config("JIRA_BASE_URL", "Jira")
+    monkeypatch.setenv("ATLASSIAN_TOKEN", TOKEN)
+    cfg = load_config("JIRA_BASE_URL", "Jira", env_prefix="ATLASSIAN",
+                       auth_modes=("bearer", "basic"))
 
     assert TOKEN not in scrub(f"boom {TOKEN}")
     # The assembled header is a different string; it must also be covered.
-    assert TOKEN not in scrub(f"header {cfg.auth_header()}")
+    for value in cfg.auth_headers().values():
+        assert TOKEN not in scrub(f"header {value}")
 
 
 def test_basic_config_registers_the_base64_blob(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -118,9 +120,10 @@ def test_basic_config_registers_the_base64_blob(monkeypatch: pytest.MonkeyPatch)
     email, token = "user@corp.example", "cloud-api-token-value-1234"
     monkeypatch.setenv("CONFLUENCE_BASE_URL", "https://x.atlassian.net/wiki")
     monkeypatch.setenv("ATLASSIAN_AUTH_MODE", "basic")
-    monkeypatch.setenv("ATLASSIAN_EMAIL", email)
-    monkeypatch.setenv("ATLASSIAN_API_TOKEN", token)
-    load_config("CONFLUENCE_BASE_URL", "Confluence")
+    monkeypatch.setenv("ATLASSIAN_USER", email)
+    monkeypatch.setenv("ATLASSIAN_TOKEN", token)
+    load_config("CONFLUENCE_BASE_URL", "Confluence", env_prefix="ATLASSIAN",
+                       auth_modes=("bearer", "basic"))
 
     blob = base64.b64encode(f"{email}:{token}".encode()).decode()
     out = scrub(f"Authorization: Basic {blob}")
@@ -136,8 +139,9 @@ def test_config_repr_does_not_expose_token_via_scrub(monkeypatch: pytest.MonkeyP
     """A dataclass repr holds the token; anything that formats it must scrub."""
     monkeypatch.setenv("JIRA_BASE_URL", "https://jira.test.internal")
     monkeypatch.setenv("ATLASSIAN_AUTH_MODE", "bearer")
-    monkeypatch.setenv("ATLASSIAN_PAT", TOKEN)
-    cfg: AtlassianConfig = load_config("JIRA_BASE_URL", "Jira")
+    monkeypatch.setenv("ATLASSIAN_TOKEN", TOKEN)
+    cfg: ServiceConfig = load_config("JIRA_BASE_URL", "Jira", env_prefix="ATLASSIAN",
+                       auth_modes=("bearer", "basic"))
 
     # The raw repr does contain it - that is exactly why every outbound path
     # goes through scrub() rather than relying on the object being safe.

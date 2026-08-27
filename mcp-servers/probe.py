@@ -31,12 +31,15 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
-from atlassian_client.config import ConfigError, load_config  # noqa: E402
-from atlassian_client.errors import AtlassianError  # noqa: E402
-from atlassian_client.http import ReadOnlyClient  # noqa: E402
-from atlassian_client.paths import (  # noqa: E402
+from readonly_client.config import ConfigError, load_config  # noqa: E402
+from readonly_client.errors import ServiceError  # noqa: E402
+from readonly_client.http import ReadOnlyClient  # noqa: E402
+from readonly_client.paths.atlassian import (  # noqa: E402
     CONFLUENCE_PROBE,
+    EXTRA_HEADERS,
     JIRA_SERVER_INFO,
+    SEARCH_POST_ALLOWLIST,
+    WRONG_PATH_HINT,
 )
 
 GREEN, RED, YELLOW, DIM, RESET = "\033[32m", "\033[31m", "\033[33m", "\033[2m", "\033[0m"
@@ -70,7 +73,15 @@ async def probe_jira() -> bool:
     """
     print(f"\n{'─' * 70}\nJIRA\n{'─' * 70}")
     try:
-        cfg = load_config("JIRA_BASE_URL", "Jira")
+        cfg = load_config(
+            "JIRA_BASE_URL",
+            "Jira",
+            env_prefix="ATLASSIAN",
+            auth_modes=("bearer", "basic"),
+            extra_headers=EXTRA_HEADERS,
+            search_post_allowlist=SEARCH_POST_ALLOWLIST,
+            wrong_path_hint=WRONG_PATH_HINT,
+        )
     except ConfigError as exc:
         bad(f"Configuration: {exc}")
         return False
@@ -82,7 +93,7 @@ async def probe_jira() -> bool:
     async with ReadOnlyClient(cfg) as client:
         try:
             data = await client.get(JIRA_SERVER_INFO)
-        except AtlassianError as exc:
+        except ServiceError as exc:
             bad(f"GET {JIRA_SERVER_INFO} failed.")
             note(str(exc))
             return False
@@ -123,7 +134,14 @@ async def probe_confluence() -> bool:
     """
     print(f"\n{'─' * 70}\nCONFLUENCE\n{'─' * 70}")
     try:
-        cfg = load_config("CONFLUENCE_BASE_URL", "Confluence")
+        cfg = load_config(
+            "CONFLUENCE_BASE_URL",
+            "Confluence",
+            env_prefix="ATLASSIAN",
+            auth_modes=("bearer", "basic"),
+            extra_headers=EXTRA_HEADERS,
+            wrong_path_hint=WRONG_PATH_HINT,
+        )
     except ConfigError as exc:
         bad(f"Configuration: {exc}")
         return False
@@ -133,7 +151,7 @@ async def probe_confluence() -> bool:
     async with ReadOnlyClient(cfg) as client:
         try:
             data = await client.get(CONFLUENCE_PROBE, params={"limit": 1})
-        except AtlassianError as exc:
+        except ServiceError as exc:
             bad(f"GET {CONFLUENCE_PROBE} failed.")
             note(str(exc))
             note("")

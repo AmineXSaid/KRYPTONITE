@@ -16,20 +16,22 @@ import asyncio
 import sys
 from typing import Any
 
-from atlassian_client.config import ConfigError, load_config
-from atlassian_client.mcp_compat import build_server
-from atlassian_client.errors import AtlassianError
-from atlassian_client.http import ReadOnlyClient
-from atlassian_client.paths import (
+from readonly_client.config import ConfigError, load_config
+from readonly_client.mcp_compat import build_server
+from readonly_client.errors import ServiceError
+from readonly_client.http import ReadOnlyClient
+from readonly_client.paths.atlassian import (
     CONFLUENCE_CONTENT,
     CONFLUENCE_SEARCH,
     CONFLUENCE_SPACES,
+    EXTRA_HEADERS,
+    WRONG_PATH_HINT,
 )
 
 from .shaping import shape_page, shape_search, shape_space
 
 # FastMCP in SDK 1.x, MCPServer in 2.x - same decorator model either way.
-# See atlassian_client.mcp_compat.
+# See readonly_client.mcp_compat.
 mcp = build_server(
     "confluence-mcp",
     instructions=(
@@ -44,7 +46,7 @@ _client: ReadOnlyClient | None = None
 
 def _require_client() -> ReadOnlyClient:
     if _client is None or _config is None:
-        raise AtlassianError(
+        raise ServiceError(
             "confluence-mcp is not initialised. This is a bug: main() must run "
             "before any tool is called."
         )
@@ -81,7 +83,7 @@ async def confluence_search(
     assert _config is not None
 
     if not cql or not cql.strip():
-        raise AtlassianError(
+        raise ServiceError(
             'cql is required and cannot be empty. To list recent pages, try: '
             'type = page ORDER BY lastmodified DESC'
         )
@@ -139,14 +141,14 @@ async def confluence_get_page(
 
     pid = (page_id or "").strip()
     if not pid:
-        raise AtlassianError(
+        raise ServiceError(
             "page_id is required. It is the numeric content id from "
             "confluence_search, e.g. 123456789 - not the page title."
         )
 
     fmt = (body_format or "storage").strip().lower()
     if fmt not in ("storage", "none"):
-        raise AtlassianError(
+        raise ServiceError(
             f"body_format must be 'storage' or 'none', got {body_format!r}. "
             "'storage' fetches the body and converts it to Markdown; 'none' "
             "returns metadata only."
@@ -219,7 +221,16 @@ def main() -> int:
     """Start the server, or refuse to start and say exactly what is missing."""
     global _config, _client
     try:
-        _config = load_config("CONFLUENCE_BASE_URL", "Confluence")
+        _config = load_config(
+            "CONFLUENCE_BASE_URL",
+            "Confluence",
+            env_prefix="ATLASSIAN",
+            auth_modes=("bearer", "basic"),
+            extra_headers=EXTRA_HEADERS,
+            # No search_post_allowlist: CQL search is a GET. This client cannot
+            # POST anywhere at all.
+            wrong_path_hint=WRONG_PATH_HINT,
+        )
     except ConfigError as exc:
         # stderr: stdout is the MCP transport.
         print(f"confluence-mcp: configuration error\n  {exc}", file=sys.stderr)

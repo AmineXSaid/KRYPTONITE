@@ -16,15 +16,18 @@ import asyncio
 import sys
 from typing import Any
 
-from atlassian_client.config import ConfigError, load_config
-from atlassian_client.mcp_compat import build_server
-from atlassian_client.errors import AtlassianError
-from atlassian_client.http import ReadOnlyClient
-from atlassian_client.paths import (
+from readonly_client.config import ConfigError, load_config
+from readonly_client.mcp_compat import build_server
+from readonly_client.errors import ServiceError
+from readonly_client.http import ReadOnlyClient
+from readonly_client.paths.atlassian import (
+    EXTRA_HEADERS,
     JIRA_FIELDS,
     JIRA_ISSUE,
     JIRA_PROJECTS,
     JIRA_SEARCH,
+    SEARCH_POST_ALLOWLIST,
+    WRONG_PATH_HINT,
 )
 
 from .shaping import (
@@ -36,7 +39,7 @@ from .shaping import (
 )
 
 # FastMCP in SDK 1.x, MCPServer in 2.x - same decorator model either way.
-# See atlassian_client.mcp_compat.
+# See readonly_client.mcp_compat.
 mcp = build_server(
     "jira-mcp",
     instructions=(
@@ -53,7 +56,7 @@ _client: ReadOnlyClient | None = None
 
 def _require_client() -> ReadOnlyClient:
     if _client is None or _config is None:
-        raise AtlassianError(
+        raise ServiceError(
             "jira-mcp is not initialised. This is a bug: main() must run before "
             "any tool is called."
         )
@@ -107,7 +110,7 @@ async def jira_search(
     assert _config is not None
 
     if not jql or not jql.strip():
-        raise AtlassianError(
+        raise ServiceError(
             "jql is required and cannot be empty. To list everything recently "
             "updated, try: ORDER BY updated DESC"
         )
@@ -161,7 +164,7 @@ async def jira_get_issue(
 
     key = (issue_key or "").strip()
     if not key:
-        raise AtlassianError("issue_key is required, e.g. PLATFORM-1423.")
+        raise ServiceError("issue_key is required, e.g. PLATFORM-1423.")
 
     extra = _split_fields(fields)
     requested = list(DEFAULT_ISSUE_FIELDS) + [f for f in extra if f not in DEFAULT_ISSUE_FIELDS]
@@ -267,7 +270,18 @@ def main() -> int:
     """Start the server, or refuse to start and say exactly what is missing."""
     global _config, _client
     try:
-        _config = load_config("JIRA_BASE_URL", "Jira")
+        _config = load_config(
+            "JIRA_BASE_URL",
+            "Jira",
+            env_prefix="ATLASSIAN",
+            auth_modes=("bearer", "basic"),
+            extra_headers=EXTRA_HEADERS,
+            # Only Jira gets the POST carve-out, and only for /search. The
+            # Confluence server below passes no allowlist at all, so its client
+            # is GET-only however the code around it changes.
+            search_post_allowlist=SEARCH_POST_ALLOWLIST,
+            wrong_path_hint=WRONG_PATH_HINT,
+        )
     except ConfigError as exc:
         # stderr, not stdout: stdout is the MCP transport. A message written
         # there corrupts the protocol stream instead of reaching the user.

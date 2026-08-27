@@ -16,7 +16,7 @@ more.
    `mcp-readonly-<yourname>`.
 5. Set an expiry. Shorter is better; you can always issue another.
 6. **Copy the token now** — Jira shows it exactly once.
-7. Put it in `.env` as `ATLASSIAN_PAT`.
+7. Put it in `.env` as `ATLASSIAN_TOKEN`.
 
 > If there is no **Personal Access Tokens** entry in your profile, your admin
 > has disabled PATs instance-wide, or this is Jira Cloud rather than Data
@@ -30,7 +30,7 @@ credential, and this server would not use one if it were.
 ```bash
 JIRA_BASE_URL=https://jira.company.internal
 ATLASSIAN_AUTH_MODE=bearer
-ATLASSIAN_PAT=<your token>
+ATLASSIAN_TOKEN=<your token>
 
 # Only if your instance uses an internally-signed certificate:
 # ATLASSIAN_CA_BUNDLE=/etc/ssl/certs/corp-root.pem
@@ -52,12 +52,12 @@ most other clients take the same shape:
 {
   "mcpServers": {
     "jira": {
-      "command": "/absolute/path/to/atlassian-mcp/.venv/bin/jira-mcp",
+      "command": "/absolute/path/to/mcp-servers/.venv/bin/jira-mcp",
       "env": {
         "JIRA_BASE_URL": "https://jira.company.internal",
         "ATLASSIAN_AUTH_MODE": "bearer",
-        "ATLASSIAN_PAT": "<your token>",
-        "MAX_RESULTS_CAP": "50"
+        "ATLASSIAN_TOKEN": "<your token>",
+        "MCP_MAX_RESULTS_CAP": "50"
       }
     }
   }
@@ -106,7 +106,7 @@ jql = 'project = PLATFORM AND status != Done AND updated >= -14d ORDER BY update
 }
 ```
 
-Continue with `start_at=25`. `max_results` is clamped to `MAX_RESULTS_CAP`
+Continue with `start_at=25`. `max_results` is clamped to `ATLASSIAN_MAX_RESULTS_CAP` (or `MCP_MAX_RESULTS_CAP`)
 rather than rejected.
 
 ### `jira_get_issue(issue_key, fields=None)`

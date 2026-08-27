@@ -8,6 +8,11 @@ every way a caller might try to smuggle one past the check.
 So the cases below are adversarial rather than illustrative: casing, whitespace,
 path traversal that normalises back onto a write endpoint, absolute URLs to
 another host, and prefix tricks against the search allowlist.
+
+The allowlist itself is now per-client rather than a module global, and the
+default is EMPTY. That is the property the first block below defends: a caller
+that forgets to pass an allowlist gets GET and only GET, so adding a fifth
+product cannot silently inherit Jira's one POST carve-out.
 """
 
 from __future__ import annotations
@@ -15,20 +20,24 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from atlassian_client.config import AtlassianConfig
-from atlassian_client.errors import ReadOnlyViolation
-from atlassian_client.http import ReadOnlyClient, assert_read_only, normalise_path
-from atlassian_client.paths import JIRA_SEARCH, SEARCH_POST_ALLOWLIST
+from readonly_client.config import ServiceConfig
+from readonly_client.errors import ReadOnlyViolation
+from readonly_client.http import ReadOnlyClient, assert_read_only, normalise_path
+from readonly_client.paths.atlassian import JIRA_SEARCH, SEARCH_POST_ALLOWLIST
 
 
-def cfg() -> AtlassianConfig:
-    return AtlassianConfig(
+def cfg(**over) -> ServiceConfig:
+    base = dict(
         base_url="https://jira.test.internal",
         auth_mode="bearer",
-        pat="test-token-value-long-enough",
+        token="test-token-value-long-enough",
         product="Jira",
         base_url_var="JIRA_BASE_URL",
+        env_prefix="ATLASSIAN",
+        search_post_allowlist=SEARCH_POST_ALLOWLIST,
     )
+    base.update(over)
+    return ServiceConfig(**base)  # type: ignore[arg-type]
 
 
 # ── the mutating verbs are refused outright ────────────────────────────────
@@ -81,7 +90,42 @@ def test_get_is_permitted_anywhere(path: str) -> None:
 
 def test_post_to_search_is_permitted() -> None:
     """The single carve-out: Atlassian needs POST for long JQL."""
-    assert_read_only("POST", JIRA_SEARCH)
+    assert_read_only("POST", JIRA_SEARCH, SEARCH_POST_ALLOWLIST)
+
+
+def test_the_default_allowlist_is_empty() -> None:
+    """Fail closed. A caller that passes no allowlist can only GET.
+
+    This is the property that makes adding a product safe. GitLab and Jenkins
+    have no POST search, so their configs name no allowlist - and if the
+    default were Jira's, they would silently gain the right to POST to a Jira
+    path that happens to exist on no GitLab instance today and might tomorrow.
+    """
+    with pytest.raises(ReadOnlyViolation) as exc:
+        assert_read_only("POST", JIRA_SEARCH)
+    assert "No request was made" in str(exc.value)
+    # And explicitly passing an empty allowlist must behave identically.
+    with pytest.raises(ReadOnlyViolation):
+        assert_read_only("POST", JIRA_SEARCH, ())
+
+
+def test_one_products_carve_out_does_not_reach_another_client() -> None:
+    """The allowlist travels on the config, so it cannot leak sideways."""
+    jira = ServiceConfig(
+        base_url="https://jira.test.internal",
+        auth_mode="bearer",
+        token="test-token-value-long-enough",
+        search_post_allowlist=SEARCH_POST_ALLOWLIST,
+    )
+    gitlab_shaped = ServiceConfig(
+        base_url="https://gitlab.test.internal",
+        auth_mode="header",
+        token="test-token-value-long-enough",
+        auth_header_name="PRIVATE-TOKEN",
+    )
+    assert_read_only("POST", JIRA_SEARCH, jira.search_post_allowlist)
+    with pytest.raises(ReadOnlyViolation):
+        assert_read_only("POST", JIRA_SEARCH, gitlab_shaped.search_post_allowlist)
 
 
 @pytest.mark.parametrize(
@@ -98,7 +142,7 @@ def test_post_to_search_is_permitted() -> None:
 def test_post_to_write_endpoints_is_refused(path: str) -> None:
     """Every real Jira/Confluence write endpoint is unreachable by POST."""
     with pytest.raises(ReadOnlyViolation) as exc:
-        assert_read_only("POST", path)
+        assert_read_only("POST", path, SEARCH_POST_ALLOWLIST)
     assert "No request was made" in str(exc.value)
 
 
@@ -108,11 +152,11 @@ def test_post_allowlist_is_exact_not_prefix() -> None:
     Guards written with startswith() let /search/../issue/X/transitions through.
     """
     with pytest.raises(ReadOnlyViolation):
-        assert_read_only("POST", JIRA_SEARCH + "/../issue/ABC-1/transitions")
+        assert_read_only("POST", JIRA_SEARCH + "/../issue/ABC-1/transitions", SEARCH_POST_ALLOWLIST)
     with pytest.raises(ReadOnlyViolation):
-        assert_read_only("POST", JIRA_SEARCH + "x")
+        assert_read_only("POST", JIRA_SEARCH + "x", SEARCH_POST_ALLOWLIST)
     with pytest.raises(ReadOnlyViolation):
-        assert_read_only("POST", JIRA_SEARCH + "/sub")
+        assert_read_only("POST", JIRA_SEARCH + "/sub", SEARCH_POST_ALLOWLIST)
 
 
 def test_post_traversal_that_normalises_to_a_write_is_refused() -> None:
@@ -120,13 +164,13 @@ def test_post_traversal_that_normalises_to_a_write_is_refused() -> None:
     sneaky = "/rest/api/2/search/../../2/issue/ABC-1/transitions"
     assert normalise_path(sneaky) == "/rest/api/2/issue/ABC-1/transitions"
     with pytest.raises(ReadOnlyViolation):
-        assert_read_only("POST", sneaky)
+        assert_read_only("POST", sneaky, SEARCH_POST_ALLOWLIST)
 
 
 def test_post_traversal_that_normalises_onto_search_is_allowed() -> None:
     """Normalisation is honest in both directions: this really is the search path."""
     assert normalise_path("/rest/api/2/foo/../search") == JIRA_SEARCH
-    assert_read_only("POST", "/rest/api/2/foo/../search")
+    assert_read_only("POST", "/rest/api/2/foo/../search", SEARCH_POST_ALLOWLIST)
 
 
 def test_absolute_url_is_reduced_to_its_path() -> None:
@@ -137,7 +181,7 @@ def test_absolute_url_is_reduced_to_its_path() -> None:
     """
     assert normalise_path("https://evil.example/rest/api/2/issue") == "/rest/api/2/issue"
     with pytest.raises(ReadOnlyViolation):
-        assert_read_only("POST", "https://evil.example/rest/api/2/issue")
+        assert_read_only("POST", "https://evil.example/rest/api/2/issue", SEARCH_POST_ALLOWLIST)
 
 
 def test_allowlist_contains_only_search() -> None:

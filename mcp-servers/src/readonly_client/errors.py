@@ -6,21 +6,26 @@ one. Two pairs matter most:
 
   401 vs 403  A rejected token and a valid token without access are opposite
               problems with opposite fixes - regenerate the credential, versus
-              ask a space admin for access. Collapsing them into "access
-              denied" sends people to re-issue a PAT that was never the issue.
+              ask an admin for access. Collapsing them into "access denied"
+              sends people to re-issue a token that was never the issue.
 
   404 path vs 404 item
-              Atlassian answers both "this endpoint does not exist" and "this
-              issue does not exist, or you cannot see it" with 404. The first
-              means the client is pointed at the wrong deployment type; the
-              second is normal. We separate them by asking whether the response
-              looks like an API error or like a web page, since a wrong path on
-              a DC instance usually falls through to the site's HTML 404.
+              Every one of these products answers both "this endpoint does not
+              exist" and "this item does not exist, or you cannot see it" with
+              404. The first means the client is pointed at the wrong
+              deployment or API version; the second is normal. We separate them
+              by asking whether the response looks like an API error or like a
+              web page, since a wrong path usually falls through to the site's
+              HTML 404.
 
-Note the third case folded into item-not-found: Jira and Confluence both return
-404 rather than 403 for an item that exists but is invisible to the caller.
-That is a deliberate anti-enumeration choice on Atlassian's part, and we cannot
-undo it, so the message says both.
+Note the third case folded into item-not-found: Jira, Confluence and GitLab all
+return 404 rather than 403 for an item that exists but is invisible to the
+caller. That is a deliberate anti-enumeration choice on their part, and we
+cannot undo it, so the message says both.
+
+Every message that names a variable takes the prefix from the config, so a
+GitLab failure says GITLAB_TOKEN and a Jenkins one says JENKINS_TOKEN. A
+message naming the wrong variable is worse than one naming none.
 """
 
 from __future__ import annotations
@@ -30,7 +35,7 @@ import httpx
 from .redaction import safe_exception_text, scrub
 
 
-class AtlassianError(RuntimeError):
+class ServiceError(RuntimeError):
     """Base for every error surfaced to a tool caller.
 
     Carries no response body by default: bodies can echo request headers on
@@ -39,27 +44,27 @@ class AtlassianError(RuntimeError):
     """
 
 
-class AuthError(AtlassianError):
+class AuthError(ServiceError):
     """401 - the credential was rejected."""
 
 
-class PermissionError_(AtlassianError):
+class PermissionError_(ServiceError):
     """403 - the credential is good, the caller lacks rights."""
 
 
-class NotFoundError(AtlassianError):
+class NotFoundError(ServiceError):
     """404 - either the path or the item."""
 
 
-class RateLimitError(AtlassianError):
+class RateLimitError(ServiceError):
     """429 after retries were exhausted."""
 
 
-class TransportError(AtlassianError):
+class TransportError(ServiceError):
     """DNS, connect, timeout, TLS."""
 
 
-class ReadOnlyViolation(AtlassianError):
+class ReadOnlyViolation(ServiceError):
     """A caller tried to make a request this client refuses to build.
 
     Deliberately not an HTTP error: it is raised before any connection exists.
@@ -73,13 +78,16 @@ def _looks_like_html(response: httpx.Response) -> bool:
     return response.text.lstrip()[:15].lower().startswith(("<!doctype", "<html"))
 
 
-def _atlassian_messages(response: httpx.Response) -> str:
-    """Pull Atlassian's own error strings out of a JSON error body.
+def _api_messages(response: httpx.Response) -> str:
+    """Pull the API's own error strings out of a JSON error body.
 
-    Both products answer errors with ``errorMessages`` (a list) and/or
-    ``errors`` (a dict), and those strings are genuinely useful - an invalid
-    JQL field name is reported there and nowhere else. Everything else in the
-    body is dropped.
+    These are genuinely useful and reported nowhere else - an invalid JQL field
+    name, a GitLab scope refusal, a Jenkins tree-parameter syntax error.
+    Everything else in the body is dropped.
+
+      Atlassian  errorMessages (list) and/or errors (dict)
+      Confluence a flat `message` on some shapes
+      GitLab     `message` (str or dict) or `error` (str)
     """
     try:
         data = response.json()
@@ -94,9 +102,15 @@ def _atlassian_messages(response: httpx.Response) -> str:
     errs = data.get("errors")
     if isinstance(errs, dict):
         parts.extend(f"{k}: {v}" for k, v in errs.items())
-    # Confluence uses a flat `message` on some error shapes.
-    if not parts and isinstance(data.get("message"), str):
-        parts.append(data["message"])
+    if not parts:
+        for key in ("message", "error", "error_description"):
+            value = data.get(key)
+            if isinstance(value, str) and value:
+                parts.append(value)
+                break
+            if isinstance(value, dict) and value:
+                parts.extend(f"{k}: {v}" for k, v in value.items())
+                break
     return scrub("; ".join(parts))
 
 
@@ -106,52 +120,54 @@ def raise_for_response(
     product: str,
     path: str,
     base_url_var: str,
+    env_prefix: str = "MCP",
+    wrong_path_hint: str = "",
 ) -> None:
     """Map a non-2xx response onto a precise, actionable error.
 
-    ``product`` and ``base_url_var`` are threaded through so the message can
-    name the variable the user has to change, rather than describing the
-    problem in the abstract.
+    ``product``, ``base_url_var`` and ``env_prefix`` are threaded through so
+    the message can name the variable the user has to change, rather than
+    describing the problem in the abstract. ``wrong_path_hint`` is the
+    product's own sentence about what a wrong API root looks like for it - that
+    knowledge belongs to the product, not to this module.
     """
     status = response.status_code
     if status < 400:
         return
 
-    detail = _atlassian_messages(response)
+    detail = _api_messages(response)
     suffix = f" {product} said: {detail}" if detail else ""
 
     if status == 401:
-        var = "ATLASSIAN_PAT" if "Bearer" in response.request.headers.get(
-            "authorization", "Bearer"
-        ) else "ATLASSIAN_EMAIL / ATLASSIAN_API_TOKEN"
         raise AuthError(
-            "Token rejected (HTTP 401). Check "
-            f"{var} and that ATLASSIAN_AUTH_MODE matches your deployment "
-            "('bearer' for Data Center PATs, 'basic' for Cloud email+API "
-            f"token). The credential itself was not logged.{suffix}"
+            f"Token rejected (HTTP 401). Check {env_prefix}_TOKEN, and that "
+            f"{env_prefix}_AUTH_MODE matches what this instance expects - the "
+            "same token sent in the wrong header or the wrong scheme fails "
+            "exactly like a bad one. The credential itself was not logged."
+            f"{suffix}"
         )
 
     if status == 403:
         # Explicitly NOT an auth problem, and the message has to say so or the
         # user will go and regenerate a working token.
         raise PermissionError_(
-            "Authenticated, but no permission on this project/space (HTTP 403). "
-            "The token is valid - your account lacks rights to this resource, "
-            "or a project/space permission scheme excludes it. Regenerating the "
-            f"token will not help; ask the project or space admin for access.{suffix}"
+            "Authenticated, but no permission on this resource (HTTP 403). "
+            "The token is valid - your account lacks rights here, or the "
+            "token's scopes do not cover this call. Regenerating the token "
+            "will not help unless you widen its scopes; otherwise ask an "
+            f"admin for access.{suffix}"
         )
 
     if status == 404:
         if _looks_like_html(response):
             # An HTML 404 means the request never reached the REST layer, which
-            # on these products almost always means wrong deployment shape.
+            # almost always means the wrong API root.
+            hint = f" {wrong_path_hint}" if wrong_path_hint else ""
             raise NotFoundError(
                 f"HTTP 404 with an HTML body for {path} - this looks like a wrong "
                 f"API path rather than a missing item. Check {base_url_var} points "
-                "at the instance root, and that the deployment type is right: "
-                "Data Center uses /rest/api/2 (Jira) and /rest/api with no /wiki "
-                "prefix (Confluence); Cloud uses /rest/api/3 and /wiki/rest/api. "
-                "Run probe.py to see which this instance is."
+                f"at the instance root and nothing deeper.{hint} "
+                "Run probe.py to see what this instance actually is."
             )
         raise NotFoundError(
             f"HTTP 404 for {path} - the item does not exist, or it exists and your "
@@ -167,15 +183,22 @@ def raise_for_response(
         )
 
     if 500 <= status < 600:
-        raise AtlassianError(
+        raise ServiceError(
             f"{product} returned HTTP {status} for {path}. This is a server-side "
             f"fault on the instance, not a problem with the request.{suffix}"
         )
 
-    raise AtlassianError(f"{product} returned HTTP {status} for {path}.{suffix}")
+    raise ServiceError(f"{product} returned HTTP {status} for {path}.{suffix}")
 
 
-def transport_error(exc: Exception, *, product: str, base_url: str, base_url_var: str) -> TransportError:
+def transport_error(
+    exc: Exception,
+    *,
+    product: str,
+    base_url: str,
+    base_url_var: str,
+    env_prefix: str = "MCP",
+) -> TransportError:
     """Map an httpx transport exception onto a cause the user can act on.
 
     The TLS branch is the important one. A corporate instance behind a private
@@ -190,13 +213,13 @@ def transport_error(exc: Exception, *, product: str, base_url: str, base_url_var
         return TransportError(
             f"Timed out connecting to {base_url}. The host may be unreachable "
             "from this network - a corporate instance usually requires VPN. "
-            "Raise ATLASSIAN_CONNECT_TIMEOUT if the network is merely slow."
+            f"Raise {env_prefix}_CONNECT_TIMEOUT if the network is merely slow."
         )
     if isinstance(exc, httpx.ReadTimeout):
         return TransportError(
             f"{product} accepted the connection but did not answer in time. "
-            "A broad JQL/CQL query can exceed the read timeout - narrow it, or "
-            "raise ATLASSIAN_READ_TIMEOUT."
+            "A broad query or a very large log can exceed the read timeout - "
+            f"narrow it, or raise {env_prefix}_READ_TIMEOUT."
         )
     # ConnectError wraps TLS failures as well as refused connections, so the
     # certificate check has to look at the message.
@@ -205,7 +228,8 @@ def transport_error(exc: Exception, *, product: str, base_url: str, base_url_var
         return TransportError(
             f"TLS verification failed for {base_url}: {text}\n"
             "This is what a corporate root CA looks like when the client does "
-            "not trust it. Point ATLASSIAN_CA_BUNDLE at your organisation's PEM "
+            f"not trust it. Point {env_prefix}_CA_BUNDLE (or MCP_CA_BUNDLE, "
+            "which covers every server here) at your organisation's PEM "
             "bundle. Do not disable verification: this connection carries your "
             "personal token, and an unverified TLS session cannot tell the "
             "instance apart from anything that intercepts it."

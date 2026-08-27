@@ -12,9 +12,9 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from atlassian_client.config import AtlassianConfig
-from atlassian_client.errors import (
-    AtlassianError,
+from readonly_client.config import ServiceConfig
+from readonly_client.errors import (
+    ServiceError,
     AuthError,
     NotFoundError,
     PermissionError_,
@@ -23,19 +23,26 @@ from atlassian_client.errors import (
     raise_for_response,
     transport_error,
 )
-from atlassian_client.http import ReadOnlyClient
+from readonly_client.http import ReadOnlyClient
+from readonly_client.paths.atlassian import (
+    SEARCH_POST_ALLOWLIST,
+    WRONG_PATH_HINT,
+)
 
 
-def cfg(**over) -> AtlassianConfig:
+def cfg(**over) -> ServiceConfig:
     base = dict(
         base_url="https://jira.test.internal",
         auth_mode="bearer",
-        pat="test-token-value-long-enough",
+        token="test-token-value-long-enough",
         product="Jira",
         base_url_var="JIRA_BASE_URL",
+        env_prefix="ATLASSIAN",
+        wrong_path_hint=WRONG_PATH_HINT,
+        search_post_allowlist=SEARCH_POST_ALLOWLIST,
     )
     base.update(over)
-    return AtlassianConfig(**base)  # type: ignore[arg-type]
+    return ServiceConfig(**base)  # type: ignore[arg-type]
 
 
 def response(status: int, *, json=None, text: str | None = None, headers=None) -> httpx.Response:
@@ -50,7 +57,14 @@ def response(status: int, *, json=None, text: str | None = None, headers=None) -
 
 
 def _raise(resp: httpx.Response, path: str = "/rest/api/2/search") -> None:
-    raise_for_response(resp, product="Jira", path=path, base_url_var="JIRA_BASE_URL")
+    raise_for_response(
+        resp,
+        product="Jira",
+        path=path,
+        base_url_var="JIRA_BASE_URL",
+        env_prefix="ATLASSIAN",
+        wrong_path_hint=WRONG_PATH_HINT,
+    )
 
 
 # ── 401 and 403 must never be the same message ─────────────────────────────
@@ -61,7 +75,7 @@ def test_401_names_the_credential() -> None:
         _raise(response(401, json={"errorMessages": ["Unauthorized"]}))
     msg = str(exc.value)
     assert "Token rejected" in msg
-    assert "ATLASSIAN_PAT" in msg
+    assert "ATLASSIAN_TOKEN" in msg
     assert "ATLASSIAN_AUTH_MODE" in msg
     # Must not send the user chasing a permission problem.
     assert "no permission" not in msg.lower()
@@ -124,7 +138,7 @@ def test_429_mentions_retry_after_and_the_cap() -> None:
 
 
 def test_500_is_attributed_to_the_instance() -> None:
-    with pytest.raises(AtlassianError) as exc:
+    with pytest.raises(ServiceError) as exc:
         _raise(response(503))
     assert "server-side fault" in str(exc.value)
 
@@ -134,7 +148,7 @@ def test_atlassian_error_detail_is_surfaced() -> None:
     resp = response(
         400, json={"errorMessages": ["Field 'sprintz' does not exist or is not searchable"]}
     )
-    with pytest.raises(AtlassianError) as exc:
+    with pytest.raises(ServiceError) as exc:
         _raise(resp)
     assert "sprintz" in str(exc.value)
 
@@ -150,10 +164,18 @@ def test_tls_failure_points_at_the_ca_bundle_and_refuses_to_suggest_disabling() 
     """
     exc = httpx.ConnectError("[SSL: CERTIFICATE_VERIFY_FAILED] self signed certificate in chain")
     err = transport_error(
-        exc, product="Jira", base_url="https://jira.test.internal", base_url_var="JIRA_BASE_URL"
+        exc,
+        product="Jira",
+        base_url="https://jira.test.internal",
+        base_url_var="JIRA_BASE_URL",
+        env_prefix="ATLASSIAN",
     )
     msg = str(err)
     assert "ATLASSIAN_CA_BUNDLE" in msg
+    # The estate-wide fallback is worth naming: one corporate root CA usually
+    # signs all four instances, and setting it four times is how three of them
+    # end up stale.
+    assert "MCP_CA_BUNDLE" in msg
     assert "Do not disable verification" in msg
     for forbidden in ("verify=False", "verify = False", "--insecure", "-k "):
         assert forbidden not in msg
@@ -265,7 +287,7 @@ async def test_html_login_page_is_named_as_sso_interception() -> None:
     client._client = httpx.AsyncClient(
         transport=httpx.MockTransport(handler), base_url="https://jira.test.internal"
     )
-    with pytest.raises(AtlassianError) as exc:
+    with pytest.raises(ServiceError) as exc:
         await client.get("/rest/api/2/search")
     assert "SSO" in str(exc.value)
     await client.aclose()
