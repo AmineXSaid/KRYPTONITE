@@ -35,6 +35,7 @@ from .errors import (
 from .http import (
     ALLOWED_METHODS,
     DEFAULT_TEXT_LIMIT,
+    JsonResponse,
     ReadOnlyClient,
     TextResponse,
     assert_read_only,
@@ -51,6 +52,7 @@ __all__ = [
     "DEFAULT_MAX_RESULTS",
     "DEFAULT_TEXT_LIMIT",
     "HARD_MAX_RESULTS",
+    "JsonResponse",
     "NotFoundError",
     "PermissionError_",
     "RateLimitError",

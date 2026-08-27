@@ -58,6 +58,10 @@ RETRY_STATUSES = frozenset({429, 502, 503, 504})
 # the cut happened rather than being handed a silently truncated log.
 DEFAULT_TEXT_LIMIT = 2 * 1024 * 1024
 
+# Sentinel for "the body was there and was not JSON", so the raise happens
+# outside the except block and does not chain a ValueError onto the message.
+_NON_JSON = object()
+
 
 def normalise_path(path: str) -> str:
     """Collapse ``.``/``..`` and duplicate slashes to a canonical absolute path.
@@ -105,6 +109,43 @@ def assert_read_only(
         )
 
 
+class JsonResponse:
+    """A decoded JSON body together with the response headers.
+
+    Headers are not decoration on these APIs, they are half the answer. GitLab
+    reports pagination entirely in `x-total` / `x-next-page` and friends, and
+    Jenkins reports how much log exists in `X-Text-Size`. A client that returns
+    only the parsed body forces every caller that needs those to reach past it.
+
+    :meth:`ReadOnlyClient.request` still returns the bare body, because most
+    callers want exactly that and threading a wrapper through them all would be
+    noise. This is what the ones that need more ask for.
+    """
+
+    __slots__ = ("data", "headers", "status_code")
+
+    def __init__(self, data: Any, headers: httpx.Headers, status_code: int) -> None:
+        self.data = data
+        self.headers = headers
+        self.status_code = status_code
+
+    def header_int(self, name: str) -> int | None:
+        """A header parsed as an int, or None if absent or unparseable.
+
+        None is a real answer, not a failure. GitLab omits `x-total` entirely
+        once a query exceeds 10,000 records, and reporting that as 0 would tell
+        a model it had the whole result set when it had the first page of
+        hundreds.
+        """
+        raw = self.headers.get(name)
+        if raw is None:
+            return None
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return None
+
+
 class TextResponse:
     """A text body, with the fact of truncation carried alongside it.
 
@@ -113,15 +154,34 @@ class TextResponse:
     build failed for no visible reason. So the cut travels with the text.
     """
 
-    __slots__ = ("text", "truncated", "byte_limit", "content_type")
+    __slots__ = ("text", "truncated", "byte_limit", "content_type", "headers")
 
     def __init__(
-        self, text: str, *, truncated: bool, byte_limit: int, content_type: str
+        self,
+        text: str,
+        *,
+        truncated: bool,
+        byte_limit: int,
+        content_type: str,
+        headers: httpx.Headers | None = None,
     ) -> None:
         self.text = text
         self.truncated = truncated
         self.byte_limit = byte_limit
         self.content_type = content_type
+        self.headers = headers if headers is not None else httpx.Headers()
+
+    def header_int(self, name: str) -> int | None:
+        """As :meth:`JsonResponse.header_int`. Jenkins reports the true size of
+        a log in ``X-Text-Size``, which is how a tail can be fetched without
+        downloading everything before it."""
+        raw = self.headers.get(name)
+        if raw is None:
+            return None
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return None
 
     def __str__(self) -> str:  # pragma: no cover - convenience only
         return self.text
@@ -189,6 +249,12 @@ class ReadOnlyClient:
     ) -> Any:
         return await self.request("GET", path, params=params)
 
+    async def get_full(
+        self, path: str, *, params: Mapping[str, Any] | None = None
+    ) -> JsonResponse:
+        """GET, returning the headers as well as the body."""
+        return await self.request("GET", path, params=params, want_headers=True)
+
     async def search_post(self, path: str, *, json: Mapping[str, Any]) -> Any:
         """POST to a search endpoint. Rejected unless ``path`` is allowlisted."""
         return await self.request("POST", path, json=json)
@@ -200,6 +266,7 @@ class ReadOnlyClient:
         *,
         params: Mapping[str, Any] | None = None,
         json: Mapping[str, Any] | None = None,
+        want_headers: bool = False,
     ) -> Any:
         # THE GUARD. Before anything else, including URL construction.
         assert_read_only(method, path, self._config.search_post_allowlist)
@@ -222,10 +289,13 @@ class ReadOnlyClient:
             self._check(response, path)
 
             if not response.content:
-                return {}
-            try:
-                return response.json()
-            except ValueError:
+                data: Any = {}
+            else:
+                try:
+                    data = response.json()
+                except ValueError:
+                    data = _NON_JSON
+            if data is _NON_JSON:
                 raise ServiceError(
                     f"{self._config.product} returned a non-JSON body for "
                     f"{normalise_path(path)} (content-type "
@@ -233,6 +303,9 @@ class ReadOnlyClient:
                     "usually means an SSO portal intercepted the request and "
                     "answered with a login page instead of the API."
                 ) from None
+            if want_headers:
+                return JsonResponse(data, response.headers, response.status_code)
+            return data
 
     async def get_text(
         self,
@@ -307,7 +380,11 @@ class ReadOnlyClient:
                     "interactive login."
                 )
             return TextResponse(
-                text, truncated=truncated, byte_limit=limit, content_type=ctype
+                text,
+                truncated=truncated,
+                byte_limit=limit,
+                content_type=ctype,
+                headers=response.headers,
             )
 
     def _should_retry(self, status: int, attempt: int) -> bool:
