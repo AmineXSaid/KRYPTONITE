@@ -54,7 +54,7 @@ export class ControlCenterPanel {
 
     const panel = vscode.window.createWebviewPanel(
       ControlCenterPanel.viewType,
-      "KRYPTONITE",
+      "Genesis",
       { viewColumn: column, preserveFocus: false },
       webviewOptions(extensionUri)
     );

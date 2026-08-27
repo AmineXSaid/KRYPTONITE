@@ -67,8 +67,19 @@ function boot() {
   b.sync("ask");
   // The control sits in the composer's toolbar now, beside the phase and the
   // model, where there is room for a word rather than a sentence.
-  ok("the composer shows the mode in force", b.d.getElementById("permName").textContent === "Ask",
+  ok("the composer shows the mode in force", b.d.getElementById("permName").textContent === "Manual",
     b.d.getElementById("permName").textContent);
+  // The reason it is "Manual" and not "Ask": the phase segment two controls to
+  // the left already has a button labelled Ask, and the two are unrelated
+  // settings. Pinned as the invariant rather than as the string, so renaming
+  // either control can never quietly recreate the collision.
+  {
+    const phases = [...b.d.querySelectorAll("#phaseSeg button")].map((x) =>
+      x.textContent.trim().toLowerCase());
+    ok("and does not reuse a phase's name",
+      !phases.includes(b.d.getElementById("permName").textContent.trim().toLowerCase()),
+      `perm="${b.d.getElementById("permName").textContent}" phases=${phases.join(",")}`);
+  }
   ok("and the full sentence is still reachable",
     /Manual - Always ask before making changes/.test(b.d.getElementById("permBtn").title),
     b.d.getElementById("permBtn").title);
@@ -431,8 +442,21 @@ function boot() {
     /function tipIndex\(\)[\s\S]{0,160}Math\.floor\(Date\.now\(\) \/ TIP_PERIOD_MS\)/.test(SRC));
   ok("with the manual button as an offset on top", /tipNudge/.test(SRC));
   ok("and something watches for the period turning over", /function watchTips\(\)/.test(SRC));
-  ok("checked on a shorter interval than the period itself",
-    /60 \* 1000/.test(SRC), "so a machine waking from sleep catches up");
+  // Computed from the source rather than pinned to a literal, so changing the
+  // rotation speed cannot leave the poll slower than the period it watches -
+  // which would make tips skip rather than rotate.
+  {
+    const evalMs = (expr) => Function(`"use strict";return (${expr});`)();
+    const period = evalMs((SRC.match(/TIP_PERIOD_MS\s*=\s*([^;]+);/) || [])[1]);
+    const poll = evalMs(
+      (SRC.match(/function watchTips\(\)[\s\S]*?\},\s*([^)]+)\);/) || [])[1]);
+    ok("checked on a shorter interval than the period itself",
+      poll > 0 && poll < period, `poll=${poll}ms period=${period}ms`);
+  }
+  // A 30-second rotation will land mid-sentence under someone's eye unless it
+  // stops while they are on it. This is the guard for that.
+  ok("and held while the strip is being read",
+    /S\.tipHold/.test(SRC) && /mouseenter/.test(SRC) && /focusin/.test(SRC));
 
   const b = boot();
   b.sync("ask");
@@ -472,6 +496,70 @@ console.log("\n──── the send control ────");
   ok("a press registers on a control this small", /#sendBtn:active[^}]*scale\(/.test(CSS));
   ok("and reduced motion turns that off",
     /prefers-reduced-motion[\s\S]*?#sendBtn:active\s*\{\s*transform:\s*none/.test(CSS));
+}
+
+/* ── the panel has a floor and scrolls below it ─────────────────────────── */
+{
+  console.log("\n──── too narrow to reflow ────");
+  // VS Code lets the secondary sidebar be dragged to any width. Without a
+  // floor every block reflowed on its own and the panel became a column of
+  // one-word lines: a tip strip set vertically, a filename broken mid-token
+  // across five lines, prose two words at a time.
+  const floor = CSS.match(/#app\s*\{[^}]*min-width:\s*(\d+)px/);
+  ok("the panel declares a minimum width", !!floor, floor ? floor[1] + "px" : "none");
+  ok("and it is wide enough to be a panel rather than a column",
+    !!floor && Number(floor[1]) >= 280, floor && floor[1]);
+  ok("the scroll lives on the wrapper, so the panel moves as one object",
+    /#root\s*\{[^}]*overflow:\s*auto/.test(CSS));
+  // #app must not shrink below the floor, or the min-width is decorative.
+  ok("and the panel refuses to be squeezed under it",
+    /#app\s*\{[^}]*flex:\s*1 0 auto/.test(CSS));
+}
+
+/* ── files dropped on the composer ──────────────────────────────────────── */
+{
+  console.log("\n──── drag and drop ────");
+  ok("the composer takes a drop", /composer\.addEventListener\("drop"/.test(SRC));
+  ok("and shows it is about to", /data-drop/.test(SRC) && /\.composer\[data-drop="1"\]/.test(CSS));
+  // The load-bearing half: a webview's default action for a dropped file is to
+  // navigate to it, which replaces the panel and loses the conversation.
+  ok("the document cancels drops everywhere else",
+    /document\.addEventListener\("drop",\s*function[^)]*\)\s*\{\s*e\.preventDefault\(\)/.test(SRC));
+  ok("and cancels dragover too, or drop never fires at all",
+    /document\.addEventListener\("dragover",\s*function[^)]*\)\s*\{\s*e\.preventDefault\(\)/.test(SRC));
+  ok("the drop reuses the paste path's size and count caps",
+    /function takeFiles[\s\S]{0,400}readBlob\(/.test(SRC));
+}
+
+/* ── a conversation can be thrown away from the welcome screen ──────────── */
+{
+  console.log("\n──── deleting a conversation ────");
+  const b = boot();
+  b.sync("ask");
+  // boot()'s fixture has no sessions, so the Recent list is empty. Send one
+  // that has some: the welcome screen renders when the CURRENT session has no
+  // messages, and Recent lists the others.
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "sessionsListed",
+    sessions: [
+      { id: "s", title: "t", when: "now", count: 0, active: true },
+      { id: "old", title: "Trace the mTLS handshake", when: "2h ago", count: 12, active: false },
+    ],
+  } }));
+  const bins = [...b.d.querySelectorAll(".welcome [data-del]")];
+  ok("every Recent row offers a bin", bins.length > 0, String(bins.length));
+  ok("and each names the conversation it would delete",
+    bins.every((x) => (x.getAttribute("aria-label") || "").length > 8));
+  const id = bins[0].getAttribute("data-del");
+  bins[0].click();
+  const del = b.sent.filter((m) => m.type === "deleteSession");
+  ok("clicking it asks the host to delete that one", del.length === 1 && del[0].id === id,
+    JSON.stringify(del));
+  // The bin sits inside the row, which is itself a button that loads the
+  // conversation. Deleting must not also open the thing being deleted.
+  ok("and does not open the conversation on the way out",
+    !b.sent.some((m) => m.type === "loadSession"));
+  b.dom.window.close();
 }
 
 if (failures.length) for (const f of failures) console.log("FAIL  " + f);

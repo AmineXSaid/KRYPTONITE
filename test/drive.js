@@ -13,6 +13,7 @@ function ok(label, cond) {
 const ROOT = path.join(__dirname, "..");
 const crystalSrc = fs.readFileSync(path.join(ROOT, "media/webview/crystal.js"), "utf8");
 const sidebarSrc = fs.readFileSync(path.join(ROOT, "media/webview/sidebar.js"), "utf8");
+const CSS = fs.readFileSync(path.join(ROOT, "media/webview/sidebar.css"), "utf8");
 
 function boot() {
   const dom = new JSDOM(`<!doctype html><html><body><div id="root"></div></body></html>`, {
@@ -74,14 +75,21 @@ const STATE = (over = {}) => ({ type: "stateSync", state: {
   ok("send posts sendMessage", sent.some(m => m.type === "sendMessage"));
   const rad = d.querySelector(".stream .rad");
   ok("aura shows while waiting", !!rad);
-  // The aura was rebuilt around rays / ki / shock / emitters; the old markup
-  // was a single .ring plus a .core. These assert the parts that actually
-  // animate now, so the test fails if a layer is dropped rather than renamed.
-  ok("aura has rays", !!rad.querySelector(".rays"));
-  ok("aura has three ki arcs", rad.querySelectorAll(".ki").length === 3);
-  ok("aura has shockwave", !!rad.querySelector(".shock"));
-  ok("aura has three emitters", rad.querySelectorAll(".em").length === 3);
-  ok("aura wraps the roundel", !!rad.querySelector("svg use"));
+  // The indicator is the Genesis notch sweep: a still dim bezel with one
+  // oxide notch rotating over it. It replaced the eight-layer Kryptonite ki
+  // aura (rays / three ki bands / shockwave / three emitters), whose greens
+  // are not in this palette and which read as the old logo burning behind the
+  // new one. Assert the two marks and, crucially, that none of the old layers
+  // came back - a stray .ki is the exact regression this guards.
+  ok("indicator has the dim bezel", !!rad.querySelector(".rad-plate"));
+  ok("and the sweeping notch", !!rad.querySelector(".rad-notch"));
+  ok("both are the roundel, not ad-hoc shapes",
+    rad.querySelectorAll("svg use").length === 2);
+  ok("the notch is the one animated element",
+    /\.rad \.rad-notch\s*\{[^}]*animation:\s*g-sweep/.test(CSS));
+  for (const dead of [".rays", ".ki", ".shock", ".em"]) {
+    ok(`no ${dead} layer survives`, rad.querySelectorAll(dead).length === 0);
+  }
   inbound({ type: "turnEnd" });
   ok("aura clears on turn end", !d.querySelector(".stream"));
 }

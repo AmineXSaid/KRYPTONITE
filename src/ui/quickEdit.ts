@@ -89,7 +89,7 @@ export class QuickEdit {
     let answer: string;
     try {
       answer = await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Notification, title: `Kryptonite: ${req.title}`, cancellable: true },
+        { location: vscode.ProgressLocation.Notification, title: `Genesis: ${req.title}`, cancellable: true },
         async (_p, token) => {
           const ac = new AbortController();
           token.onCancellationRequested(() => ac.abort());
@@ -103,17 +103,17 @@ export class QuickEdit {
     } catch (e: any) {
       // A cancelled request is the user's decision, not a failure to report.
       if (isAbort(e)) return false;
-      void vscode.window.showErrorMessage(`Kryptonite: ${String(e?.message ?? e)}`);
+      void vscode.window.showErrorMessage(`Genesis: ${String(e?.message ?? e)}`);
       return false;
     }
 
     const next = unfence(answer);
     if (!next.trim()) {
-      void vscode.window.showInformationMessage("Kryptonite: the model returned nothing to apply.");
+      void vscode.window.showInformationMessage("Genesis: the model returned nothing to apply.");
       return false;
     }
     if (next === before) {
-      void vscode.window.showInformationMessage("Kryptonite: no change needed.");
+      void vscode.window.showInformationMessage("Genesis: no change needed.");
       return false;
     }
 
@@ -123,7 +123,7 @@ export class QuickEdit {
       // that no longer exists, so applying it would overwrite whatever now
       // occupies those offsets.
       void vscode.window.showWarningMessage(
-        "Kryptonite: the file changed while the model was working, so nothing was applied."
+        "Genesis: the file changed while the model was working, so nothing was applied."
       );
       return false;
     }
@@ -135,7 +135,7 @@ export class QuickEdit {
     const edit = new vscode.WorkspaceEdit();
     edit.replace(req.uri, req.range, next);
     const ok = await vscode.workspace.applyEdit(edit);
-    if (!ok) void vscode.window.showWarningMessage("Kryptonite: the edit was rejected by the editor.");
+    if (!ok) void vscode.window.showWarningMessage("Genesis: the edit was rejected by the editor.");
     return ok;
   }
 

@@ -1303,6 +1303,7 @@ export class App {
       skillsDirectory: this.cfg().get<string>("skillsDirectory", ".agent/skills"),
       browserHeaded: this.cfg().get<boolean>("browserHeaded", false),
       editorContext: this.cfg().get<boolean>("editorContext", true),
+      readOutsideWorkspace: this.cfg().get<boolean>("readOutsideWorkspace", true),
       ui: { ...this.uiConfig },
     };
   }
@@ -1350,7 +1351,7 @@ export class App {
   updateStatus(): void {
     const dto = this.statusDto();
     const active = this.activeProfile();
-    this.status.text = `$(plug) KRYPTONITE: ${dto.label}`;
+    this.status.text = `$(plug) GENESIS: ${dto.label}`;
     this.status.tooltip = active
       ? `${active.name} - ${active.wire} · ${active.model} · ${active.baseUrl}`
       : "Create an endpoint profile to get started.";
@@ -1985,41 +1986,104 @@ export class App {
     const root = this.root;
     const exclude = "**/{node_modules,.git,dist,out,.vscode-test,coverage}/**";
 
-    const files = await vscode.workspace.findFiles(
-      query ? `**/*${query}*` : "**/*",
-      exclude,
-      200
-    );
+    // ONE scan of the workspace, then rank in memory.
+    //
+    // This used to hand the query to `findFiles` as `**/*${query}*`, which is
+    // three separate defects wearing one glob:
+    //
+    //   - `*` does not cross `/`, so the pattern only ever matched a BASENAME.
+    //     Typing `lin_testcases/helper` matched nothing at all, and neither did
+    //     any query naming a folder on the way to the file.
+    //   - the glob is case-sensitive on Linux and macOS-with-case-sensitivity,
+    //     so `Lin` missed `lin_master.py`.
+    //   - `findFiles` returns in directory-walk order and was capped at 200,
+    //     then sliced to 20. In a repo of any size that is an arbitrary
+    //     20 files, not the 20 best - which is what "doesn't show all files
+    //     and folders" actually was.
+    //
+    // The cap is now on the scan, not on the answer, and the answer is sorted
+    // by how well it matches rather than by where the walker happened to be.
+    const files = await vscode.workspace.findFiles("**/*", exclude, 20_000);
     const rels = files.map((u) => path.relative(root, u.fsPath).split(path.sep).join("/"));
 
-    // Every ancestor directory of every hit, plus - when there is a query -
-    // directories whose own name matches even if no child matched the text.
+    const q = query.trim().toLowerCase();
+
+    // Folders are derived from the files inside them, so one only appears when
+    // it actually holds something the picker would offer.
     const dirs = new Set<string>();
-    const q = query.toLowerCase();
     for (const rel of rels) {
       const parts = rel.split("/");
-      for (let i = 1; i < parts.length; i++) {
-        const dir = parts.slice(0, i).join("/");
-        if (!q || parts[i - 1].toLowerCase().includes(q)) dirs.add(dir);
-      }
+      for (let i = 1; i < parts.length; i++) dirs.add(parts.slice(0, i).join("/"));
     }
+
     if (!q) {
-      // With no query, offer the top level rather than every nested folder.
-      for (const dir of [...dirs]) if (dir.includes("/")) dirs.delete(dir);
+      // Nothing typed yet: top-level folders, then whatever is shallowest.
+      const out: FileHitDto[] = [...dirs]
+        .filter((d) => !d.includes("/"))
+        .sort((a, b) => a.localeCompare(b))
+        .slice(0, 12)
+        .map((p) => ({ path: p, kind: "folder" as const }));
+      for (const rel of rels
+        .slice()
+        .sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b))
+        .slice(0, 40)) {
+        out.push({ path: rel, kind: App.fileKind(rel) });
+      }
+      return out;
     }
 
-    const out: FileHitDto[] = [...dirs]
-      .sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b))
-      .slice(0, 10)
-      .map((p) => ({ path: p, kind: "folder" as const }));
+    const ranked = (paths: string[]) =>
+      paths
+        .map((p) => ({ p, s: App.matchScore(p, q) }))
+        .filter((x) => x.s > 0)
+        .sort((a, b) => b.s - a.s || a.p.length - b.p.length || a.p.localeCompare(b.p));
 
-    for (const rel of rels.slice(0, 20)) {
-      out.push({
-        path: rel,
-        kind: /\.(ya?ml|json|toml|ini|env|cfg)$/i.test(rel) ? "config" : "file",
-      });
+    const out: FileHitDto[] = ranked([...dirs])
+      .slice(0, 12)
+      .map((x) => ({ path: x.p, kind: "folder" as const }));
+    for (const x of ranked(rels).slice(0, 40)) {
+      out.push({ path: x.p, kind: App.fileKind(x.p) });
     }
     return out;
+  }
+
+  /** Config files earn their own glyph in the picker. */
+  private static fileKind(rel: string): FileHitDto["kind"] {
+    return /\.(ya?ml|json|toml|ini|env|cfg)$/i.test(rel) ? "config" : "file";
+  }
+
+  /**
+   * How well one path answers a query. 0 means it does not.
+   *
+   * Deliberately simple and deliberately not a full fuzzy matcher: the ranking
+   * someone actually wants from `@` is "the thing whose NAME is what I typed",
+   * and every rule here serves that.
+   *
+   *   - a substring of the basename beats a substring of the directory, so
+   *     typing `helper` offers `lin/helper.py` above `helper/config.py`
+   *   - an exact basename, or a basename before its extension, beats both
+   *   - a prefix beats a hit in the middle
+   *   - a shorter path wins ties, because it is the less specific and more
+   *     commonly meant one
+   *
+   * A query containing `/` is matched against the whole path, which is what
+   * makes `testcases/helper` work at all.
+   */
+  private static matchScore(rel: string, q: string): number {
+    const low = rel.toLowerCase();
+    const base = low.slice(low.lastIndexOf("/") + 1);
+    const stem = base.replace(/\.[^.]+$/, "");
+
+    if (q.includes("/")) return low.includes(q) ? 60 + (low.startsWith(q) ? 20 : 0) : 0;
+
+    if (base === q || stem === q) return 100;
+    if (base.startsWith(q)) return 80;
+
+    const inBase = base.indexOf(q);
+    if (inBase > 0) return 60;
+
+    // Fall back to the directory part, which is a weaker claim on the query.
+    return low.includes(q) ? 30 : 0;
   }
 
   async runTrace(): Promise<void> {

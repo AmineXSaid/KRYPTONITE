@@ -701,6 +701,73 @@ const run = (name: string, args: any) => runTool(name, args, ctx);
     approveAnswer = true;
   }
 
+  /* ── reads may leave the workspace; writes may not ────────────────────── */
+  {
+    console.log("\n──── the read boundary ────");
+
+    // A file that is genuinely outside the workspace, and not a credential.
+    const outsideDir = path.join(tmp, "elsewhere", "site-packages", "andisdk");
+    fs.mkdirSync(outsideDir, { recursive: true });
+    const outsideFile = path.join(outsideDir, "program.py");
+    fs.writeFileSync(outsideFile, "class Program:\n    pass\n");
+
+    // Default context: the flag is absent, which must mean the old behaviour.
+    {
+      const r = await run("read_file", { path: outsideFile });
+      ck(Boolean(r.isError) && /reading outside it is turned off/i.test(r.content),
+        "absent flag keeps reads inside the workspace", r.content.slice(0, 80));
+      ck(/readOutsideWorkspace/.test(r.content),
+        "and the refusal names the setting that changes it");
+    }
+
+    const openCtx: ToolContext = { ...ctx, readOutsideWorkspace: true };
+    const runOpen = (name: string, args: any) => runTool(name, args, openCtx);
+
+    {
+      const r = await runOpen("read_file", { path: outsideFile });
+      ck(!r.isError && /class Program/.test(r.content),
+        "with the flag on, a dependency outside the workspace reads", r.content.slice(0, 60));
+    }
+
+    // The whole point of the deny list: on is not "on for everything".
+    {
+      const keyDir = path.join(tmp, "home", ".ssh");
+      fs.mkdirSync(keyDir, { recursive: true });
+      fs.writeFileSync(path.join(keyDir, "id_rsa"), "-----BEGIN PRIVATE KEY-----\n");
+      const r = await runOpen("read_file", { path: path.join(keyDir, "id_rsa") });
+      ck(Boolean(r.isError) && !r.content.includes("PRIVATE KEY"),
+        "a credential store is refused even with reads opened up", r.content.slice(0, 80));
+      ck(/credential store/i.test(r.content), "and says why");
+    }
+    {
+      // Named by the file rather than the directory.
+      const nr = path.join(tmp, "elsewhere", ".netrc");
+      fs.writeFileSync(nr, "machine example.com password hunter2\n");
+      const r = await runOpen("read_file", { path: nr });
+      ck(Boolean(r.isError) && !r.content.includes("hunter2"),
+        "and so is a credential FILE outside any credential directory",
+        r.content.slice(0, 80));
+    }
+
+    // Writes are unmoved by the flag. This is the load-bearing half.
+    {
+      const target = path.join(tmp, "elsewhere", "written.txt");
+      const r = await runOpen("write_file", { path: target, content: "x" });
+      ck(Boolean(r.isError) && /outside the workspace/i.test(r.content),
+        "opening reads does NOT open writes", r.content.slice(0, 80));
+      ck(!fs.existsSync(target), "and nothing was written outside the workspace");
+    }
+    {
+      const r = await runOpen("edit_file", {
+        path: path.join(tmp, "elsewhere", "site-packages", "andisdk", "program.py"),
+        old_string: "class Program:", new_string: "class Pwned:",
+      });
+      ck(Boolean(r.isError), "a readable file outside the workspace is still not editable");
+      ck(fs.readFileSync(outsideFile, "utf8").includes("class Program:"),
+        "and it is unchanged on disk");
+    }
+  }
+
   // Teardown must never decide the outcome. The junction created above cannot
   // be removed by a recursive delete on Windows, and a leftover temp directory
   // is not a test failure.

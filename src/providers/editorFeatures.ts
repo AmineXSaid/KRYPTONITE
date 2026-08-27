@@ -105,13 +105,13 @@ export class KryptoniteCodeActions implements vscode.CodeActionProvider {
     const problems = ctx.diagnostics ?? [];
     if (problems.length) {
       const a = new vscode.CodeAction(
-        problems.length === 1 ? "Fix with Kryptonite" : `Fix ${problems.length} problems with Kryptonite`,
+        problems.length === 1 ? "Fix with Genesis" : `Fix ${problems.length} problems with Genesis`,
         vscode.CodeActionKind.QuickFix
       );
       a.diagnostics = [...problems];
       a.command = {
         command: "kryptonite.fixProblem",
-        title: "Fix with Kryptonite",
+        title: "Fix with Genesis",
         // Diagnostics are passed rather than re-read. By the time the command
         // runs the user may have moved, and the fix must address the squiggle
         // they clicked on, not whatever is under the cursor now.
@@ -120,18 +120,18 @@ export class KryptoniteCodeActions implements vscode.CodeActionProvider {
       out.push(a);
     }
 
-    const doc_ = new vscode.CodeAction("Document with Kryptonite", vscode.CodeActionKind.RefactorRewrite);
+    const doc_ = new vscode.CodeAction("Document with Genesis", vscode.CodeActionKind.RefactorRewrite);
     doc_.command = {
       command: "kryptonite.documentSymbol",
-      title: "Document with Kryptonite",
+      title: "Document with Genesis",
       arguments: [doc.uri, range],
     };
     out.push(doc_);
 
-    const explain = new vscode.CodeAction("Explain with Kryptonite", vscode.CodeActionKind.Empty);
+    const explain = new vscode.CodeAction("Explain with Genesis", vscode.CodeActionKind.Empty);
     explain.command = {
       command: "kryptonite.explainSelection",
-      title: "Explain with Kryptonite",
+      title: "Explain with Genesis",
       arguments: [doc.uri, range],
     };
     out.push(explain);
@@ -205,7 +205,7 @@ export function registerEditorFeatures(app: App, quick: QuickEdit): vscode.Dispo
     const ed = vscode.window.activeTextEditor;
     const target = uri ?? ed?.document.uri;
     if (!target) {
-      void vscode.window.showInformationMessage("Kryptonite: open a file first.");
+      void vscode.window.showInformationMessage("Genesis: open a file first.");
       return undefined;
     }
     const doc = await vscode.workspace.openTextDocument(target);

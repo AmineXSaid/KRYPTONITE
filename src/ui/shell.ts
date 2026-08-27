@@ -144,11 +144,11 @@ ${fontFaces(extensionUri, webview)}
 }
 
 export function sidebarHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
-  return shell(webview, extensionUri, "sidebar", "Kryptonite");
+  return shell(webview, extensionUri, "sidebar", "Genesis");
 }
 
 export function controlCenterHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
-  return shell(webview, extensionUri, "controlCenter", "KRYPTONITE Control Center");
+  return shell(webview, extensionUri, "controlCenter", "Genesis Control Center");
 }
 
 /**

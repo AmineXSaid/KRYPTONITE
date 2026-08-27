@@ -196,12 +196,17 @@ export interface ConfigDto {
   browserHeaded: boolean;
   /** Send what is on screen with each message. */
   editorContext: boolean;
+  /**
+   * Whether the agent may READ files outside the workspace root. Writes are
+   * confined to the workspace whatever this says.
+   */
+  readOutsideWorkspace: boolean;
   ui: UiConfigDto;
 }
 
 export interface StatusDto {
   state: StatusState;
-  /** Text after the `KRYPTONITE: ` prefix, e.g. `OK · ACT`. */
+  /** Text after the `GENESIS: ` prefix, e.g. `OK · ACT`. */
   label: string;
   endpoint: string | null;
   model: string | null;

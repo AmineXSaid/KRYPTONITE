@@ -508,6 +508,11 @@ export class SessionController {
 
     const ctx: ToolContext = {
       root,
+      // Reads may leave the workspace; writes never do, whatever this says.
+      // Read through configDto rather than vscode.workspace directly: this
+      // module has no vscode import on purpose, so the offline harness can
+      // drive a whole turn.
+      readOutsideWorkspace: this.app.configDto().readOutsideWorkspace,
       skills: this.app.enabledSkills(agent),
       // The agent's MCP scope is enforced at the call, not only in the list of
       // tools offered - a name the model produced from earlier in the
@@ -941,7 +946,7 @@ export class SessionController {
     const found = listBrowsers();
     if (!found.length) {
       throw new Error(
-        "No Chromium-family browser is installed. Kryptonite drives Chrome, Edge, " +
+        "No Chromium-family browser is installed. Genesis drives Chrome, Edge, " +
         "Brave, Vivaldi or Chromium - whichever the machine already has - and bundles " +
         "none of them. Install one, or set KRYPTONITE_BROWSER to its executable. " +
         "fetch_url still works without any browser."

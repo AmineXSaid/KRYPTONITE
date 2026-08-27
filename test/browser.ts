@@ -148,7 +148,7 @@ const threw = (fn: () => unknown): string => {
     ck(/Hello there\./.test(p.text), "and its text");
     ck(p.links.some((l) => l.href === base + "/next"), "and its links, resolved");
     ck(p.bytes > 0 && p.ms >= 0, "with size and timing");
-    ck(/Kryptonite/.test(lastAgent),
+    ck(/Genesis/.test(lastAgent),
       "identifying honestly - a blank agent gets a different page from many sites", lastAgent);
   }
   {

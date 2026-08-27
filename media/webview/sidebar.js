@@ -340,9 +340,10 @@ function _sbRun() {
   function icon(id, cls) {
     return '<svg class="ic ' + (cls || "") + '" aria-hidden="true"><use href="#' + id + '"/></svg>';
   }
-  /* Height-driven: the mark is portrait (42:48) and a width/height pair at a
-     call site is how aspect-ratio bugs get in. */
-  function crystal(h, cls) { return window.__kxCrystal.svg(h, cls); }
+  /* Square by construction, so a call site passing one number cannot stretch
+     it. `variant` picks the roundel's cut - "dim", "sm", "notch", or the full
+     mark when omitted - and is passed straight through. */
+  function crystal(h, cls, variant) { return window.__kxCrystal.svg(h, cls, variant); }
   function $(id) { return document.getElementById(id); }
   function div(cls, html) {
     var d = document.createElement("div");
@@ -959,7 +960,7 @@ function _sbRun() {
         '</nav>' +
         '<div class="phase-banner" id="phaseBanner" data-phase="plan" hidden>' +
           '<span class="dot"></span><span class="lbl" id="phaseBannerLbl">Plan phase</span>' +
-          '<span class="sub" id="phaseBannerSub">read-only tools · no edits applied</span>' +
+          '<span class="sub" id="phaseBannerSub">reads and plans · no edits applied</span>' +
         '</div>' +
         // Only drawn while an agent is actually selected. A permanent chip in
         // the composer toolbar would cost a row of chrome on every panel to
@@ -1043,9 +1044,9 @@ function _sbRun() {
                 '<div class="seg" id="phaseSeg" role="radiogroup" title="Shift+Tab to cycle phase"' +
                   ' aria-label="Phase - press Shift+Tab to cycle">' +
                   '<button role="radio" aria-checked="false" data-phase="ask" data-on="0" ' +
-                    'title="Ask - read-only, answers a question">Ask</button>' +
+                    'title="Ask - answers from what it reads. Makes no changes.">Ask</button>' +
                   '<button role="radio" aria-checked="false" data-phase="plan" data-on="0" ' +
-                    'title="Plan - read-only, produces a plan">Plan</button>' +
+                    'title="Plan - produces a plan. Makes no changes.">Plan</button>' +
                   '<button role="radio" aria-checked="true" data-phase="act" data-on="1" ' +
                     'title="Act - full tools, makes changes">Act</button>' +
                 '</div>' +
@@ -1064,7 +1065,7 @@ function _sbRun() {
                 // footer, which is where things go to be ignored.
                 '<button class="perm-btn" id="permBtn" aria-haspopup="menu" aria-expanded="false"' +
                   ' title="What the agent may do without asking">' +
-                  icon("i-shield", "ic-11") + '<span class="nm" id="permName">Ask</span>' +
+                  icon("i-shield", "ic-11") + '<span class="nm" id="permName">Manual</span>' +
                 '</button>' +
                 '<span class="sp"></span>' +
                 // @ / attach / send are one group, not three siblings. As
@@ -1203,8 +1204,8 @@ function _sbRun() {
   // in Act and there is nothing to disclose.
   var PHASE_CYCLE = ["ask", "plan", "act"];
   var PHASE_INFO = {
-    ask: { lbl: "Ask phase", sub: "read-only tools · no edits, no plan" },
-    plan: { lbl: "Plan phase", sub: "read-only tools · no edits applied" }
+    ask: { lbl: "Ask phase", sub: "reads and answers · no edits, no plan" },
+    plan: { lbl: "Plan phase", sub: "reads and plans · no edits applied" }
   };
 
   function applyPhase(phase, silent) {
@@ -1246,8 +1247,8 @@ function _sbRun() {
       // the whole difference between the two read-only phases, so the banner
       // that announces the phase is where it has to be said.
       $("phaseBannerSub").textContent = phase === "ask"
-        ? "read-only tools · no edits, no plan"
-        : "read-only tools · no edits applied";
+        ? "reads and answers · no edits, no plan"
+        : "reads and plans · no edits applied";
     }
     syncComposer();
     if (!silent) post("setPhase", { phase: phase });
@@ -1308,10 +1309,12 @@ function _sbRun() {
   ];
 
   /* How long one tip holds the strip.
-     Short enough that a panel left open all day shows more than one, long
-     enough that it is never moving while being read - a line that changes
-     under the eye is worse than a line nobody reads. */
-  var TIP_PERIOD_MS = 15 * 60 * 1000;
+     30 seconds, so a panel open for a couple of minutes shows several rather
+     than one - the strip is only worth its row if it actually turns over.
+     A line that changes under the eye is still worse than a line nobody
+     reads, which is what `watchTips` handles: the clock stops while the
+     pointer is on the strip or the keyboard is in it. */
+  var TIP_PERIOD_MS = 30 * 1000;
 
   /* Derived from the clock rather than stored, so it advances on its own and
      two panels open side by side agree. `tipNudge` is the manual button's
@@ -1333,13 +1336,28 @@ function _sbRun() {
   }
 
   /* The strip has to change while the panel simply sits there, so the period
-     is watched rather than waited for: checking the bucket each minute costs
-     nothing and survives the machine sleeping, which a 15-minute timer would
-     not. */
+     is watched rather than waited for: comparing the clock bucket survives the
+     machine sleeping, which a plain 30-second timer would not - it would come
+     back owing a hundred missed ticks and burn through the whole list.
+
+     HELD WHILE IT IS BEING READ. A line that rotates every 30 seconds will
+     eventually change mid-sentence under someone's eye, which is the one way
+     this strip can be actively annoying rather than merely ignorable. Hover or
+     focus freezes it, and because the index is derived from the clock rather
+     than incremented, letting go does not replay the tips that were skipped -
+     it jumps to whichever one is current. */
   function watchTips() {
+    var bar = $("tipBar");
+    if (bar) {
+      bar.addEventListener("mouseenter", function () { S.tipHold = true; });
+      bar.addEventListener("mouseleave", function () { S.tipHold = false; });
+      bar.addEventListener("focusin", function () { S.tipHold = true; });
+      bar.addEventListener("focusout", function () { S.tipHold = false; });
+    }
     setInterval(function () {
+      if (S.tipHold) return;
       if (tipIndex() !== S.tipShown) renderTip(false);
-    }, 60 * 1000);
+    }, 2 * 1000);
   }
 
   /* ───────────────────────── permissions ───────────────────────── */
@@ -1363,7 +1381,16 @@ function _sbRun() {
     // places would put the same setting behind two controls that disagree.
     // What is left maps one-to-one onto the three approval modes the host has
     // always had.
-    ["ask", "Manual", "Always ask before making changes", "Ask", "i-hand", "var(--kx-fg)"],
+    // The short label for `ask` is "Manual", NOT "Ask".
+    //
+    // It was "Ask", which put the word ASK on two different controls a
+    // centimetre apart in the same row: the left one is the PHASE (what tools
+    // the model may reach for) and the right one was the APPROVAL MODE (whether
+    // it stops before a side effect). They are unrelated settings, and reading
+    // "ASK PLAN ACT ... ASK" the pair looks like one broken segmented control
+    // with a stray fourth option. The design's own name for this mode is
+    // Manual, which is both unambiguous and what the sheet already called it.
+    ["ask", "Manual", "Always ask before making changes", "Manual", "i-hand", "var(--kx-fg)"],
     ["edits-auto", "Accept edits", "File edits run automatically. Shell commands still ask.", "Edits", "i-code", "var(--kx-mcp)"],
     ["full-auto", "Auto", "The agent handles permission decisions itself", "Auto", "i-bolt", "var(--kx-error)"]
   ];
@@ -1518,7 +1545,12 @@ function _sbRun() {
         // forty from its title alone - so it moves into the title attribute
         // rather than off the screen.
         var n = r.count === 1 ? "1 message" : r.count + " messages";
-        body += '<button class="w-row" data-session="' + esc(r.id) + '"' +
+        // The row is a button, so the delete control cannot be inside it - a
+        // button inside a button is invalid and browsers resolve it by
+        // dropping the inner one. The pair is wrapped instead, exactly as the
+        // history popover does it.
+        body += '<span class="w-item">' +
+          '<button class="w-row" data-session="' + esc(r.id) + '"' +
           ' title="' + esc(r.title + " - " + n + ", " + r.when) + '">' +
           // Slate, always. The mockup's rule is `dot: c.live ? oxide : slate`,
           // and the oxide case cannot arise here: the loop above skips
@@ -1528,7 +1560,10 @@ function _sbRun() {
           // say "this is a row".
           '<span class="w-dot"></span>' +
           '<span class="t ell">' + esc(r.title) + "</span>" +
-          '<span class="w-ago">' + esc(r.when) + "</span></button>";
+          '<span class="w-ago">' + esc(r.when) + "</span></button>" +
+          '<button class="w-del" data-del="' + esc(r.id) + '" title="Delete this conversation" ' +
+            'aria-label="Delete ' + esc(r.title) + '">' + icon("i-trash", "ic-13") + "</button>" +
+          "</span>";
       }
       body += "</div></div>";
     }
@@ -1819,6 +1854,10 @@ function _sbRun() {
   function addThinking(text) {
     var t = String(text == null ? "" : text).trim();
     if (!t) return;
+    // Captured before `aiEl` is dropped, because the insert below needs the
+    // answer element that is already on screen, and the next line is what
+    // forgets it.
+    var prior = aiEl && aiEl.parentNode === logEl ? aiEl : null;
     // Not through `aiEl`: this is not the answer, and appending it there would
     // put it back in the same paragraph flow it just came out of.
     aiEl = null;
@@ -1833,7 +1872,24 @@ function _sbRun() {
     box.querySelector(".think-head").addEventListener("click", function () {
       box.setAttribute("data-open", box.getAttribute("data-open") === "1" ? "0" : "1");
     });
-    add(box);
+
+    // ABOVE the answer, never below it.
+    //
+    // Appending put the working after the prose it produced, because that is
+    // the order the events arrive in: several providers flush a reasoning
+    // summary only once the visible answer has started, so the transcript read
+    // "here is the answer... and here is the thinking that led to it", which is
+    // backwards and makes the disclosure look like an afterthought rather than
+    // a preamble.
+    //
+    if (prior) {
+      flushAi();
+      var stick = atBottom();
+      logEl.insertBefore(box, prior);
+      if (stick) scroll();
+    } else {
+      add(box);
+    }
   }
 
   /** Freeze the group's counters. Safe to call when no group is open. */
@@ -1945,9 +2001,9 @@ function _sbRun() {
       var cmd = div("term-block cmd-in");
       cmd.textContent = String(args.command);
       body.appendChild(ioRow("IN", cmd));
-      if (text) body.appendChild(ioRow("OUT", resultBlock(text, name)));
+      if (text) body.appendChild(ioRow("OUT", resultBlock(text, name, args)));
     } else if (preview) body.appendChild(preview);
-    else if (text) body.appendChild(resultBlock(text, name));
+    else if (text) body.appendChild(resultBlock(text, name, args));
     if (text.length > MODEL_TRUNCATION) {
       body.appendChild(div("trunc-note",
         icon("i-warn", "ic-11") + "<span>Output truncated to 60,000 characters for the model</span>"));
@@ -2016,23 +2072,62 @@ function _sbRun() {
     return row;
   }
 
-  function resultBlock(text, name) {
+  /** Tools whose result IS file content, and so should be coloured as code. */
+  var CODE_TOOLS = { read_file: 1, write_file: 1, edit_file: 1 };
+
+  /**
+   * The language for a tool result, taken from the path it was called with.
+   *
+   * Returns "" when there is no path, no extension, or no grammar for it -
+   * `highlight()` falls back to plain escaped text on an empty hint, so an
+   * unknown extension costs nothing and looks exactly as it did before.
+   */
+  function langForCall(name, args) {
+    if (!CODE_TOOLS[name]) return "";
+    var p = args && typeof args === "object" ? args.path : null;
+    if (!p || typeof p !== "string") return "";
+    var dot = p.lastIndexOf(".");
+    var slash = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+    // A dotfile with no extension - .gitignore, Dockerfile - is named by its
+    // basename in LANG_FAMILY, so fall back to that.
+    var hint = dot > slash + 1 ? p.slice(dot + 1) : p.slice(slash + 1);
+    return LANG_FAMILY[String(hint).toLowerCase()] ? hint : "";
+  }
+
+  function resultBlock(text, name, args) {
     var wrap = document.createElement("div");
     // Shell output wraps and reads as a console; file contents stay a snippet.
     var pre = div(name === "run_command" ? "term-block" : "code-block");
+
+    // File contents get the same colours a fenced block gets.
+    //
+    // This was `textContent` for every tool, so a card showing 200 lines of
+    // Python or JSON was one flat grey wall - the only place in the panel
+    // where code is shown without being coloured, and the place it matters
+    // most, because reading the file IS the card's whole content.
+    //
+    // `highlight()` escapes everything it does not tokenise and everything it
+    // does, so its output is safe as innerHTML. When it has no grammar it
+    // returns plain escaped text, which is exactly the old behaviour.
+    var lang = langForCall(name, args);
+    var paint = function (s) {
+      if (lang) pre.innerHTML = highlight(s, lang);
+      else pre.textContent = s;
+    };
+
     if (text.length > INLINE_LIMIT) {
-      pre.textContent = text.slice(0, INLINE_LIMIT);
+      paint(text.slice(0, INLINE_LIMIT));
       wrap.appendChild(pre);
       var more = document.createElement("button");
       more.className = "show-more";
       more.textContent = "Show more (" + fmtK(text.length) + " characters)";
       more.addEventListener("click", function () {
-        pre.textContent = text;
+        paint(text);
         more.remove();
       });
       wrap.appendChild(more);
     } else {
-      pre.textContent = text;
+      paint(text);
       wrap.appendChild(pre);
     }
     return wrap;
@@ -2588,12 +2683,21 @@ function _sbRun() {
    * no geometry so the whole composition can be retuned in sidebar.css alone.
    */
   function auraMarkup() {
+    // Two stacked marks, not eight layers.
+    //
+    // What was here was the Kryptonite "ki aura": a conic ray sweep, three
+    // green spike bands on offset clocks, a shockwave and three embers, all
+    // behind the mark. Against the Genesis roundel it read as the OLD LOGO
+    // still burning behind the new one, which is exactly what it was - the
+    // green is #0B5B3F / #17A874, nowhere in this palette.
+    //
+    // Genesis says the mark moves one way: the dim bezel holds still and a
+    // single oxide notch sweeps it. One element, one rotation, no colour that
+    // is not already the brand's.
     return '<span class="rad">' +
-      '<span class="rays"></span>' +
-      '<span class="ki ki1"></span><span class="ki ki2"></span><span class="ki ki3"></span>' +
-      '<span class="shock"></span>' +
-      '<span class="em em1"></span><span class="em em2"></span><span class="em em3"></span>' +
-      crystal(21, "crystal") + "</span>";
+      crystal(20, "rad-plate", "dim") +
+      crystal(20, "rad-notch", "notch") +
+      "</span>";
   }
 
   function startStream() {
@@ -4037,6 +4141,91 @@ function _sbRun() {
     r.readAsDataURL(blob);
   }
 
+  /* ───────────────────────── drag and drop ─────────────────────────
+   *
+   * Files dropped ON THE COMPOSER become attachments. Files dropped anywhere
+   * else in the panel are refused, and that refusal is the point rather than
+   * an omission.
+   *
+   * A webview is a browser frame, and a browser's default action for a dropped
+   * file is to NAVIGATE TO IT. Dropped on the transcript, that replaces the
+   * whole panel with a rendering of the file and there is no back button - the
+   * conversation is simply gone until the view is reloaded. So the document
+   * cancels dragover and drop everywhere, and the composer is the one element
+   * that opts back in.
+   *
+   * Reuses readBlob, so the size cap, the count cap and the base64 shape are
+   * the paste path's, not a second implementation of them.
+   */
+  function takeFiles(list, whenDone) {
+    var blobs = [];
+    for (var i = 0; i < (list ? list.length : 0); i++) blobs.push(list[i]);
+    if (!blobs.length) return false;
+    var left = blobs.length;
+    var any = false;
+    for (var b = 0; b < blobs.length; b++) {
+      (function (blob) {
+        var nm = blob.name || pasteName(blob.type);
+        readBlob(blob, nm, function (ok) {
+          any = any || ok;
+          if (--left === 0 && any) whenDone();
+        });
+      })(blobs[b]);
+    }
+    return true;
+  }
+
+  function wireDrop() {
+    var composer = document.querySelector(".composer");
+    if (!composer) return;
+
+    // The document-wide guard. `dragover` must be cancelled too: without it the
+    // browser never fires `drop` on the composer either, because the default
+    // dragover handler rejects the drag before it gets there.
+    document.addEventListener("dragover", function (e) { e.preventDefault(); });
+    document.addEventListener("drop", function (e) { e.preventDefault(); });
+
+    // A counter, not a boolean: dragging across a child element fires leave on
+    // the parent before enter on the child, so a boolean flickers the outline
+    // off and on as the pointer crosses the textarea.
+    var depth = 0;
+    var hasFiles = function (e) {
+      var t = e.dataTransfer && e.dataTransfer.types;
+      if (!t) return false;
+      for (var i = 0; i < t.length; i++) if (t[i] === "Files") return true;
+      return false;
+    };
+
+    composer.addEventListener("dragenter", function (e) {
+      if (!hasFiles(e)) return;
+      depth++;
+      composer.setAttribute("data-drop", "1");
+    });
+    composer.addEventListener("dragleave", function () {
+      if (depth > 0) depth--;
+      if (!depth) composer.removeAttribute("data-drop");
+    });
+    composer.addEventListener("dragover", function (e) {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      // Tells the OS this is a copy rather than a move, which is what changes
+      // the cursor to the one with a plus on it.
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+    });
+    composer.addEventListener("drop", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      depth = 0;
+      composer.removeAttribute("data-drop");
+      if (!e.dataTransfer) return;
+      takeFiles(e.dataTransfer.files, function () {
+        renderAttachments();
+        syncComposer();
+      });
+    });
+  }
+
   function onPaste(e) {
     var cd = e.clipboardData;
     if (!cd) return;
@@ -4207,6 +4396,14 @@ function _sbRun() {
         }
         return;
       }
+      // Delete is checked BEFORE load: it sits inside the same row, so a click
+      // on the bin would otherwise also match the row's [data-session] on the
+      // way up and open the very conversation being thrown away.
+      var wdel = e.target.closest(".welcome [data-del]");
+      if (wdel) {
+        post("deleteSession", { id: wdel.getAttribute("data-del") });
+        return;
+      }
       var recent = e.target.closest(".welcome [data-session]");
       if (recent) { post("loadSession", { id: recent.getAttribute("data-session") }); return; }
       var sug = e.target.closest("[data-sug]");
@@ -4283,6 +4480,7 @@ function _sbRun() {
     // On the textarea rather than the document, so a paste into some other
     // field cannot silently become an attachment.
     draft.addEventListener("paste", onPaste);
+    wireDrop();
     $("attachStrip").addEventListener("click", function (e) {
       var btn = e.target.closest("[data-att-rm]");
       if (!btn) return;

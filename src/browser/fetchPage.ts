@@ -162,7 +162,7 @@ export async function fetchPage(
       // Identifying honestly. A blank or forged agent gets a different page
       // from many sites, and then the panel and the agent disagree about what
       // the address contains.
-      "user-agent": "Kryptonite/0.5 (VS Code extension; +https://github.com/AmineXSaid/KRYPTONITE)",
+      "user-agent": "Genesis/0.8 (VS Code extension; +https://github.com/AmineXSaid/KRYPTONITE)",
       accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8",
       "accept-language": "en",
     },

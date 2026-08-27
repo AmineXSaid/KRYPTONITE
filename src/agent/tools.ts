@@ -60,6 +60,15 @@ export function lineStat(before: string, after: string): { added: number; remove
 
 export interface ToolContext {
   root: string;
+  /**
+   * Whether READS may leave the workspace root. Writes never may, whatever
+   * this says. See `readable()` for what "may" costs.
+   *
+   * Optional, and absent means false, so every offline harness and every
+   * caller that predates the flag keeps the old workspace-only behaviour
+   * without being edited.
+   */
+  readOutsideWorkspace?: boolean;
   skills: Skill[];
   /** Returns true if the user allows this side effect. */
   approve: (summary: string, detail?: string) => Promise<boolean>;
@@ -174,7 +183,7 @@ export interface ToolResult {
  * works, and falls back to the lexical result when nothing on the path exists
  * yet.
  */
-function inside(root: string, p: string): string {
+function writable(root: string, p: string): string {
   const base = path.resolve(root);
   const abs = path.resolve(base, p ?? ".");
   const contains = (parent: string, child: string) =>
@@ -201,6 +210,76 @@ function inside(root: string, p: string): string {
       probe = up;
     }
   }
+}
+
+/**
+ * Paths a read is refused even when reads may leave the workspace.
+ *
+ * Widening reads to the whole filesystem is what the user asked for, and the
+ * reason they asked is real: a Python project's actual dependencies live in
+ * site-packages, a Go project's in the module cache, and an agent that cannot
+ * open them can only guess at what the code it is reading actually calls.
+ *
+ * But "read any file" and "read any file and put it in a prompt" are the same
+ * capability here, because everything a tool returns goes to the endpoint. So
+ * the places whose entire purpose is to hold a credential stay closed. This is
+ * not a security boundary against a hostile model - a determined one has a
+ * shell in Act mode - it is a guard against the ordinary accident: a model
+ * grepping a home directory for "token" and finding one.
+ *
+ * Matched on path segments, so `~/.aws` is blocked and `~/project/.aws-notes`
+ * is not.
+ */
+const SECRET_DIRS = new Set([
+  ".ssh", ".aws", ".gnupg", ".gpg", ".docker", ".kube", ".azure", ".config/gcloud",
+  ".netrc", ".password-store", "keychains", "credentials.d",
+]);
+const SECRET_FILES = new Set([
+  ".netrc", ".npmrc", ".pypirc", ".git-credentials", ".htpasswd",
+  "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa", "credentials", "shadow",
+]);
+
+/**
+ * Resolve a path for READING.
+ *
+ * Inside the workspace this is exactly `writable()`. Outside it, the read is
+ * allowed when `readOutsideWorkspace` is on and the path is not a credential
+ * store - and refused with a message that names the setting when it is off,
+ * because "outside the workspace" on its own sent someone round a three-turn
+ * loop asking the model to relocate itself.
+ */
+function readable(ctx: { root: string; readOutsideWorkspace?: boolean }, p: string): string {
+  const base = path.resolve(ctx.root);
+  const abs = path.resolve(base, p ?? ".");
+  const contains = (parent: string, child: string) =>
+    child === parent || child.startsWith(parent.endsWith(path.sep) ? parent : parent + path.sep);
+
+  if (contains(base, abs)) return writable(ctx.root, p);
+
+  if (!ctx.readOutsideWorkspace) {
+    throw new Error(
+      `Path ${p} is outside the workspace, and reading outside it is turned off. ` +
+      `Set "kryptonite.readOutsideWorkspace": true to allow it, or bring the file ` +
+      `into the workspace. Writes stay inside the workspace either way.`
+    );
+  }
+
+  // Resolve symlinks before judging the path, so a link named innocuously
+  // cannot point at a key.
+  let real = abs;
+  try { real = fs.realpathSync(abs); } catch { /* may not exist; judge the lexical path */ }
+
+  const segs = real.split(path.sep).filter(Boolean);
+  const base_ = segs[segs.length - 1] ?? "";
+  if (SECRET_FILES.has(base_)) {
+    throw new Error(`Refusing to read ${p}: that filename is a credential store.`);
+  }
+  for (let i = 0; i < segs.length; i++) {
+    if (SECRET_DIRS.has(segs[i]) || SECRET_DIRS.has(segs.slice(i, i + 2).join("/"))) {
+      throw new Error(`Refusing to read ${p}: it is inside ${segs[i]}, a credential store.`);
+    }
+  }
+  return real;
 }
 
 /** Skip anything that is not plausibly text, so a search never scans a binary. */
@@ -618,7 +697,7 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
 
     switch (name) {
       case "read_file": {
-        const abs = inside(ctx.root, args.path);
+        const abs = readable(ctx, args.path);
         const st = fs.statSync(abs);
         if (st.isDirectory()) {
           return { content: `${args.path} is a directory. Use list_files or glob.`, isError: true };
@@ -648,7 +727,7 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
       }
 
       case "write_file": {
-        const abs = inside(ctx.root, args.path);
+        const abs = writable(ctx.root, args.path);
         const existed = fs.existsSync(abs);
         const ok = await ctx.approve(
           `${existed ? "Overwrite" : "Create"} ${args.path}`,
@@ -679,7 +758,7 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
       }
 
       case "edit_file": {
-        const abs = inside(ctx.root, args.path);
+        const abs = writable(ctx.root, args.path);
         if (!fs.existsSync(abs)) return { content: `${args.path} does not exist.`, isError: true };
         const before = fs.readFileSync(abs, "utf8");
         // An empty needle "appears" between every character; split would report
@@ -717,7 +796,7 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
       }
 
       case "list_files": {
-        const abs = inside(ctx.root, args.path ?? ".");
+        const abs = readable(ctx, args.path ?? ".");
         const out: string[] = [];
         walkFiles(
           ctx.root,
@@ -736,7 +815,7 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
         if (typeof args.pattern !== "string" || !args.pattern) {
           return { content: "pattern is required.", isError: true };
         }
-        const from = inside(ctx.root, args.path ?? ".");
+        const from = readable(ctx, args.path ?? ".");
         const re = globToRe(args.pattern);
         // Patterns are written either against the workspace root ("src/**/*.ts")
         // or as a bare filename ("*.ts"); accept both rather than making the
@@ -775,7 +854,7 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
           return { content: `Invalid pattern: ${e.message}`, isError: true };
         }
 
-        const from = inside(ctx.root, args.path ?? ".");
+        const from = readable(ctx, args.path ?? ".");
         const globRe = args.glob ? globToRe(args.glob) : undefined;
         const globBare = args.glob ? !args.glob.includes("/") : false;
         const mode = args.output_mode ?? "content";
@@ -966,7 +1045,7 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
         if (!ctx.browser) {
           return {
             content:
-              "No browser is available. Kryptonite drives the Chrome or Edge already " +
+              "No browser is available. Genesis drives the Chrome or Edge already " +
               "installed on this machine; none was found. Use fetch_url for static pages.",
             isError: true,
           };
@@ -1091,7 +1170,7 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
         // later in a way that looks like the generation failed.
         const want = extFor(out.mime);
         const rel = wanted.replace(/\.[A-Za-z0-9]+$/, "") + want;
-        const abs = inside(ctx.root, rel);
+        const abs = writable(ctx.root, rel);
         const replaced = fs.existsSync(abs);
         fs.mkdirSync(path.dirname(abs), { recursive: true });
         fs.writeFileSync(abs, out.bytes);

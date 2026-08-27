@@ -79,14 +79,14 @@ export function registerCommitMessage(app: App): vscode.Disposable {
     const api = gitApi();
     if (!api) {
       void vscode.window.showWarningMessage(
-        "Kryptonite: the built-in Git extension is not available in this window."
+        "Genesis: the built-in Git extension is not available in this window."
       );
       return;
     }
 
     const repo = await pickRepo(api, hint);
     if (!repo) {
-      void vscode.window.showWarningMessage("Kryptonite: no Git repository here.");
+      void vscode.window.showWarningMessage("Genesis: no Git repository here.");
       return;
     }
 
@@ -95,14 +95,14 @@ export function registerCommitMessage(app: App): vscode.Disposable {
       // Naming the fix matters. "Nothing staged" reads as a bug to someone who
       // has 40 modified files in front of them.
       void vscode.window.showInformationMessage(
-        "Kryptonite: nothing is staged. Stage the changes you want to commit first."
+        "Genesis: nothing is staged. Stage the changes you want to commit first."
       );
       return;
     }
 
     const raw = await repo.diff(true);
     if (!raw.trim()) {
-      void vscode.window.showInformationMessage("Kryptonite: the staged change has no diff to read.");
+      void vscode.window.showInformationMessage("Genesis: the staged change has no diff to read.");
       return;
     }
     const capped = capDiff(raw);
@@ -124,7 +124,7 @@ export function registerCommitMessage(app: App): vscode.Disposable {
 
       const message = cleanCommitMessage(answer);
       if (!message) {
-        void vscode.window.showWarningMessage("Kryptonite: the model returned an empty message.");
+        void vscode.window.showWarningMessage("Genesis: the model returned an empty message.");
         return;
       }
       // Replacing rather than appending. A half-typed message the user wants to
@@ -132,7 +132,7 @@ export function registerCommitMessage(app: App): vscode.Disposable {
       // a leading newline in every commit, and that is the common case.
       repo.inputBox.value = message;
     } catch (e: any) {
-      void vscode.window.showErrorMessage(`Kryptonite: ${String(e?.message ?? e)}`);
+      void vscode.window.showErrorMessage(`Genesis: ${String(e?.message ?? e)}`);
     }
   });
 }

@@ -126,7 +126,11 @@ export function refusalFor(phase: Phase, name: string): string {
     ? `MCP tools are withheld in ${where} mode unless their server is marked ` +
       `"readOnly": true in .agent/mcp.json - the protocol itself cannot declare ` +
       `a tool read-only, so that claim has to come from the user.`
-    : `${where} mode offers read-only tools only.`;
+    // Says what is withheld - the ability to CHANGE things - rather than
+    // "read-only tools only", which a model reads as a confinement and then
+    // explains to the user as a sandbox it is trapped in. Reading is not
+    // restricted in Ask or Plan and never was; only writing is.
+    : `${where} mode withholds the tools that change things. Reading is not limited.`;
   const go =
     phase === "ask"
       ? "Answer the question with what you can read, then tell the user to switch to Plan to design the change or Act to make it."
@@ -564,7 +568,7 @@ function identityLine(identity?: { model: string; endpoint: string }): string {
   if (!identity?.model) return "";
   return (
     `You are the model \`${identity.model}\`, served through the endpoint ` +
-    `"${identity.endpoint}" and running inside the Kryptonite extension for VS Code. ` +
+    `"${identity.endpoint}" and running inside the Genesis extension for VS Code. ` +
     `If you are asked what model you are, answer with that and do not guess at a ` +
     `brand name from your training.`
   );

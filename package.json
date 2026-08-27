@@ -1,6 +1,6 @@
 {
   "name": "kryptonite",
-  "displayName": "KRYPTONITE",
+  "displayName": "Genesis",
   "description": "A coding agent for endpoints that don't behave. mTLS, corporate CAs, token exchange, air-gapped.",
   "version": "0.8.0",
   "publisher": "MohamedAmineSaid",
@@ -28,7 +28,7 @@
       "secondarySidebar": [
         {
           "id": "kryptonite",
-          "title": "Kryptonite",
+          "title": "Genesis",
           "icon": "media/icon.svg"
         }
       ]
@@ -45,88 +45,88 @@
     "commands": [
       {
         "command": "kryptonite.focusSidebar",
-        "title": "KRYPTONITE: Focus sidebar"
+        "title": "Genesis: Focus sidebar"
       },
       {
         "command": "kryptonite.openControlCenter",
-        "title": "KRYPTONITE: Open Control Center"
+        "title": "Genesis: Open Control Center"
       },
       {
         "command": "kryptonite.openBrowser",
-        "title": "KRYPTONITE: Open browser"
+        "title": "Genesis: Open browser"
       },
       {
         "command": "kryptonite.closeBrowser",
-        "title": "KRYPTONITE: Close browser"
+        "title": "Genesis: Close browser"
       },
       {
         "command": "kryptonite.newChat",
-        "title": "KRYPTONITE: New chat"
+        "title": "Genesis: New chat"
       },
       {
         "command": "kryptonite.runDiagnostics",
-        "title": "KRYPTONITE: Run connection diagnostics"
+        "title": "Genesis: Run connection diagnostics"
       },
       {
         "command": "kryptonite.selectEndpoint",
-        "title": "KRYPTONITE: Select active endpoint"
+        "title": "Genesis: Select active endpoint"
       },
       {
         "command": "kryptonite.newEndpoint",
-        "title": "KRYPTONITE: Create endpoint profile"
+        "title": "Genesis: Create endpoint profile"
       },
       {
         "command": "kryptonite.restoreCheckpoint",
-        "title": "KRYPTONITE: Restore checkpoint"
+        "title": "Genesis: Restore checkpoint"
       },
       {
         "command": "kryptonite.exportBundle",
-        "title": "KRYPTONITE: Export offline bundle"
+        "title": "Genesis: Export offline bundle"
       },
       {
         "command": "kryptonite.selectAgent",
-        "title": "KRYPTONITE: Select agent"
+        "title": "Genesis: Select agent"
       },
       {
         "command": "kryptonite.newAgent",
-        "title": "KRYPTONITE: Create agent"
+        "title": "Genesis: Create agent"
       },
       {
         "command": "kryptonite.exportChat",
-        "title": "KRYPTONITE: Export chat as JSON"
+        "title": "Genesis: Export chat as JSON"
       },
       {
         "command": "kryptonite.exportAllChats",
-        "title": "KRYPTONITE: Export all chats as JSON"
+        "title": "Genesis: Export all chats as JSON"
       },
       {
         "command": "kryptonite.fixProblem",
-        "title": "KRYPTONITE: Fix this problem"
+        "title": "Genesis: Fix this problem"
       },
       {
         "command": "kryptonite.documentSymbol",
-        "title": "KRYPTONITE: Document this"
+        "title": "Genesis: Document this"
       },
       {
         "command": "kryptonite.explainSelection",
-        "title": "KRYPTONITE: Explain this"
+        "title": "Genesis: Explain this"
       },
       {
         "command": "kryptonite.writeTests",
-        "title": "KRYPTONITE: Write tests for this"
+        "title": "Genesis: Write tests for this"
       },
       {
         "command": "kryptonite.generateCommitMessage",
-        "title": "KRYPTONITE: Generate commit message",
+        "title": "Genesis: Generate commit message",
         "icon": "$(sparkle)"
       },
       {
         "command": "kryptonite.watchAgentBrowser",
-        "title": "KRYPTONITE: Watch the agent browser"
+        "title": "Genesis: Watch the agent browser"
       }
     ],
     "configuration": {
-      "title": "KRYPTONITE",
+      "title": "Genesis",
       "properties": {
         "kryptonite.profileDirectory": {
           "type": "string",
@@ -147,6 +147,11 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Append what is on screen - the focused file, the open tabs, and the compiler's errors for that file - to each message you send. Costs a few hundred tokens per turn and is what makes \"fix this\" resolve to something. Turn it off on a very small context window."
+        },
+        "kryptonite.readOutsideWorkspace": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Let the agent **read** files outside the workspace folder - a Python `site-packages`, a Go module cache, a config under `/etc`. Without it, asking about a library your code imports gets \"outside the workspace\" and no answer, because the dependency source is never in the checkout.\n\n**Writes are always confined to the workspace**, whatever this is set to, and paths whose whole purpose is holding a credential - `.ssh`, `.aws`, `.gnupg`, `.kube`, `id_rsa`, `.netrc` and similar - are refused even when this is on. Turn it off to confine reads to the workspace as well."
         },
         "kryptonite.browserHeaded": {
           "type": "boolean",
@@ -181,7 +186,7 @@
         "kryptonite.codeActions": {
           "type": "boolean",
           "default": true,
-          "description": "Offer Kryptonite fixes and rewrites in the lightbulb menu."
+          "description": "Offer Genesis fixes and rewrites in the lightbulb menu."
         },
         "kryptonite.inlineCompletion": {
           "type": "boolean",
