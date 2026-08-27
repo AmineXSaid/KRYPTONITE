@@ -7,9 +7,11 @@ never write to. Search-only, by construction rather than by convention.
 | --- | --- |
 | `src/readonly_client/` | shared auth, HTTP client, read-only guard, error mapping, redaction |
 | `src/readonly_client/paths/` | every REST path, one module per product, each with its provenance |
-| `src/jira_mcp/` | Jira server — [README](docs/jira.md) |
-| `src/confluence_mcp/` | Confluence server — [README](docs/confluence.md) |
-| `probe.py` | standalone connectivity + deployment-type check. **Run this first.** |
+| `src/jira_mcp/` | Jira — JQL search, issues, projects, fields — [README](docs/jira.md) |
+| `src/confluence_mcp/` | Confluence — CQL search, pages, spaces — [README](docs/confluence.md) |
+| `src/gitlab_mcp/` | GitLab — projects, code search, files, merge requests — [README](docs/gitlab.md) |
+| `src/jenkins_mcp/` | Jenkins — jobs, builds, console logs, artifacts — [README](docs/jenkins.md) |
+| `probe.py` | standalone connectivity + capability check. **Run this first.** |
 
 The shared core is named for the property it enforces, not for the first vendor
 that used it: it began as `atlassian_client`, and that name stopped being true
@@ -19,23 +21,40 @@ the moment a second vendor's server imported it.
 
 ## ⚠️ Read this before you trust the endpoint paths
 
-**The paths in `src/readonly_client/paths/` have not been verified against
-your instance.** The environment this was built in cannot reach
-`*.company.internal`, and its egress proxy blocks `developer.atlassian.com` and
-`docs.atlassian.com`, so the Data Center API shapes are corroborated from
-secondary sources rather than confirmed against the primary reference.
+**Nothing here has been verified against your instances.** How well each path
+set is corroborated differs, and it is worth knowing which is which:
 
-`probe.py` exists to close that gap and takes about ten seconds:
+| | source | status |
+| --- | --- | --- |
+| GitLab | `gitlab-org/gitlab`'s own `doc/api/` tree, read at master | shape read off the primary reference |
+| Jenkins | the Java that serves the endpoints, in `jenkinsci/jenkins` and `jenkinsci/stapler` | shape read off the implementation |
+| Jira / Confluence | secondary sources | **corroborated only** — `developer.atlassian.com` was unreachable from the build environment |
+
+Every path carries its own status comment in
+`src/readonly_client/paths/`. None of it says anything about *your* instance:
+its version, its licence tier, whether a reverse proxy sits in front of it.
+
+`probe.py` closes that gap and takes about ten seconds:
 
 ```bash
-cp .env.example .env      # fill in your PAT
+cp .env.example .env      # fill in your tokens
 set -a; source .env; set +a
-python probe.py
+python probe.py           # everything you configured
 ```
 
-It reports the deployment type from the instance itself. If it says **Cloud**,
-stop — the path set targets Data Center and I need to add a Cloud one. See
-[Open questions](#open-questions).
+It answers a different question per product:
+
+- **Jira / Confluence** — Data Center or Cloud. If it says **Cloud**, stop: the
+  path set targets Data Center. See [Open questions](#open-questions).
+- **GitLab** — the version, and whether project-scoped code search actually
+  works here. Neither a licence tier nor Elasticsearch should be required for
+  it, but "should not be" is a claim about GitLab, not about your instance.
+- **Jenkins** — whether `X-Text-Size` reaches the client. The console tail is
+  built on that header; a proxy stripping it turns a 100 KB read into a 200 MB
+  one. The server still works, just slowly, and this is how you find out
+  before the instance's worst job finds out for you.
+
+A product with no `*_BASE_URL` set is skipped, not failed.
 
 ---
 
@@ -93,12 +112,18 @@ cannot work is offering a choice that can only be a mistake — and it fails as 
 ```bash
 jira-mcp          # or: python -m jira_mcp.server
 confluence-mcp    # or: python -m confluence_mcp.server
+gitlab-mcp        # or: python -m gitlab_mcp.server
+jenkins-mcp       # or: python -m jenkins_mcp.server
 ```
+
+Each server is independent: run only the ones you have configured. A server
+whose variables are missing refuses to start and names them, rather than
+starting and 401ing on every call.
 
 ## Test
 
 ```bash
-pytest            # 137 tests, no network access required
+pytest            # 226 tests, no network access required
 ```
 
 ---
@@ -153,9 +178,10 @@ fires without touching a transport that raises if called.
 
 ## Output shaping
 
-Raw Atlassian payloads will blow the context window — a single Jira issue is
-routinely 40–80 KB, mostly avatar URLs at four pixel sizes per user and several
-hundred null custom fields.
+Raw payloads will blow the context window. A single Jira issue is routinely
+40–80 KB, mostly avatar URLs at four pixel sizes per user and several hundred
+null custom fields. A GitLab project record runs past a hundred keys. A Jenkins
+console log can be hundreds of megabytes.
 
 - **Jira issue** → `key, summary, status, issue_type, assignee, reporter,
   priority, updated, url`. Anything else must be named in `fields`, and arrives
@@ -169,6 +195,24 @@ hundred null custom fields.
   slice as the whole.
 - `avatarUrls`, `_links`, `_expandable`, `expand` and `self` are stripped
   everywhere, including from caller-requested extra fields.
+- **GitLab merge-request diffs** are capped twice — 8 KB per file, 60 KB over
+  the whole result — so one generated lockfile cannot crowd out every real
+  change. A file whose diff was cut keeps its entry and its paths.
+- **Jenkins builds** convert epoch milliseconds to ISO timestamps and readable
+  durations, keeping the originals for anything that has to compute; and
+  `status` is never null, because Jenkins leaves `result` null on a build that
+  is merely still running.
+- **Jenkins consoles** are read from the END, capped, with failure lines pulled
+  out and gaps marked, and the log's true size reported alongside.
+
+Three things are reported as absent rather than guessed at, because guessing in
+each case produces a confident and wrong answer:
+
+| | absent means | not |
+| --- | --- | --- |
+| GitLab `x-total` above 10,000 records | `total: null` plus a note | `total: 0` |
+| GitLab `collapsed` / `too_large` below 18.4 | the key is omitted | `false` |
+| Jenkins artifact size (never exported) | no `size` key at all | `0` |
 
 ## Error mapping
 
@@ -208,9 +252,21 @@ intercepting it. A test asserts the string never appears in the error message.
 3. **MCP SDK version.** You asked for FastMCP; the current SDK is 2.x, where it
    was renamed `MCPServer`. `mcp_compat.py` resolves whichever is installed, so
    both work. Pin `mcp<2` if you want the 1.x line specifically.
-4. **Reading large text.** `get_text()` streams and caps text bodies, with
-   `tail=True` for the case that matters — a stack trace is the last thing a
-   failing build prints, so a cap that keeps the first 2 MB of a 200 MB log
-   keeps everything except the answer. Truncation is reported alongside the
-   text rather than hidden, because a truncated log that looks whole makes an
-   agent report that a build failed for no visible reason.
+4. **GitLab code search.** `gitlab_search_code` is project-scoped, because
+   instance-wide blob search needs Premium/Ultimate *and* Elasticsearch. If
+   `probe.py --gitlab` says advanced search is available on your instance and
+   you want cross-project search, say so — it is a second tool, not a change
+   to this one, because the two have genuinely different availability and a
+   single tool that sometimes works is worse than two that each say what they
+   need.
+5. **Jenkins job naming.** Your `CTH-8899` example reads like a Jira issue key
+   rather than a Jenkins job path. If your jobs really are named after Jira
+   keys, `jenkins_list_jobs` will find them and nothing changes. If instead the
+   question is "the build for ticket CTH-8899", that needs a link between the
+   two — a Jira field naming the job, or a job parameter carrying the key — and
+   I need to know which your instance uses before building it.
+6. **Images from Confluence and Jira still do not reach the model.** Two
+   independent blockers, unchanged by this work: the servers never download
+   attachments, and KRYPTONITE's MCP bridge flattens an image content block to
+   the string `[image: image/png]`. Both are fixable, and it is its own piece
+   of work.
