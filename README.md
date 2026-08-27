@@ -137,6 +137,50 @@ wrong.
 is active a bar under the tabs names it and states its scope; nothing is drawn
 when none is.
 
+## MCP servers
+
+Configured in `.agent/mcp.json`, in the shape Claude Desktop and Claude Code
+use, so a server block copies between them verbatim. Tools reach the model as
+`mcp__<server>__<tool>`.
+
+Two keys are this extension's own:
+
+| key | meaning |
+| --- | --- |
+| `approval` | `ask` routes every call through the permission gate; `auto` does not |
+| `readOnly` | **your** claim that the server only reads — see below |
+
+### `readOnly`, and why it is your claim to make
+
+Ask and Plan promise the model can only look. MCP gives a server no way to
+declare a tool read-only, so by default those two modes withhold MCP entirely —
+there is nothing for the extension to check.
+
+That is safe but blunt: a server that genuinely only reads gets locked out of
+the read-only modes, and you end up in Act — which can also edit files — just to
+run a search.
+
+`"readOnly": true` is you saying you checked. It is the only thing that opens
+Ask and Plan to a server's tools:
+
+```json
+"jira": {
+  "command": "/path/to/.venv/bin/jira-mcp",
+  "approval": "ask",
+  "readOnly": true
+}
+```
+
+**Nothing verifies it.** The extension cannot introspect what a server does, and
+pretending otherwise would be worse than the honest label — so a marked server
+carries a `READ-ONLY` chip in the MCP tab whose tooltip says you declared it and
+the extension did not check. Set it only for a server you have actually read,
+the same judgement `approval: "auto"` asks for.
+
+Only a literal `true` counts. `readOnly: "true"` produces a warning and is
+treated as false; widening what Ask and Plan may reach because of a typo is
+precisely what this flag must not do.
+
 ## In the editor
 
 The chat panel is not the only surface. Each of these calls the same endpoint

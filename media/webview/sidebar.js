@@ -3619,7 +3619,16 @@ function _sbRun() {
       rows += '<div class="mcp-row" data-state="' + esc(sv.state) + '">' +
         '<span class="rail"></span>' +
         '<span class="mid">' +
-          '<span class="top"><span class="nm">' + esc(sv.name) + "</span>" + mcpPill(sv.state) + "</span>" +
+          '<span class="top"><span class="nm">' + esc(sv.name) + "</span>" + mcpPill(sv.state) +
+            // The read-only claim, shown because it is the one thing that lets
+            // this server's tools be used in Ask and Plan. A claim nobody can
+            // see is a claim nobody can audit - and the title says plainly
+            // that the user made it and the extension did not check it.
+            (sv.readOnly
+              ? '<span class="mcp-ro" title="You declared this server read-only in .agent/mcp.json, ' +
+                'so its tools are offered in Ask and Plan. Nothing verifies that claim.">read-only</span>'
+              : "") +
+          "</span>" +
           '<span class="sub ell" title="' + esc(sv.command) + '">' +
             esc(sv.transport || "stdio") + " · " +
             esc(sv.serverInfo ? sv.serverInfo.name + " " + sv.serverInfo.version : sv.command) +

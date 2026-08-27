@@ -3,6 +3,29 @@
 ## Unreleased
 
 ### Added
+- **A read-only MCP server can now be used in Ask and Plan.** Mark it
+  `"readOnly": true` in `.agent/mcp.json` and its tools are offered in the two
+  modes that previously withheld MCP entirely.
+
+  The old blanket rule was defensible - MCP has no way for a server to declare
+  a tool read-only, so there was nothing to check - but it produced a bad
+  outcome: a server that genuinely only reads was locked out of Ask, the
+  read-only mode, and you had to enter Act, the mode that can also edit files,
+  to run a search. The safest servers were excluded from the safest mode.
+
+  What was missing is not something the protocol can supply. It is a statement
+  by the person who configured the server, so now they can make it. **It is a
+  claim, not a proof**: nothing inspects what the server does, exactly as
+  nothing checks that `approval: "auto"` was wise. The MCP tab shows a
+  `READ-ONLY` chip on a marked server whose tooltip says you declared it and
+  the extension did not verify it - a claim nobody can see is a claim nobody
+  can audit.
+
+  Unmarked servers are entirely unaffected: still withheld in Ask and Plan,
+  still refused at the call if the model names one anyway. Only a literal
+  `true` counts - `readOnly: "true"` is warned about and treated as false,
+  because widening what those modes may reach on the strength of a typo is
+  exactly the failure this flag must not have.
 - **The panel now ships the fonts it is drawn in.** IBM Plex Sans for the
   interface, Space Mono for every mono run in it, and Michroma for the GENESIS
   wordmark - the three families the Genesis design specifies. None of them were

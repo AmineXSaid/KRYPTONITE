@@ -516,6 +516,12 @@ export class SessionController {
         ? {
             has: (name: string) => this.app.mcp.has(name),
             needsApproval: (name: string) => this.app.mcp.needsApproval(name),
+            // Delegated unchanged: the read-only claim is about the SERVER,
+            // and the agent's scope is about which of its tools may be
+            // reached. They are orthogonal, and the scope is enforced in
+            // `call` below - narrowing it here too would refuse a tool the
+            // agent is allowed for a reason that has nothing to do with it.
+            isReadOnly: (name: string) => this.app.mcp.isReadOnly(name),
             call: async (name: string, args: unknown) => {
               const q = parseQualified(name);
               if (!q || !agentAllowsMcp(agent, q.server, q.tool)) {

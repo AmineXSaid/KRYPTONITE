@@ -92,6 +92,12 @@ export interface ToolContext {
   mcp?: {
     has(name: string): boolean;
     needsApproval(name: string): boolean;
+    /**
+     * Whether the user declared this tool's server read-only in
+     * `.agent/mcp.json`. The agent loop consults it to decide whether an MCP
+     * tool may be offered outside Act. Nothing verifies the claim.
+     */
+    isReadOnly(name: string): boolean;
     call(name: string, args: unknown): Promise<{ content: string; isError?: boolean }>;
   };
   /**

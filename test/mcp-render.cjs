@@ -199,5 +199,31 @@ console.log("\n──── tool chips say what a tool can do ────");
     "every chip states its classification in a title");
 }
 
+console.log("\n──── the read-only claim is visible ────");
+{
+  // It is the one thing that lets a server's tools be used in Ask and Plan, so
+  // it has to be on the row. A claim nobody can see is a claim nobody audits.
+  const marked = render([{ name: "jira", state: "ready", toolCount: 2,
+    tools: ["jira_search", "jira_get_issue"], approval: "ask", readOnly: true }]);
+  ck(/class="mcp-ro"/.test(marked.html), "a marked server shows the read-only chip");
+  ck(/read-only<\/span>/.test(marked.html), "and the chip says read-only");
+  // The wording has to attribute the claim to the user, not to the extension.
+  // "This server is read-only" would be a guarantee we cannot make.
+  ck(/You declared this server read-only/.test(marked.html),
+    "the title attributes the claim to the user");
+  ck(/Nothing verifies that claim/.test(marked.html),
+    "and says plainly that it was not verified");
+
+  const plain = render([{ name: "fs", state: "ready", toolCount: 1,
+    tools: ["read_text_file"], approval: "ask", readOnly: false }]);
+  ck(!/class="mcp-ro"/.test(plain.html), "an unmarked server shows no chip");
+
+  // Absent is the same as false - an older config with no readOnly key must
+  // not render as though a claim had been made.
+  const legacy = render([{ name: "old", state: "ready", toolCount: 1,
+    tools: ["x"], approval: "ask" }]);
+  ck(!/class="mcp-ro"/.test(legacy.html), "a config with no readOnly key shows no chip");
+}
+
 console.log(`\n──── ${pass} passed, ${fail} failed ────`);
 process.exit(fail ? 1 : 0);

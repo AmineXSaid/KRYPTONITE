@@ -1795,6 +1795,21 @@ li.doing .cbx { border-color: var(--kx-accent); }
 .mcp-pill.ok { background: var(--kx-mcp-wash); color: var(--kx-mcp); }
 .mcp-pill.err { background: var(--kx-error-wash); color: var(--kx-error); }
 
+/* The user's read-only claim, and the reason this server's tools work in Ask
+   and Plan at all. Deliberately quieter than the state pill beside it - the
+   state is a fact the extension observed, this is something a person asserted,
+   and the two should not carry equal weight. Takes the information blue the
+   read-only tool chips below already use, so the same idea reads the same way
+   twice on one row. */
+.mcp-ro {
+  display: inline-flex; align-items: center; flex: none;
+  padding: 2px 7px; border-radius: 4px;
+  font-family: var(--kx-mono); font-size: 9px;
+  letter-spacing: .1em; text-transform: uppercase;
+  background: var(--kx-info-wash); color: var(--kx-info);
+  border: 1px solid color-mix(in srgb, var(--kx-info) 22%, transparent);
+}
+
 /* Chips are capped in the renderer; the tail carries the rest in its tooltip. */
 .mcp-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 16px 12px 29px; }
 /* A chip is a tool the model gained from a server, and its colour says what

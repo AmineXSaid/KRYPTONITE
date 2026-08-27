@@ -42,6 +42,12 @@ export interface McpServerSpec {
   cwd?: string;
   /** `ask` routes every call through the approval gate; `auto` does not. */
   approval?: "ask" | "auto";
+  /**
+   * The user's claim that this server only reads. Nothing verifies it; it is
+   * what allows the server's tools to be offered in Ask and Plan, which
+   * otherwise withhold MCP entirely. Defaults false.
+   */
+  readOnly?: boolean;
   /** Per-request timeout. The handshake gets its own, shorter budget. */
   timeoutMs?: number;
   enabled?: boolean;
@@ -194,6 +200,11 @@ export class McpClient {
 
   get approval(): "ask" | "auto" {
     return this.spec.approval ?? "ask";
+  }
+
+  /** The user's read-only claim. Absent means false, never "unknown". */
+  get readOnly(): boolean {
+    return this.spec.readOnly === true;
   }
 
   /**

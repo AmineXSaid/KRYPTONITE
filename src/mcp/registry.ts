@@ -21,9 +21,17 @@ type AnyClient = McpClient | McpHttpClient | McpSseClient;
  *         "approval": "ask"
  *       } } }
  *
- * `approval` is the one addition: MCP has no notion of it, but this extension
- * gates every side effect, and a tool from a server it started is exactly the
- * kind of side effect that needs a gate.
+ * `approval` and `readOnly` are the two additions. MCP has no notion of either.
+ *
+ * `approval` gates the call: this extension gates every side effect, and a tool
+ * from a server it started is exactly the kind of side effect that needs one.
+ *
+ * `readOnly` is the user vouching for a server. MCP cannot declare a tool
+ * read-only, so Ask and Plan withhold MCP entirely by default - which locks out
+ * servers that genuinely only read. This flag lets the person who configured
+ * the server say so, and is the ONLY thing that opens Ask/Plan to it. It is a
+ * claim, not a proof: nothing here inspects what the server does, exactly as
+ * nothing verifies that `approval: "auto"` is wise.
  */
 
 export const MCP_PREFIX = "mcp__";
@@ -51,6 +59,12 @@ export interface McpServerStatus {
   toolCount: number;
   tools: string[];
   approval: "ask" | "auto";
+  /**
+   * The user declared this server read-only, which is what lets its tools be
+   * offered in Ask and Plan. Defaults false: absent a claim there is nothing
+   * to check, and the safe answer is to withhold.
+   */
+  readOnly: boolean;
   serverInfo?: { name: string; version: string };
 }
 
@@ -161,10 +175,21 @@ export function loadMcpConfig(
     if (cfg.approval && cfg.approval !== "ask" && cfg.approval !== "auto") {
       warnings.push(`Server "${name}": approval must be "ask" or "auto" - got "${cfg.approval}".`);
     }
+    // Anything other than a literal boolean is refused rather than coerced.
+    // `readOnly: "true"` is the shape a person writes by accident, and reading
+    // it as true would silently widen what Ask and Plan may reach on the
+    // strength of a typo.
+    if (cfg.readOnly !== undefined && typeof cfg.readOnly !== "boolean") {
+      warnings.push(
+        `Server "${name}": readOnly must be true or false - got ${JSON.stringify(cfg.readOnly)}. ` +
+          `Treating it as false, so this server stays withheld in Ask and Plan.`
+      );
+    }
 
     const common = {
       name,
       approval: cfg.approval === "auto" ? ("auto" as const) : ("ask" as const),
+      readOnly: cfg.readOnly === true,
       timeoutMs: Number.isFinite(cfg.timeoutMs) ? Number(cfg.timeoutMs) : undefined,
       enabled: cfg.enabled !== false,
     };
@@ -293,6 +318,7 @@ export class McpRegistry {
       toolCount: c.tools.length,
       tools: c.tools.map((t) => t.name),
       approval: c.approval,
+      readOnly: c.readOnly,
       serverInfo: c.serverInfo,
     }));
     const off: McpServerStatus[] = this.disabled.map((s) => ({
@@ -303,6 +329,7 @@ export class McpRegistry {
       toolCount: 0,
       tools: [],
       approval: s.approval === "auto" ? ("auto" as const) : ("ask" as const),
+      readOnly: s.readOnly === true,
     }));
     return [...running, ...off].sort((a, b) => a.name.localeCompare(b.name));
   }
@@ -361,6 +388,20 @@ export class McpRegistry {
     const q = parseQualified(name);
     if (!q) return true;
     return (this.clients.get(q.server)?.approval ?? "ask") === "ask";
+  }
+
+  /**
+   * Whether the user declared this tool's server read-only.
+   *
+   * The one thing that opens Ask and Plan to an MCP tool. Every uncertain
+   * case answers false: an unparseable name, an unknown server, a server that
+   * never set the flag. The default has to be the withholding one, because
+   * this is a claim about a process we did not write and cannot inspect.
+   */
+  isReadOnly(name: string): boolean {
+    const q = parseQualified(name);
+    if (!q) return false;
+    return this.clients.get(q.server)?.readOnly === true;
   }
 
   find(name: string): { client: AnyClient; tool: McpTool } | undefined {

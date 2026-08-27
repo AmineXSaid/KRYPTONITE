@@ -675,6 +675,12 @@ export interface McpServerDto {
   toolCount: number;
   tools: string[];
   approval: "ask" | "auto";
+  /**
+   * The user declared this server read-only in `.agent/mcp.json`, which is what
+   * lets its tools be used in Ask and Plan. Surfaced so the panel can show the
+   * claim - an invisible claim is one nobody can audit.
+   */
+  readOnly: boolean;
   serverInfo?: { name: string; version: string };
 }
 /** Servers connected, failed, or reloaded. Carries config warnings too. */
