@@ -74,7 +74,18 @@ function _sbRun() {
        cannot", and this says "something is standing between the agent and the
        workspace" - which is a guard, not a barrier. */
     '<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7.5 3v6c0 4.2-3 7.6-7.5 9-4.5-1.4-7.5-4.8-7.5-9V6z" ' +
-      S6 + ' stroke-width="1.5" stroke-linejoin="round"/></symbol>';
+      S6 + ' stroke-width="1.5" stroke-linejoin="round"/></symbol>' +
+    /* The `@` that references a file, DRAWN rather than typed.
+       It was the literal character in a button beside the paperclip, so two
+       controls in the same group were a glyph from the UI font at 13px and an
+       icon from this sheet at 13px - different weights, different optical
+       sizes, different vertical centres. This is the same at-sign as a stroked
+       path on the same 24px grid as its neighbour, so the pair reads as one
+       set of controls. */
+    '<symbol id="i-at" viewBox="0 0 24 24">' +
+      '<circle cx="12" cy="12" r="3.6" ' + S6 + ' stroke-width="1.6"/>' +
+      '<path d="M15.6 8.4v5a2.4 2.4 0 0 0 4.8 0V12a8.4 8.4 0 1 0-3.3 6.7" ' +
+        S6 + ' stroke-width="1.6" stroke-linecap="round"/></symbol>';
 
   /* Ladder rung name -> the short label the design shows. */
   var RUNG_LABELS = {
@@ -1065,15 +1076,23 @@ function _sbRun() {
                 // footer, which is where things go to be ignored.
                 '<button class="perm-btn" id="permBtn" aria-haspopup="menu" aria-expanded="false"' +
                   ' title="What the agent may do without asking">' +
-                  icon("i-shield", "ic-11") + '<span class="nm" id="permName">Manual</span>' +
+                  icon("i-hand", "ic-11") + '<span class="nm" id="permName">Manual</span>' +
                 '</button>' +
                 '<span class="sp"></span>' +
-                // @ / attach / send are one group, not three siblings. As
-                // siblings the toolbar's wrap point landed between attach and
-                // send and orphaned send on a row of its own; grouped, the
-                // three move together and stay hugged to the right edge.
+                // Attach and send. THERE IS NO `@` BUTTON, on purpose.
+                //
+                // It typed a single character into the box, which is a thing
+                // the keyboard already does and which the placeholder already
+                // teaches - "( / skills · @ files )". As a sixth control in a
+                // wrapping row it was the one that broke the line: the group
+                // orphaned onto a second row and sat right-aligned with the
+                // whole left half of the composer empty. The design's composer
+                // has five controls and this is the one it does not have.
+                //
+                // The pair is still a GROUP rather than two siblings, so a
+                // wrap at a narrow width moves them together instead of
+                // leaving send on a row by itself.
                 '<span class="tb-actions">' +
-                  '<button class="tb-btn" id="atBtn" title="Reference a file" aria-label="Reference a file">@</button>' +
                   '<button class="tb-btn" id="clipBtn" title="Attach files" aria-label="Attach files">' + icon("i-clip", "ic-13") + '</button>' +
                   '<button id="sendBtn" data-ready="0" data-mode="send" title="Send" aria-label="Send">' + icon("i-up", "ic-13") + '</button>' +
                 '</span>' +
@@ -1407,6 +1426,12 @@ function _sbRun() {
     return PERMS[0][2];
   }
 
+  /** The glyph for a mode. Same table the sheet reads, so the two agree. */
+  function permIcon(mode) {
+    for (var i = 0; i < PERMS.length; i++) if (PERMS[i][0] === mode) return PERMS[i][4];
+    return PERMS[0][4];
+  }
+
   function renderPerm() {
     var mode = (S.config && S.config.approvalMode) || "ask";
     var nm = $("permName");
@@ -1416,6 +1441,19 @@ function _sbRun() {
       btn.setAttribute("data-mode", mode);
       // The full sentence, for the control that now shows one word.
       btn.title = permLabel(mode) + " - " + permDetail(mode);
+      // THE MODE'S OWN GLYPH, not a fixed shield.
+      //
+      // The button drew `i-shield` whatever the mode was, while the sheet it
+      // opens drew a different glyph per mode - a raised hand, angle brackets,
+      // a bolt. So the one icon on screen the whole time said nothing about
+      // which mode was in force, and disagreed with the sheet the moment it
+      // opened. A shield also appears nowhere else in this panel, so it read as
+      // a security badge rather than as a control.
+      //
+      // Reading PERMS means the button cannot drift from the sheet: there is
+      // one table, and both render from it.
+      var ic = btn.querySelector("svg");
+      if (ic) ic.outerHTML = icon(permIcon(mode), "ic-11");
     }
     var pop = $("permPop");
     if (!pop || pop.hidden) return;
@@ -2346,7 +2384,7 @@ function _sbRun() {
       '<div class="diff-foot">' + crystal(16) +
         "<span>Genesis: " + m.added + " additions, " + m.removed + " deletions</span>" +
         '<span class="sp"></span>' +
-        '<button class="btn sm primary" data-diff="accept">Accept</button>' +
+        '<button class="btn sm go" data-diff="accept">Accept</button>' +
         '<button class="btn sm" data-diff="reject">Reject</button>' +
         '<button class="btn sm" data-diff="view">Diff view</button></div>');
 
@@ -2453,11 +2491,16 @@ function _sbRun() {
           "</div>";
       }
       html += "</div>";
+      // The footer states which agent is in force, and nothing else.
+      //
+      // It used to end in a second "New agent" button, identical in label and
+      // behaviour to the one in the sticky header a few hundred pixels above.
+      // Two identical primary actions on one screen is not two chances to find
+      // it - it is a moment spent working out whether they differ. The header's
+      // copy stays, because it is the one that is always on screen.
       html += '<div class="sk-foot"><span>' +
         (S.activeAgent ? esc(S.activeAgent) + " is active" : "No agent - the default assistant") +
-        "</span>" +
-        '<span class="sp"></span>' +
-        '<button class="btn sm" data-ag="new">New agent</button></div>';
+        "</span></div>";
     }
     if (S.agentWarnings.length) {
       html += '<div class="warn-line">' + esc(S.agentWarnings.join(" ")) + "</div>";
@@ -2615,7 +2658,7 @@ function _sbRun() {
       '<div class="perm-cmd">' + esc(m.summary) + "</div>" +
       (m.detail ? '<div class="perm-cmd" style="margin-top:6px">' + esc(String(m.detail).slice(0, 4000)) + "</div>" : "") +
       '<div class="perm-actions">' +
-        '<button class="btn primary" data-perm="allow">Allow</button>' +
+        '<button class="btn go" data-perm="allow">Allow</button>' +
         '<button class="btn" data-perm="always">Always allow</button>' +
         '<button class="btn" data-perm="deny">Deny</button></div>'));
     el.dataset.perm = m.id;
@@ -2660,7 +2703,7 @@ function _sbRun() {
       '<span class="m">' + esc(m.meta) + "</span></div>" +
       '<ul class="plan-steps">' + steps + "</ul>" +
       '<div class="plan-foot">' +
-        '<button class="btn primary" data-plan="run">Approve &amp; run</button>' +
+        '<button class="btn go" data-plan="run">Approve &amp; run</button>' +
         '<button class="btn" data-plan="keep">Keep planning</button></div>'));
     el.addEventListener("click", function (e) {
       var b = e.target.closest("[data-plan]");
@@ -2702,7 +2745,20 @@ function _sbRun() {
 
   function startStream() {
     if (!streamEl) {
-      streamEl = add(div("stream", auraMarkup() + '<span class="g"></span><span class="m"></span>'));
+      // Three parts, as the design draws it: the mark, a column holding the
+      // verb over a mono sub-line, and the elapsed figure hard right.
+      //
+      // It was mark + verb + "(esc to interrupt · 4s)" on one line, which put
+      // the shortcut, the clock and the verb in one run of text at one size -
+      // so the only part that changes as the turn goes on, the seconds, was
+      // the least findable thing in it. Splitting them lets the verb shimmer
+      // on its own, keeps the shortcut quiet where it belongs, and gives the
+      // figure a fixed right edge to count in.
+      streamEl = add(div("stream",
+        auraMarkup() +
+        '<span class="s-col"><span class="g"></span>' +
+          '<span class="s-sub"><span class="s-esc">esc</span> to interrupt</span></span>' +
+        '<span class="m tnum"></span>'));
       S.elapsed = 0;
     }
     tickGerund();
@@ -2713,7 +2769,10 @@ function _sbRun() {
   function tickGerund() {
     if (!streamEl) return;
     streamEl.querySelector(".g").textContent = S.gerund;
-    streamEl.querySelector(".m").textContent = "(esc to interrupt · " + S.elapsed + "s)";
+    // Just the figure. The shortcut it used to share a line with is static and
+    // now lives in the sub-line, so this element only ever holds the one thing
+    // that moves.
+    streamEl.querySelector(".m").textContent = S.elapsed + "s";
   }
   function endStream() {
     flushAi();
@@ -2824,7 +2883,12 @@ function _sbRun() {
       send.innerHTML = icon("i-up", "ic-13");
       send.disabled = blocked;
     }
-    $("atBtn").disabled = blocked;
+    // Attach follows the composer. With no workspace and no endpoint there is
+    // nothing to attach a file TO, and a file picker that opens onto a turn
+    // that cannot be sent is a dead end. This line used to sit on the `@`
+    // button, which is gone; without it the paperclip stayed live on a
+    // composer that was otherwise entirely disabled.
+    $("clipBtn").disabled = blocked;
     $("modelBtn").disabled = !hasEndpoint();
 
     /* Reset to auto so scrollHeight reflects the real content height, not a
@@ -3349,13 +3413,24 @@ function _sbRun() {
       ? fmtK(used) + " of " + fmtK(limit) + " tokens, reported by " + name
       : "Context used - estimated, this endpoint reports no token count";
     $("epDot").setAttribute("data-err", S.tlsError ? "1" : "0");
-    $("modelBtn").title = S.tlsError ? name + " - TLS error" : name;
     // "Auto" when no profile is pinned and there is more than one to
     // choose from: the label has to say the choice is being made for you.
     var pinnedTo = (S.config && S.config.activeProfile) || "";
     $("modelName").textContent = active
       ? (pinnedTo === "" && S.models.length > 1 ? "Auto · " + active.model : active.model)
       : "No model";
+    // THE MODEL FIRST, THEN THE ENDPOINT.
+    //
+    // This named only the endpoint. That was defensible while the button was
+    // wide enough to print the model id in full - the tooltip added the one
+    // fact the label was missing. The button now gives its width back to keep
+    // the composer on one row, so the label is the part that ellipsises and
+    // the tooltip is the only place the whole id can be read. A tooltip that
+    // answers a question the label already answered, while withholding the one
+    // it does not, is worse than no tooltip.
+    $("modelBtn").title =
+      (active ? active.model + " · " + name : name) +
+      (S.tlsError ? " - TLS error" : "");
   }
 
   /* ─────────────────────── diagnostics: TLS ─────────────────────── */
@@ -3379,7 +3454,7 @@ function _sbRun() {
     if (!e) {
       if (!S.traceRun && !S.rungs.length) {
         html += '<div class="ok-state"><p>No trace yet - run diagnostics to check the connection.</p>' +
-          '<div><button class="btn sm primary" data-tls="trace">Run trace</button></div></div>';
+          '<div><button class="btn sm go" data-tls="trace">Run trace</button></div></div>';
       } else if (!S.tracing && S.rungs.every(function (r) { return r.status !== "fail"; })) {
         html += '<div class="ok-state"><div class="h">' + icon("i-check", "ic-14") + "No TLS errors</div>" +
           "<p>All endpoint connections are healthy. This panel populates automatically when a TLS or network error occurs.</p></div>";
@@ -3740,7 +3815,7 @@ function _sbRun() {
       // panel reflects mcp.json, but it is not counted as "unavailable".
 
       rows += '<div class="mcp-row" data-state="' + esc(sv.state) + '">' +
-        '<span class="rail"></span>' +
+        
         '<span class="mid">' +
           '<span class="top"><span class="nm">' + esc(sv.name) + "</span>" + mcpPill(sv.state) +
             // The read-only claim, shown because it is the one thing that lets
@@ -4467,12 +4542,6 @@ function _sbRun() {
       S.qp = null;
       S.qpIndex = 0;
       renderQuickPick();
-    });
-    $("atBtn").addEventListener("click", function () {
-      draft.value += (draft.value && !/\s$/.test(draft.value) ? " " : "") + "@";
-      draft.focus();
-      syncComposer();
-      detectQuickPick();
     });
     $("clipBtn").addEventListener("click", function () {
       post("attachFiles");

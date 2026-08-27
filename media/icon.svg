@@ -1,10 +1,29 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 42 48" width="42" height="48">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
   <!--
-    Activity-bar icon. VS Code masks these to a flat monochrome silhouette, so
-    the facet gradients and halo of the full crystal would collapse into a
-    blob. This is a reduced cluster — the six largest shards only, thickened so
-    the gaps between them survive being drawn at 16-24px — in the standard
-    activity-bar grey. The full-colour crystal lives in the webviews.
+    Activity-bar icon: the Bezel Roundel, in the `g-roundel-sm` cut.
+
+    This was the Kryptonite crystal - six thickened shards in activity-bar
+    grey - and it stayed the crystal after every other surface became the
+    roundel, which meant the one mark visible before the panel is even opened
+    was the old product's.
+
+    THE SMALL CUT, NOT THE FULL ONE. VS Code masks activity-bar icons to a
+    flat monochrome silhouette, so the full mark's four filled oxide notches
+    would collapse into the ring and the whole thing would read as a donut.
+    The small cut inverts the relationship: the notches become GAPS cut
+    through a heavier ring, which survives masking and still reads as a bezel
+    at 16px. Geometry is identical to `g-roundel-sm` in media/webview/crystal.js
+    and must stay in step with it.
+
+    Colour is #C5C5C5, the activity-bar grey VS Code expects. It is replaced by
+    the mask anyway; it is here so the file looks right opened on its own.
   -->
-  <path fill="#C5C5C5" d="M35.5 1.1 L29.9 11.1 L32.8 18.3 L39.4 15.6Z M29.6 11.6 L22.3 13.7 L16.8 22.5 L18.3 32.7 L23.3 33.8 L32.1 19Z M10.1 13.7 L15.7 37.9 L17.8 32.2 L15.3 17.8Z M9.2 21.4 L4.8 27 L12 40.4 L14.8 40.3 L15.3 38.9 L12.1 25.7Z M34.1 27.7 L23.7 34.1 L25 39.6 L36.1 32.5Z M18.3 33.2 L15.5 40.4 L21.3 47.3 L24.8 39.9 L23.2 34.5Z"/>
+  <g fill="none" stroke="#C5C5C5" stroke-width="3" stroke-linecap="butt">
+    <path d="M21.482 13.502 A9.6 9.6 0 0 1 13.502 21.482"/>
+    <path d="M10.498 21.482 A9.6 9.6 0 0 1 2.518 13.502"/>
+    <path d="M2.518 10.498 A9.6 9.6 0 0 1 10.498 2.518"/>
+    <path d="M13.502 2.518 A9.6 9.6 0 0 1 21.482 10.498"/>
+  </g>
+  <path fill-rule="evenodd" fill="#C5C5C5"
+        d="M12 6.9 A5.1 5.1 0 1 1 11.99 6.9 Z M9 10.9 H15 V13.1 H9 Z"/>
 </svg>

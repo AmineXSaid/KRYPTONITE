@@ -1,3 +1,5 @@
+<img src="media/logo.svg" width="72" height="72" alt="">
+
 # GENESIS
 
 A VS Code coding agent for endpoints that don't behave.

@@ -1276,7 +1276,7 @@ function _run() {
   function secDiag() {
     var html = secHead("diag", "Diagnostics",
       "Each rung runs only if the one above it passed, so the first failure is always the real one.",
-      '<button class="btn primary wait" data-act="trace"' + (S.tracing ? " disabled" : "") + ">" +
+      '<button class="btn go wait" data-act="trace"' + (S.tracing ? " disabled" : "") + ">" +
         (S.tracing ? spinner(13) + "<span>Running…</span>" : "<span>Re-run trace</span>") +
       "</button>");
 

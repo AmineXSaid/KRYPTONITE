@@ -824,7 +824,12 @@ function composer(over) {
 {
   const c = composer({ workspace: { open: false, name: null }, profiles: [], endpoint: null });
   ok("2.2b send disabled with no workspace", c.d.getElementById("sendBtn").disabled === true);
-  ok("2.2b attach disabled too", c.d.getElementById("atBtn").disabled === true);
+  // The `@` button is gone - it typed one character the keyboard already
+  // types, and as a sixth control it was what broke the composer onto two
+  // rows. The paperclip is the attach control now, and it is the one that has
+  // to be disabled when there is nowhere to attach to.
+  ok("2.2b no @ button to disable", c.d.getElementById("atBtn") === null);
+  ok("2.2b attach disabled too", c.d.getElementById("clipBtn").disabled === true);
 }
 
 /* 2.3 — Enter sends, Shift+Enter does not */

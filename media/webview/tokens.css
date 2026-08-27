@@ -36,15 +36,32 @@
 
 :root {
   /* ── surfaces ──
-   * ink is the recessed colour (code, dumps, composer, popovers, modals) and
-   * ground is the panel. See structural note 1: this is inverted relative to
-   * main's ascending scale, deliberately. */
-  --kx-bg-deep:   #18171d;  /* ink    - dumps, code panes, diff bodies       */
-  --kx-bg:        #28272d;  /* ground - the panel itself                     */
-  --kx-surface:   #18171d;  /* ink    - cards, composer, popups, modals      */
-  --kx-surface-2: #211f26;  /* the effort block inside the model popup       */
-  --kx-surface-3: #3a383f;  /* raised: small-button hover, menu row hover    */
-  --kx-surface-4: #4c4b51;  /* slate  - hover on an already-raised surface   */
+   *
+   * THE PANEL GROUND IS VS CODE'S, NOT THE MOCKUP'S.
+   *
+   * Genesis draws its panel on #28272d. This sits beside Claude Code in the
+   * same window, and a sidebar a shade lighter than every other sidebar reads
+   * as a rendering fault rather than as a brand. So the ground is #181818 -
+   * `sideBar.background` from Dark Modern, which is what Claude Code's panel
+   * paints and therefore what "the same background" means.
+   *
+   * That is not a one-token change. Genesis's scale DESCENDS: the panel is the
+   * light end and its cards, composer, popups and dumps are recessed BELOW it.
+   * The recessed colour was #18171d, which is within one step of #181818, so
+   * moving the ground alone would have flattened every card into the panel.
+   * The whole scale is re-based instead, keeping the same relationships:
+   * recessed is a clear step down, raised is a clear step up.
+   *
+   * The greys are neutral now rather than violet-cast, because #181818 is
+   * neutral and mixing a neutral ground with violet surfaces reads as a colour
+   * bug. The ACCENTS are untouched - they are the brand, and they were never
+   * the thing that clashed. */
+  --kx-bg-deep:   #0f0f11;  /* recessed - dumps, code panes, diff bodies     */
+  --kx-bg:        #181818;  /* the panel itself, matching VS Code's sidebar  */
+  --kx-surface:   #0f0f11;  /* recessed - cards, composer, popups, modals    */
+  --kx-surface-2: #141416;  /* one step above recessed, inside a popup       */
+  --kx-surface-3: #2c2c2f;  /* raised: small-button hover, menu row hover    */
+  --kx-surface-4: #3c3c40;  /* hover on an already-raised surface            */
 
   /* ── text ── */
   --kx-fg:   #fbfafd;  /* cream - titles, active tab, emphasis               */

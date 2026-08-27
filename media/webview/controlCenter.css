@@ -73,12 +73,17 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 
 /* ───────────────────────── section strip ───────────────────────── */
 
+/* Ten sections never fit, so this strip has always scrolled - it just never
+   said so, and a clipped last tab reads as the end of the list rather than the
+   middle of it. Same mask as the sidebar's tab strip, for the same reason. */
 .strip {
   flex: none; display: flex; gap: 0; overflow-x: auto; overflow-y: hidden;
   border-bottom: 1px solid var(--kx-line);
-  scrollbar-width: thin;
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
 }
-.strip::-webkit-scrollbar { height: 4px; }
+.strip::-webkit-scrollbar { display: none; }
 .strip button {
   display: flex; align-items: center; gap: 6px; flex: none; padding: 9px;
   font-size: 11.5px; white-space: nowrap;
@@ -371,6 +376,25 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 .btn:hover:not(:disabled) { background: var(--kx-surface-4); }
 .btn.primary { background: var(--kx-mcp); border-color: var(--kx-mcp); color: var(--kx-on-accent); }
 .btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
+/* The affirmative action: an oxide outline, not another filled block.
+ *
+ * The design uses exactly one treatment for "this is the thing to press" -
+ * accept a diff, allow a permission, use an agent, re-run a trace: a 1px oxide
+ * border, cream label, and a 16% oxide wash on hover. Nothing is filled, which
+ * is what lets several of them coexist on a panel without any of them
+ * shouting; the filled purple is reserved for a form's commit, where there is
+ * exactly one and it ends the task.
+ *
+ * The border is 3.15:1 against the panel, over the 3:1 a non-text UI boundary
+ * needs, so the control is findable without relying on the label alone. */
+.btn.go {
+  background: transparent;
+  border-color: var(--kx-action);
+  color: var(--kx-fg);
+}
+.btn.go:hover:not(:disabled) { background: rgba(31, 117, 203, .16); }
+.btn.go:disabled { border-color: var(--kx-line); color: var(--kx-fg-3); background: transparent; }
+
 .btn.sm { font-size: 11.5px; padding: 4px 9px; }
 .btn:disabled { color: var(--kx-fg-3); background: var(--kx-surface-3); }
 .row-actions { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 10px; align-items: center; }
@@ -559,8 +583,22 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 
   /* Definition grids and the endpoint form read better stacked than scrolled:
      the label is short, the value is what needs the width, and a form field
-     you have to scroll sideways to type into is worse than a tall form. */
+     you have to scroll sideways to type into is worse than a tall form.
+
+     STACKED, THE PAIR HAS TO BE RE-MADE. Side by side, position alone says
+     which is the label and which the value. Stacked, they become two lines of
+     similar weight and a run of six pairs reads as twelve unrelated lines. The
+     label drops to the mono uppercase caption scale - the same one every other
+     label in this panel uses - so the eye can pick the pairs apart down the
+     column without either line getting louder. */
   .kv, .fgrid { grid-template-columns: minmax(0, 1fr); gap: 3px 0; }
+  .kv .k {
+    font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
+    letter-spacing: .12em; text-transform: uppercase;
+    color: var(--kx-fg-3);
+  }
+  .kv > * { margin-bottom: 2px; }
+  .kv .v { margin-bottom: 8px; }
   .fgrid { gap: 4px 0; }
   .fgrid label { margin-top: 6px; }
   /* A value that had to ellipsise to fit a 132px column has room to wrap now,
