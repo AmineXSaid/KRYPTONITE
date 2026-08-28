@@ -52,6 +52,58 @@ jobs:
       - name: Test
         run: npm test
 
+  # The MCP servers under mcp-servers/ are Python, and they carry the
+  # read-only guard that makes them safe to point at a corporate instance. A
+  # guard nothing runs in CI is a guard that decays, so this job exists even
+  # though it shares no code with the extension above.
+  #
+  # It runs on every push, like the rest. GitHub has no per-job path filter,
+  # and setting one on the workflow would gate the extension's jobs too;
+  # installing Python and four small packages is cheaper than that trade.
+  mcp-servers:
+    name: mcp-servers (python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 is the floor declared in pyproject.toml, so it is the one that
+        # matters; 3.13 catches a deprecation before it becomes a break.
+        python: ["3.11", "3.13"]
+    defaults:
+      run:
+        working-directory: mcp-servers
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      # No network is touched: every test drives the client through
+      # httpx.MockTransport, and the read-only guard is asserted against a
+      # transport that raises if it is ever called.
+      - name: Test
+        run: pytest -q
+
+      # Cheap, and it is the failure that would otherwise reach a user as a
+      # crash on startup rather than as a red build.
+      - name: Servers import
+        run: |
+          python -c "import jira_mcp.server, confluence_mcp.server"
+          python -c "import gitlab_mcp.server, jenkins_mcp.server"
+
+      # probe.py is the thing a user runs first. With nothing configured it
+      # must exit non-zero and say what is missing, rather than tracebacking.
+      - name: Probe refuses to run unconfigured
+        run: |
+          if python probe.py; then
+            echo "probe.py exited 0 with no configuration"; exit 1
+          fi
+
   package:
     name: package vsix
     runs-on: ubuntu-latest
