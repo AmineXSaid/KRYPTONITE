@@ -187,25 +187,41 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
  * rather than read: the size says "this row is different" from across the
  * panel and the pulse says which difference. The halo is a box-shadow so it
  * costs no layout and cannot push the title. */
-.hist-row[data-run="1"] .hist-dot,
-.w-item[data-run="1"] .w-dot {
-  width: 9px; height: 9px; border-radius: 50%;
-  background: var(--kx-link);
-  animation: kx-live-pulse 1.9s cubic-bezier(.16, 1, .3, 1) infinite;
+/* Three parts, each moving on its own: a track that does not, an arc that
+   travels it, and a halo that breathes out of the edge. `overflow: visible`
+   because the halo grows past the 24-unit box it is drawn in. */
+.g-live { flex: none; overflow: visible; }
+/* `.g-live circle` would out-specify `.g-live-core` - one class plus a type
+   beats one class - and swallow the core's fill. The three strokes name
+   themselves instead. */
+.g-live-track, .g-live-arc, .g-live-halo { fill: none; }
+.g-live-track { stroke: var(--kx-link); stroke-opacity: .3; stroke-width: 2.6; }
+.g-live-arc {
+  stroke: var(--kx-link); stroke-width: 2.6; stroke-linecap: round;
+  /* An arc a little under a quarter of the circumference: long enough to read
+     as travelling rather than blinking, short enough to leave the track
+     visible behind it. 2πr at r=8.6 is 54, so 13 of 54. */
+  stroke-dasharray: 13 41;
+  transform-origin: 50% 50%;
+  animation: g-sweep 1.4s linear infinite;
 }
-@keyframes kx-live-pulse {
-  0%   { box-shadow: 0 0 0 0 rgba(70, 146, 221, .55); }
-  70%  { box-shadow: 0 0 0 8px rgba(70, 146, 221, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(70, 146, 221, 0); }
+.g-live-core { fill: var(--kx-link); }
+.g-live-halo {
+  stroke: var(--kx-link); stroke-width: 1.6;
+  transform-origin: 50% 50%; opacity: 0;
+  animation: g-live-halo 1.9s cubic-bezier(.16, 1, .3, 1) infinite;
 }
-/* Motion off: the dot stays big and keeps a steady halo, so the row is still
-   the one that is different - it simply does not breathe. */
+@keyframes g-live-halo {
+  0%   { opacity: .5; transform: scale(.74); }
+  70%  { opacity: 0;  transform: scale(1.28); }
+  100% { opacity: 0;  transform: scale(1.28); }
+}
+/* Motion off: the mark stays, and stays the size it is - the row is still the
+   one that is different. The arc holds its position and the halo sits still
+   rather than breathing. */
 @media (prefers-reduced-motion: reduce) {
-  .hist-row[data-run="1"] .hist-dot,
-  .w-item[data-run="1"] .w-dot {
-    animation: none;
-    box-shadow: 0 0 0 3px rgba(70, 146, 221, .28);
-  }
+  .g-live-arc { animation: none; }
+  .g-live-halo { animation: none; opacity: .34; transform: scale(1); }
 }
 .hist-del {
   position: absolute; right: 6px; top: 50%; margin-top: -11px;

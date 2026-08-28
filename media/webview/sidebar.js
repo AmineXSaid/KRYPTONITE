@@ -1183,6 +1183,29 @@ function _sbRun() {
      are there so it is obvious that a session holds a transcript rather than a
      single message - the old list showed only a title and a timestamp, which
      read identically whether a session had one message or forty. */
+/**
+   * The mark a conversation wears while it is working.
+   *
+   * Inline rather than a `<use>` of the icon sheet, because the parts have to
+   * be animated independently and CSS selectors do not reach inside a use's
+   * shadow tree. It appears a handful of times at most.
+   *
+   * Built from the roundel's own vocabulary - a track, an arc travelling it,
+   * a core - so that a conversation working in the background wears a smaller
+   * version of the same mark the streaming indicator wears for the one on
+   * screen. A dot with a box-shadow said the same thing and said it in a
+   * language nothing else in the panel speaks.
+   */
+  function liveMark() {
+    return '<svg class="g-live" viewBox="0 0 24 24" width="14" height="14" ' +
+      'role="img" aria-label="Working">' +
+      '<circle class="g-live-halo" cx="12" cy="12" r="9.4"/>' +
+      '<circle class="g-live-track" cx="12" cy="12" r="8.6"/>' +
+      '<circle class="g-live-arc" cx="12" cy="12" r="8.6"/>' +
+      '<circle class="g-live-core" cx="12" cy="12" r="3"/>' +
+      "</svg>";
+  }
+
   function renderHistory() {
     var html = "";
     for (var i = 0; i < S.sessions.length; i++) {
@@ -1197,7 +1220,7 @@ function _sbRun() {
       html += '<div class="hist-row" data-on="' + on + '" data-run="' + run + '">' +
         '<button class="pop-row" role="menuitem" data-session="' + esc(s.id) + '"' +
           (s.running ? ' title="Working…"' : "") + '>' +
-          '<span class="hist-dot"' + (s.running ? ' aria-label="Working"' : "") + '></span>' +
+          (s.running ? liveMark() : '<span class="hist-dot"></span>') +
           '<span class="ell"><span class="t ell">' + esc(s.title) + '</span>' +
           '<span class="m">' + esc(s.when) + ' · ' + n + '</span></span>' +
         '</button>' +
@@ -1668,7 +1691,7 @@ function _sbRun() {
           // is, and it is still working. Slate otherwise. It was a flat GREEN
           // before, which spent the panel's success colour to say "this is a
           // row".
-          '<span class="w-dot"></span>' +
+          (r.running ? liveMark() : '<span class="w-dot"></span>') +
           '<span class="t ell">' + esc(r.title) + "</span>" +
           '<span class="w-ago">' + esc(r.when) + "</span></button>" +
           '<button class="w-del" data-del="' + esc(r.id) + '" title="Delete this conversation" ' +
