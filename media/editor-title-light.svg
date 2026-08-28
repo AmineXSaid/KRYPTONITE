@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!--
+    Editor-title icon (light themes): the Bezel Roundel in its FULL cut.
+
+    Not the same file as media/icon.svg, and not the same cut. The activity
+    bar masks its icons to a flat silhouette, so that one uses `g-roundel-sm`
+    where the notches are gaps cut through the ring. The editor title bar does
+    NOT mask - it draws the SVG as-is, in colour, which is why Claude's mark
+    beside this one is orange. So this can be the full mark: filled oxide
+    notches on a light ring, exactly as `i-kx` in media/webview/crystal.js.
+
+    Geometry is copied from that symbol and must stay in step with it. The one
+    difference is `currentColor` becoming a literal: a background-image SVG has
+    no inherited colour to resolve against.
+
+    Ring and core are #424242, the grey VS Code draws its own title actions in on a
+    light theme,
+    so the mark sits at the same weight as the icons either side of it rather
+    than glaring next to them.
+  -->
+  <circle cx="12" cy="12" r="10.2" fill="none" stroke="#424242" stroke-width="2.4"/>
+  <path d="M9.9 .744 A11.45 11.45 0 0 1 14.1 .744 L14.1 3.3 A8.95 8.95 0 0 0 9.9 3.3Z" fill="#E03A2F"/>
+  <path d="M9.9 23.256 A11.45 11.45 0 0 0 14.1 23.256 L14.1 20.7 A8.95 8.95 0 0 1 9.9 20.7Z" fill="#E03A2F"/>
+  <path d="M.744 9.9 A11.45 11.45 0 0 0 .744 14.1 L3.3 14.1 A8.95 8.95 0 0 1 3.3 9.9Z" fill="#E03A2F"/>
+  <path d="M23.256 9.9 A11.45 11.45 0 0 1 23.256 14.1 L20.7 14.1 A8.95 8.95 0 0 0 20.7 9.9Z" fill="#E03A2F"/>
+  <path fill-rule="evenodd" fill="#424242" d="M12 6.4 A5.6 5.6 0 1 1 11.99 6.4 Z M9 11 H15 V13 H9 Z"/>
+</svg>

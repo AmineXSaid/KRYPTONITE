@@ -43,3 +43,10 @@ dist/harness/**
 # media/webview/*.js|*.css (including crystal.js, the shared brand mark) and
 # media/fonts/* are loaded at runtime through asWebviewUri or named by the
 # manifest; excluding them breaks every webview surface.
+
+# The Python MCP servers are a SEPARATE deliverable. A user installs them with
+# pip and points .agent/mcp.json at them; nothing in dist/extension.js imports
+# or spawns anything under here, so shipping them would add 355 KB of source
+# to every download for code the extension cannot run. test/vsix.cjs asserts
+# the archive is free of them - this is the rule that makes that assertion pass.
+mcp-servers/**

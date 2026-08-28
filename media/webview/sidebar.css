@@ -327,26 +327,38 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 /* Left-aligned, as the design draws it, and not only for fidelity: everything
    below the intro is a list of rows, and a centred mark above a left-aligned
    list gives the column two different axes. One edge, top to bottom. */
-.welcome .crystal { opacity: .9; margin-bottom: 18px; }
-
-/* ONE TURN, ON ARRIVAL.
+/* IT KEEPS TURNING, FOR AS LONG AS THE WELCOME PAGE IS UP.
  *
  * It was briefly a pair of marks that blinked. Two roundels read as eyes -
  * a ring around a core is an eye - and as eyes they were ugly. The mark is a
  * BEZEL: four notches on a ring, which is a thing that turns.
  *
- * So it turns once and stops, and it stops in the position it started, which
- * is what keeps it a logo rather than an animation. Expo-out, so it carries
- * most of the way in the first third and settles into the rest instead of
- * halting dead. `g-sweep` is the same 360 the streaming notch uses; only the
- * timing and the iteration count differ. */
-.welcome .crystal[data-greet="1"] {
+ * This turned ONCE on arrival and then stopped, on the argument that a mark
+ * that keeps moving is an animation rather than a logo. The owner asked for a
+ * rotating logo on the welcome page, which settles that: it rotates.
+ *
+ * Linear and slow. The two other `g-sweep` users are STATUS - the streaming
+ * notch at 1.4s and the working-conversation mark at 2.4s - and both mean
+ * "something is happening right now". This one means nothing is happening, so
+ * it has to be visibly slower than either or it reads as work in flight on an
+ * idle panel. 6s is a quarter the speed of the slower of the two.
+ *
+ * Easing would be wrong here in a way it was not for the one-shot: any curve
+ * on an infinite rotation produces a visible stutter at the wrap, where the
+ * end of one turn meets the start of the next at a different rate. */
+.welcome .crystal {
+  /* Left-aligned, as the design draws it, and not only for fidelity:
+     everything below the intro is a list of rows, and a centred mark above a
+     left-aligned list gives the column two different axes. One edge, top to
+     bottom. */
+  opacity: .9;
+  margin-bottom: 18px;
   transform-origin: 50% 50%;
-  animation: g-sweep 900ms cubic-bezier(.16, 1, .3, 1) 1;
+  animation: g-sweep 6s linear infinite;
 }
 /* Motion off: no turn. The mark is simply there, which is all it has to be. */
 @media (prefers-reduced-motion: reduce) {
-  .welcome .crystal[data-greet="1"] { animation: none; }
+  .welcome .crystal { animation: none; }
 }
 /* Michroma, at the one size and tracking it is drawn for. */
 .w-mark {

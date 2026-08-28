@@ -1051,7 +1051,7 @@ function _sbRun() {
               // marked, and the input above it is painted transparent.
               '<div class="draft-wrap">' +
                 '<div class="draft-mirror" id="draftMirror" aria-hidden="true"></div>' +
-                '<textarea id="draft" rows="1" aria-label="Message" placeholder="Ask Genesis anything…   ( / skills · @ files )"></textarea>' +
+                '<textarea id="draft" rows="1" aria-label="Message" placeholder="Ask Genesis anything…\u00A0\u00A0 (\u00A0/\u00A0skills\u00A0·\u00A0@\u00A0files\u00A0)"></textarea>' +
               '</div>' +
               '<div class="toolbar">' +
                 // #4 - the control row carries controls only. The keycap that
@@ -1596,33 +1596,16 @@ function _sbRun() {
   }
 
   /**
-   * Turn the mark, once.
+   * The welcome screen.
    *
-   * Two frames of delay and then an attribute, rather than an animation that
-   * runs on mount: the mark should be still long enough to be seen as a mark
-   * before it moves, or the turn reads as a rendering glitch. The attribute
-   * comes off when the animation ends, so a re-render is not a second spin.
+   * This used to take a `greet` flag, because the mark turned exactly once and
+   * only on first arrival - so a re-render caused by the session list changing
+   * had to be told not to spin the logo at a data refresh. The mark now rotates
+   * for as long as the page is up (see `.welcome .crystal` in sidebar.css), so
+   * there is no longer a first arrival to distinguish, and the flag is gone
+   * rather than left behind as an argument nothing reads.
    */
-  function greetMark() {
-    var mark = logEl.querySelector(".welcome .crystal");
-    if (!mark) return;
-    requestAnimationFrame(function () {
-      requestAnimationFrame(function () {
-        mark.setAttribute("data-greet", "1");
-        mark.addEventListener("animationend", function () {
-          mark.removeAttribute("data-greet");
-        }, { once: true });
-      });
-    });
-  }
-
-  /**
-   * `greet` is "the screen is being met for the first time" - a fresh panel or
-   * a new conversation - and is the only case the mark turns in. The two call
-   * sites that re-render this because the SESSION LIST changed pass nothing: a
-   * spin there is the logo reacting to a data refresh.
-   */
-  function renderWelcome(greet) {
+  function renderWelcome() {
     clearTranscript();
     if (!S.workspace.open) {
       logEl.appendChild(div("welcome",
@@ -1730,7 +1713,6 @@ function _sbRun() {
       body += "</div></div>";
     }
     logEl.appendChild(div("welcome", body));
-    if (greet) greetMark();
   }
 
   /* The rail is a ::before on .msg-user, so everything else has to sit in a
@@ -2683,6 +2665,19 @@ function _sbRun() {
    * the cross drops it. Both were previously impossible - a queued message was
    * announced once and then unreachable until it sent itself.
    */
+  /**
+   * The composer's hint, as ONE unbreakable run.
+   *
+   * A textarea placeholder wraps at any space, so at a narrow dock width the
+   * old literal broke inside the bracket and left ")" alone on the second line.
+   * The spaces INSIDE the hint are non-breaking, so the only place it can wrap
+   * is the gap before it - the hint moves to the next line whole, or not at all.
+   *
+   * Four placeholders used to carry their own copy of this string, and one of
+   * them had already drifted out of step with the palette. One definition now.
+   */
+  var COMPOSER_HINT = "\u00A0\u00A0 (\u00A0/\u00A0skills\u00A0·\u00A0@\u00A0files\u00A0)";
+
   function renderQueue() {
     var wrap = $("queue");
     if (!wrap) return;
@@ -3056,12 +3051,12 @@ function _sbRun() {
     draft.placeholder = blocked
       ? "Configure an endpoint first…"
       : S.running
-      ? "Queue another message…   ( / skills · @ files )"
+      ? "Queue another message…" + COMPOSER_HINT
       : S.phase === "plan"
-        ? "Describe what to plan…   ( / skills · @ files )"
+        ? "Describe what to plan…" + COMPOSER_HINT
         : S.phase === "ask"
-          ? "Ask Genesis anything…   ( / skills · @ files )"
-          : "Tell Genesis what to do…   ( / skills · @ files )";
+          ? "Ask Genesis anything…" + COMPOSER_HINT
+          : "Tell Genesis what to do…" + COMPOSER_HINT;
 
     var send = $("sendBtn");
     var typing = draft.value.trim() || (S.attachments && S.attachments.length);
@@ -4198,7 +4193,7 @@ function _sbRun() {
 
   function renderSession(messages) {
     clearTranscript();
-    if (!messages || !messages.length) { renderWelcome(true); return; }
+    if (!messages || !messages.length) { renderWelcome(); return; }
 
     /* Tool results are consumed by the assistant call that produced them, so a
        restored transcript reads like the live one rather than a raw log. */
@@ -5518,7 +5513,7 @@ function _sbRun() {
 
   mount();
   wire();
-  renderWelcome(true);
+  renderWelcome();
   renderFooter();
   renderTls();
   renderEndpoints();
