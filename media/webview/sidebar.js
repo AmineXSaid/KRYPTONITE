@@ -2987,8 +2987,14 @@ function _sbRun() {
     // mount, so this is the string that actually shows. It said "/ commands"
     // after `/` was changed to list skills - the mount was updated and this was
     // not, which is why the panel disagreed with the palette.
+    // While a turn runs, the composer says what will happen to what you type,
+    // because what happens is not what happens the rest of the time: it joins
+    // the queue above rather than starting a turn. Naming the phase here would
+    // be describing a mode that is not in force yet.
     draft.placeholder = blocked
       ? "Configure an endpoint first…"
+      : S.running
+      ? "Queue another message…   ( / skills · @ files )"
       : S.phase === "plan"
         ? "Describe what to plan…   ( / skills · @ files )"
         : S.phase === "ask"
@@ -3048,7 +3054,17 @@ function _sbRun() {
     if (/^\/[^\s]*$/.test(v)) {
       S.qp = { kind: "cmd", q: v.slice(1) };
     } else {
-      var m = v.match(/(?:^|\s)@([\w./-]*)$/);
+      // Everything up to whitespace, not `[\w./-]`.
+      //
+      // The old class was A-Za-z0-9_ plus dot, slash and dash, which quietly
+      // excluded every path with a space, a `+`, a `#`, brackets, or any
+      // non-ASCII character in it - a repo with an accented or CJK filename
+      // could type the whole name and the picker never opened. It is not that
+      // those files ranked badly; the mention was never detected.
+      //
+      // Widening it cannot catch an email, because `@` there is not preceded
+      // by whitespace, and a decorator that matches simply finds nothing.
+      var m = v.match(/(?:^|\s)@(\S*)$/);
       if (m) {
         // A NEW mention starts with an empty list rather than the previous
         // mention's. Carrying the old hits over meant the first frame of a
@@ -3344,7 +3360,9 @@ function _sbRun() {
       // A folder keeps its trailing slash so the model can tell "this
       // directory" from "a file with no extension".
       var suffix = r.badge === "folder" ? "/ " : " ";
-      draft.value = draft.value.replace(/@([\w./-]*)$/, "@" + r.file + suffix);
+      // Same class as the detector above, for the same reason: a narrower one
+      // here would leave the tail of a non-ASCII path behind the inserted one.
+      draft.value = draft.value.replace(/@(\S*)$/, "@" + r.file + suffix);
     } else if (r.agent !== undefined) {
       post("setAgent", { name: r.agent });
       S.agentOpen = false;

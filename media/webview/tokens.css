@@ -86,10 +86,34 @@
    * panel, and the ground the browser panel - which lives in an editor tab and
    * genuinely does paint its own - still uses. */
   --kx-bg:        #181818;  /* the assumed ground; see the note above        */
-  --kx-surface:   #0f0f11;  /* recessed - cards, composer, popups, modals    */
-  --kx-surface-2: #141416;  /* one step above recessed, inside a popup       */
-  --kx-surface-3: #2c2c2f;  /* raised: small-button hover, menu row hover    */
-  --kx-surface-4: #3c3c40;  /* hover on an already-raised surface            */
+  /* THE SURFACES ARE STEPS OFF THE GROUND, NOT COLOURS OF THEIR OWN.
+   *
+   * These were fixed greys balanced against #181818, and once the panel
+   * started taking the container's colour they stopped belonging to it: on a
+   * near-black container #2c2c2f and #3c3c40 are grey blocks floating on
+   * black rather than degrees of the same black. That is the whole of "only
+   * the background is black, the elements are the same original".
+   *
+   * A wash cannot be wrong about a ground it never names. Each of these is a
+   * percentage of white laid over whatever the container is, so the panel is
+   * one family of one colour in every theme: on #010409 the first step lands
+   * at #0b0e12, which is within a shade of the #0d1117 Claude Code's own
+   * composer sits at, and on Dark Modern's #181818 it lands where a card
+   * should on grey.
+   *
+   * It also inverts the direction the scale used to run. Genesis recessed its
+   * cards BELOW the panel, which needs headroom underneath - and against a
+   * near-black container there is none, because black is the floor. Up is the
+   * only direction always available, and it is the one the workbench itself
+   * uses for the same job.
+   *
+   * Two surfaces cannot be a wash, because they cover content that scrolls
+   * under them: the Agents header and the permission sheet. Those are opaque
+   * and blurred instead - see sidebar.css. */
+  --kx-surface:   rgba(255, 255, 255, .040);  /* cards, composer, popups      */
+  --kx-surface-2: rgba(255, 255, 255, .068);  /* one step up, inside a popup  */
+  --kx-surface-3: rgba(255, 255, 255, .105);  /* raised: hover on a button    */
+  --kx-surface-4: rgba(255, 255, 255, .155);  /* hover on a raised surface    */
 
   /* ── text ── */
   --kx-fg:   #fbfafd;  /* cream - titles, active tab, emphasis               */
@@ -122,6 +146,8 @@
   --kx-info:   #4692dd;  /* blue     - informational                         */
   --kx-action: #1f75cb;  /* oxide    - send, primary action                  */
   --kx-error:  #ec624c;  /* red-400  - failure, removed line                 */
+  --kx-error-2: #f4907e; /* red-300  - the same red on a heavy error wash,
+                          * where red-400 reads at 4.01:1                    */
   --kx-error-deep: #dd2b0e;
   --kx-warn:   #e9be74;  /* orange-300 - warning                             */
 
@@ -167,8 +193,12 @@
    * places main uses them as a whisper rather than a rule. */
   --kx-hairline: rgba(251, 250, 253, .06);
   --kx-divider:  rgba(251, 250, 253, .10);
-  --kx-line:     #4c4b51;
-  --kx-line-2:   #5c5b61;
+  /* Rules are washes for the same reason the surfaces are: a solid #4c4b51
+     hairline is a grey wire on a near-black container. The alphas are chosen
+     so that over Dark Modern's #181818 they land where the solid values were,
+     which is what keeps the 3:1 boundary contrast the suite enforces. */
+  --kx-line:     rgba(255, 255, 255, .22);
+  --kx-line-2:   rgba(255, 255, 255, .28);
   --kx-raised:   rgba(251, 250, 253, .25);
   --kx-hover:    rgba(255, 255, 255, .04);  /* the mockup's row hover, exact */
 

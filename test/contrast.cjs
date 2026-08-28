@@ -43,7 +43,25 @@ function token(name) {
     if (!fallback) throw new Error("no fallback for " + name);
     v = fallback.startsWith("var(") ? fallback : token(fallback.replace(/^--/, ""));
   }
+  // The surfaces are washes now - a percentage of white over whatever the
+  // container is - so there is no hex to measure until one is composited. The
+  // ground it is composited over is --kx-bg, which is the ground the palette
+  // is designed against and the one every other ratio here is taken from.
+  const rgba = v.match(/^rgba?\(([^)]+)\)$/i);
+  if (rgba) {
+    const parts = rgba[1].split(",").map((s) => parseFloat(s.trim()));
+    const a = parts.length > 3 ? parts[3] : 1;
+    if (a >= 1) return hex(parts.slice(0, 3));
+    const base = rgb(token("kx-bg"));
+    return hex([0, 1, 2].map((i) => Math.round(base[i] + (parts[i] - base[i]) * a)));
+  }
   return v;
+}
+
+/** [r,g,b] back to the #rrggbb the rest of this file speaks. */
+function hex(c) {
+  return "#" + c.map((n) => Math.max(0, Math.min(255, Math.round(n)))
+    .toString(16).padStart(2, "0")).join("");
 }
 
 function rgb(hex) {

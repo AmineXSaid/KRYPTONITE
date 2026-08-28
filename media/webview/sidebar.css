@@ -616,7 +616,10 @@ ul.md-l li.md-task, ol.md-l li.md-task {
  * the accent colour, which no other state in this row uses. */
 .turn-foot:has([data-busy]) { opacity: 1; }
 .turn-foot button[data-busy] {
-  color: var(--kx-action);
+  /* --kx-link, not --kx-action: oxide is the SEND BUTTON's fill, where the
+     label sits on top of it. As a glyph colour on a dark surface it is a
+     4.5:1 failure - this is the same blue, one step up the ramp. */
+  color: var(--kx-link);
   background: var(--kx-hover);
   cursor: default;
 }
@@ -1088,9 +1091,15 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .ag-top {
   display: flex; align-items: center; gap: 9px; flex: none;
   padding: 9px 14px; border-bottom: 1px solid var(--kx-line);
-  /* Opaque, because the list scrolls under it - and a literal rather than the
-     ground, which is the container's now and therefore unknown here. */
-  position: sticky; top: 0; z-index: 2; background: var(--kx-surface);
+  /* The list scrolls under this, so it cannot be a wash like every other
+     surface: it has to stop what is behind it. Near-opaque black plus a blur
+     does that without naming the ground - the blur is what makes it safe if
+     the .96 ever shows through, and it is the same treatment the permission
+     sheet uses one section down. */
+  position: sticky; top: 0; z-index: 2;
+  background: rgba(9, 9, 11, .96);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
 }
 .ag-top .lbl { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
 .ag-body { flex: 1; min-height: 0; }
@@ -1230,7 +1239,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 .queue-row:hover .queue-now, .queue-row:hover .queue-x,
 .queue-now:focus-visible, .queue-x:focus-visible { opacity: 1; }
-.queue-now:hover { color: var(--kx-action); background: var(--kx-hover); }
+.queue-now:hover { color: var(--kx-link); background: var(--kx-hover); }
 .queue-x:hover { color: var(--kx-error); background: var(--kx-hover); }
 
 /* Below the floor there is no room for a row's text AND two buttons, and the
@@ -1862,10 +1871,11 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .perm-card {
   width: 100%; height: auto; max-height: min(72%, 300px);
   display: flex; flex-direction: column; min-height: 0;
-  /* Same reason as .ag-top: it covers the log, so it cannot be transparent,
-     and the ground it would have copied is no longer a colour this file
-     knows. --kx-surface is what every other card in the panel uses. */
-  background: var(--kx-surface);
+  /* Same reason as .ag-top: it covers the log, so it cannot be a wash. Its
+     scrim is already blurred, and the card is the thing the scrim is under. */
+  background: rgba(9, 9, 11, .97);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
   border-top: 1px solid var(--kx-line);
   border-radius: 4px 4px 0 0;
   box-shadow: 0 -14px 34px var(--kx-shadow);
@@ -2137,7 +2147,9 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 .mcp-pill.ok { background: var(--kx-accent-wash); color: var(--kx-accent); }
 .mcp-pill.idle { background: var(--kx-warn-wash); color: var(--kx-active); }
-.mcp-pill.err { background: var(--kx-error-wash); color: var(--kx-error); }
+/* --kx-error-2: the wash under it is a heavy .32, and #ec624c on it lands at
+   4.01:1. Same red, lifted until it clears the floor. */
+.mcp-pill.err { background: var(--kx-error-wash); color: var(--kx-error-2); }
 
 /* The user's read-only claim, and the reason this server's tools work in Ask
    and Plan at all. Deliberately quieter than the state pill beside it - the
@@ -2150,7 +2162,9 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   padding: 2px 7px; border-radius: 4px;
   font-family: var(--kx-mono); font-size: 9px;
   letter-spacing: .1em; text-transform: uppercase;
-  background: var(--kx-info-wash); color: var(--kx-info);
+  /* --kx-ask rather than --kx-info: same blue family, one step lighter, and
+     the ratio on the wash is 4.40:1 at --kx-info, which is under the floor. */
+  background: var(--kx-info-wash); color: var(--kx-ask);
   border: 1px solid color-mix(in srgb, var(--kx-info) 22%, transparent);
 }
 
@@ -2169,7 +2183,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   /* A hairline of the same hue: the wash alone bleeds into the panel at this
      size, and a stack of chips reads as one block rather than several tools. */
   border: 1px solid color-mix(in srgb, var(--kx-info) 22%, transparent);
-  font-family: var(--kx-mono); font-size: 11px; color: var(--kx-info);
+  font-family: var(--kx-mono); font-size: 11px; color: var(--kx-ask);
 }
 /* A WRITE CHIP IS MARKED BY MORE THAN ITS COLOUR.
  *
