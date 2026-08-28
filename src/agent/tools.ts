@@ -248,6 +248,55 @@ const SECRET_FILES = new Set([
  * because "outside the workspace" on its own sent someone round a three-turn
  * loop asking the model to relocate itself.
  */
+/**
+ * Judge a workspace-relative path that an `@` mention wants to inline.
+ *
+ * This is a SEPARATE gate from `readable()` and deliberately stricter than it,
+ * because an `@` mention is not a tool call. A tool call is announced, can be
+ * refused, and is subject to the phase - Ask cannot write, permissions are
+ * asked for, the transcript shows what was touched. An `@` mention takes the
+ * file's contents and puts them in the prompt before the model has said
+ * anything at all, with no card to approve and no line in the log. Whatever
+ * `read_file` is allowed to do, a mention should be allowed to do less.
+ *
+ * So: inside the workspace only - the picker never offers anything else, and
+ * `@../../etc/passwd` typed by hand is not a feature - and never a credential
+ * store, which `readable()` permits inside the workspace on the grounds that a
+ * tool call for one is visible and refusable. This one would not be.
+ *
+ * Returns the absolute path, or the reason it was refused. A path that simply
+ * does not exist is neither: `@pytest.mark.parametrize` and an email address
+ * are ordinary prose and the caller leaves them alone.
+ */
+export function mentionable(root: string, rel: string): { abs: string } | { refused: string } {
+  const base = path.resolve(root);
+  const abs = path.resolve(base, rel);
+  const inside = abs === base ||
+    abs.startsWith(base.endsWith(path.sep) ? base : base + path.sep);
+  if (!inside) return { refused: `${rel} is outside the workspace` };
+
+  // Symlinks are resolved before judging, so a link named innocuously cannot
+  // point at a key. A path that does not exist is judged lexically and will be
+  // dropped by the caller's stat anyway.
+  let real = abs;
+  try { real = fs.realpathSync(abs); } catch { /* judge the lexical path */ }
+  if (real !== abs) {
+    const insideReal = real === base ||
+      real.startsWith(base.endsWith(path.sep) ? base : base + path.sep);
+    if (!insideReal) return { refused: `${rel} is a link out of the workspace` };
+  }
+
+  const segs = real.split(path.sep).filter(Boolean);
+  const name = segs[segs.length - 1] ?? "";
+  if (SECRET_FILES.has(name)) return { refused: `${rel} is a credential store` };
+  for (let i = 0; i < segs.length; i++) {
+    if (SECRET_DIRS.has(segs[i]) || SECRET_DIRS.has(segs.slice(i, i + 2).join("/"))) {
+      return { refused: `${rel} is inside ${segs[i]}, a credential store` };
+    }
+  }
+  return { abs: real };
+}
+
 function readable(ctx: { root: string; readOutsideWorkspace?: boolean }, p: string): string {
   const base = path.resolve(ctx.root);
   const abs = path.resolve(base, p ?? ".");

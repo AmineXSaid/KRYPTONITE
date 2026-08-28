@@ -235,6 +235,58 @@ async function main() {
     await app.dispose();
   }
 
+  console.log("\n──── §2.16 an @ mention actually reaches the model ────");
+  {
+    // The last and largest half of "@ doesn't work". The picker found the
+    // file and put `@path` in the composer, and then nothing read it: the
+    // mention went to the model as prose, and whether its contents were ever
+    // seen came down to the model deciding by itself to call read_file on a
+    // string it happened to notice. These assert that the FILE arrives, not
+    // that the sentence mentioning it does.
+    const root = workspace({ "gw.yaml": GOOD });
+    fs.mkdirSync(path.join(root, "Tests", "lin"), { recursive: true });
+    fs.writeFileSync(path.join(root, "Tests", "lin", "lin_master.py"),
+      "def checksum(frame):\n    return sum(frame) & 0xFF\n", "utf8");
+    fs.writeFileSync(path.join(root, "Tests", "lin", "notes.md"), "# LIN notes\n", "utf8");
+    fs.writeFileSync(path.join(root, ".env"), "API_KEY=sk-live-should-never-be-inlined\n", "utf8");
+    fs.writeFileSync(path.join(root, ".git-credentials"), "https://u:p@github.com\n", "utf8");
+
+    const { app } = await boot(root);
+    const compose = (t: string) =>
+      (app.session as any).composeUserMessage(t, undefined,
+        { name: "gw", capabilities: {} }) as any;
+
+    const one = compose("what is the checksum in @Tests/lin/lin_master.py ?");
+    const body = typeof one.content === "string" ? one.content : JSON.stringify(one.content);
+    ck(/def checksum/.test(body), "the mentioned file's CONTENTS are in the message");
+    ck(/Tests\/lin\/lin_master\.py/.test(body), "named, so the model knows which file it is");
+    ck(/what is the checksum/.test(body), "and the sentence that mentioned it survives");
+
+    // Two mentions, both attached, and the folder listed rather than read.
+    const two = compose("compare @Tests/lin/lin_master.py with @Tests/lin/notes.md in @Tests/lin/");
+    const btwo = typeof two.content === "string" ? two.content : JSON.stringify(two.content);
+    ck(/def checksum/.test(btwo) && /# LIN notes/.test(btwo), "several mentions all arrive");
+    ck(/lin_master\.py/.test(btwo) && /notes\.md/.test(btwo),
+      "and a mentioned folder is listed, not read whole");
+
+    // Prose that merely looks like a mention is left alone.
+    const prose = compose("the @dataclass decorator, and mail rahma@example.com");
+    const bprose = typeof prose.content === "string" ? prose.content : JSON.stringify(prose.content);
+    ck(!/Attached file/.test(bprose), "a mention that resolves to nothing is ordinary text");
+
+    // The gate. A mention inlines a file with no card to approve and no line
+    // in the log, so it is held to a stricter rule than read_file is.
+    const secret = compose("check @.git-credentials");
+    const bsecret = typeof secret.content === "string" ? secret.content : JSON.stringify(secret.content);
+    ck(!/github\.com/.test(bsecret), "a credential store is never inlined by a mention");
+
+    const escape = compose("read @../../../etc/passwd");
+    const bescape = typeof escape.content === "string" ? escape.content : JSON.stringify(escape.content);
+    ck(!/Attached file/.test(bescape), "and neither is anything outside the workspace");
+
+    await app.dispose();
+  }
+
   console.log("\n──── §2.15 agents ────");
   {
     const root = workspace({ "gw.yaml": GOOD });

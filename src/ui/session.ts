@@ -6,6 +6,7 @@ import type { Msg } from "../providers/client";
 import { runAgent } from "../agent/loop";
 import { isUntitled, titleFrom, sanitizeTitle } from "../core/sessions";
 import type { FileChange, ToolContext, TodoItem, ToolImage } from "../agent/tools";
+import { mentionable } from "../agent/tools";
 import { agentAllowsMcp, agentRefusal } from "../agents/loader";
 import { parseQualified } from "../mcp/registry";
 import { fetchPage, normaliseUrl } from "../browser/fetchPage";
@@ -344,17 +345,128 @@ export class SessionController {
    * answers a base64 blob with a 400, so sending one is a worse failure than
    * saying it was skipped.
    */
+/**
+   * Turn `@path` mentions into files the model actually receives.
+   *
+   * THIS IS WHAT "@ DOESN'T WORK" FINALLY WAS.
+   *
+   * The picker found the file, the row was right, tab put `@Tests/lin/
+   * lin_master.py` in the composer - and then nothing read it. The mention
+   * went to the model as prose, indistinguishable from having typed the path
+   * by hand, and whether its contents were ever seen came down to the model
+   * deciding on its own to call `read_file` on a string it noticed in the
+   * request. Sometimes it did. When it did not, or when the read was refused,
+   * the answer was about a file nobody had opened.
+   *
+   * A mention is now an attachment. It goes through the same path as a file
+   * dropped on the composer - decoded, capped, fenced with its name - so
+   * there is one way a file reaches the model rather than two, and the one is
+   * the one that was already tested.
+   *
+   * What is deliberately NOT done: the `@path` is left in the prose. The model
+   * should see which file the sentence is about, and stripping it turns "look
+   * at @lin_master.py" into "look at".
+   *
+   * A mention that does not resolve is left entirely alone. `@pytest.mark`,
+   * `@dataclass` and an email address are all ordinary text, and a picker that
+   * has never been opened is the common case for all three.
+   */
+  private expandMentions(
+    text: string,
+    notes: string[]
+  ): Array<{ name: string; mediaType: string; data: string }> {
+    const root = this.app.root;
+    if (!root) return [];
+
+    /** Total decoded characters across every mention in one message. */
+    const BUDGET = 200_000;
+    /** Entries listed for a mentioned folder. */
+    const DIR_CAP = 200;
+
+    const out: Array<{ name: string; mediaType: string; data: string }> = [];
+    const seen = new Set<string>();
+    let budget = BUDGET;
+
+    // The same shape the picker inserts, plus a trailing slash for a folder.
+    // Trailing punctuation belongs to the sentence, not the path.
+    const re = /(?:^|\s)@([^\s]+)/g;
+    for (const m of text.matchAll(re)) {
+      if (budget <= 0) break;
+      let rel = m[1].replace(/[.,;:!?)\]}'"]+$/, "");
+      const wantsDir = rel.endsWith("/");
+      if (wantsDir) rel = rel.slice(0, -1);
+      if (!rel || seen.has(rel)) continue;
+      seen.add(rel);
+
+      const judged = mentionable(root, rel);
+      if ("refused" in judged) {
+        notes.push(`@${rel} was not attached - ${judged.refused}.`);
+        continue;
+      }
+
+      let st: fs.Stats;
+      try { st = fs.statSync(judged.abs); } catch { continue; } // prose, not a path
+
+      if (st.isDirectory()) {
+        // A folder is listed, not read. `@src` on a large tree would otherwise
+        // be the whole tree, and the listing is what someone mentioning a
+        // folder is usually after anyway.
+        let entries: string[];
+        try {
+          entries = fs.readdirSync(judged.abs, { withFileTypes: true })
+            .map((e) => e.name + (e.isDirectory() ? "/" : ""))
+            .sort();
+        } catch { continue; }
+        const shown = entries.slice(0, DIR_CAP);
+        const body = shown.join("\n") +
+          (entries.length > shown.length
+            ? `\n… and ${entries.length - shown.length} more`
+            : "");
+        budget -= body.length;
+        out.push({
+          name: rel + "/",
+          mediaType: "text/plain",
+          data: Buffer.from(body, "utf8").toString("base64"),
+        });
+        continue;
+      }
+
+      if (!st.isFile()) continue;
+      // A file large enough to evict the conversation is not attached whole.
+      // composeUserMessage truncates at 60k with the cut stated in-band; this
+      // is the outer bound, so one @ cannot spend the whole budget.
+      if (st.size > budget) {
+        notes.push(`@${rel} was not attached - it is too large (${st.size} bytes).`);
+        continue;
+      }
+      let buf: Buffer;
+      try { buf = fs.readFileSync(judged.abs); } catch { continue; }
+      budget -= buf.length;
+      out.push({
+        name: rel,
+        mediaType: "text/plain",
+        data: buf.toString("base64"),
+      });
+    }
+    return out;
+  }
+
   private composeUserMessage(
     text: string,
     attachments: Array<{ name: string; mediaType: string; data: string }> | undefined,
     profile: { name: string; capabilities: { vision?: boolean } }
   ): Msg {
-    const all = attachments ?? [];
+    const notes: string[] = [];
+    // A mention is an attachment, and joins the ones the composer already
+    // had. Doing it here rather than in send() means every path that builds a
+    // user message gets it - the turn, a steered message, and one promoted out
+    // of the queue - and the queue itself does not, because a queued message
+    // re-enters send() and would otherwise be expanded twice.
+    const all = [...(attachments ?? []), ...this.expandMentions(text, notes)];
     const vision = profile.capabilities.vision === true;
     const images = all.filter((a) => a.mediaType.startsWith("image/"));
     const textual = all.filter((a) => !a.mediaType.startsWith("image/"));
 
-    const notes: string[] = [];
     const parts: string[] = [];
 
     for (const a of textual) {
