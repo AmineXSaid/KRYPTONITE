@@ -65,10 +65,25 @@ console.log("──── the rules the aura depends on ────");
 
   // Painted through a transparent border rather than over the content: the
   // technique is what lets `overflow: hidden` survive.
-  ok("the gradient is painted to the border box",
-    /conic-gradient\([\s\S]*?\)\s*border-box/.test(CSS));
-  ok("with the surface painted to the padding box over it",
-    /linear-gradient\(var\(--kx-surface\), var\(--kx-surface\)\)\s*padding-box/.test(CSS));
+  //
+  // The boxes are now set by the `background-clip` / `background-origin`
+  // longhands rather than by per-layer keywords inside a `background`
+  // shorthand - see the floor test at the bottom of this file for why the
+  // shorthand had to go. The invariant is unchanged and is what is asserted:
+  // layer one (the surface) is clipped to the padding box, layer two (the
+  // sweep) to the border box, IN THAT ORDER. Reverse them and the gradient
+  // is painted over the content instead of showing through the border.
+  ok("the surface layer is declared before the sweep", (() => {
+    const img = /background-image:\s*([\s\S]*?);/.exec(CSS);
+    if (!img) return false;
+    const lin = img[1].indexOf("linear-gradient");
+    const con = img[1].indexOf("conic-gradient");
+    return lin !== -1 && con !== -1 && lin < con;
+  })());
+  ok("the surface is clipped to the padding box and the sweep to the border box",
+    /background-clip:\s*padding-box,\s*border-box/.test(CSS));
+  ok("and both layers originate from the matching boxes",
+    /background-origin:\s*padding-box,\s*border-box/.test(CSS));
 }
 {
   const composer = CSS.match(/\n\.composer\s*\{[^}]*\}/);
@@ -92,12 +107,12 @@ console.log("──── the rules the aura depends on ────");
 }
 {
   // The palette, not a rainbow. Three accents this panel already owns.
-  const conic = CSS.match(/conic-gradient\([\s\S]*?\)\s*border-box/);
+  const conic = CSS.match(/conic-gradient\(([\s\S]*?)\n\s*\);/);
   ok("the sweep uses the product's own accents", !!conic &&
-    ["--kx-accent", "--kx-link", "--kx-under"].every((t) => conic[0].includes(t)),
-    conic ? conic[0].replace(/\s+/g, " ").slice(0, 90) : "");
+    ["--kx-accent", "--kx-link", "--kx-under"].every((t) => conic[1].includes(t)),
+    conic ? conic[1].replace(/\s+/g, " ").slice(0, 90) : "not found");
   ok("and closes the loop, so there is no seam at 360deg",
-    !!conic && (conic[0].match(/--kx-accent/g) || []).length >= 2);
+    !!conic && (conic[1].match(/--kx-accent/g) || []).length >= 2);
 }
 
 /* ── the attribute the CSS reads ────────────────────────────────────────── */
@@ -133,6 +148,61 @@ console.log("\n──── the host tells the composer it is streaming ──�
   send(state(false));
   ok("and it goes back when the turn ends", attr() === "0", String(attr()));
   dom.window.close();
+}
+
+/* ── the composer must never lose its floor ──────────────────────────────
+ *
+ * This is the regression that reached a user's screen: the composer rendered
+ * TRANSPARENT, with the panel behind it showing through the box you type into.
+ *
+ * The cause was the `background` shorthand. It resets `background-color`, so
+ * anything that made the aura declaration invalid at computed-value time took
+ * the composer's surface down with it - and an invalid `background` computes
+ * to `initial` (transparent), not to whatever an earlier rule said. Two real
+ * environments do exactly that:
+ *
+ *   - an Electron without `@property` support, where `--kx-angle` is an
+ *     unregistered custom property and `var(--kx-angle)` resolves to nothing;
+ *   - any load where tokens.css did not apply, so every `--kx-*` is absent.
+ *
+ * The fix is structural, so the test is structural: the aura rule may not use
+ * the shorthand, and every `var()` in it must carry a literal fallback.
+ */
+{
+  const css = fs.readFileSync(path.join(ROOT, "media/webview/sidebar.css"), "utf8");
+
+  // Anchored at the start of a line: `.composer-wrap[data-drop="1"] .composer`
+  // also ends in `.composer {`, and an unanchored match finds the drop rule
+  // instead of the base one.
+  const composerBase = /\n\.composer \{([^}]*)\}/.exec(css);
+  ok("the composer declares a floor", !!composerBase);
+  if (composerBase) {
+    const body = composerBase[1];
+    ok("the floor is background-COLOR, not the shorthand",
+      /background-color:/.test(body) && !/\bbackground:/.test(body), body.trim());
+    ok("and it has a literal fallback, for a load with no tokens",
+      /background-color:\s*var\(--kx-surface,\s*#[0-9a-f]{3,8}\)/i.test(body), body.trim());
+  }
+
+  const auraRule = /\.composer:focus-within,\s*\n\.composer\[data-streaming="1"\] \{([^}]*)\}/.exec(css);
+  ok("the aura rule is present", !!auraRule);
+  if (auraRule) {
+    const body = auraRule[1];
+    // The whole point. `background:` here is what made the composer vanish.
+    ok("the aura never uses the background shorthand",
+      !/(^|[;{\s])background:/.test(body), body.trim().slice(0, 120));
+    ok("it paints with background-image", /background-image:/.test(body));
+    ok("and sets clip and origin as longhands",
+      /background-clip:\s*padding-box,\s*border-box/.test(body) &&
+      /background-origin:\s*padding-box,\s*border-box/.test(body));
+    // Without a fallback the unregistered-property case invalidates the whole
+    // declaration, which is how this broke in the first place.
+    ok("the angle carries a fallback, so no @property still draws a rim",
+      /var\(--kx-angle,\s*0deg\)/.test(body), body.trim().slice(0, 120));
+    const vars = body.match(/var\(--[a-z0-9-]+(?:,[^)]*)?\)/g) || [];
+    const bare = vars.filter((v) => !v.includes(","));
+    ok("every var() in the aura has a fallback", bare.length === 0, bare.join(" "));
+  }
 }
 
 if (failures.length) for (const f of failures) console.log("FAIL  " + f);

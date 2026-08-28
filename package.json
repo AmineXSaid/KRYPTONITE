@@ -45,84 +45,104 @@
     "commands": [
       {
         "command": "genesis.focusSidebar",
-        "title": "Genesis: Focus sidebar"
+        "title": "Focus sidebar",
+        "category": "Genesis"
       },
       {
         "command": "genesis.openControlCenter",
-        "title": "Genesis: Open Control Center"
+        "title": "Open Control Center",
+        "category": "Genesis"
       },
       {
         "command": "genesis.openBrowser",
-        "title": "Genesis: Open browser"
+        "title": "Open browser",
+        "category": "Genesis"
       },
       {
         "command": "genesis.closeBrowser",
-        "title": "Genesis: Close browser"
+        "title": "Close browser",
+        "category": "Genesis"
       },
       {
         "command": "genesis.newChat",
-        "title": "Genesis: New chat"
+        "title": "New chat",
+        "category": "Genesis"
       },
       {
         "command": "genesis.runDiagnostics",
-        "title": "Genesis: Run connection diagnostics"
+        "title": "Run connection diagnostics",
+        "category": "Genesis"
       },
       {
         "command": "genesis.selectEndpoint",
-        "title": "Genesis: Select active endpoint"
+        "title": "Select active endpoint",
+        "category": "Genesis"
       },
       {
         "command": "genesis.newEndpoint",
-        "title": "Genesis: Create endpoint profile"
+        "title": "Create endpoint profile",
+        "category": "Genesis"
       },
       {
         "command": "genesis.restoreCheckpoint",
-        "title": "Genesis: Restore checkpoint"
+        "title": "Restore checkpoint",
+        "category": "Genesis"
       },
       {
         "command": "genesis.exportBundle",
-        "title": "Genesis: Export offline bundle"
+        "title": "Export offline bundle",
+        "category": "Genesis"
       },
       {
         "command": "genesis.selectAgent",
-        "title": "Genesis: Select agent"
+        "title": "Select agent",
+        "category": "Genesis"
       },
       {
         "command": "genesis.newAgent",
-        "title": "Genesis: Create agent"
+        "title": "Create agent",
+        "category": "Genesis"
       },
       {
         "command": "genesis.exportChat",
-        "title": "Genesis: Export chat as JSON"
+        "title": "Export chat as JSON",
+        "category": "Genesis"
       },
       {
         "command": "genesis.exportAllChats",
-        "title": "Genesis: Export all chats as JSON"
+        "title": "Export all chats as JSON",
+        "category": "Genesis"
       },
       {
         "command": "genesis.fixProblem",
-        "title": "Genesis: Fix this problem"
+        "title": "Fix this problem",
+        "category": "Genesis"
       },
       {
         "command": "genesis.documentSymbol",
-        "title": "Genesis: Document this"
+        "title": "Document this",
+        "category": "Genesis"
       },
       {
         "command": "genesis.explainSelection",
-        "title": "Genesis: Explain this"
+        "title": "Explain this",
+        "category": "Genesis"
       },
       {
         "command": "genesis.writeTests",
-        "title": "Genesis: Write tests for this"
+        "title": "Write tests for this",
+        "category": "Genesis"
       },
       {
         "command": "genesis.generateCommitMessage",
-        "title": "Genesis: Generate commit message",
-        "icon": "$(sparkle)"
+        "title": "Generate commit message",
+        "icon": "$(sparkle)",
+        "category": "Genesis"
       },
       {
         "command": "genesis.watchAgentBrowser",
-        "title": "Genesis: Watch the agent browser"
+        "title": "Watch the agent browser",
+        "category": "Genesis"
       }
     ],
     "configuration": {
@@ -246,7 +266,8 @@
     "test:mcp": "npm install --no-save @modelcontextprotocol/server-filesystem @modelcontextprotocol/server-memory && esbuild test/mcp-e2e.ts --bundle --outdir=dist --out-extension:.js=.cjs --format=cjs --platform=node --target=node20 && node dist/mcp-e2e.cjs",
     "verify": "npm run typecheck && npm test",
     "vscode:prepublish": "npm run build",
-    "package": "vsce package --no-dependencies"
+    "package": "vsce package --no-dependencies && node test/vsix.cjs",
+    "test:vsix": "node test/vsix.cjs"
   },
   "dependencies": {
     "undici": "^6.19.8",

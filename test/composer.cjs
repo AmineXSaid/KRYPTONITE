@@ -187,11 +187,34 @@ function boot() {
 {
   // Only the modes that stop asking are coloured, and the loudest one is the
   // one that never asks.
-  ok("auto-edit is marked", /\.perm-btn\[data-mode="edits-auto"\][^}]*var\(--kx-ask\)/.test(CSS));
+  //
+  // The BUTTON's hue is asserted against the SHEET's, read out of the same
+  // PERMS table, rather than against a literal token. The two are the same
+  // control seen twice - the button is the state, the sheet row is the choice
+  // that set it - and a button in one colour opening a row in another is the
+  // same class of mismatch as the label saying "Ask" while the row said
+  // "Manual". Pinning a literal here let them drift once already.
+  const hue = (mode) => {
+    const row = new RegExp('\\["' + mode + '",[^\\]]*\\]').exec(SRC);
+    const m = row && /var\(--[a-z0-9-]+\)/g.exec(row[0].split(",").pop());
+    return m ? m[0] : null;
+  };
+  for (const mode of ["edits-auto", "full-auto"]) {
+    const want = hue(mode);
+    ok(`${mode} has a hue in the sheet`, !!want, String(want));
+    const rule = new RegExp('\\.perm-btn\\[data-mode="' + mode + '"\\]\\s*\\{([^}]*)\\}').exec(CSS);
+    ok(`${mode} is marked on the button too`, !!rule);
+    if (rule && want) {
+      ok(`${mode} uses the same hue as its sheet row`,
+        rule[1].includes(want), `button ${rule[1].match(/var\(--[a-z0-9-]+\)/)} vs sheet ${want}`);
+    }
+  }
+  // The one that never asks is the alarm colour specifically, not merely a
+  // colour: it has to read as a warning rather than as another category.
   ok("allow-all is marked in the alarm colour",
     /\.perm-btn\[data-mode="full-auto"\][^}]*var\(--kx-error\)/.test(CSS));
   ok("and the default is not coloured at all",
-    !/\.perm-btn\[data-mode="ask"\]/.test(CSS));
+    !/\.perm-btn\[data-mode="ask"\]\s*\{/.test(CSS));
 }
 
 /* ── the tip strip ──────────────────────────────────────────────────────── */

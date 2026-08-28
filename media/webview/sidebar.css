@@ -1466,7 +1466,15 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 
 .composer {
-  background: var(--kx-surface); border-radius: 4px; overflow: hidden;
+  /* background-COLOR, with a literal fallback, and never re-declared by the
+     aura below. This is the composer's floor, and it has to survive every
+     environment: a `var()` that fails to resolve makes a declaration invalid
+     at computed-value time, and an invalid `background` computes to `initial`
+     - transparent - rather than to whatever an earlier rule said. A composer
+     with no floor shows the panel straight through it, which is unreadable
+     rather than merely wrong. */
+  background-color: var(--kx-surface, #18171d);
+  border-radius: 4px; overflow: hidden;
   border: 1px solid rgba(222, 220, 209, .15);
 }
 /* A file is over the composer and will be taken if it is let go here.
@@ -1508,15 +1516,33 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    corners with it.
 
    The border stays 1px so nothing moves when the aura turns on. */
+/* LONGHANDS, not the `background` shorthand, and this is not a style
+   preference. The shorthand resets `background-color`, so anything that makes
+   it invalid at computed-value time takes the composer's floor down with it:
+   an Electron without `@property` support leaves `--kx-angle` unregistered, a
+   theme where a token fails to resolve does the same, and in both cases the
+   whole declaration computes to `initial` and the composer becomes
+   TRANSPARENT - the panel behind it showing through the box you type into.
+   Longhands cannot do that: if `background-image` is invalid it computes to
+   `none`, and the floor set above is still there.
+
+   Every `var()` here carries a fallback for the same reason. `--kx-angle` in
+   particular: without `@property` it is an unregistered custom property, so
+   `var(--kx-angle)` alone resolves to nothing and invalidates the gradient.
+   With `0deg` behind it the rim is drawn and simply does not turn, which is
+   the correct degradation. */
 .composer:focus-within,
 .composer[data-streaming="1"] {
   border-color: transparent;
-  background:
-    linear-gradient(var(--kx-surface), var(--kx-surface)) padding-box,
+  background-image:
+    linear-gradient(var(--kx-surface, #18171d), var(--kx-surface, #18171d)),
     conic-gradient(
-      from var(--kx-angle),
-      var(--kx-accent), var(--kx-link), var(--kx-under), var(--kx-accent)
-    ) border-box;
+      from var(--kx-angle, 0deg),
+      var(--kx-accent, #2ea562), var(--kx-link, #4692dd),
+      var(--kx-under, #4692dd), var(--kx-accent, #2ea562)
+    );
+  background-origin: padding-box, border-box;
+  background-clip: padding-box, border-box;
   animation: kx-aura-spin 4.2s linear infinite;
 }
 /* Streaming is the louder of the two: the model is doing something the user is
@@ -1847,11 +1873,15 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    change, not a theme, so the icon carries it here. */
 .perm-btn {
   display: flex; align-items: center; gap: 5px; flex: none;
-  min-height: 24px; padding: 0 6px; border-radius: 4px;
+  min-height: 24px; padding: 0 7px; border-radius: 4px;
   font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
   letter-spacing: .12em; text-transform: uppercase; text-indent: .12em;
   color: var(--kx-fg-3);
   border: 1px solid transparent; background: none;
+  /* Sits immediately after the phase segment, and must not read as a fourth
+     phase. The gap does that work: the segment's own buttons are flush
+     against each other, so any space at all reads as "different control". */
+  margin-left: 3px;
 }
 /* The mode GLYPH is the thing that survives a narrow panel, so it is drawn at
    a size that can carry the meaning on its own - 15px rather than 11. At 11 it
@@ -1859,11 +1889,33 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .perm-btn .ic-15 { color: currentColor; flex: none; }
 .perm-btn:hover { background: var(--kx-hover); color: var(--kx-fg); }
 .perm-btn[aria-expanded="true"] { background: var(--kx-hover); border-color: var(--kx-line); }
-/* Only the mode that stops asking is coloured. "Ask each time" is the
-   default and needs no marking; "Allow all" is a state someone should be
-   able to notice from across the room. */
-.perm-btn[data-mode="edits-auto"] { color: var(--kx-ask); }
-.perm-btn[data-mode="full-auto"] { color: var(--kx-error); }
+/* Only a mode that stops asking is coloured, and it is coloured on its OWN
+   surface rather than in text alone. "Manual" is the default and needs no
+   marking; the other two are states someone should be able to notice from
+   across the room, because they mean the agent will act without stopping. */
+.perm-btn[data-mode="edits-auto"] {
+  color: var(--kx-mcp); border-color: color-mix(in srgb, var(--kx-mcp) 38%, transparent);
+  background: color-mix(in srgb, var(--kx-mcp) 12%, transparent);
+}
+.perm-btn[data-mode="full-auto"] {
+  color: var(--kx-error); border-color: color-mix(in srgb, var(--kx-error) 42%, transparent);
+  background: color-mix(in srgb, var(--kx-error) 14%, transparent);
+}
+/* color-mix is recent. Without it the two rules above drop their surface and
+   the button falls back to coloured text, which is the previous behaviour and
+   still legible - so this is a progressive enhancement, not a dependency. */
+@supports not (color: color-mix(in srgb, red 10%, transparent)) {
+  .perm-btn[data-mode="edits-auto"] { color: var(--kx-mcp); }
+  .perm-btn[data-mode="full-auto"] { color: var(--kx-error); }
+}
+/* Below ~330px the control row has to choose between wrapping onto a second
+   line and dropping a word. The word goes: the glyph carries the mode, the
+   tooltip and the accessible name carry the sentence, and the row stays one
+   line - which is worth more than the label on a panel this narrow. */
+@media (max-width: 330px) {
+  .perm-btn .nm { display: none; }
+  .perm-btn { padding: 0 5px; }
+}
 
 
 /* Opens upward, over the transcript, anchored to the composer rather than to

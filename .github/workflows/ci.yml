@@ -70,7 +70,11 @@ jobs:
       # lockfile rather than whatever npx would resolve. Proves the extension
       # actually packages, and leaves the .vsix on the run so an air-gapped
       # install can be fetched without going through a marketplace.
-      - name: Package
+      # `npm run package` also validates the archive it produced - see
+      # test/vsix.cjs. That check cannot run anywhere else: it is the only one
+      # that looks at what .vscodeignore actually let through, and a file
+      # excluded by mistake fails at runtime with no build error at all.
+      - name: Package and validate the archive
         run: npm run package
 
       - uses: actions/upload-artifact@v4
