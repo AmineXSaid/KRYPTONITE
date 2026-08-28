@@ -46,6 +46,18 @@ console.log("──── the mark sits in the editor title bar ────");
   ok("in the navigation group, so it renders as an icon rather than a menu row",
     !!entry && /^navigation/.test(entry.group || ""), entry && entry.group);
 
+  // The order suffix is `group@N`. It was `@-1` to sit leftmost, which relies
+  // on VS Code accepting a NEGATIVE order - and code.visualstudio.com is
+  // blocked from this build environment, so that could not be read off a
+  // primary source. Every documented example uses a non-negative integer, so
+  // the manifest uses one too: an ordering that might be dropped by a stricter
+  // parser is not worth the one position it buys, and which extension sits
+  // adjacent is not ours to decide anyway.
+  const order = /@(-?\d+)$/.exec((entry && entry.group) || "");
+  ok("with an order suffix", !!order, entry && entry.group);
+  ok("and it is a non-negative integer, which is the only documented form",
+    !!order && Number(order[1]) >= 0, order && order[1]);
+
   const cmd = pkg.contributes.commands.find((c) => c.command === "genesis.focusSidebar");
   ok("the command declares an icon", !!cmd && !!cmd.icon);
   // A single path would be drawn on both themes, and the mark's ring is the
