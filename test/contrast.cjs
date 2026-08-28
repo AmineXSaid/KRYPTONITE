@@ -17,10 +17,32 @@ const path = require("path");
 
 const TOKENS = fs.readFileSync(path.join(__dirname, "..", "media", "webview", "tokens.css"), "utf8");
 
+/**
+ * A token's value, resolved to something measurable.
+ *
+ * `--kx-bg` is `var(--vscode-sideBar-background, var(--kx-bg-default))`, so the
+ * panel takes whatever colour the workbench paints its side bar and matches
+ * every theme by construction rather than by guessing at one. Contrast still
+ * has to be checked against SOMETHING, and the only value knowable here is the
+ * fallback - which is also what the panel shows in any host that supplies no
+ * theme variables. So a `var()` chain is followed to its literal.
+ *
+ * This means the ratios below hold for the default. A theme with a much
+ * lighter side bar would need its own check, which is not something a static
+ * file can do; the fallback is the contract this suite can enforce.
+ */
 function token(name) {
   const m = TOKENS.match(new RegExp("--" + name + ":\\s*([^;]+);"));
   if (!m) throw new Error("token not found: --" + name);
-  return m[1].trim();
+  let v = m[1].trim();
+  for (let i = 0; i < 4 && v.startsWith("var("); i++) {
+    // The last argument of a var() chain is the fallback.
+    const inner = v.slice(4, v.lastIndexOf(")"));
+    const fallback = inner.slice(inner.indexOf(",") + 1).trim();
+    if (!fallback) throw new Error("no fallback for " + name);
+    v = fallback.startsWith("var(") ? fallback : token(fallback.replace(/^--/, ""));
+  }
+  return v;
 }
 
 function rgb(hex) {

@@ -1076,7 +1076,7 @@ function _sbRun() {
                 // footer, which is where things go to be ignored.
                 '<button class="perm-btn" id="permBtn" aria-haspopup="menu" aria-expanded="false"' +
                   ' title="What the agent may do without asking">' +
-                  icon("i-hand", "ic-11") + '<span class="nm" id="permName">Manual</span>' +
+                  icon("i-hand", "ic-15") + '<span class="nm" id="permName">Manual</span>' +
                 '</button>' +
                 '<span class="sp"></span>' +
                 // Attach and send. THERE IS NO `@` BUTTON, on purpose.
@@ -1439,6 +1439,9 @@ function _sbRun() {
     var btn = $("permBtn");
     if (btn) {
       btn.setAttribute("data-mode", mode);
+      // Below 340px the label is hidden and the glyph is the whole control, so
+      // the accessible name cannot come from the text any more.
+      btn.setAttribute("aria-label", "Mode: " + permLabel(mode));
       // The full sentence, for the control that now shows one word.
       btn.title = permLabel(mode) + " - " + permDetail(mode);
       // THE MODE'S OWN GLYPH, not a fixed shield.
@@ -1453,7 +1456,7 @@ function _sbRun() {
       // Reading PERMS means the button cannot drift from the sheet: there is
       // one table, and both render from it.
       var ic = btn.querySelector("svg");
-      if (ic) ic.outerHTML = icon(permIcon(mode), "ic-11");
+      if (ic) ic.outerHTML = icon(permIcon(mode), "ic-15");
     }
     var pop = $("permPop");
     if (!pop || pop.hidden) return;

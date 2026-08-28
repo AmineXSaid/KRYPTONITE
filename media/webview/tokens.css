@@ -57,7 +57,21 @@
    * bug. The ACCENTS are untouched - they are the brand, and they were never
    * the thing that clashed. */
   --kx-bg-deep:   #0f0f11;  /* recessed - dumps, code panes, diff bodies     */
-  --kx-bg:        #181818;  /* the panel itself, matching VS Code's sidebar  */
+  /* THE PANEL TAKES VS CODE'S OWN BACKGROUND.
+   *
+   * A literal #181818 was Dark Modern's `sideBar.background`, which is right
+   * for Dark Modern and wrong for every other theme - and wrong is exactly how
+   * it looked sitting in a tab strip next to Claude Code, which paints VS
+   * Code's variable rather than a colour of its own.
+   *
+   * Matching a hex is guessing at one theme. Reading the variable matches by
+   * CONSTRUCTION: whatever the workbench paints its side bar, the panel paints
+   * too, in every theme, including ones that did not exist when this was
+   * written. `--kx-bg-default` is the fallback for a host that supplies no
+   * theme variables at all - the screenshot harness, and the contrast suite,
+   * which needs a real colour to measure against. */
+  --kx-bg-default: #181818;
+  --kx-bg: var(--vscode-sideBar-background, var(--kx-bg-default));
   --kx-surface:   #0f0f11;  /* recessed - cards, composer, popups, modals    */
   --kx-surface-2: #141416;  /* one step above recessed, inside a popup       */
   --kx-surface-3: #2c2c2f;  /* raised: small-button hover, menu row hover    */

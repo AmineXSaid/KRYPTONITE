@@ -551,15 +551,25 @@ console.log("\n──── the send control ────");
   // floor every block reflowed on its own and the panel became a column of
   // one-word lines: a tip strip set vertically, a filename broken mid-token
   // across five lines, prose two words at a time.
-  const floor = CSS.match(/#app\s*\{[^}]*min-width:\s*(\d+)px/);
-  ok("the panel declares a minimum width", !!floor, floor ? floor[1] + "px" : "none");
-  ok("and it is wide enough to be a panel rather than a column",
-    !!floor && Number(floor[1]) >= 280, floor && floor[1]);
-  ok("the scroll lives on the wrapper, so the panel moves as one object",
-    /#root\s*\{[^}]*overflow:\s*auto/.test(CSS));
-  // #app must not shrink below the floor, or the min-width is decorative.
-  ok("and the panel refuses to be squeezed under it",
-    /#app\s*\{[^}]*flex:\s*1 0 auto/.test(CSS));
+  // The floor is on the TRANSCRIPT, not on the whole panel.
+  //
+  // It was on `#app`, which took the composer with it - and at a 200px panel
+  // that put the send button at x=274 inside a 300px layout: off screen, and
+  // reachable only by scrolling sideways first. The one control needed on
+  // every turn was the one that could not be seen. The transcript is the part
+  // that actually needs a measure to stay readable, so the floor lives there
+  // and the composer tracks the real width.
+  const floor = CSS.match(/#log > \*\s*\{[^}]*min-width:\s*(\d+)px/);
+  ok("the transcript declares a minimum width", !!floor, floor ? floor[1] + "px" : "none");
+  ok("and it is wide enough to hold a line of prose",
+    !!floor && Number(floor[1]) >= 260, floor && floor[1]);
+  ok("with its own sideways scroll",
+    /#log\s*\{[^}]*overflow-x:\s*auto/.test(CSS));
+  // And the panel itself must NOT have one, or the composer goes with it.
+  ok("while the panel is free to be as narrow as it is",
+    /#app\s*\{[^}]*min-width:\s*0/.test(CSS));
+  ok("so nothing scrolls the composer out of reach",
+    /#root\s*\{[^}]*overflow:\s*hidden/.test(CSS));
 }
 
 /* ── files dropped on the composer ──────────────────────────────────────── */

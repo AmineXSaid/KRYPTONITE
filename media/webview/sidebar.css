@@ -53,36 +53,44 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   border: 2px solid transparent; background-clip: content-box;
 }
 
-/* THE PANEL HAS A FLOOR, AND BELOW IT THE WHOLE PANEL SCROLLS.
+/* THE TRANSCRIPT HAS A FLOOR. THE COMPOSER DOES NOT.
  *
  * VS Code lets the secondary sidebar be dragged to any width at all, and with
- * `min-width: 0` every block in here reflowed independently. At around 160px
- * that produced a panel where the tip strip set one word per line down a 55px
+ * `min-width: 0` every block reflowed independently. At around 160px that
+ * produced a panel where the tip strip set one word per line down a 55px
  * gutter, a filename broke mid-token across five lines, and prose ran two
- * words at a time - each element technically wrapping correctly, and the whole
- * thing unreadable.
+ * words at a time - each element wrapping correctly, the whole thing
+ * unreadable. So there is a floor, and below it the content scrolls sideways
+ * rather than rearranging itself.
  *
- * A single floor fixes all of it at once: below 300px the panel keeps its
- * layout and scrolls sideways as one object, so a line of prose is still a
- * line of prose and you move the view rather than the text rearranging itself.
- * That is what every editor does with a document too narrow for its content,
- * and it is the behaviour people already expect from a panel they are
- * squeezing.
+ * The floor was on `#app`, which took the COMPOSER with it - and that was
+ * worse than the problem it fixed. At a 200px panel the send button sat at
+ * x=274 in a 300px layout: off screen, reachable only by scrolling sideways
+ * first. The one control you need on every single turn was the one you could
+ * not see.
+ *
+ * So the floor sits on the transcript, which is the part that actually needs a
+ * measure to be readable. The composer tracks the real width and stays whole,
+ * shedding its mode LABEL rather than its controls when it runs out of room
+ * (see `.perm-btn` below).
  *
  * 300px is measured, not guessed: it is the width at which the composer's
- * control row - phase segments, model, mode, and the three actions - stops
- * needing to wrap, so the floor is set by the one row that cannot usefully
- * get narrower. */
-#root { height: 100vh; display: flex; flex-direction: column; min-width: 0; overflow: auto; }
-#app {
-  height: 100vh; display: flex; flex-direction: column;
-  min-width: 300px; flex: 1 0 auto;
-}
+ * control row stops needing to wrap. */
+#root { height: 100vh; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+#app { height: 100vh; display: flex; flex-direction: column; min-width: 0; }
+/* The floor, and the scroll that goes with it. `#log` is the only thing in the
+   panel wide enough to need one. */
+#log { min-width: 0; overflow-x: auto; }
+/* 268, not 276. `#log` carries 14px of padding on each side, so a 300px panel
+   offers 272px of content - and a floor above that made the transcript scroll
+   by four pixels at the exact width the composer was tuned to fit. */
+#log > * { min-width: 268px; }
 
 .ic { flex: none; display: block; width: 16px; height: 16px; }
 .ic-9 { width: 9px; height: 9px; }
 .ic-11 { width: 11px; height: 11px; }
 .ic-13 { width: 13px; height: 13px; }
+.ic-15 { width: 15px; height: 15px; }
 .ic-14 { width: 14px; height: 14px; }
 .ic-18 { width: 18px; height: 18px; }
 .sp { flex: 1; }
@@ -1661,7 +1669,10 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   color: var(--kx-fg-3);
   border: 1px solid transparent; background: none;
 }
-.perm-btn .ic-11 { color: currentColor; }
+/* The mode GLYPH is the thing that survives a narrow panel, so it is drawn at
+   a size that can carry the meaning on its own - 15px rather than 11. At 11 it
+   was a smudge next to a word doing all the work. */
+.perm-btn .ic-15 { color: currentColor; flex: none; }
 .perm-btn:hover { background: var(--kx-hover); color: var(--kx-fg); }
 .perm-btn[aria-expanded="true"] { background: var(--kx-hover); border-color: var(--kx-line); }
 /* Only the mode that stops asking is coloured. "Ask each time" is the
@@ -1669,6 +1680,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    able to notice from across the room. */
 .perm-btn[data-mode="edits-auto"] { color: var(--kx-ask); }
 .perm-btn[data-mode="full-auto"] { color: var(--kx-error); }
+
 
 /* Opens upward, over the transcript, anchored to the composer rather than to
    the old footer. Left-aligned because the button it belongs to now sits on
@@ -2451,3 +2463,46 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    segmented four-button picker and a per-row kind badge, and both were replaced
    by the model picker's kind HEADERS and the form's <select>. Nothing renders
    either class any more, so the rules are gone rather than left to rot. */
+
+
+/* ── narrow panel: the composer's responsive rules ──────────────────────
+   Last in the file on purpose. These override `#modelBtn`'s flex basis and
+   the phase segment's padding, both of which are declared further up; a
+   media query does not raise specificity, so source order is the only
+   thing that decides which wins. */
+/* NARROW: THE WORD GOES, THE GLYPH GROWS, THE CONTROL STAYS.
+ *
+ * Below 340px the control row cannot hold phase + model + mode + attach +
+ * send at full width. Something has to give, and the choice is between
+ * dropping a control off the row and dropping a LABEL. A missing control is
+ * unreachable; a missing label is a glyph and a tooltip.
+ *
+ * So the mode button becomes icon-only and takes the same 30px square as
+ * attach and send, which makes the end of the row three matching controls
+ * rather than two and a stub. The glyph goes to 17px, because it is now the
+ * whole message: a raised hand, angle brackets, or a bolt.
+ *
+ * The name is still announced - `aria-label` carries it, and the title carries
+ * the full sentence - so nothing is lost to a screen reader, only to width. */
+@media (max-width: 400px) {
+  .perm-btn {
+    width: 30px; height: 30px; min-height: 0; padding: 0;
+    justify-content: center;
+    border-color: var(--kx-line); background: var(--kx-surface-2);
+  }
+  .perm-btn .nm { display: none; }
+  .perm-btn .ic-15 { width: 17px; height: 17px; }
+}
+
+/* Narrower still: the phase segment gives up its side padding.
+   It is the widest fixed item in the row at 115px, and three uppercase words
+   at 9px do not need 7px of air on each side of each one. This buys back about
+   18px, which is the difference between one row and two at a 300px panel. */
+@media (max-width: 330px) {
+  .seg button { padding: 5px 4px; }
+  .toolbar { gap: 4px; }
+  .composer-wrap { padding-left: 10px; padding-right: 10px; }
+  /* And the model button asks for less to start with. It grows into whatever
+     is left over anyway; the basis only decides whether the row wraps. */
+  #modelBtn { flex-basis: 48px; }
+}
