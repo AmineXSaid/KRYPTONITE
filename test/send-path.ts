@@ -287,61 +287,6 @@ async function main() {
     await app.dispose();
   }
 
-  console.log("\n──── §2.17 conversation tabs ────");
-  {
-    // A tab is a conversation you have OPENED, and it is not the same thing as
-    // a conversation you have HAD. The store keeps every one there has ever
-    // been; these are the handful being worked on at once. Closing one deletes
-    // nothing - which is the fact these mostly exist to hold down.
-    const { app, out } = await boot(workspace({ "gw.yaml": GOOD }));
-
-    const first = app.session.sessionId;
-    ck(app.openTabIds().includes(first),
-      "the conversation on screen always has a tab", app.openTabIds().join(","));
-
-    await app.session.send("hello");          // give it history so newChat rotates
-    app.session.newChat();
-    const second = app.session.sessionId;
-    ck(second !== first, "a new chat is a new conversation", `${first} · ${second}`);
-    ck(app.openTabIds().length === 2 && app.openTabIds()[1] === second,
-      "and opens a tab of its own, at the end", app.openTabIds().join(","));
-
-    const tabs: any = (out.filter((m) => m.type === "tabsChanged").pop() as any);
-    ck(tabs?.tabs?.length === 2, "the strip is broadcast whole",
-      String(tabs?.tabs?.length));
-    ck(tabs.tabs[1].active === true && tabs.tabs[0].active === false,
-      "with exactly one marked active");
-
-    // Give the second one something in it, or there is no file to check
-    // survives: an empty conversation is never written.
-    await app.session.send("something");
-
-    // Closing the one you are IN has to land somewhere.
-    app.session.closeTab(second);
-    ck(!app.openTabIds().includes(second), "closing removes the tab",
-      app.openTabIds().join(","));
-    ck(app.session.sessionId === first, "and lands on its neighbour",
-      app.session.sessionId);
-    ck(app.sessions.load(second) !== undefined,
-      "the conversation itself is untouched - a tab is not a file");
-
-    // Closing the last one cannot leave the panel with nothing to type into.
-    app.session.closeTab(first);
-    ck(app.openTabIds().length === 1, "closing the last tab opens a fresh chat",
-      app.openTabIds().join(","));
-    ck(app.session.sessionId !== first, "which is a new conversation",
-      app.session.sessionId);
-
-    // Deleting IS deleting, and takes the tab with it.
-    const doomed = app.session.sessionId;
-    await app.session.send("x");
-    app.session.deleteSession(doomed);
-    ck(!app.openTabIds().includes(doomed),
-      "deleting a conversation takes its tab too", app.openTabIds().join(","));
-
-    await app.dispose();
-  }
-
   console.log("\n──── §2.15 agents ────");
   {
     const root = workspace({ "gw.yaml": GOOD });

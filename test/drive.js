@@ -724,21 +724,27 @@ const pasteTests = (async () => {
   ok("1.5 transcript hydrated", /hello/.test(log.textContent) && /hi/.test(log.textContent));
   ok("1.5 composer enabled with a ready endpoint", d.getElementById("draft").disabled === false);
   ok("1.5 todos hydrated", /step one/.test(d.getElementById("root").textContent));
-  // The context readout moved into the header rather than going away, and
-  // the endpoint name went with it onto the model button. What has to keep
-  // working is that the message carrying it still does not throw - a renderer
-  // reaching for an element that is gone takes the whole panel with it.
+  // The context readout is gone entirely, and the endpoint name it used to
+  // carry lives on the model button. What has to keep working is that the
+  // message carrying the usage still does not throw - a renderer reaching for
+  // an element that is gone takes the whole panel with it.
   ok("1.5 the endpoint is named on the model button", /gw/.test(d.getElementById("modelBtn").title));
 }
 
-/* 1.5b — a usage report is accepted even though nothing renders it */
+/* 1.5b — a usage report is accepted even though nothing renders it
+ *
+ * Nothing renders it now in the literal sense: the readout is gone from the
+ * header as well as the footer. The message still arrives on every turn, and
+ * a renderer reaching for an element that is no longer there takes the whole
+ * panel with it - which is the thing worth holding down. */
 {
   const { d, inbound } = boot();
   inbound(STATE());
   inbound({ type: "contextUsage", used: 12000, limit: 128000, exact: true });
   ok("1.5b a usage message does not break the panel",
     d.getElementById("draft").disabled === false);
-  ok("1.5b and the meter still stands", !!d.getElementById("ctxHead"));
+  ok("1.5b with nothing left in the header to render it into",
+    !d.getElementById("ctxHead"));
 }
 
 /* 1.6 — a second stateSync replaces, never duplicates */
@@ -1190,19 +1196,30 @@ function composer(over) {
   ok("OF a failed write offers nothing to open", !d.querySelector('[data-open-file="nope.ts"]'));
 }
 
-/* ══ The footer strip is gone, the meter is not ══════════ */
+/* ══ The context readout is gone; the usage is not ══════════
+ *
+ * It lived under the composer first, where it changed on every frame directly
+ * beneath the thing being typed, and then in the header, where it was a small
+ * meter that moved constantly and told you nothing you could act on until it
+ * was nearly full. Both are gone. The usage is still tracked and still printed
+ * on each turn's footer line, which is where a figure belongs: attached to the
+ * turn that spent it, once, and not moving afterwards. */
 {
   const { d, inbound } = boot();
   inbound(STATE());
   ok("FT the footer strip is gone", !d.querySelector(".footer"));
-  ok("FT the meter moved into the header", !!d.querySelector(".kx-header #ctxBar"));
-  ok("FT and the figure with it", !!d.querySelector(".kx-header #ctxText"));
+  ok("FT and so is the header meter", !d.querySelector("#ctxBar"));
+  ok("FT and the figure with it", !d.querySelector("#ctxText"));
+  ok("FT leaving nothing behind it", !d.querySelector(".kx-ctx"));
 
+  // Still counted, and it still survives a turn: a readout was removed, not
+  // the accounting behind it.
   inbound({ type: "contextUsage", used: 24000, limit: 128000, exact: true });
-  ok("FT the figure still prints", /24/.test(d.getElementById("ctxText").textContent));
-  ok("FT the meter still fills", parseFloat(d.getElementById("ctxFill").style.width) > 0);
-  ok("FT the header says where the number came from",
-    /reported by/i.test(d.getElementById("ctxHead").title));
+  inbound({ type: "streamDelta", text: "done" });
+  inbound({ type: "turnEnd" });
+  ok("FT the turn's own line still prints what it spent",
+    /24(\.\d)?k/.test(d.querySelector(".turn-foot .cost").textContent),
+    d.querySelector(".turn-foot .cost") ? d.querySelector(".turn-foot .cost").textContent : "no footer");
 
   // The endpoint pill went with the strip; its health did not.
   ok("FT endpoint health sits on the model button", !!d.querySelector("#modelBtn #epDot"));
