@@ -183,6 +183,9 @@ export class SessionStore {
         when: relativeTime(r.updatedAt),
         count: r.count,
         active: r.id === activeId,
+        // Filled in by App.sessionMetas(): whether a turn is running in a
+        // conversation is the SessionController's fact, not the store's.
+        running: false,
       }));
   }
 

@@ -149,7 +149,10 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 
 .popover {
   position: absolute; top: 38px; right: 10px; z-index: 60; padding: 4px;
-  background: var(--kx-surface);
+  /* It covers the tab strip and the transcript, so it cannot be a wash. */
+  background: var(--kx-over);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
   border: 1px solid var(--kx-line); border-radius: 4px;
   box-shadow: 0 8px 24px var(--kx-shadow);
 }
@@ -171,6 +174,39 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 }
 .hist-row[data-on="1"] .hist-dot { background: var(--kx-link); }
 .hist-row[data-on="1"] .pop-row .t { font-weight: 600; }
+
+/* A CONVERSATION THAT IS WORKING WHILE YOU ARE LOOKING AT ANOTHER ONE.
+ *
+ * Everything the panel says about a turn in flight - the aura on the composer,
+ * the sweeping notch, the verb in the status bar - is about the conversation
+ * ON SCREEN. Start a turn, switch away, and the one you left is working with
+ * nothing anywhere saying so. This list is where the other conversations are,
+ * so this is where it gets said.
+ *
+ * Bigger and pulsing, because it has to be findable in a list at a glance
+ * rather than read: the size says "this row is different" from across the
+ * panel and the pulse says which difference. The halo is a box-shadow so it
+ * costs no layout and cannot push the title. */
+.hist-row[data-run="1"] .hist-dot,
+.w-item[data-run="1"] .w-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--kx-link);
+  animation: kx-live-pulse 1.9s cubic-bezier(.16, 1, .3, 1) infinite;
+}
+@keyframes kx-live-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(70, 146, 221, .55); }
+  70%  { box-shadow: 0 0 0 8px rgba(70, 146, 221, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(70, 146, 221, 0); }
+}
+/* Motion off: the dot stays big and keeps a steady halo, so the row is still
+   the one that is different - it simply does not breathe. */
+@media (prefers-reduced-motion: reduce) {
+  .hist-row[data-run="1"] .hist-dot,
+  .w-item[data-run="1"] .w-dot {
+    animation: none;
+    box-shadow: 0 0 0 3px rgba(70, 146, 221, .28);
+  }
+}
 .hist-del {
   position: absolute; right: 6px; top: 50%; margin-top: -11px;
   width: 22px; height: 22px; display: grid; place-items: center; border-radius: 4px;
@@ -1281,7 +1317,10 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .qp {
   position: absolute; left: 12px; right: 12px; bottom: 100%; margin-bottom: 6px; z-index: 50;
   padding: 4px; max-height: 232px; overflow-y: auto;
-  background: var(--kx-surface);
+  /* Same: it sits over the transcript while you are reading the list. */
+  background: var(--kx-over);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
   border: 1px solid var(--kx-line); border-radius: 4px;
   box-shadow: 0 8px 24px var(--kx-shadow);
 }
@@ -1420,7 +1459,9 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   position: absolute; inset: 0; z-index: 3;
   display: grid; place-items: center;
   pointer-events: none;
-  background: color-mix(in srgb, var(--kx-surface) 82%, transparent);
+  /* This one is deliberately a veil rather than a cover - the composer has to
+     stay recognisable under it - but 82% OF A WASH is barely a tint. */
+  background: rgba(9, 9, 11, .82);
   font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
   letter-spacing: .14em; text-transform: uppercase; text-indent: .14em;
   color: var(--kx-fg);

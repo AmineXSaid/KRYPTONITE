@@ -115,6 +115,19 @@
   --kx-surface-3: rgba(255, 255, 255, .105);  /* raised: hover on a button    */
   --kx-surface-4: rgba(255, 255, 255, .155);  /* hover on a raised surface    */
 
+  /* ANYTHING THAT COVERS SOMETHING ELSE.
+   *
+   * A wash is a step off the ground, which is exactly wrong for a surface that
+   * has to STOP the ground: a popover over the transcript, the @ picker over
+   * the log, a sheet over the panel. Made washes and they turned see-through -
+   * the history popover had the tab strip legible through its own titles.
+   *
+   * Near-solid rather than solid, with a blur under it. Solid would need the
+   * ground's colour, which is the container's and unknown here; .97 of black
+   * plus a blur is opaque in practice and never wrong about a colour it does
+   * not name. Anything using this must set the blur too - see .popover. */
+  --kx-over:      rgba(9, 9, 11, .97);
+
   /* ── text ── */
   --kx-fg:   #fbfafd;  /* cream - titles, active tab, emphasis               */
   --kx-fg-2: #bcbbbf;  /* fog   - body copy, the workhorse                   */

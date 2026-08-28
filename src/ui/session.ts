@@ -108,6 +108,17 @@ export class SessionController {
    * point of it being a map.
    */
   private live = new Map<string, LiveTurn>();
+
+  /**
+   * The conversations with a turn in flight.
+   *
+   * `running` on this class is "is the conversation ON SCREEN working"; this
+   * is every conversation that is, which is what the history list needs in
+   * order to mark one you have switched away from.
+   */
+  liveSessionIds(): Set<string> {
+    return new Set(this.live.keys());
+  }
   /**
    * One browser per session, launched on first use.
    *
@@ -579,6 +590,8 @@ export class SessionController {
       title: this.title,
     };
     this.live.set(turn.id, turn);
+    // The history list marks a working conversation, so it is now stale.
+    this.app.refreshSessions();
     this.running = true;
     this.app.setRunning(true);
 
@@ -889,6 +902,7 @@ export class SessionController {
     }
 
     this.live.delete(turn.id);
+    this.app.refreshSessions();
     // Only the conversation on screen gets its composer back. A turn that
     // finished in the background has nothing to say to the panel, which is
     // showing something else - it says it by leaving a full replay buffer

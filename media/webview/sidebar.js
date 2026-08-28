@@ -1188,10 +1188,16 @@ function _sbRun() {
     for (var i = 0; i < S.sessions.length; i++) {
       var s = S.sessions[i];
       var on = s.active ? "1" : "0";
+      // A conversation you are not looking at can still be working: start a
+      // turn, switch, and the one you left keeps going with nothing on screen
+      // saying so. This list is the only place the other conversations appear,
+      // so it is the only place that can say it.
+      var run = s.running ? "1" : "0";
       var n = s.count === 1 ? "1 message" : (s.count || 0) + " messages";
-      html += '<div class="hist-row" data-on="' + on + '">' +
-        '<button class="pop-row" role="menuitem" data-session="' + esc(s.id) + '">' +
-          '<span class="hist-dot"></span>' +
+      html += '<div class="hist-row" data-on="' + on + '" data-run="' + run + '">' +
+        '<button class="pop-row" role="menuitem" data-session="' + esc(s.id) + '"' +
+          (s.running ? ' title="Working…"' : "") + '>' +
+          '<span class="hist-dot"' + (s.running ? ' aria-label="Working"' : "") + '></span>' +
           '<span class="ell"><span class="t ell">' + esc(s.title) + '</span>' +
           '<span class="m">' + esc(s.when) + ' · ' + n + '</span></span>' +
         '</button>' +
@@ -1650,15 +1656,18 @@ function _sbRun() {
         // button inside a button is invalid and browsers resolve it by
         // dropping the inner one. The pair is wrapped instead, exactly as the
         // history popover does it.
-        body += '<span class="w-item">' +
+        body += '<span class="w-item" data-run="' + (r.running ? "1" : "0") + '">' +
           '<button class="w-row" data-session="' + esc(r.id) + '"' +
-          ' title="' + esc(r.title + " - " + n + ", " + r.when) + '">' +
-          // Slate, always. The mockup's rule is `dot: c.live ? oxide : slate`,
-          // and the oxide case cannot arise here: the loop above skips
-          // `sess.active`, so the live conversation is never in this list by
-          // construction. A `data-on` branch for it would be dead markup. It
-          // was a flat GREEN before, which spent the panel's success colour to
-          // say "this is a row".
+          ' title="' + esc(r.title + " - " + n + ", " + r.when +
+            (r.running ? " - working now" : "")) + '">' +
+          // The mockup's rule is `dot: c.live ? oxide : slate`, and the live
+          // case DOES arise, though not the way it was read here before: the
+          // loop above skips
+          // `sess.active`, so the conversation ON SCREEN is never in this
+          // list - but one you started a turn in and then switched away from
+          // is, and it is still working. Slate otherwise. It was a flat GREEN
+          // before, which spent the panel's success colour to say "this is a
+          // row".
           '<span class="w-dot"></span>' +
           '<span class="t ell">' + esc(r.title) + "</span>" +
           '<span class="w-ago">' + esc(r.when) + "</span></button>" +

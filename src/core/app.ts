@@ -1480,7 +1480,10 @@ export class App {
   }
 
   private sessionMetas(): SessionMetaDto[] {
-    return this.sessions.list(this.session.sessionId);
+    const live = this.session.liveSessionIds();
+    return this.sessions
+      .list(this.session.sessionId)
+      .map((s) => ({ ...s, running: live.has(s.id) }));
   }
 
   private async checkpointDtos(): Promise<CheckpointDto[]> {

@@ -177,6 +177,16 @@ export interface SessionMetaDto {
   count: number;
   /** True for the conversation the composer is currently writing into. */
   active: boolean;
+  /**
+   * True while a turn is running IN THAT CONVERSATION.
+   *
+   * Not the same fact as `active`, and the difference is the whole reason this
+   * exists: start a turn, switch conversations, and the one you left is still
+   * working with nothing on screen saying so. The history list is the only
+   * place that can say it, because it is the only place the other
+   * conversations appear.
+   */
+  running: boolean;
 }
 
 export interface CheckpointDto {
