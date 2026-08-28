@@ -327,35 +327,26 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 /* Left-aligned, as the design draws it, and not only for fidelity: everything
    below the intro is a list of rows, and a centred mark above a left-aligned
    list gives the column two different axes. One edge, top to bottom. */
-.welcome .crystal { opacity: .9; }
+.welcome .crystal { opacity: .9; margin-bottom: 18px; }
 
-/* A PAIR OF EYES.
+/* ONE TURN, ON ARRIVAL.
  *
- * The roundel is a ring around a core, which is an eye - and one eye looking
- * at you is unsettling in a way that two are not. The welcome opens with both.
+ * It was briefly a pair of marks that blinked. Two roundels read as eyes -
+ * a ring around a core is an eye - and as eyes they were ugly. The mark is a
+ * BEZEL: four notches on a ring, which is a thing that turns.
  *
- * They blink together and ONCE, a beat after the panel arrives: a face that
- * blinks on a loop is a face that is staring, and this is a greeting rather
- * than an idle animation. The lid is a scaleY about the middle, which is what
- * a blink actually is - the eye does not shrink, it closes. */
-.w-eyes { display: flex; gap: 13px; margin-bottom: 18px; }
-.w-eyes[data-blink="1"] .crystal {
+ * So it turns once and stops, and it stops in the position it started, which
+ * is what keeps it a logo rather than an animation. Expo-out, so it carries
+ * most of the way in the first third and settles into the rest instead of
+ * halting dead. `g-sweep` is the same 360 the streaming notch uses; only the
+ * timing and the iteration count differ. */
+.welcome .crystal[data-greet="1"] {
   transform-origin: 50% 50%;
-  animation: g-blink 420ms cubic-bezier(.4, 0, .2, 1) 1;
+  animation: g-sweep 900ms cubic-bezier(.16, 1, .3, 1) 1;
 }
-@keyframes g-blink {
-  /* Still, then a fast close and a slower open - the asymmetry is what makes
-     it read as a blink rather than a squash. */
-  0%, 34% { transform: scaleY(1); }
-  46%     { transform: scaleY(.06); }
-  62%     { transform: scaleY(1); }
-  /* And a second, shorter one, the way a real blink usually comes in pairs. */
-  78%     { transform: scaleY(.14); }
-  100%    { transform: scaleY(1); }
-}
-/* Motion off: no blink, and the pair simply sits there. */
+/* Motion off: no turn. The mark is simply there, which is all it has to be. */
 @media (prefers-reduced-motion: reduce) {
-  .w-eyes[data-blink="1"] .crystal { animation: none; }
+  .welcome .crystal[data-greet="1"] { animation: none; }
 }
 /* Michroma, at the one size and tracking it is drawn for. */
 .w-mark {

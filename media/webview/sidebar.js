@@ -1596,21 +1596,21 @@ function _sbRun() {
   }
 
   /**
-   * Blink the pair, once.
+   * Turn the mark, once.
    *
-   * Two frames of delay and then a class, rather than an animation that runs
-   * on mount: the mark should be still long enough to be seen as a mark before
-   * it moves, or the blink reads as a rendering glitch. The class is removed
-   * when the animation ends so a re-render is not a second blink.
+   * Two frames of delay and then an attribute, rather than an animation that
+   * runs on mount: the mark should be still long enough to be seen as a mark
+   * before it moves, or the turn reads as a rendering glitch. The attribute
+   * comes off when the animation ends, so a re-render is not a second spin.
    */
-  function blinkEyes() {
-    var eyes = logEl.querySelector(".w-eyes");
-    if (!eyes) return;
+  function greetMark() {
+    var mark = logEl.querySelector(".welcome .crystal");
+    if (!mark) return;
     requestAnimationFrame(function () {
       requestAnimationFrame(function () {
-        eyes.setAttribute("data-blink", "1");
-        eyes.addEventListener("animationend", function () {
-          eyes.removeAttribute("data-blink");
+        mark.setAttribute("data-greet", "1");
+        mark.addEventListener("animationend", function () {
+          mark.removeAttribute("data-greet");
         }, { once: true });
       });
     });
@@ -1618,9 +1618,9 @@ function _sbRun() {
 
   /**
    * `greet` is "the screen is being met for the first time" - a fresh panel or
-   * a new conversation - and is the only case the eyes blink in. The two call
+   * a new conversation - and is the only case the mark turns in. The two call
    * sites that re-render this because the SESSION LIST changed pass nothing: a
-   * blink there is a face reacting to a data refresh.
+   * spin there is the logo reacting to a data refresh.
    */
   function renderWelcome(greet) {
     clearTranscript();
@@ -1665,18 +1665,13 @@ function _sbRun() {
     // The wordmark, not a sentence. "How can I help?" is what every assistant
     // says; the mark says which one this is, and it is the one place Michroma
     // appears outside the header.
-    /* A PAIR, AND THEY BLINK.
+    /* ONE MARK, AND IT TURNS ONCE.
      *
-     * The roundel is a ring around a core, which is an eye, and one eye
-     * looking at you is unsettling in a way two are not. So the welcome opens
-     * with both - and they blink together, once, a beat after the panel
-     * arrives. Once: a face that blinks on a loop is a face that is staring,
-     * and this is a greeting rather than an idle animation.
-     *
-     * `w-eyes` gets the class that runs the blink from renderWelcome's caller,
-     * so it fires on a new conversation as well as on a fresh panel - the two
-     * moments the screen is being met for the first time. */
-    var body = '<div class="w-eyes">' + crystal(34, "crystal") + crystal(34, "crystal") + "</div>" +
+     * It was briefly a pair that blinked. The roundel is a ring around a core,
+     * so two of them read as eyes - and as eyes they were ugly. The mark is a
+     * BEZEL: four notches on a ring, which is a thing that turns. So it turns,
+     * once, a beat after the panel arrives, and then it is a logo again. */
+    var body = crystal(34, "crystal") +
       '<div class="w-mark">Genesis</div>' +
       '<p>' + (recent.length
         ? "Pick up where you left off, or start something new."
@@ -1735,7 +1730,7 @@ function _sbRun() {
       body += "</div></div>";
     }
     logEl.appendChild(div("welcome", body));
-    if (greet) blinkEyes();
+    if (greet) greetMark();
   }
 
   /* The rail is a ::before on .msg-user, so everything else has to sit in a
