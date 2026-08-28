@@ -69,6 +69,7 @@ import type {
   RungDto,
   SelectionDto,
   SessionMetaDto,
+  SessionTabDto,
   SkillDto,
   StateSync,
   StatusDto,
@@ -404,6 +405,9 @@ export class App {
     }
 
     await this.reload("activation");
+    // Whatever conversation activation landed on - restored or freshly minted -
+    // is the one on screen, and the one on screen always has a tab.
+    this.setOpenTabs([...this.openTabIds(), this.session.sessionId]);
     // Now that the profiles exist, their stored API keys can be found.
     await this.migrateSecretsFromKryptonite();
     this.reloadInstructions();
@@ -1145,6 +1149,10 @@ export class App {
   }
 
   refreshSessions(): void {
+    // The tab strip carries the same three facts the history list does -
+    // which conversation, whether it is the active one, whether it is
+    // working - so anything that changes one changes the other.
+    this.refreshTabs();
     this.broadcast({ type: "sessionsListed", sessions: this.sessionMetas() });
   }
 
@@ -1486,6 +1494,75 @@ export class App {
       .map((s) => ({ ...s, running: live.has(s.id) }));
   }
 
+  /* ─────────────────────────── conversation tabs ────────────────────────
+   *
+   * A tab is a conversation you have OPENED, and it is not the same thing as
+   * a conversation you have HAD. The store keeps every one there has ever
+   * been; thirty of those is a history list, not a tab strip. Tabs are the
+   * handful being worked on at once, they survive a reload because the list
+   * lives in workspaceState, and closing one deletes nothing - the
+   * conversation goes back to being a row in the history, which is where it
+   * came from.
+   *
+   * Order is insertion order, so a tab does not move under the pointer when a
+   * turn finishes in it. The history list is sorted by time and this
+   * deliberately is not.
+   */
+  /**
+   * Held in memory and MIRRORED to workspaceState, not read back from it.
+   *
+   * The list has to be right the instant `newChat()` returns, because the
+   * broadcast that draws the strip goes out on the same tick. Reading it back
+   * from an awaited `update()` meant the strip could be one operation behind
+   * the panel it describes - which is a race nothing would notice until a tab
+   * failed to appear once in a while. The write is fire-and-forget: losing it
+   * costs the tab list across a window reload and nothing else.
+   */
+  private tabIds?: string[];
+
+  openTabIds(): string[] {
+    if (!this.tabIds) {
+      this.tabIds = this.context.workspaceState.get<string[]>("genesis.openTabs", []) ?? [];
+    }
+    return this.tabIds;
+  }
+
+  setOpenTabs(ids: string[]): void {
+    // De-duplicated and capped. A tab strip is a working set; past a dozen it
+    // is a history list that scrolls, and the history list already exists.
+    const seen = new Set<string>();
+    const next: string[] = [];
+    for (const id of ids) {
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      next.push(id);
+    }
+    this.tabIds = next.slice(-12);
+    this.refreshTabs();
+    void this.context.workspaceState.update("genesis.openTabs", this.tabIds);
+  }
+
+  refreshTabs(): void {
+    this.broadcast({ type: "tabsChanged", tabs: this.tabDtos() });
+  }
+
+  tabDtos(): SessionTabDto[] {
+    const live = this.session.liveSessionIds();
+    const known = new Map(this.sessions.list(undefined, 500).map((s) => [s.id, s.title]));
+    const active = this.session.sessionId;
+    return this.openTabIds()
+      // A conversation deleted from under its own tab leaves nothing to show,
+      // so the tab goes with it - except the active one, which is a brand new
+      // chat the store has not been told about yet.
+      .filter((id) => known.has(id) || id === active)
+      .map((id) => ({
+        id,
+        title: known.get(id) ?? this.session.title,
+        active: id === active,
+        running: live.has(id),
+      }));
+  }
+
   private async checkpointDtos(): Promise<CheckpointDto[]> {
     if (!this.shadow) return [];
     try {
@@ -1517,6 +1594,7 @@ export class App {
       todos: this.todos,
       checkpoints: await this.checkpointDtos(),
       sessions: this.sessionMetas(),
+      tabs: this.tabDtos(),
       selection: this.selection,
       context: this.lastContext,
       changes: this.session.changedFiles(),
@@ -2089,6 +2167,14 @@ export class App {
 
       case "clearChanges":
         this.session.clearChanges();
+        return;
+
+      case "openTab":
+        this.session.load(msg.id);
+        return;
+
+      case "closeTab":
+        this.session.closeTab(msg.id);
         return;
 
       case "cancelQueued":

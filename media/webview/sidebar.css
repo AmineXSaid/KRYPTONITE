@@ -247,6 +247,70 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
  * fade is a mask rather than a gradient overlay so it works on any background
  * and costs no element. Scrollbar hidden - the fade is the affordance, and a
  * 10px bar under a 32px strip is most of the strip. */
+/* ------------------------- conversation tabs -------------------------
+   The conversations held open, above the view tabs and below the header,
+   because the strip says WHICH conversation the four views below are of -
+   the same relationship the editor's tab strip has to the editor.
+
+   A tab is not a conversation. The store keeps every conversation there has
+   ever been, and the history popover lists thirty of them; these are the
+   handful being worked on at once. The cross CLOSES a tab and deletes
+   nothing - which is why it is a cross and the history list's is a trash can.
+
+   Two rows of tabs stacked is a real risk of looking like a mistake, so these
+   are deliberately unlike the ones below: sentence case rather than mono
+   caps, a filled chip for the active one rather than an underline, and a
+   hairline between the two strips. */
+.ctabs {
+  flex: none; display: flex; align-items: stretch; gap: 3px;
+  padding: 5px 8px 0;
+  overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: none;
+}
+.ctabs::-webkit-scrollbar { display: none; }
+
+.ctab {
+  flex: none; display: flex; align-items: center; max-width: 168px;
+  border-radius: 4px 4px 0 0;
+  border: 1px solid transparent; border-bottom: none;
+  color: var(--kx-fg-3);
+}
+.ctab:hover { background: var(--kx-hover); color: var(--kx-fg-2); }
+/* The active one is a chip that reads as continuous with the panel below it -
+   the same trick a browser tab uses, and the reason the strip has no bottom
+   border of its own. */
+.ctab[data-on="1"] {
+  background: var(--kx-surface-2);
+  border-color: var(--kx-line);
+  color: var(--kx-fg);
+}
+.ctab-t {
+  display: flex; align-items: center; gap: 6px; min-width: 0;
+  height: 26px; padding: 0 2px 0 9px;
+  font-size: 11.5px; color: inherit; background: none; border: none;
+}
+.ctab[data-on="1"] .ctab-t { font-weight: 600; }
+.ctab-t .ell { min-width: 0; }
+.ctab-t .g-live { width: 11px; height: 11px; }
+.ctab-x {
+  flex: none; width: 18px; height: 18px; margin: 0 5px 0 1px;
+  display: grid; place-items: center; border-radius: 3px;
+  background: none; border: none; color: var(--kx-fg-4);
+  /* Kept in the layout and revealed on hover, so a strip of five tabs is five
+     names rather than five names and five crosses. The active one keeps its
+     cross always: it is the one you are most likely to be closing. */
+  opacity: 0; transition: opacity .12s ease;
+}
+.ctab:hover .ctab-x, .ctab[data-on="1"] .ctab-x, .ctab-x:focus-visible { opacity: 1; }
+.ctab-x:hover { color: var(--kx-fg); background: var(--kx-surface-3); }
+
+/* Below the floor a name plus a cross does not fit twice over, so the names
+   truncate harder rather than the strip scrolling on every switch. */
+@media (max-width: 330px) {
+  .ctab { max-width: 116px; }
+  .ctab-t { padding-left: 7px; }
+}
+
 .kx-tabs {
   height: 32px; flex: none; display: flex; align-items: center; gap: 16px; padding: 0 14px;
   border-bottom: 1px solid var(--kx-line);

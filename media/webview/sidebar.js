@@ -286,6 +286,8 @@ function _sbRun() {
     workspace: { open: false, name: null },
     /** Messages waiting for the running turn to finish, newest last. */
     queue: [],
+    /** The conversations held open as tabs, in the order they were opened. */
+    tabs: [],
     running: false,
     phase: "act",
     endpoint: null,
@@ -958,6 +960,14 @@ function _sbRun() {
             '<button class="pop-row" role="menuitem" data-more="issue"><span class="t">Report Issue</span></button>' +
           '</div>' +
         '</header>' +
+        // The conversations held open, in the order they were opened.
+        //
+        // Above the view tabs and below the header, because it says WHICH
+        // conversation the four views below are of - the same relationship the
+        // editor's tab strip has to the editor. Hidden until there is more
+        // than one: a strip of one tab is a title bar, and vertical space in a
+        // narrow panel is what the transcript is short of.
+        '<div class="ctabs" id="ctabs" role="tablist" aria-label="Conversations" hidden></div>' +
         '<nav class="kx-tabs" role="tablist">' +
           '<button class="kx-tab" id="tabSession" role="tab" aria-selected="true" aria-controls="viewSession">Session</button>' +
           // MCP earns a tab now that it is real. 1a had a "SOON" placeholder,
@@ -1204,6 +1214,46 @@ function _sbRun() {
       '<circle class="g-live-arc" cx="12" cy="12" r="8.6"/>' +
       '<circle class="g-live-core" cx="12" cy="12" r="3"/>' +
       "</svg>";
+  }
+
+  /**
+   * The open conversations, as tabs.
+   *
+   * Each carries the two things a tab has to: which conversation it is, and a
+   * way out of it. The cross CLOSES the tab and deletes nothing - the
+   * conversation goes back to being a row in the history, which is where tabs
+   * come from. Deleting is the trash button in that list, and keeping the two
+   * apart is the whole reason the cross is not a trash can.
+   *
+   * A conversation working in the background wears the same animated mark it
+   * wears in the history list, so the strip answers "which one is busy"
+   * without opening anything.
+   */
+  function renderTabs() {
+    var el = $("ctabs");
+    if (!el) return;
+    var tabs = S.tabs || [];
+    // One tab is a title bar, and the header already names the product. The
+    // strip earns its row when there is something to switch BETWEEN.
+    el.hidden = tabs.length < 2;
+    if (el.hidden) { el.innerHTML = ""; return; }
+    var html = "";
+    for (var i = 0; i < tabs.length; i++) {
+      var t = tabs[i];
+      html += '<span class="ctab" data-id="' + esc(t.id) + '" data-on="' + (t.active ? "1" : "0") + '">' +
+        '<button class="ctab-t" role="tab" aria-selected="' + (t.active ? "true" : "false") + '"' +
+          ' title="' + esc(t.title + (t.running ? " - working now" : "")) + '">' +
+          (t.running ? liveMark() : "") +
+          '<span class="ell">' + esc(t.title) + "</span>" +
+        "</button>" +
+        '<button class="ctab-x" data-close="' + esc(t.id) + '"' +
+          ' title="Close this tab - the conversation is kept"' +
+          ' aria-label="Close ' + esc(t.title) + '">' + icon("i-x", "ic-9") + "</button>" +
+        "</span>";
+    }
+    el.innerHTML = html;
+    var on = el.querySelector('.ctab[data-on="1"]');
+    if (on && on.scrollIntoView) on.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
 
   function renderHistory() {
@@ -4265,6 +4315,7 @@ function _sbRun() {
     S.traceRun = S.rungs.length > 0;
     S.todos = state.todos || [];
     S.sessions = state.sessions || [];
+    S.tabs = state.tabs || [];
     S.selection = state.selection;
     S.context = state.context;
     S.changes = state.changes || [];
@@ -4296,6 +4347,7 @@ function _sbRun() {
     renderMcp();
     renderMcpCount();
     renderHistory();
+    renderTabs();
     syncComposer();
     if (S.running) startStream();
     S.hydrated = true;
@@ -4867,6 +4919,21 @@ function _sbRun() {
       renderQueue();
       post(b.getAttribute("data-q") === "now" ? "promoteQueued" : "cancelQueued", { id: id });
     });
+    $("ctabs").addEventListener("click", function (e) {
+      var x = e.target.closest("[data-close]");
+      if (x) {
+        // Closing is not deleting, and the host is the one that decides where
+        // the panel lands afterwards - so no optimistic removal here: a tab
+        // that vanished before its replacement was chosen would blink the
+        // whole strip.
+        post("closeTab", { id: x.getAttribute("data-close") });
+        return;
+      }
+      var t = e.target.closest(".ctab");
+      if (t && t.getAttribute("data-on") !== "1") {
+        post("openTab", { id: t.getAttribute("data-id") });
+      }
+    });
     $("queueClear").addEventListener("click", function () {
       var ids = S.queue.map(function (q) { return q.id; });
       S.queue = [];
@@ -5277,6 +5344,11 @@ function _sbRun() {
         readEpForm();
         S.epCheck.rungs = S.epCheck.rungs.concat([m.rung]);
         renderEndpoints();
+        break;
+
+      case "tabsChanged":
+        S.tabs = m.tabs || [];
+        renderTabs();
         break;
 
       case "queueChanged":

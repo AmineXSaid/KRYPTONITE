@@ -1246,6 +1246,10 @@ export class SessionController {
     // Without this the reopened conversation would carry the placeholder minted
     // in the constructor and the naming pass would rename an already-named chat.
     if (doc.title) this.title = doc.title;
+    // The conversation on screen always has a tab, including on the first
+    // window where the stored list is empty. Otherwise the strip would come up
+    // blank beside a panel that plainly has a conversation in it.
+    this.app.setOpenTabs([...this.app.openTabIds(), doc.id]);
   }
 
   /** Persist the transcript and tell every surface the list moved. */
@@ -1510,6 +1514,28 @@ export class SessionController {
       this.cdp = undefined;
     }
     this.reset(rotate, rotate ? this.app.sessions.nextUntitled() : this.title);
+    this.app.setOpenTabs([...this.app.openTabIds(), this.sessionId]);
+  }
+
+  /**
+   * Close a conversation's tab. The conversation itself is untouched.
+   *
+   * Closing the one you are IN has to land somewhere, and the neighbour is the
+   * choice every tab strip makes: the one to the right if there is one, the
+   * one to the left otherwise. With nothing left to land on it opens a fresh
+   * chat, because a panel with no conversation in it has no composer to type
+   * into.
+   */
+  closeTab(id: string): void {
+    const tabs = this.app.openTabIds();
+    const at = tabs.indexOf(id);
+    if (at === -1) return;
+    const rest = tabs.filter((t) => t !== id);
+    this.app.setOpenTabs(rest);
+    if (id !== this.sessionId) return;
+    const next = rest[at] ?? rest[at - 1] ?? rest[rest.length - 1];
+    if (next) this.load(next);
+    else this.newChat();
   }
 
   load(id: string): void {
@@ -1527,16 +1553,24 @@ export class SessionController {
     this.history = running ? running.history : doc.messages;
     this.sessionId = doc.id;
     this.reset(false, doc.title || this.app.sessions.nextUntitled());
+    // Opening a conversation from the history opens a tab for it. That is the
+    // only way one gets into the strip, and it is what makes the history the
+    // place tabs come from rather than a second, parallel list.
+    this.app.setOpenTabs([...this.app.openTabIds(), doc.id]);
   }
 
   /** Deleting the conversation in the composer drops you into a fresh one. */
   deleteSession(id: string): void {
     this.app.sessions.delete(id);
+    // A tab for a conversation that no longer exists is a tab that cannot be
+    // opened, so it goes with it.
+    this.app.setOpenTabs(this.app.openTabIds().filter((t) => t !== id));
     if (id !== this.sessionId) {
       this.app.refreshSessions();
       return;
     }
     this.reset(true, this.app.sessions.nextUntitled());
+    this.app.setOpenTabs([...this.app.openTabIds(), this.sessionId]);
   }
 
   /**

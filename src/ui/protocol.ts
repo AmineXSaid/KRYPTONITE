@@ -374,6 +374,8 @@ export interface StateSync {
   todos: TodoDto[];
   checkpoints: CheckpointDto[];
   sessions: SessionMetaDto[];
+  /** The conversations held open as tabs, in the order they were opened. */
+  tabs: SessionTabDto[];
   selection: SelectionDto | null;
   context: { used: number; limit: number; exact: boolean } | null;
   /** Files this conversation has changed, newest write first. */
@@ -526,6 +528,13 @@ export interface ClearChangesMsg { type: "clearChanges" }
  * waiting, let alone change your mind. `id` is the one the host handed out in
  * `queueChanged`.
  */
+/** Bring a conversation to the front, opening a tab for it if it has none. */
+export interface OpenTabMsg { type: "openTab"; id: string }
+/**
+ * Close a tab. The conversation is NOT deleted - it goes back to being a row
+ * in the history list, which is where tabs come from.
+ */
+export interface CloseTabMsg { type: "closeTab"; id: string }
 export interface CancelQueuedMsg { type: "cancelQueued"; id: string }
 /**
  * Stop waiting: steer this queued message into the turn that is running.
@@ -551,7 +560,7 @@ export type InboundMessage =
   | ListSessionsMsg | LoadSessionMsg | DeleteSessionMsg | SearchFilesMsg
   | CheckEndpointMsg | McpReconnectMsg | McpReloadMsg | ClearChangesMsg
   | DetectCapsMsg | SetCapabilityMsg | ApplyCapsMsg | McpLogMsg
-  | CancelQueuedMsg | PromoteQueuedMsg;
+  | CancelQueuedMsg | PromoteQueuedMsg | OpenTabMsg | CloseTabMsg;
 
 export type InboundType = InboundMessage["type"];
 
@@ -697,6 +706,24 @@ export interface SessionSwitchedOut {
   messages: Msg[];
 }
 export interface SessionsListedOut { type: "sessionsListed"; sessions: SessionMetaDto[] }
+/**
+ * One conversation the panel is holding open, as a tab.
+ *
+ * A tab is not a conversation - the store holds every conversation there has
+ * ever been, and thirty of them is a history list, not a tab strip. A tab is
+ * one you have OPENED, and it stays open until you close it. Closing a tab
+ * does not delete anything; the conversation goes back to being one row in the
+ * history, which is where it came from.
+ */
+export interface SessionTabDto {
+  id: string;
+  title: string;
+  /** The one the composer is writing into. */
+  active: boolean;
+  /** A turn is running in it - true whether or not it is the active one. */
+  running: boolean;
+}
+export interface TabsChangedOut { type: "tabsChanged"; tabs: SessionTabDto[] }
 /**
  * The active conversation has been given a real name.
  *
@@ -868,7 +895,8 @@ export type OutboundMessage =
   | EditorContextChangedOut
   | CheckpointsListedOut | CheckpointRestoredOut | BundleExportedOut | ChatExportedOut
   | ConfigChangedOut | PhaseChangedOut | EndpointChangedOut | StatusChangedOut
-  | LogLineOut | NavigateOut | FileResultsOut | QueueChangedOut | CaBundlePickedOut
+  | LogLineOut | NavigateOut | FileResultsOut | QueueChangedOut | TabsChangedOut
+  | CaBundlePickedOut
   | EndpointCheckStartedOut | EndpointCheckRungOut | EndpointCheckDoneOut
   | SessionTitledOut | McpChangedOut | ModelsListedOut
   | InputAcceptedOut | SteerAcceptedOut | HealthResultOut | HealthStartedOut;
