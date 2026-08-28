@@ -156,12 +156,20 @@ async function exportChat(instance: App, scope: "current" | "all"): Promise<void
 /**
  * Where the panel lives.
  *
- * The manifest contributes the container to `viewsContainers.secondarySidebar`,
- * so VS Code opens it in the Secondary Side Bar - the strip on the far right,
- * beside the editor. That is the whole of the layout story now: no command runs
- * at activation, nothing is moved, and the Primary Side Bar keeps Explorer and
- * Search on the left where the user put them. Dragging the panel elsewhere is a
- * VS Code gesture and VS Code remembers it.
+ * The manifest contributes the container to `viewsContainers.activitybar`, so
+ * VS Code opens it in the PRIMARY Side Bar, alongside Explorer and Search.
+ *
+ * It was the Secondary Side Bar until 0.8, on the argument that an agent
+ * belongs opposite the file tree rather than on top of it. It moved to satisfy
+ * a request that has no other answer: open at the same width as the other
+ * agent extension in the window. VS Code exposes no API for a view's width -
+ * there is no such property on a view or a view container - and it remembers
+ * ONE width per sidebar. Two extensions can therefore only share a width by
+ * sharing a sidebar.
+ *
+ * That is the whole of the layout story: no command runs at activation and
+ * nothing is moved. Dragging the panel to the Secondary Side Bar is a VS Code
+ * gesture, and VS Code remembers it.
  *
  * What is left below is a one-time repair. Versions up to 0.5.4 moved the whole
  * Primary Side Bar to the right, because no container could be contributed to

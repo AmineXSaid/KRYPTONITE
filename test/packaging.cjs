@@ -60,7 +60,7 @@ ok("and is a PNG, which is the only format vsce accepts for it",
   /\.png$/i.test(pkg.icon), pkg.icon);
 ok("the extension entry point is the bundle",
   pkg.main === "./dist/extension.js", pkg.main);
-for (const c of pkg.contributes.viewsContainers.secondarySidebar) {
+for (const c of Object.values(pkg.contributes.viewsContainers).flat()) {
   ok(`the view container icon exists: ${c.icon}`, exists(c.icon));
 }
 

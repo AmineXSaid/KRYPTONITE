@@ -1093,7 +1093,7 @@ function _sbRun() {
                 // wrap at a narrow width moves them together instead of
                 // leaving send on a row by itself.
                 '<span class="tb-actions">' +
-                  '<button class="tb-btn" id="clipBtn" title="Attach files" aria-label="Attach files">' + icon("i-clip", "ic-13") + '</button>' +
+                  '<button class="tb-btn" id="clipBtn" title="Upload from your computer - or drop files on the box" aria-label="Upload files from your computer">' + icon("i-clip", "ic-13") + '</button>' +
                   '<button id="sendBtn" data-ready="0" data-mode="send" title="Send" aria-label="Send">' + icon("i-up", "ic-13") + '</button>' +
                 '</span>' +
               '</div>' +
@@ -1462,7 +1462,10 @@ function _sbRun() {
     var html = "";
     for (var i = 0; i < PERMS.length; i++) {
       var on = PERMS[i][0] === mode;
-      html += '<button class="perm-row" role="radio" aria-checked="' + (on ? "true" : "false") +
+      // `--i` is the row's position, which is what the stagger in sidebar.css
+      // multiplies its delay by. Without it every row transitions on the same
+      // frame and the list arrives pre-formed.
+      html += '<button class="perm-row" style="--i:' + i + '" role="radio" aria-checked="' + (on ? "true" : "false") +
         '" data-on="' + (on ? "1" : "0") + '" data-perm="' + esc(PERMS[i][0]) + '">' +
         '<span class="ic" style="color:' + PERMS[i][5] + '">' + icon(PERMS[i][4], "ic-18") + "</span>" +
         '<span class="col"><span class="t">' + esc(PERMS[i][1]) + "</span>" +
@@ -1472,12 +1475,54 @@ function _sbRun() {
     list.innerHTML = html;
   }
 
+  /* The exit timer, held so a fast close-then-open cannot leave the sheet
+     hidden after it has already been asked to reopen. */
+  var permExit = null;
+
+  /**
+   * Open or close the mode sheet, with the transition sidebar.css describes.
+   *
+   * `display: none` cannot be transitioned, so `hidden` and the animation are
+   * two different things sequenced here:
+   *
+   *   opening   drop `hidden`, then set `data-open` on the NEXT frame. Both in
+   *             one frame and the browser has no start value to animate from,
+   *             so the sheet would appear fully open - which is the bug this
+   *             was written to fix.
+   *   closing   drop `data-open` and let it play, then put `hidden` back when
+   *             it has finished. Set immediately and the element vanishes
+   *             mid-flight.
+   *
+   * The exit is timed rather than driven by `transitionend`, because that
+   * event does not fire if the sheet is hidden by something else first - a
+   * reload, a tab switch - and the sheet would then stay in the tree,
+   * invisible and still focusable.
+   */
   function togglePerm(open) {
     var pop = $("permPop");
     if (!pop) return;
-    pop.hidden = open === undefined ? !pop.hidden : !open;
-    $("permBtn").setAttribute("aria-expanded", pop.hidden ? "false" : "true");
-    renderPerm();
+    var want = open === undefined ? pop.hidden : open;
+
+    if (permExit) { clearTimeout(permExit); permExit = null; }
+
+    if (want) {
+      pop.hidden = false;
+      renderPerm();
+      // Two frames, not one: the first commits the un-hidden layout, the
+      // second is where the transition has a value to start from.
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () { pop.setAttribute("data-open", "1"); });
+      });
+    } else {
+      pop.removeAttribute("data-open");
+      // Card 340ms plus the backdrop's 200ms, with a little slack.
+      permExit = setTimeout(function () {
+        pop.hidden = true;
+        permExit = null;
+      }, 380);
+      renderPerm();
+    }
+    $("permBtn").setAttribute("aria-expanded", want ? "true" : "false");
   }
 
 
@@ -4250,55 +4295,119 @@ function _sbRun() {
     return true;
   }
 
+  /**
+   * Paths out of a VS Code drag.
+   *
+   * A file dragged from the OS arrives as `dataTransfer.files` and can be read
+   * here. A file dragged from VS CODE'S OWN EXPLORER does not: the webview is
+   * an iframe inside the workbench, the drag never leaves the application, and
+   * what arrives is a `text/uri-list` of `file://` URIs with an empty `files`
+   * list. Handling only `Files` is why dropping onto the composer appeared to
+   * do nothing - the commonest way to drag a file in an editor was the one
+   * case that was not implemented.
+   *
+   * The host reads those paths, because the webview cannot: it has no file
+   * access, and `file://` is not fetchable under this CSP.
+   */
+  function uriListPaths(dt) {
+    var out = [];
+    var raw = "";
+    try {
+      raw = dt.getData("text/uri-list") || dt.getData("resourceurls") || "";
+    } catch (e) { return out; }
+    if (!raw) return out;
+
+    // `resourceurls` is a JSON array of URI strings; `text/uri-list` is
+    // newline-separated with `#` comment lines.
+    if (raw.charAt(0) === "[") {
+      try {
+        var arr = JSON.parse(raw);
+        for (var i = 0; i < arr.length; i++) {
+          var v = typeof arr[i] === "string" ? arr[i] : (arr[i] && arr[i].external);
+          if (v) out.push(String(v));
+        }
+        return out;
+      } catch (e) { /* fall through to the line form */ }
+    }
+    var lines = raw.split(/\r?\n/);
+    for (var k = 0; k < lines.length; k++) {
+      var line = lines[k].trim();
+      if (line && line.charAt(0) !== "#") out.push(line);
+    }
+    return out;
+  }
+
   function wireDrop() {
     var composer = document.querySelector(".composer");
     if (!composer) return;
 
-    // The document-wide guard. `dragover` must be cancelled too: without it the
-    // browser never fires `drop` on the composer either, because the default
-    // dragover handler rejects the drag before it gets there.
-    document.addEventListener("dragover", function (e) { e.preventDefault(); });
-    document.addEventListener("drop", function (e) { e.preventDefault(); });
+    /* The document-wide guard.
+     *
+     * A webview is a browser frame, and a browser's default action for a
+     * dropped file is to NAVIGATE TO IT - which replaces the whole panel with
+     * a rendering of the file, with no way back short of reloading the view.
+     * `dragover` has to be cancelled as well: without it `drop` never fires
+     * anywhere, because the default dragover handler rejects the drag before
+     * it reaches any element.
+     *
+     * CAPTURE PHASE. The workbench also listens for drags, and a bubbling
+     * listener runs after anything that calls stopPropagation on the way down.
+     */
+    document.addEventListener("dragover", function (e) { e.preventDefault(); }, true);
+    document.addEventListener("drop", function (e) { e.preventDefault(); }, true);
 
     // A counter, not a boolean: dragging across a child element fires leave on
     // the parent before enter on the child, so a boolean flickers the outline
     // off and on as the pointer crosses the textarea.
     var depth = 0;
-    var hasFiles = function (e) {
+    var carriesFiles = function (e) {
       var t = e.dataTransfer && e.dataTransfer.types;
       if (!t) return false;
-      for (var i = 0; i < t.length; i++) if (t[i] === "Files") return true;
+      for (var i = 0; i < t.length; i++) {
+        // "Files" is an OS drag. The other two are the workbench dragging one
+        // of its own resources, which is the same intent by a different route.
+        if (t[i] === "Files" || t[i] === "text/uri-list" || t[i] === "resourceurls") return true;
+      }
       return false;
     };
 
     composer.addEventListener("dragenter", function (e) {
-      if (!hasFiles(e)) return;
+      if (!carriesFiles(e)) return;
       depth++;
       composer.setAttribute("data-drop", "1");
-    });
+    }, true);
     composer.addEventListener("dragleave", function () {
       if (depth > 0) depth--;
       if (!depth) composer.removeAttribute("data-drop");
-    });
+    }, true);
     composer.addEventListener("dragover", function (e) {
-      if (!hasFiles(e)) return;
+      if (!carriesFiles(e)) return;
       e.preventDefault();
       e.stopPropagation();
       // Tells the OS this is a copy rather than a move, which is what changes
       // the cursor to the one with a plus on it.
       if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
-    });
+    }, true);
     composer.addEventListener("drop", function (e) {
       e.preventDefault();
       e.stopPropagation();
       depth = 0;
       composer.removeAttribute("data-drop");
-      if (!e.dataTransfer) return;
-      takeFiles(e.dataTransfer.files, function () {
-        renderAttachments();
-        syncComposer();
-      });
-    });
+      var dt = e.dataTransfer;
+      if (!dt) return;
+
+      // OS drag first: those bytes are already here and need no round trip.
+      if (dt.files && dt.files.length) {
+        takeFiles(dt.files, function () {
+          renderAttachments();
+          syncComposer();
+        });
+        return;
+      }
+      // Otherwise it came from inside VS Code, and only the host can read it.
+      var paths = uriListPaths(dt);
+      if (paths.length) post("attachPaths", { paths: paths });
+    }, true);
   }
 
   function onPaste(e) {

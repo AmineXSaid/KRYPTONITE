@@ -1063,7 +1063,46 @@ export class App {
       },
     });
     if (!uris || uris.length === 0) return;
+    await this.attachUris(uris);
+  }
 
+  /**
+   * Attach files the panel could not read for itself.
+   *
+   * A file dragged from the OS lands in the webview as bytes and is read
+   * there. A file dragged from VS Code's own explorer arrives as a `file://`
+   * URI and nothing else - the drag never left the application - and the
+   * webview has no file access and cannot fetch `file://` under its CSP. So
+   * the paths come here.
+   *
+   * Anything that does not resolve to a readable file is skipped with a
+   * warning rather than failing the whole drop: dragging three files and
+   * getting none because one of them was a folder is worse than getting two.
+   */
+  async attachPaths(paths: string[]): Promise<void> {
+    const uris: vscode.Uri[] = [];
+    for (const raw of paths.slice(0, 20)) {
+      try {
+        const uri = raw.startsWith("file:") ? vscode.Uri.parse(raw) : vscode.Uri.file(raw);
+        const stat = await vscode.workspace.fs.stat(uri);
+        // A directory has no bytes to attach, and the model cannot be handed
+        // one. Say so rather than silently dropping it.
+        if (stat.type === vscode.FileType.Directory) {
+          void vscode.window.showWarningMessage(
+            `${path.basename(uri.fsPath)} is a folder. Attach the files inside it, or mention it with @.`
+          );
+          continue;
+        }
+        uris.push(uri);
+      } catch {
+        void vscode.window.showWarningMessage(`Could not read ${raw}.`);
+      }
+    }
+    if (uris.length) await this.attachUris(uris);
+  }
+
+  /** Read, size-check and base64 a set of URIs, then hand them to the panel. */
+  private async attachUris(uris: vscode.Uri[]): Promise<void> {
     const MAX = 10 * 1024 * 1024; // 10 MB per file
     const MIME: Record<string, string> = {
       ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -1688,6 +1727,10 @@ export class App {
 
       case "attachFiles":
         await this.pickAndAttach();
+        return;
+
+      case "attachPaths":
+        await this.attachPaths(Array.isArray(msg.paths) ? msg.paths.map(String) : []);
         return;
 
       case "warm":

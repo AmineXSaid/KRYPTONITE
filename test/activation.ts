@@ -177,20 +177,37 @@ async function main() {
       "1.1 and does it once, so a deliberate move afterwards sticks",
       recorded.executed.map((e) => e.id).join(", "));
 
-    // The container has to be declared where the code says it is: a view
-    // contributed to the activity bar would open on the left again, and
-    // nothing in the extension host would complain.
+    // THE PRIMARY SIDEBAR, and this reverses an earlier deliberate choice.
+    //
+    // The container was contributed to the Secondary Side Bar, on the argument
+    // that the agent belongs opposite the explorer rather than on top of it.
+    // It moved because of a request VS Code gives no other way to satisfy:
+    // "open at the same width as Claude Code". There is no API for a view's
+    // width - `@types/vscode` has no such property on views or view containers
+    // - and VS Code remembers ONE width per sidebar. So the only way for two
+    // extensions to share a width is for them to share a sidebar, and Claude
+    // Code lives in the primary one.
+    //
+    // A user who prefers the old position can still drag the container across;
+    // that is a workbench gesture and needs no manifest change.
     const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8"));
     const containers = manifest.contributes.viewsContainers;
     ck(
-      Array.isArray(containers.secondarySidebar) && !containers.activitybar,
-      "1.1 the container is contributed to the Secondary Side Bar only",
+      Array.isArray(containers.activitybar) && !containers.secondarySidebar,
+      "1.1 the container is contributed to the primary sidebar only",
       Object.keys(containers).join(", ")
     );
     ck(
-      containers.secondarySidebar[0].id === "genesis" &&
+      containers.activitybar[0].id === "genesis" &&
         Array.isArray(manifest.contributes.views.genesis),
       "1.1 and the view is declared inside it"
+    );
+    // The activity bar shows the container's icon at 24px, masked to a flat
+    // silhouette. It has to be the small roundel cut, not the full mark.
+    ck(
+      containers.activitybar[0].icon === "media/icon.svg",
+      "1.1 with an icon the activity bar can render",
+      containers.activitybar[0].icon
     );
   }
   ck(ctx.subscriptions.length > 0, "1.1 disposables registered", String(ctx.subscriptions.length));

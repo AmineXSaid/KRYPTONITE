@@ -61,7 +61,7 @@ Taken from `package.json` and `src/`, not from memory.
 
 | Contribution | Detail |
 |---|---|
-| View container | `genesis` in the **secondary** sidebar, icon `media/icon.svg` |
+| View container | `genesis` in the **primary** sidebar, icon `media/icon.svg` |
 | Webview view | `genesis.sidebar` |
 | Webview panels | Control Center, Agent browser (`createWebviewPanel` x2) |
 | Inline completion provider | 1 |

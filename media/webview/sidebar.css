@@ -1278,6 +1278,23 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   border-color: var(--kx-action);
   background: color-mix(in srgb, var(--kx-action) 7%, var(--kx-surface));
 }
+/* And it SAYS so. A box that merely changes colour under a dragged file is a
+   guess; the label is the difference between "something is happening" and
+   "let go here and these will be attached". Painted over the composer rather
+   than inserted into it, so nothing reflows under the pointer at the moment
+   somebody is aiming at it. */
+.composer { position: relative; }
+.composer[data-drop="1"]::after {
+  content: "Drop to attach";
+  position: absolute; inset: 0; z-index: 3;
+  display: grid; place-items: center;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--kx-surface) 82%, transparent);
+  font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
+  letter-spacing: .14em; text-transform: uppercase; text-indent: .14em;
+  color: var(--kx-fg);
+  border-radius: 4px;
+}
 
 /* Two background layers rather than a pseudo-element: the surface is painted
    to the padding box and the gradient to the border box, so the gradient is
@@ -1455,12 +1472,41 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   border-radius: 4px; font-size: 12px; color: var(--kx-fg-2); white-space: nowrap;
 }
 #modelBtn:hover:not(:disabled) { color: var(--kx-fg); }
+/* The attach control is a CONTROL, not a floating glyph.
+ *
+ * It was a bare 26px icon with no plate and no border: nothing but a dim
+ * paperclip hanging in the composer, invisible until hovered, at the same
+ * visual weight as the placeholder text beside it. A button you cannot see is
+ * not a button, and this is the one that opens the file picker - the whole
+ * "upload from my computer" route.
+ *
+ * It now shares the send button's geometry: 30px, 4px radius, a real surface
+ * and a hairline. The two read as a pair of controls at the end of the row,
+ * which is what they are, and the difference between them is FILL - send is
+ * filled when armed, attach never is - so the primary action still wins
+ * without attach having to be hidden to let it. */
 .tb-btn {
-  width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: 4px;
-  font-family: var(--kx-mono); font-size: 13px; color: var(--kx-fg-2);
+  width: 30px; height: 30px; flex: none; display: grid; place-items: center;
+  border-radius: 4px;
+  background: var(--kx-surface-2);
+  border: 1px solid var(--kx-line);
+  color: var(--kx-fg-2);
+  transition: background .14s ease, color .14s ease, border-color .14s ease, transform .09s ease;
 }
-.tb-btn:hover:not(:disabled) { background: var(--kx-hover); color: var(--kx-fg); }
-.tb-btn:disabled { color: var(--kx-fg-3); }
+.tb-btn:hover:not(:disabled) {
+  background: var(--kx-surface-3);
+  border-color: var(--kx-line-2);
+  color: var(--kx-fg);
+}
+/* A press has to register on a target this small, exactly as send's does. */
+.tb-btn:active:not(:disabled) { transform: scale(.94); }
+.tb-btn:disabled {
+  color: var(--kx-fg-5); background: transparent; border-color: var(--kx-hairline);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tb-btn { transition: none; }
+  .tb-btn:active:not(:disabled) { transform: none; }
+}
 /* The send control is a rounded square, not a disc.
  *
  * A circle reads as a media button - the thing a consumer app puts under a
@@ -1473,8 +1519,14 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 #sendBtn {
   width: 30px; height: 30px; flex: none; border-radius: 4px;
   display: grid; place-items: center;
-  background: var(--kx-surface-3); color: var(--kx-fg-3);
-  transition: background .14s ease, color .14s ease, box-shadow .14s ease, transform .09s ease;
+  background: var(--kx-surface-2); color: var(--kx-fg-3);
+  /* The same hairline the attach button has, so the two read as one pair of
+     controls at the end of the row. Idle, they are the same object twice; the
+     only thing that separates them is that send FILLS when it is armed, which
+     is the whole of the hierarchy and costs no extra chrome. */
+  border: 1px solid var(--kx-line);
+  transition: background .14s ease, color .14s ease, border-color .14s ease,
+              box-shadow .14s ease, transform .09s ease;
 }
 /* Nothing to send yet: present and legible, and visibly not the thing to press.
    Dimming the glyph rather than the plate keeps the target obvious. */
@@ -1483,7 +1535,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 /* Armed: the only filled element in the composer, so the eye lands on it
    without anything else having to get louder. */
 #sendBtn[data-ready="1"] {
-  background: var(--kx-action); color: var(--kx-on-action);
+  background: var(--kx-action); border-color: var(--kx-action); color: var(--kx-on-action);
   box-shadow: 0 1px 3px var(--kx-shadow);
 }
 #sendBtn[data-ready="1"]:hover { box-shadow: 0 2px 6px var(--kx-shadow); }
@@ -1645,10 +1697,40 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    `position: relative` and only a few rows tall - an absolutely positioned
    sheet would be confined to it and hang off the bottom of the panel. Fixed
    resolves against the webview viewport, which is exactly the panel. */
+/* THE SHEET IS ANIMATED, AND THE ANIMATION IS THE POINT.
+ *
+ * It used to appear by having `hidden` removed - one frame of nothing, the
+ * next frame a full-panel dialog. At that speed a modal reads as a glitch
+ * rather than as a thing that arrived, and there is no moment in which the eye
+ * is told WHERE it came from, so the way back out is not obvious either.
+ *
+ * Three layers on their own clocks, which is what makes it read as one object
+ * moving rather than a picture fading:
+ *
+ *   the backdrop  fades and blurs, 200ms, so the panel behind recedes instead
+ *                 of simply darkening
+ *   the card      rises from the bottom edge on a 340ms expo-out curve - most
+ *                 of the distance is covered early and it settles rather than
+ *                 stopping, which is what "fancy" actually means here
+ *   the rows      follow it up, 6px each, staggered 34ms apart, so the list
+ *                 assembles instead of arriving pre-formed
+ *
+ * `data-open` drives all of it rather than `hidden`, because `display: none`
+ * cannot be transitioned: `hidden` still comes off first and goes back on
+ * after the exit finishes, so the sheet stays invisible to assistive tech and
+ * untabbable exactly as before. `togglePerm` owns that sequencing. */
 .perm-sheet {
   position: fixed; inset: 0; z-index: 90;
   display: flex; align-items: flex-end;
+  background: rgba(24, 23, 29, 0);
+  -webkit-backdrop-filter: blur(0px);
+  backdrop-filter: blur(0px);
+  transition: background .2s ease, backdrop-filter .2s ease, -webkit-backdrop-filter .2s ease;
+}
+.perm-sheet[data-open="1"] {
   background: rgba(24, 23, 29, .62);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
 }
 .perm-sheet[hidden] { display: none; }
 .perm-card {
@@ -1659,6 +1741,35 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   border-radius: 4px 4px 0 0;
   box-shadow: 0 -14px 34px var(--kx-shadow);
   padding-bottom: 8px;
+  transform: translateY(100%);
+  /* Expo-out. Ease-out is the obvious choice and it decelerates too evenly to
+     feel like weight; this covers ~90% of the travel in the first third and
+     eases the rest, which reads as something settling into place. */
+  transition: transform .34s cubic-bezier(.16, 1, .3, 1);
+  will-change: transform;
+}
+.perm-sheet[data-open="1"] .perm-card { transform: translateY(0); }
+
+/* The rows arrive after the card they are in. `--i` is set per row by the
+   renderer; without it every row would move on the same frame and the stagger
+   would not exist. */
+.perm-sheet .perm-row {
+  opacity: 0; transform: translateY(6px);
+  transition: opacity .22s ease, transform .22s cubic-bezier(.16, 1, .3, 1);
+}
+.perm-sheet[data-open="1"] .perm-row {
+  opacity: 1; transform: translateY(0);
+  transition-delay: calc(90ms + var(--i, 0) * 34ms);
+}
+
+/* Motion off: the sheet still arrives and still leaves, it just does not
+   travel. The backdrop keeps its fade, because a modal appearing over an
+   unchanged panel is disorienting in either setting. */
+@media (prefers-reduced-motion: reduce) {
+  .perm-card { transform: none; transition: none; }
+  .perm-sheet[data-open="1"] .perm-card { transform: none; }
+  .perm-sheet .perm-row { opacity: 1; transform: none; transition: none; }
+  .perm-sheet[data-open="1"] .perm-row { transition-delay: 0s; }
 }
 /* The grab handle. Decorative - the sheet is not draggable - but it is what
    tells you at a glance that the thing rose from the bottom edge. */

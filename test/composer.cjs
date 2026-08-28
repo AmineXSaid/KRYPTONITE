@@ -126,7 +126,14 @@ function boot() {
   ok("with the right key and value",
     posted[0] && posted[0].key === "approvalMode" && posted[0].value === "full-auto",
     JSON.stringify(posted[0]));
-  ok("and the menu closes", b.d.getElementById("permPop").hidden);
+  // The sheet ANIMATES out, so `hidden` is not the immediate signal any more:
+  // `display: none` cannot be transitioned, and setting it at once would make
+  // the sheet vanish mid-flight instead of sliding away. `data-open` comes off
+  // straight away and drives the exit; `hidden` follows when it has finished.
+  ok("and the menu starts closing at once",
+    b.d.getElementById("permPop").getAttribute("data-open") === null);
+  ok("but is still in the tree while it plays",
+    b.d.getElementById("permPop").hidden === false);
 
   // The host echoes the change back; the composer follows it.
   b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
@@ -142,7 +149,20 @@ function boot() {
 
   b.click("#permBtn");
   b.d.body.dispatchEvent(new b.w.MouseEvent("click", { bubbles: true }));
-  ok("clicking away closes it", b.d.getElementById("permPop").hidden);
+  ok("clicking away closes it",
+    b.d.getElementById("permPop").getAttribute("data-open") === null);
+  ok("and the button agrees immediately",
+    b.d.getElementById("permBtn").getAttribute("aria-expanded") === "false");
+  // The exit finishing - `hidden` going back on once the transition has played
+  // - is a TIMING fact, and jsdom runs no transitions and has no top-level
+  // await to wait with. It is asserted for real against Chromium in the
+  // browser validation. What is checked here is that the mechanism exists at
+  // all: a sheet whose exit is never scheduled stays invisible and focusable,
+  // which is worse than one that never animated.
+  ok("and the exit is scheduled rather than forgotten",
+    /permExit = setTimeout\(/.test(SRC) && /pop\.hidden = true;/.test(SRC));
+  ok("with a pending exit cancelled if it is reopened first",
+    /if \(permExit\) \{ clearTimeout\(permExit\); permExit = null; \}/.test(SRC));
   b.dom.window.close();
 }
 {
@@ -496,6 +516,32 @@ console.log("\n──── the send control ────");
   ok("a press registers on a control this small", /#sendBtn:active[^}]*scale\(/.test(CSS));
   ok("and reduced motion turns that off",
     /prefers-reduced-motion[\s\S]*?#sendBtn:active\s*\{\s*transform:\s*none/.test(CSS));
+}
+
+/* ── the mode sheet arrives, rather than appearing ──────────────────────── */
+{
+  console.log("\n──── the mode sheet's transition ────");
+  // `display: none` cannot be transitioned, which is why the animation hangs
+  // off `data-open` and not off `hidden`.
+  ok("the sheet animates on an attribute, not on hidden",
+    /\.perm-sheet\[data-open="1"\]/.test(CSS));
+  ok("the card travels from the bottom edge",
+    /\.perm-card\s*\{[^}]*transform:\s*translateY\(100%\)/.test(CSS));
+  ok("and settles rather than stopping",
+    /\.perm-card\s*\{[^}]*cubic-bezier\(\.16,\s*1,\s*\.3,\s*1\)/.test(CSS));
+  ok("the backdrop fades and blurs",
+    /\.perm-sheet\s*\{[^}]*backdrop-filter:\s*blur\(0px\)/.test(CSS) &&
+    /\.perm-sheet\[data-open="1"\]\s*\{[^}]*backdrop-filter:\s*blur\(3px\)/.test(CSS));
+  // Without a per-row index every row transitions on the same frame and the
+  // list arrives pre-formed, which is the thing the stagger exists to avoid.
+  ok("the rows stagger off a per-row index",
+    /var\(--i, 0\)/.test(CSS) && /style="--i:/.test(SRC));
+  // Opening needs TWO frames: one to commit the un-hidden layout, one for the
+  // transition to have a start value. One frame and it appears fully open.
+  ok("opening waits two frames so there is something to animate from",
+    /requestAnimationFrame\(function \(\) \{\s*requestAnimationFrame\(/.test(SRC));
+  ok("and motion-off still opens and closes it",
+    /prefers-reduced-motion[\s\S]{0,400}\.perm-card \{ transform: none/.test(CSS));
 }
 
 /* ── the panel has a floor and scrolls below it ─────────────────────────── */

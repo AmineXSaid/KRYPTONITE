@@ -385,6 +385,15 @@ export interface SendMessageMsg {
 }
 export interface AttachFilesMsg { type: "attachFiles" }
 /**
+ * Files dropped on the composer that the WEBVIEW could not read.
+ *
+ * An OS drag carries bytes and never reaches the host. A drag from VS Code's
+ * own explorer carries only `file://` URIs, and the webview has no file access
+ * and cannot fetch `file://` under its CSP - so those paths come here to be
+ * read. `paths` may be `file://` URIs or plain absolute paths.
+ */
+export interface AttachPathsMsg { type: "attachPaths"; paths: string[] }
+/**
  * Open `.agent/mcp.json`, writing a commented starter if it is not there yet.
  *
  * "Create config" used to post `openFile`, which asked VS Code to open a path
@@ -503,7 +512,7 @@ export interface McpReconnectMsg { type: "mcpReconnect"; name: string }
 export interface McpReloadMsg { type: "mcpReload" }
 
 export type InboundMessage =
-  | ReadyMsg | SendMessageMsg | AttachFilesMsg | WarmMsg | McpOpenConfigMsg
+  | ReadyMsg | SendMessageMsg | AttachFilesMsg | AttachPathsMsg | WarmMsg | McpOpenConfigMsg
   | ListModelsMsg | HealthCheckMsg | InterruptMsg | NewChatMsg | SetPhaseMsg
   | ApprovePlanMsg | ResolvePermissionMsg | ResolveDiffMsg | SelectModelMsg
   | RunTraceMsg | SaveCaBundleMsg | BrowseCaBundleMsg | UseSystemTrustMsg

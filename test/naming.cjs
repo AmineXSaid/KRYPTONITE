@@ -53,9 +53,12 @@ const ALLOWED = [
 
 console.log("──── the manifest ────");
 ok("the extension is called Genesis", pkg.displayName === "Genesis", pkg.displayName);
+// Wherever the manifest puts the container - which sidebar it lives in is
+// test/activation.ts's business, not this file's.
+const allContainers = Object.values(pkg.contributes.viewsContainers).flat();
 ok("and so is the view container",
-  pkg.contributes.viewsContainers.secondarySidebar.every((v) => !/kryptonite/i.test(v.title)),
-  JSON.stringify(pkg.contributes.viewsContainers.secondarySidebar.map((v) => v.title)));
+  allContainers.every((v) => !/kryptonite/i.test(v.title)),
+  JSON.stringify(allContainers.map((v) => v.title)));
 ok("and the settings category",
   !/kryptonite/i.test(pkg.contributes.configuration.title),
   pkg.contributes.configuration.title);
