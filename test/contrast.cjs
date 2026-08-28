@@ -20,16 +20,17 @@ const TOKENS = fs.readFileSync(path.join(__dirname, "..", "media", "webview", "t
 /**
  * A token's value, resolved to something measurable.
  *
- * `--kx-bg` is `var(--vscode-sideBar-background, var(--kx-bg-default))`, so the
- * panel takes whatever colour the workbench paints its side bar and matches
- * every theme by construction rather than by guessing at one. Contrast still
- * has to be checked against SOMETHING, and the only value knowable here is the
- * fallback - which is also what the panel shows in any host that supplies no
- * theme variables. So a `var()` chain is followed to its literal.
+ * The panel no longer paints a ground: `body` is transparent so the container
+ * shows through, which is how it ends up the same colour as Claude Code beside
+ * it. Contrast still has to be measured against SOMETHING, and `--kx-bg` is
+ * that something - the ground the palette is designed against, and the one the
+ * screenshot harness puts behind the panel.
  *
- * This means the ratios below hold for the default. A theme with a much
- * lighter side bar would need its own check, which is not something a static
- * file can do; the fallback is the contract this suite can enforce.
+ * So the ratios below hold for a container at --kx-bg. A workbench painting
+ * its container much lighter would need its own check, which is not something
+ * a static file can do; this is the contract the suite can enforce. A `var()`
+ * chain is still followed to its literal, so a token can be pointed at a
+ * `--vscode-*` value with a fallback without breaking the measurement.
  */
 function token(name) {
   const m = TOKENS.match(new RegExp("--" + name + ":\\s*([^;]+);"));

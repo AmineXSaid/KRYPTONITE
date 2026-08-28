@@ -912,13 +912,46 @@ function composer(over) {
     c.d.getElementById("sendBtn").getAttribute("data-mode") === "stop");
 }
 
-/* 2.9 — the host confirms what happened to a mid-turn message */
+/* 2.9 — the host confirms what happened to a mid-turn message
+ *
+ * A queued message used to be acknowledged with a sentence appended to the
+ * transcript, and that was the whole of it: the sentence scrolled away, a
+ * second message left the first one's count on screen saying something no
+ * longer true, and there was no way to see what was waiting or take it back.
+ *
+ * It is state now, drawn above the composer beside the change list, and these
+ * assert the two things that were impossible: seeing the queue, and changing
+ * your mind about it. */
 {
   const c = composer({ running: true });
-  c.inbound({ type: "inputAccepted", mode: "queue", text: "later", depth: 2 });
-  const note = c.d.querySelector("#log .queued-note");
-  ok("2.9 a queued message is acknowledged", !!note);
-  ok("2.9 it says how many are waiting", /2 messages queued/.test(note.textContent));
+  c.inbound({ type: "queueChanged", items: [
+    { id: "q1", text: "first thought", files: [] },
+    { id: "q2", text: "second thought", files: [] },
+  ] });
+  const tray = c.d.getElementById("queue");
+  ok("2.9 the queue is on screen", tray && !tray.hidden);
+  const rows = c.d.querySelectorAll(".queue-row");
+  ok("2.9 one row per waiting message", rows.length === 2, String(rows.length));
+  ok("2.9 each row says what it will send",
+    /first thought/.test(rows[0].textContent) && /second thought/.test(rows[1].textContent));
+  ok("2.9 and how many are waiting",
+    /2 messages waiting/.test(c.d.getElementById("queueCount").textContent));
+
+  // Taking one back.
+  rows[0].querySelector('[data-q="drop"]').click();
+  ok("2.9 the cross cancels that message",
+    c.sent.some((m) => m.type === "cancelQueued" && m.id === "q1"));
+  ok("2.9 and the row goes at once rather than after a round trip",
+    c.d.querySelectorAll(".queue-row").length === 1);
+
+  // Sending one now.
+  c.d.querySelector('.queue-row [data-q="now"]').click();
+  ok("2.9 send-now steers it into the running turn",
+    c.sent.some((m) => m.type === "promoteQueued" && m.id === "q2"));
+
+  c.inbound({ type: "queueChanged", items: [] });
+  ok("2.9 an empty queue takes the tray with it",
+    c.d.getElementById("queue").hidden);
 
   c.inbound({ type: "inputAccepted", mode: "steer", text: "now", depth: 1 });
   ok("2.9 a steered message says the model will read it",
@@ -1216,14 +1249,20 @@ function composer(over) {
   ok("WB and no recent list", !c.d.querySelector(".welcome .w-sec"));
 }
 
-/* ══ A queued message keeps its attachments on screen ═════ */
+/* ══ A queued message keeps its attachments on screen ═════
+ *
+ * The chips travel with the queue row because the composer's pills have
+ * already cleared by the time it is drawn: without them a message queued with
+ * a screenshot attached showed only its sentence, which is exactly what it
+ * looked like back when the attachment really was being dropped. */
 {
   const { d, inbound } = boot();
   inbound(STATE());
-  inbound({ type: "inputAccepted", mode: "queue", text: "look at this", depth: 1,
-    files: [{ name: "shot.png", size: 2048 }] });
-  const note = d.querySelector(".queued-note");
-  ok("QA the queued note renders", !!note);
+  inbound({ type: "queueChanged", items: [
+    { id: "q1", text: "look at this", files: [{ name: "shot.png", size: 2048 }] },
+  ] });
+  const note = d.querySelector(".queue-row");
+  ok("QA the queued message renders", !!note);
   ok("QA and carries the attachment chip", !!note.querySelector(".u-att-chip"));
   ok("QA named", /shot\.png/.test(note.textContent));
   ok("QA and sized", /2 KB/.test(note.textContent));

@@ -508,6 +508,23 @@ export interface CheckEndpointMsg { type: "checkEndpoint"; endpoint: EndpointFor
  * user saying "I have seen those".
  */
 export interface ClearChangesMsg { type: "clearChanges" }
+/**
+ * Take a message back out of the queue before the running turn reaches it.
+ *
+ * The queue used to be write-only: a message typed during a turn was accepted
+ * with a sentence in the transcript and there was no way to look at what was
+ * waiting, let alone change your mind. `id` is the one the host handed out in
+ * `queueChanged`.
+ */
+export interface CancelQueuedMsg { type: "cancelQueued"; id: string }
+/**
+ * Stop waiting: steer this queued message into the turn that is running.
+ *
+ * Queue-or-steer was a preference set once in settings. This offers the same
+ * choice at the moment it is actually being made, about the message it is
+ * being made about.
+ */
+export interface PromoteQueuedMsg { type: "promoteQueued"; id: string }
 export interface McpReconnectMsg { type: "mcpReconnect"; name: string }
 export interface McpReloadMsg { type: "mcpReload" }
 
@@ -523,7 +540,8 @@ export type InboundMessage =
   | OpenYamlMsg | OpenControlCenterMsg | EditorCommandMsg | OpenSkillsFolderMsg
   | ListSessionsMsg | LoadSessionMsg | DeleteSessionMsg | SearchFilesMsg
   | CheckEndpointMsg | McpReconnectMsg | McpReloadMsg | ClearChangesMsg
-  | DetectCapsMsg | SetCapabilityMsg | ApplyCapsMsg | McpLogMsg;
+  | DetectCapsMsg | SetCapabilityMsg | ApplyCapsMsg | McpLogMsg
+  | CancelQueuedMsg | PromoteQueuedMsg;
 
 export type InboundType = InboundMessage["type"];
 
@@ -743,6 +761,22 @@ export interface StatusChangedOut { type: "statusChanged"; status: StatusDto }
 export interface LogLineOut { type: "logLine"; line: LogLine }
 export interface NavigateOut { type: "navigate"; section: CcSection }
 export interface FileResultsOut { type: "fileResults"; query: string; files: FileHitDto[] }
+/** One message waiting for the running turn to finish. */
+export interface QueuedItemDto {
+  id: string;
+  text: string;
+  files: AttachmentChipDto[];
+}
+/**
+ * Everything currently waiting, sent whole whenever it changes.
+ *
+ * The queue is state, and it used to be announced as history: one sentence
+ * appended to the transcript per arrival. That scrolled away, went stale the
+ * moment a second message joined, and gave no way to see or undo what was
+ * waiting. The panel draws this above the composer instead, beside the change
+ * list, which is the other thing there that is state rather than history.
+ */
+export interface QueueChangedOut { type: "queueChanged"; items: QueuedItemDto[] }
 export interface CaBundlePickedOut { type: "caBundlePicked"; path: string }
 /**
  * A message typed while a turn was running was accepted rather than refused.
@@ -824,7 +858,7 @@ export type OutboundMessage =
   | EditorContextChangedOut
   | CheckpointsListedOut | CheckpointRestoredOut | BundleExportedOut | ChatExportedOut
   | ConfigChangedOut | PhaseChangedOut | EndpointChangedOut | StatusChangedOut
-  | LogLineOut | NavigateOut | FileResultsOut | CaBundlePickedOut
+  | LogLineOut | NavigateOut | FileResultsOut | QueueChangedOut | CaBundlePickedOut
   | EndpointCheckStartedOut | EndpointCheckRungOut | EndpointCheckDoneOut
   | SessionTitledOut | McpChangedOut | ModelsListedOut
   | InputAcceptedOut | SteerAcceptedOut | HealthResultOut | HealthStartedOut;

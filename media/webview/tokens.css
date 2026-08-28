@@ -40,12 +40,12 @@
    * THE PANEL GROUND IS VS CODE'S, NOT THE MOCKUP'S.
    *
    * Genesis draws its panel on #28272d. This sits beside Claude Code in the
-   * same window, and a sidebar a shade lighter than every other sidebar reads
-   * as a rendering fault rather than as a brand. So the ground is #181818 -
-   * `sideBar.background` from Dark Modern, which is what Claude Code's panel
-   * paints and therefore what "the same background" means.
+   * same window, and a panel a shade lighter than every other panel reads as a
+   * rendering fault rather than as a brand. So the ground is the workbench's -
+   * see the long note on --kx-bg below for how it gets taken, and #181818 for
+   * the Dark Modern value the rest of the scale is balanced against.
    *
-   * That is not a one-token change. Genesis's scale DESCENDS: the panel is the
+   * That was not a one-token change. Genesis's scale DESCENDS: the panel is the
    * light end and its cards, composer, popups and dumps are recessed BELOW it.
    * The recessed colour was #18171d, which is within one step of #181818, so
    * moving the ground alone would have flattened every card into the panel.
@@ -57,21 +57,35 @@
    * bug. The ACCENTS are untouched - they are the brand, and they were never
    * the thing that clashed. */
   --kx-bg-deep:   #0f0f11;  /* recessed - dumps, code panes, diff bodies     */
-  /* THE PANEL TAKES VS CODE'S OWN BACKGROUND.
+  /* THE PANEL PAINTS NO GROUND AT ALL.
    *
-   * A literal #181818 was Dark Modern's `sideBar.background`, which is right
-   * for Dark Modern and wrong for every other theme - and wrong is exactly how
-   * it looked sitting in a tab strip next to Claude Code, which paints VS
-   * Code's variable rather than a colour of its own.
+   * Measured from the owner's own screenshot rather than guessed. Claude Code
+   * and Genesis are two views in one container - the workbench panel, docked
+   * right - and every pixel of Claude Code's body samples #010409, which is
+   * also the colour of the empty strip beside its tab. That strip is painted
+   * by the workbench, not by the webview. So Claude Code is not matching a
+   * colour: it is not painting one, and the container shows through.
    *
-   * Matching a hex is guessing at one theme. Reading the variable matches by
-   * CONSTRUCTION: whatever the workbench paints its side bar, the panel paints
-   * too, in every theme, including ones that did not exist when this was
-   * written. `--kx-bg-default` is the fallback for a host that supplies no
-   * theme variables at all - the screenshot harness, and the contrast suite,
-   * which needs a real colour to measure against. */
-  --kx-bg-default: #181818;
-  --kx-bg: var(--vscode-sideBar-background, var(--kx-bg-default));
+   * Two earlier attempts guessed a colour instead and both were wrong for this
+   * theme. A literal #181818 is Dark Modern's `sideBar.background` and is a
+   * light grey block against #010409. Reading `--vscode-sideBar-background`
+   * was closer but still names the wrong surface: a view container can be
+   * dragged into the primary side bar, the secondary side bar or the panel,
+   * and the workbench paints each from a different colour id. Nothing in CSS
+   * can tell which one a webview is currently sitting in.
+   *
+   * Painting nothing needs no such answer. `body` keeps the transparent
+   * background VS Code's own webview stylesheet gives it, and the ground is
+   * whatever the container is - in every theme, and wherever it is docked.
+   * See the `body` rule in sidebar.css, which is where the not-painting
+   * happens.
+   *
+   * --kx-bg therefore stops being the thing that gets painted and becomes the
+   * ground that the palette is DESIGNED AGAINST: the value the contrast suite
+   * measures text against, the value the screenshot harness puts behind the
+   * panel, and the ground the browser panel - which lives in an editor tab and
+   * genuinely does paint its own - still uses. */
+  --kx-bg:        #181818;  /* the assumed ground; see the note above        */
   --kx-surface:   #0f0f11;  /* recessed - cards, composer, popups, modals    */
   --kx-surface-2: #141416;  /* one step above recessed, inside a popup       */
   --kx-surface-3: #2c2c2f;  /* raised: small-button hover, menu row hover    */

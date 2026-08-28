@@ -2087,6 +2087,14 @@ export class App {
       case "clearChanges":
         this.session.clearChanges();
         return;
+
+      case "cancelQueued":
+        this.session.cancelQueued(msg.id);
+        return;
+
+      case "promoteQueued":
+        this.session.promoteQueued(msg.id);
+        return;
     }
   }
 
@@ -2104,32 +2112,41 @@ export class App {
    * The file budget is raised above the number shown so that a query matching
    * many files deep in one tree still yields the folders above them.
    */
-  private async searchFiles(query: string): Promise<FileHitDto[]> {
-    if (!this.root) return [];
-    const root = this.root;
-    const exclude = "**/{node_modules,.git,dist,out,.vscode-test,coverage}/**";
+  /**
+   * The workspace's files and folders, scanned once and kept.
+   *
+   * ONE scan, then rank in memory - and the scan is now shared across
+   * keystrokes rather than repeated on each of them.
+   *
+   * The query used to go to `findFiles` as `**\/*${query}*`, which was three
+   * separate defects wearing one glob:
+   *
+   *   - `*` does not cross `/`, so the pattern only ever matched a BASENAME.
+   *     Typing `lin_testcases/helper` matched nothing at all, and neither did
+   *     any query naming a folder on the way to the file.
+   *   - the glob is case-sensitive on Linux and macOS-with-case-sensitivity,
+   *     so `Lin` missed `lin_master.py`.
+   *   - `findFiles` returns in directory-walk order and was capped at 200,
+   *     then sliced to 20. In a repo of any size that is an arbitrary 20
+   *     files, not the 20 best - which is what "doesn't show all files and
+   *     folders" actually was.
+   *
+   * Fixing those left a fourth: a full `**\/*` walk PER KEYSTROKE. Typing
+   * `@lin_ma` is seven of them, debounced to perhaps four, and on a workspace
+   * of any size each one takes long enough that the picker is still showing
+   * its empty state when the next keystroke replaces the question. The list
+   * only changes when a file is added or removed, so it is scanned once and
+   * dropped by a watcher when it stops being true.
+   */
+  private fileScan?: { rels: string[]; dirs: string[] };
+  private fileScanWatcher?: vscode.FileSystemWatcher;
 
-    // ONE scan of the workspace, then rank in memory.
-    //
-    // This used to hand the query to `findFiles` as `**/*${query}*`, which is
-    // three separate defects wearing one glob:
-    //
-    //   - `*` does not cross `/`, so the pattern only ever matched a BASENAME.
-    //     Typing `lin_testcases/helper` matched nothing at all, and neither did
-    //     any query naming a folder on the way to the file.
-    //   - the glob is case-sensitive on Linux and macOS-with-case-sensitivity,
-    //     so `Lin` missed `lin_master.py`.
-    //   - `findFiles` returns in directory-walk order and was capped at 200,
-    //     then sliced to 20. In a repo of any size that is an arbitrary
-    //     20 files, not the 20 best - which is what "doesn't show all files
-    //     and folders" actually was.
-    //
-    // The cap is now on the scan, not on the answer, and the answer is sorted
-    // by how well it matches rather than by where the walker happened to be.
+  private async workspaceScan(root: string): Promise<{ rels: string[]; dirs: string[] }> {
+    if (this.fileScan) return this.fileScan;
+
+    const exclude = "**/{node_modules,.git,dist,out,.vscode-test,coverage}/**";
     const files = await vscode.workspace.findFiles("**/*", exclude, 20_000);
     const rels = files.map((u) => path.relative(root, u.fsPath).split(path.sep).join("/"));
-
-    const q = query.trim().toLowerCase();
 
     // Folders are derived from the files inside them, so one only appears when
     // it actually holds something the picker would offer.
@@ -2139,9 +2156,31 @@ export class App {
       for (let i = 1; i < parts.length; i++) dirs.add(parts.slice(0, i).join("/"));
     }
 
+    this.fileScan = { rels, dirs: [...dirs] };
+
+    // Content changes cannot alter the list, so `onDidChange` is deliberately
+    // not bound: it fires on every save and would throw the scan away for
+    // nothing. A rename arrives as a delete and a create.
+    if (!this.fileScanWatcher) {
+      const w = vscode.workspace.createFileSystemWatcher("**/*");
+      const drop = () => { this.fileScan = undefined; };
+      w.onDidCreate(drop);
+      w.onDidDelete(drop);
+      this.fileScanWatcher = w;
+      this.disposables.push(w);
+    }
+    return this.fileScan;
+  }
+
+  private async searchFiles(query: string): Promise<FileHitDto[]> {
+    if (!this.root) return [];
+    const root = this.root;
+    const { rels, dirs } = await this.workspaceScan(root);
+    const q = query.trim().toLowerCase();
+
     if (!q) {
       // Nothing typed yet: top-level folders, then whatever is shallowest.
-      const out: FileHitDto[] = [...dirs]
+      const out: FileHitDto[] = dirs
         .filter((d) => !d.includes("/"))
         .sort((a, b) => a.localeCompare(b))
         .slice(0, 12)
@@ -2161,7 +2200,7 @@ export class App {
         .filter((x) => x.s > 0)
         .sort((a, b) => b.s - a.s || a.p.length - b.p.length || a.p.localeCompare(b.p));
 
-    const out: FileHitDto[] = ranked([...dirs])
+    const out: FileHitDto[] = ranked(dirs)
       .slice(0, 12)
       .map((x) => ({ path: x.p, kind: "folder" as const }));
     for (const x of ranked(rels).slice(0, 40)) {

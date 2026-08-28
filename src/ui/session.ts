@@ -295,9 +295,11 @@ export class SessionController {
    * can change its direction but spends the tokens to do it.
    */
   private queued: Array<{
+    id: string;
     text: string;
     attachments?: Array<{ name: string; mediaType: string; data: string }>;
   }> = [];
+  private queueSeq = 0;
   private steer: Msg[] = [];
   /**
    * File chips for each pending steer, in the same order.
@@ -427,14 +429,8 @@ export class SessionController {
           files: chips,
         });
       } else {
-        this.queued.push({ text, attachments });
-        this.app.broadcast({
-          type: "inputAccepted",
-          mode: "queue",
-          text,
-          depth: this.queued.length,
-          files: chipsFor(attachments),
-        });
+        this.queued.push({ id: `q${++this.queueSeq}`, text, attachments });
+        this.broadcastQueue();
       }
       return;
     }
@@ -801,13 +797,11 @@ export class SessionController {
     // now would start a turn in a conversation they are not in.
     const next = turn.id === this.sessionId ? this.queued.shift() : undefined;
     if (next) {
-      this.app.broadcast({
-        type: "inputAccepted",
-        mode: "queue",
-        text: next.text,
-        depth: this.queued.length,
-        files: chipsFor(next.attachments),
-      });
+      // The tray loses the row before the turn starts, so the message is in
+      // exactly one place at a time - queued, or in the transcript. It used to
+      // announce itself a second time instead, which put the same sentence in
+      // the log twice for one message.
+      this.broadcastQueue();
       await this.send(next.text, next.attachments);
     }
     void errored;
@@ -1237,6 +1231,77 @@ export class SessionController {
   }
 
   /**
+   * What is waiting, as the panel draws it.
+   *
+   * The queue used to exist only as a sentence appended to the transcript when
+   * something joined it - "Queued - it will be sent when this turn finishes."
+   * That is a log line describing state, and it went wrong in all the ways a
+   * log line describing state does: it scrolled away, a second message left
+   * the first one's sentence on screen saying something no longer true, and
+   * there was no way to see what was waiting or to change your mind about it.
+   *
+   * So the queue is broadcast whole, every time it changes, and the panel
+   * renders it above the composer where the change list already lives.
+   */
+  private broadcastQueue(): void {
+    this.app.broadcast({
+      type: "queueChanged",
+      items: this.queued.map((q) => ({
+        id: q.id,
+        text: q.text,
+        files: chipsFor(q.attachments),
+      })),
+    });
+  }
+
+  /** Take a message back out of the queue. */
+  cancelQueued(id: string): void {
+    const before = this.queued.length;
+    this.queued = this.queued.filter((q) => q.id !== id);
+    if (this.queued.length !== before) this.broadcastQueue();
+  }
+
+  /**
+   * Send a queued message now, by steering it into the running turn.
+   *
+   * The same message, taking the other road: instead of waiting for the turn
+   * to end it is injected at the next boundary between model calls. Queuing
+   * and steering were a preference set once in settings and never revisited;
+   * this makes the choice available at the moment it is actually being made,
+   * about the specific message it is being made about.
+   */
+  promoteQueued(id: string): void {
+    const item = this.queued.find((q) => q.id === id);
+    if (!item) return;
+    this.queued = this.queued.filter((q) => q.id !== id);
+    this.broadcastQueue();
+    // `this.running` and not `app.running`: the App flag drives the status bar
+    // and is set for work that is not a turn, while this one is the flag
+    // `send()` itself gates on. Steering into a turn that is not there would
+    // put the message in a list nothing ever drains.
+    if (!this.running) {
+      // Nothing to steer into. Send it as its own turn, which is what the
+      // queue was going to do with it anyway.
+      void this.send(item.text, item.attachments);
+      return;
+    }
+    const profile = this.app.activeProfile();
+    const msg: Msg = profile
+      ? this.composeUserMessage(item.text, item.attachments, profile)
+      : { role: "user", content: item.text };
+    const chips = chipsFor(item.attachments);
+    this.steer.push(msg);
+    this.steerFiles.push(chips);
+    this.app.broadcast({
+      type: "inputAccepted",
+      mode: "steer",
+      text: item.text,
+      depth: this.steer.length,
+      files: chips,
+    });
+  }
+
+  /**
    * Announce the conversation the composer now writes into.
    *
    * Every path that changes `sessionId` or `history` ends here. `newChat` used
@@ -1281,6 +1346,12 @@ export class SessionController {
     this.turnDiffs.clear();
     // The change list belongs to the conversation, so it leaves with it.
     this.changes.clear();
+    // So does anything waiting to be said in it. These were typed into a
+    // composer that is no longer on screen; the old code left them in the
+    // array, invisible, to be sent into whatever conversation happened to be
+    // open when a turn next ended.
+    this.queued = [];
+    this.broadcastQueue();
     this.turnEstimate.clear();
     this.app.todos = [];
     this.app.lastContext = null;

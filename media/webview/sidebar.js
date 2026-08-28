@@ -284,6 +284,8 @@ function _sbRun() {
   var S = {
     hydrated: false,
     workspace: { open: false, name: null },
+    /** Messages waiting for the running turn to finish, newest last. */
+    queue: [],
     running: false,
     phase: "act",
     endpoint: null,
@@ -1006,6 +1008,19 @@ function _sbRun() {
                 'aria-label="Clear the change list">' + icon("i-x", "ic-11") + '</button>' +
             '</div>' +
             '<div class="chg-list" id="chgList" hidden></div>' +
+          '</div>' +
+          // Waiting to be sent. State, not history - so it lives here with the
+          // change list rather than as a sentence in the transcript that
+          // scrolls away and goes stale.
+          '<div class="queue" id="queue" hidden>' +
+            '<div class="queue-top">' +
+              icon("i-clock", "ic-11") +
+              '<span class="t" id="queueCount"></span>' +
+              '<span class="sp"></span>' +
+              '<button class="queue-clear" id="queueClear" title="Cancel everything waiting" ' +
+                'aria-label="Cancel everything waiting">' + icon("i-x", "ic-11") + '</button>' +
+            '</div>' +
+            '<div class="queue-list" id="queueList"></div>' +
           '</div>' +
           '<div class="composer-wrap">' +
             '<div class="qp" id="qp" role="listbox" hidden></div>' +
@@ -2598,6 +2613,39 @@ function _sbRun() {
    * rather than surviving in it. Rebuilding is affordable because the list is
    * one row per file, not one per write.
    */
+  /**
+   * The messages waiting for the running turn to finish.
+   *
+   * Every row carries the two things that were missing: what it actually says,
+   * and a way out of it. "Send now" steers it into the turn already running;
+   * the cross drops it. Both were previously impossible - a queued message was
+   * announced once and then unreachable until it sent itself.
+   */
+  function renderQueue() {
+    var wrap = $("queue");
+    if (!wrap) return;
+    var items = S.queue || [];
+    wrap.hidden = items.length === 0;
+    if (!items.length) { $("queueList").innerHTML = ""; return; }
+    $("queueCount").textContent = items.length === 1
+      ? "1 message waiting"
+      : items.length + " messages waiting";
+    var html = "";
+    for (var i = 0; i < items.length; i++) {
+      var q = items[i];
+      html += '<div class="queue-row" data-id="' + esc(q.id) + '">' +
+        '<span class="pos">' + (i + 1) + "</span>" +
+        '<span class="qt ell" title="' + esc(q.text) + '">' + esc(q.text) + "</span>" +
+        attChips(q.files) +
+        '<button class="queue-now" data-q="now" title="Send now - the model reads it before its next step" ' +
+          'aria-label="Send now">' + icon("i-up", "ic-11") + "</button>" +
+        '<button class="queue-x" data-q="drop" title="Cancel this message" ' +
+          'aria-label="Cancel this message">' + icon("i-x", "ic-11") + "</button>" +
+      "</div>";
+    }
+    $("queueList").innerHTML = html;
+  }
+
   function renderChanges(hot) {
     var bar = $("changeBar");
     var files = S.changes || [];
@@ -2837,8 +2885,22 @@ function _sbRun() {
    * The footer is only added when the turn actually produced something -
    * an interrupt before the first token should not leave a stray rule behind.
    */
+  /** Stop every spinning retry button. Called when a turn actually starts. */
+  function clearRetrySpinners() {
+    var busy = logEl.querySelectorAll('.turn-foot [data-busy]');
+    for (var i = 0; i < busy.length; i++) {
+      busy[i].removeAttribute("data-busy");
+      busy[i].removeAttribute("aria-busy");
+      busy[i].title = "Retry";
+    }
+  }
+
   function endTurn() {
     closeToolGroup();
+    // Retry spins for as long as the turn it started, which is the honest
+    // reading: it is still retrying. Any of them may be spinning - the
+    // transcript can hold many footers - so all of them stop.
+    clearRetrySpinners();
     var last = logEl.lastElementChild;
     if (!last || last.classList.contains("turn-div") || last.classList.contains("welcome")) return;
 
@@ -2866,8 +2928,39 @@ function _sbRun() {
         b.innerHTML = icon("i-check", "ic-13");
         b.setAttribute("data-done", "1");
         setTimeout(function () { b.innerHTML = prev; b.removeAttribute("data-done"); }, 1200);
-      } else if (a === "retry") post("sendMessage", { text: "Retry that last step." });
-      else if (a === "branch") post("newChat");
+      } else if (a === "retry") {
+        /* Retry acknowledges the CLICK, not the answer.
+         *
+         * Reported as "clicking redo takes time to do effect". It does: the
+         * host has to start a turn, and on a cold endpoint the first token is
+         * seconds away. Nothing was wrong with the request - what was wrong is
+         * that the button looked identical before and after it, so the only
+         * available reading was that the click had missed. Copy already had
+         * this and retry did not.
+         *
+         * The spin starts on the frame of the click and stops when the turn it
+         * asked for actually appears, so the row is telling the truth about
+         * how long the wait is rather than flashing and lying. A second click
+         * while it spins is ignored: it would send the same sentence twice. */
+        if (b.hasAttribute("data-busy")) return;
+        b.setAttribute("data-busy", "1");
+        b.setAttribute("aria-busy", "true");
+        b.title = "Retrying…";
+        /* Through sendText, not straight to post().
+         *
+         * This is the larger half of the same complaint. A raw post skipped
+         * every bit of turn setup the composer does: no user bubble, no
+         * streaming aura, no running flag. Nothing appeared until the host's
+         * first delta came back, so a retry on a slow endpoint was several
+         * seconds of a transcript that had not changed. sendText draws the
+         * turn immediately when the panel is idle and hands the message to the
+         * queue when it is not - which is also the only correct behaviour when
+         * a turn is already running, and the raw post got that wrong too. */
+        sendText("Retry that last step.");
+        // The new turn lands at the bottom; a retry pressed from further up
+        // the transcript would otherwise put the answer somewhere unseen.
+        scroll();
+      } else if (a === "branch") post("newChat");
     });
     add(foot);
     add(div("turn-div"));
@@ -2951,27 +3044,51 @@ function _sbRun() {
   function detectQuickPick() {
     if (S.modelOpen) return;
     var v = $("draft").value;
+    var wasFile = !!(S.qp && S.qp.kind === "file");
     if (/^\/[^\s]*$/.test(v)) {
       S.qp = { kind: "cmd", q: v.slice(1) };
     } else {
       var m = v.match(/(?:^|\s)@([\w./-]*)$/);
       if (m) {
+        // A NEW mention starts with an empty list rather than the previous
+        // mention's. Carrying the old hits over meant the first frame of a
+        // fresh `@` showed answers to a question nobody had asked.
+        if (!wasFile) S.files = [];
         S.qp = { kind: "file", q: m[1] };
-        scheduleSearch(m[1]);
+        scheduleSearch(m[1], !wasFile);
       } else {
         S.qp = null;
+        S.searching = false;
       }
     }
     S.qpIndex = 0;
     renderQuickPick();
   }
 
-  function scheduleSearch(query) {
+  /**
+   * Ask the host for candidates.
+   *
+   * `now` is the first ask of a mention - the keystroke that typed the `@`
+   * itself. That one goes out immediately: the picker has just opened with
+   * nothing in it, so there is no flicker for a debounce to protect, and 150ms
+   * of an empty picker is 150ms of the panel looking broken. Every keystroke
+   * after it is debounced as before, because those DO replace a list that is
+   * already on screen.
+   *
+   * `S.searching` exists because "no answer yet" and "no matches" are not the
+   * same fact and the picker was rendering them with the same sentence. On a
+   * workspace big enough for the scan to take a moment, "No matching files"
+   * was the only thing anyone ever saw.
+   */
+  function scheduleSearch(query, now) {
     if (S.searchTimer) clearTimeout(S.searchTimer);
-    S.searchTimer = setTimeout(function () {
+    S.searching = true;
+    var run = function () {
       S.fileQuery = query;
       post("searchFiles", { query: query });
-    }, 150);
+    };
+    if (now) run();
+    else S.searchTimer = setTimeout(run, 150);
   }
 
   function qpItems() {
@@ -3106,7 +3223,9 @@ function _sbRun() {
     var selectable = items.filter(function (r) { return !r.group; });
     if (!items.length) {
       if (S.qp && S.qp.kind === "file") {
-        qp.innerHTML = '<div class="qp-empty">No matching files</div>';
+        qp.innerHTML = S.searching
+          ? '<div class="qp-empty" data-busy="1">Searching the workspace…</div>'
+          : '<div class="qp-empty">No matching files</div>';
         qp.hidden = false;
       } else {
         qp.hidden = true;
@@ -4685,6 +4804,25 @@ function _sbRun() {
       var row = e.target.closest("[data-chg]");
       if (row) post("openFile", { path: row.getAttribute("data-chg") });
     });
+    $("queueList").addEventListener("click", function (e) {
+      var b = e.target.closest("[data-q]");
+      if (!b) return;
+      var row = b.closest(".queue-row");
+      if (!row) return;
+      var id = row.getAttribute("data-id");
+      // Optimistic, for the same reason the change list is: the host answers
+      // with a fresh queue either way, and a row that sits there after you
+      // press the cross is the exact complaint this tray exists to answer.
+      S.queue = S.queue.filter(function (q) { return q.id !== id; });
+      renderQueue();
+      post(b.getAttribute("data-q") === "now" ? "promoteQueued" : "cancelQueued", { id: id });
+    });
+    $("queueClear").addEventListener("click", function () {
+      var ids = S.queue.map(function (q) { return q.id; });
+      S.queue = [];
+      renderQueue();
+      for (var i = 0; i < ids.length; i++) post("cancelQueued", { id: ids[i] });
+    });
     $("tipNext").addEventListener("click", function () { renderTip(true); });
     watchTips();
 
@@ -5091,16 +5229,25 @@ function _sbRun() {
         renderEndpoints();
         break;
 
+      case "queueChanged":
+        // A retry pressed during a turn lands here rather than in the
+        // transcript, and the button has to stop spinning either way.
+        clearRetrySpinners();
+        S.queue = m.items || [];
+        S.pending = S.queue.length;
+        renderQueue();
+        break;
+
       case "inputAccepted": {
         // Confirms the message was taken rather than swallowed. Without this
         // the composer clears and nothing visibly happens, which reads as the
         // message having been lost.
+        // Queued messages are drawn by renderQueue() from `queueChanged`; this
+        // is left holding the steer case only, which genuinely IS an event -
+        // the message has gone, and there is nothing left waiting to show.
+        if (m.mode !== "steer") break;
         S.pending = m.depth;
-        var word = m.mode === "steer"
-          ? "Sent to the model - it will read this before its next step."
-          : m.depth > 1
-            ? m.depth + " messages queued for when this turn finishes."
-            : "Queued - it will be sent when this turn finishes.";
+        var word = "Sent to the model - it will read this before its next step.";
         // The chips go on the note because the composer's pills have already
         // cleared: without them a message queued with a screenshot attached
         // showed only the sentence, which is what it looked like back when the
@@ -5274,6 +5421,7 @@ function _sbRun() {
       case "fileResults":
         if (m.query !== S.fileQuery) break;
         S.files = m.files || [];
+        S.searching = false;
         S.qpIndex = 0;
         renderQuickPick();
         break;

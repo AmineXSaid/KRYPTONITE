@@ -107,22 +107,51 @@ async function main() {
     await app.session.send("later please");
     let fresh = out.slice(before);
     ck(errors(fresh).length === 0, "queued: not reported as an error");
-    const q: any = fresh.find((m) => m.type === "inputAccepted");
-    ck(!!q, "queued: acknowledged");
-    ck(q?.mode === "queue", "queued: in queue mode", String(q?.mode));
-    ck(q?.depth === 1, "queued: reports how many are waiting", String(q?.depth));
+    // The queue is broadcast whole, as state, rather than announced once as a
+    // sentence in the transcript - so what comes back is the list itself, and
+    // the panel can draw what is waiting and offer a way out of it.
+    const q: any = fresh.find((m) => m.type === "queueChanged");
+    ck(!!q, "queued: the queue is broadcast");
+    ck(q?.items?.length === 1, "queued: holding the one message", String(q?.items?.length));
+    ck(q?.items?.[0]?.text === "later please", "queued: with its text", q?.items?.[0]?.text);
+    ck(typeof q?.items?.[0]?.id === "string" && !!q.items[0].id,
+      "queued: and an id to cancel it by", String(q?.items?.[0]?.id));
+
+    // Changing your mind, which was impossible: a queued message was announced
+    // and then unreachable until it sent itself.
+    before = out.length;
+    app.session.cancelQueued(q.items[0].id);
+    const gone: any = out.slice(before).find((m) => m.type === "queueChanged");
+    ck(gone?.items?.length === 0, "queued: cancelling takes it back out",
+      String(gone?.items?.length));
 
     before = out.length;
     app.uiConfig = { ...app.uiConfig, inputWhileRunning: "steer" };
     await app.session.send("actually, use tabs");
     const s: any = out.slice(before).find((m) => m.type === "inputAccepted");
     ck(s?.mode === "steer", "steered: in steer mode", String(s?.mode));
+    ck(s?.files !== undefined, "steered: and the note can show what went with it");
 
     ck(app.session.running === true, "the running turn is left alone either way");
 
     before = out.length;
     await app.session.send("   ");
     ck(out.slice(before).length === 0, "whitespace mid-turn is not queued");
+
+    // A queued message can take the other road at the moment the choice is
+    // actually being made, rather than by a preference set once in settings.
+    app.uiConfig = { ...app.uiConfig, inputWhileRunning: "queue" };
+    await app.session.send("and one more");
+    const pend: any = out.filter((m) => m.type === "queueChanged").pop();
+    ck(pend?.items?.length === 1, "promote: something is waiting to promote",
+      String(pend?.items?.length));
+    before = out.length;
+    app.session.promoteQueued(pend.items[0].id);
+    const after = out.slice(before);
+    ck(after.some((m: any) => m.type === "queueChanged" && m.items.length === 0),
+      "promote: it leaves the queue");
+    ck(after.some((m: any) => m.type === "inputAccepted" && m.mode === "steer"),
+      "promote: and is steered into the running turn instead");
 
     app.session.running = false;
     await app.dispose();
@@ -197,8 +226,11 @@ async function main() {
     const queued: any = (app.session as any).queued[0];
     ck(queued?.attachments?.length === 1, "the queue holds the attachment, not just the text");
     ck(queued.attachments[0].data === png, "byte for byte");
-    const accepted: any = out.find((m) => m.type === "inputAccepted");
-    ck(accepted?.files?.length === 1, "and the note can show what is waiting with it");
+    const accepted: any = out.find((m) => m.type === "queueChanged");
+    ck(accepted?.items?.[0]?.files?.length === 1,
+      "and the queue row can show what is waiting with it");
+    ck(accepted?.items?.[0]?.files?.[0]?.name === "b.png", "by name",
+      accepted?.items?.[0]?.files?.[0]?.name);
     app.session.running = false;
     await app.dispose();
   }
