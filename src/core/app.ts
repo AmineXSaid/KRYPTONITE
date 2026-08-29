@@ -1423,6 +1423,7 @@ export class App {
       browserHeaded: this.cfg().get<boolean>("browserHeaded", false),
       editorContext: this.cfg().get<boolean>("editorContext", true),
       readOutsideWorkspace: this.cfg().get<boolean>("readOutsideWorkspace", true),
+      extensionVersion: String(this.context.extension.packageJSON.version ?? "0.0.0"),
       ui: { ...this.uiConfig },
     };
   }
@@ -2059,6 +2060,27 @@ export class App {
         const id = map[msg.command];
         if (id) await vscode.commands.executeCommand(id);
         return;
+      }
+
+      case "openIssues": {
+        /* The URL comes from the manifest, never from the message - see
+           OpenIssuesMsg. `bugs.url` is the npm-standard field for exactly
+           this, with the repository URL as the fallback for a manifest that
+           has not set one. */
+        const pkg = this.context.extension.packageJSON;
+        const bugs = pkg?.bugs?.url;
+        const repo = typeof pkg?.repository?.url === "string"
+          ? pkg.repository.url.replace(/^git\+/, "").replace(/\.git$/, "") + "/issues"
+          : "";
+        const url = typeof bugs === "string" && bugs ? bugs : repo;
+        if (!url) {
+          void vscode.window.showWarningMessage(
+            "Genesis: this build's manifest names no issue tracker."
+          );
+          break;
+        }
+        await vscode.env.openExternal(vscode.Uri.parse(url));
+        break;
       }
 
       case "openSkillsFolder": {

@@ -252,6 +252,27 @@ export function makeContext(storageRoot: string, extensionPath: string) {
   return {
     extensionPath,
     extensionUri: Uri.file(extensionPath),
+    /**
+     * Real VS Code always sets `context.extension`, and the host reads
+     * `packageJSON.version` off it - for the export bundle, and for the version
+     * the About section states in a bug report. Omitting it here made
+     * `configDto()` throw on every stateSync the moment it started reading it.
+     *
+     * The manifest is read rather than faked so a test sees the version that
+     * actually ships; a hardcoded string here would pass while the real value
+     * was anything at all.
+     */
+    extension: {
+      id: "MohamedAmineSaid.genesis",
+      packageJSON: (() => {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          return require("../package.json");
+        } catch {
+          return { version: "0.0.0" };
+        }
+      })(),
+    },
     globalStorageUri: Uri.file(storageRoot),
     subscriptions: [] as { dispose(): void }[],
     secrets: {

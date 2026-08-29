@@ -138,6 +138,15 @@ const HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 const HTML_PATH = path.join(MEDIA, "__render.html");
 fs.writeFileSync(HTML_PATH, HTML);
 
+// The other surface. Same shell, different stylesheet and script - mirrors
+// shell() in src/ui/shell.ts, which builds both from one template.
+const CC_HTML = HTML
+  .replace("webview/sidebar.css", "webview/controlCenter.css")
+  .replace("webview/sidebar.js", "webview/controlCenter.js")
+  .replace('surface: "sidebar"', 'surface: "cc"');
+const CC_PATH = path.join(MEDIA, "__render-cc.html");
+fs.writeFileSync(CC_PATH, CC_HTML);
+
 const BASE = {
   workspace: { open: true, name: "repo" },
   running: false,
@@ -945,6 +954,63 @@ function contrast(a, b) {
     ok("every glyph named in the shipped sidebar.js is defined",
       dangling.length === 0, dangling.join(", "));
     ok("and the defs were actually found", defined.size > 15, String(defined.size));
+  }
+
+  /* ── 5k. the section strip never hides the tab you are on ──────────── */
+  {
+    // The strip scrolls - ten sections have never fitted - and a fade at its
+    // right edge says "there is more this way". That mask must not sit on top
+    // of the LAST tab once you have scrolled to the end, because then the
+    // thing it hides is the tab you just selected. The More menu navigates
+    // straight to About, which is last, so this is the ordinary path.
+    //
+    // jsdom cannot see it: there is no layout and no mask. Only a real engine
+    // can say where the tab ends up.
+    const ctx = await browser.newContext({
+      viewport: { width: 820, height: 700 }, deviceScaleFactor: 2, colorScheme: "dark",
+    });
+    const page = await ctx.newPage();
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await page.goto("file://" + CC_PATH);
+    await page.evaluate(
+      (s) => window.dispatchEvent(new MessageEvent("message", { data: { type: "stateSync", state: s } })),
+      {
+        workspace: { open: true, name: "repo" }, running: false, phase: "act",
+        status: { state: "ok", label: "OK" }, endpoint: "", profiles: [],
+        skills: [], skillWarnings: [], agents: [], agentWarnings: [], activeAgent: "",
+        config: { profileDirectory: ".agent/endpoints", skillsDirectory: ".agent/skills",
+                  extensionVersion: "0.0.0", ui: {} },
+        tlsError: null, rungs: [], tracing: false, todos: [], checkpoints: [],
+        sessions: [], selection: null, context: null, changes: [], models: [], logs: [],
+        session: { id: "s", title: "t", messages: [] }, mcp: { servers: [], warnings: [] },
+      }
+    );
+    await page.waitForTimeout(300);
+    ok("the control center boots with no script error", errors.length === 0, errors.slice(0, 2).join(" | "));
+
+    // The fade width is read from the stylesheet, not retyped: the padding that
+    // clears it and the mask that needs clearing must stay the same number.
+    const css = fs.readFileSync(path.join(MEDIA, "webview/controlCenter.css"), "utf8");
+    const fade = Number((/mask-image: linear-gradient\(90deg, #000 calc\(100% - (\d+)px\)/.exec(css) || [])[1]);
+    ok("the strip's fade width is declared in css", Number.isFinite(fade), String(fade));
+
+    const m = await page.evaluate(() => {
+      const s = document.getElementById("strip");
+      s.scrollLeft = s.scrollWidth; // all the way to the end of the list
+      const tabs = [...s.querySelectorAll("button")];
+      const last = tabs[tabs.length - 1];
+      return { overflow: s.scrollWidth - s.clientWidth,
+               gap: Math.round(s.getBoundingClientRect().right - last.getBoundingClientRect().right),
+               label: last.textContent.trim() };
+    });
+    // The premise: at this width the strip really does scroll. Without it the
+    // assertion below would pass for the boring reason.
+    ok("the strip overflows at 820px, so the end of it is reachable",
+      m.overflow > 0, String(m.overflow));
+    ok("and the last tab clears the fade when scrolled to the end",
+      m.gap >= fade, `"${m.label}" ends ${m.gap}px from the edge, fade is ${fade}px`);
+    await ctx.close();
   }
 
   /* ── 6. the session list, as the reference draws it ────────────────── */

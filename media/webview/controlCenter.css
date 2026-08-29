@@ -80,6 +80,12 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
   flex: none; display: flex; gap: 0; overflow-x: auto; overflow-y: hidden;
   border-bottom: 1px solid var(--kx-line);
   scrollbar-width: none;
+  /* Exactly the width of the fade below, so the LAST tab can scroll clear of
+     it. Without this the mask sits on top of the final tab at the end of the
+     scroll - and since the More menu navigates straight to About, which is
+     last, the tab being faded was the selected one. The mask only ever means
+     "there is more this way", so it must never cover the end of the list. */
+  padding-right: 28px;
   -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
   mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
 }
@@ -350,6 +356,30 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 
 .tr2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); gap: 10px; padding: 8px 10px; }
 .tr2 + .tr2 { border-top: 1px solid var(--kx-line); }
+/* ── about ── */
+.about-card {
+  display: flex; align-items: center; gap: 16px;
+  border: 1px solid var(--kx-line); border-radius: 6px; padding: 16px 18px;
+}
+.about-mark { flex: none; display: flex; }
+.about-id { min-width: 0; }
+/* --kx-BRAND, not --kx-display: tokens.css is explicit that Michroma is the
+   GENESIS wordmark and nothing else, and an About card is exactly that use.
+   14px is the top of the range the face is drawn for; the sidebar sets it at
+   11px with the same .2em tracking. */
+.about-name {
+  font-family: var(--kx-brand); font-size: 14px; font-weight: 400;
+  letter-spacing: .2em; text-transform: uppercase; color: var(--kx-fg);
+  margin-bottom: 6px;
+}
+.about-sub { font-size: 11.5px; }
+.about-mail { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.about-mail .mono { font-family: var(--kx-mono); font-size: 11px; user-select: text; }
+/* Under ~420px the mark and the wordmark cannot sit side by side. */
+@media (max-width: 420px) {
+  .about-card { flex-direction: column; align-items: flex-start; gap: 12px; }
+}
+
 /* Documentation definition rows. .tr2 is a three-column grid; a term/meaning
    pair needs two, with the term column wide enough for `streamable-http`. */
 .doc-kv { display: grid; grid-template-columns: minmax(0, 148px) minmax(0, 1fr); gap: 10px 14px; padding: 8px 10px; }

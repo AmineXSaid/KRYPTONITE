@@ -27,7 +27,7 @@ export type Surface = "sidebar" | "cc";
 
 export type CcSection =
   | "endpoints" | "wire" | "auth" | "tls" | "proxy"
-  | "diag" | "agent" | "skills" | "checkpoints" | "logs" | "docs";
+  | "diag" | "agent" | "skills" | "checkpoints" | "logs" | "docs" | "about";
 
 export type ApprovalMode = "ask" | "edits-auto" | "full-auto";
 export type ExportScope = "current" | "all";
@@ -211,6 +211,14 @@ export interface ConfigDto {
    * confined to the workspace whatever this says.
    */
   readOutsideWorkspace: boolean;
+  /**
+   * The running extension version, from `package.json`.
+   *
+   * Carried on the config rather than read in the webview because a webview
+   * has no way to reach the manifest, and the first thing a bug report needs
+   * is which build it came from.
+   */
+  extensionVersion: string;
   ui: UiConfigDto;
 }
 
@@ -499,6 +507,14 @@ export interface EditorCommandMsg {
   command: "fix" | "doc" | "explain" | "tests" | "commit";
 }
 export interface OpenSkillsFolderMsg { type: "openSkillsFolder" }
+/**
+ * Open the project's issue tracker.
+ *
+ * Carries no URL on purpose. The host reads `bugs.url` out of the manifest,
+ * so this cannot become a general "open whatever the webview asks for" hole -
+ * the one message that opens an external browser should not take a target.
+ */
+export interface OpenIssuesMsg { type: "openIssues" }
 export interface ListSessionsMsg { type: "listSessions" }
 export interface LoadSessionMsg { type: "loadSession"; id: string }
 export interface DeleteSessionMsg { type: "deleteSession"; id: string }
@@ -547,7 +563,7 @@ export type InboundMessage =
   | ToggleSkillMsg | ReloadSkillsMsg | ReloadProfilesMsg | SetConfigMsg
   | SetAgentMsg | NewAgentMsg | OpenAgentMsg
   | RestoreCheckpointMsg | ExportBundleMsg | ExportChatMsg | OpenFileMsg | OpenSettingsMsg
-  | OpenYamlMsg | OpenControlCenterMsg | EditorCommandMsg | OpenSkillsFolderMsg
+  | OpenYamlMsg | OpenControlCenterMsg | EditorCommandMsg | OpenSkillsFolderMsg | OpenIssuesMsg
   | ListSessionsMsg | LoadSessionMsg | DeleteSessionMsg | SearchFilesMsg
   | CheckEndpointMsg | McpReconnectMsg | McpReloadMsg | ClearChangesMsg
   | DetectCapsMsg | SetCapabilityMsg | ApplyCapsMsg | McpLogMsg

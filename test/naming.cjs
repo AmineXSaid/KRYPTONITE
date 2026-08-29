@@ -46,6 +46,11 @@ const ALLOWED = [
   /kryptonite\.\$\{|"kryptonite\.|`kryptonite\./, // the migration reading old keys
   /getConfiguration\("kryptonite"\)/,    // ditto
   /migrate(Secrets)?FromKryptonite/,     // the migration's own name
+  // The author's nickname, shown in the About card at his request. This is the
+  // product name's ORIGIN, not a leftover of the rename - the person who wrote
+  // Genesis goes by Kryptonite. Scoped to the exact rendered value so it
+  // permits that one cell and cannot quietly cover a stray mention elsewhere.
+  /<span class="v">Kryptonite<\/span>/,
 ];
 // SecretStorage keys are `genesis.<profile>` and hold real API keys somebody
 // has already typed in. Renaming the prefix does not migrate them - it orphans

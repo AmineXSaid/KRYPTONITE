@@ -55,7 +55,7 @@ function _run() {
        removed; every field and both buttons are still here. */
     ["endpoints", "Endpoints"], ["conn", "Connection"], ["diag", "Diagnostics"],
     ["agent", "Agent & tools"], ["mcp", "MCP servers"], ["skills", "Skills"], ["checkpoints", "Checkpoints"],
-    ["logs", "Logs & export"], ["docs", "Documentation"]
+    ["logs", "Logs & export"], ["docs", "Documentation"], ["about", "About"]
   ];
 
   var RUNG_LABELS = {
@@ -616,7 +616,7 @@ function _run() {
     // Documentation is reference text rather than a view of the workspace, so
     // it is the one section that still renders with no folder open - that is
     // exactly when someone is reading about how to set one up.
-    if (!S.workspace.open && S.section !== "docs") {
+    if (!S.workspace.open && S.section !== "docs" && S.section !== "about") {
       pane.innerHTML = "<h3>No folder open</h3>" +
         '<div class="explainer">Genesis reads endpoint profiles and skills from the folder you have open. ' +
         "Open a folder to configure it.</div>";
@@ -632,6 +632,7 @@ function _run() {
       case "checkpoints": pane.innerHTML = secCheckpoints(); break;
       case "logs": pane.innerHTML = secLogs(); break;
       case "docs": pane.innerHTML = secDocs(); break;
+      case "about": pane.innerHTML = secAbout(); break;
       /* Without this arm an unrecognised section id - `navigate` accepts
          whatever the host sends - leaves the PREVIOUS pane on screen with
          no tab selected, which reads as a frozen panel rather than a bug. */
@@ -1698,6 +1699,54 @@ function _run() {
     return html;
   }
 
+  /* ── about ────────────────────────────────────────────────────────────
+     Who wrote this and where to report it. The More menu's "Report Issue"
+     landed on Logs & export, which is where the evidence lives but says
+     nothing about what to do with it. */
+  function secAbout() {
+    var v = S.config.extensionVersion || "";
+    var html = secHead("about", "About",
+      "What this build is, who wrote it, and where to send a bug.");
+
+    html += '<div class="about-card">' +
+      '<div class="about-mark">' + crystal(56) + "</div>" +
+      '<div class="about-id">' +
+        '<div class="about-name">GENESIS</div>' +
+        '<div class="muted about-sub">' +
+          (v ? "Version " + esc(v) + " &middot; " : "") + "MIT licence" +
+        "</div>" +
+      "</div></div>";
+
+    html += '<div class="block" style="margin-top:16px"><h4>Author</h4>' +
+      '<div class="tbl">' +
+        '<div class="doc-kv"><span class="k">Name</span>' +
+          '<span class="v">Mohamed Amine Said</span></div>' +
+        '<div class="doc-kv"><span class="k">Nickname</span>' +
+          '<span class="v">Kryptonite</span></div>' +
+        '<div class="doc-kv"><span class="k">Email</span>' +
+          '<span class="v about-mail">' +
+            '<span class="mono">amine8said@gmail.com</span>' +
+            '<button class="btn sm" data-act="copyEmail">' +
+              flash("copyEmail", "Copied", "Copy") + "</button>" +
+          "</span></div>" +
+      "</div></div>";
+
+    html += '<div class="block"><h4>Report an issue</h4>' +
+      '<div class="explainer">Bugs, and anything the panel got wrong, go to the project&rsquo;s ' +
+      "issue tracker. Two things make a report actionable, and both are one button away:" +
+      "<br><br><b>1.</b> The version above &mdash; a report against an unknown build cannot be " +
+      "reproduced.<br><b>2.</b> The diagnostic bundle, which carries the profile shape, the " +
+      "capability report and the recent log. It is written to a file you can read before you " +
+      "attach it: nothing leaves the machine on its own." +
+      "</div>" +
+      '<div class="row-actions">' +
+        '<button class="btn sm" data-act="issues">Open the issue tracker</button>' +
+        '<button class="btn sm" data-act="export">Export diagnostic bundle</button>' +
+      "</div></div>";
+
+    return html;
+  }
+
   function secSkills() {
     var enabled = S.skills.filter(function (s) { return s.enabled; });
     var html = secHead("skills", "Skills",
@@ -1962,6 +2011,11 @@ function _run() {
       case "reloadSkills": post("reloadSkills"); setFlash("reloadSkills"); break;
       case "openSkills": post("openSkillsFolder"); break;
       case "export": post("exportBundle"); break;
+      case "issues": post("openIssues"); break;
+      case "copyEmail":
+        post("copyText", { text: "amine8said@gmail.com" });
+        setFlash("copyEmail");
+        break;
       case "clearAuth": post("reloadProfiles"); setFlash("clearAuth"); break;
       case "systemTrust": post("useSystemTrust"); break;
       case "browseCa": post("browseCaBundle"); break;

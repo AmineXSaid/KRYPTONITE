@@ -973,7 +973,12 @@ function _sbRun() {
             '<div class="pop-div"></div>' +
             '<button class="pop-row" role="menuitem" data-more="settings"><span class="t">Settings…</span></button>' +
             '<button class="pop-row" role="menuitem" data-more="docs"><span class="t">Documentation</span></button>' +
-            '<button class="pop-row" role="menuitem" data-more="issue"><span class="t">Report Issue</span></button>' +
+            // "Report Issue" landed on Logs & export, which is where the evidence
+            // lives but says nothing about what to do with it. It goes to About
+            // now, which names the author, states the version a report needs, and
+            // has the tracker and the bundle a click away.
+            '<button class="pop-row" role="menuitem" data-more="issue">' +
+              '<span class="t">Author &amp; report an issue</span></button>' +
           '</div>' +
         '</header>' +
         '<nav class="kx-tabs" role="tablist">' +
@@ -4846,7 +4851,7 @@ function _sbRun() {
       else if (a === "exportAll") post("exportChat", { scope: "all" });
       else if (a === "settings") post("openSettings");
       else if (a === "docs") post("openControlCenter", { section: "docs" });
-      else if (a === "issue") post("openControlCenter", { section: "logs" });
+      else if (a === "issue") post("openControlCenter", { section: "about" });
     });
     $("historyPop").addEventListener("click", function (e) {
       var del = e.target.closest("[data-del]");

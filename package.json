@@ -4,6 +4,10 @@
   "description": "A coding agent for endpoints that don't behave. mTLS, corporate CAs, token exchange, air-gapped.",
   "version": "0.8.0",
   "publisher": "MohamedAmineSaid",
+  "author": {
+    "name": "Mohamed Amine Said",
+    "email": "amine8said@gmail.com"
+  },
   "license": "MIT",
   "icon": "media/logo.png",
   "engines": {
@@ -13,6 +17,9 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/AmineXSaid/KRYPTONITE.git"
+  },
+  "bugs": {
+    "url": "https://github.com/AmineXSaid/KRYPTONITE/issues"
   },
   "categories": [
     "AI",

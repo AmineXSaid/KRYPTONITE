@@ -110,7 +110,8 @@ function state(over = {}) {
     skills: [{ name: "lin-test-review", description: "Review tests", source: "workspace", enabled: true, files: ["SKILL.md"] }],
     skillWarnings: [], config: {
       approvalMode: "ask", activeProfile: "gateway", caBundlePath: "",
-      profileDirectory: ".agent/endpoints", skillsDirectory: ".agent/skills", ui: {},
+      profileDirectory: ".agent/endpoints", skillsDirectory: ".agent/skills",
+      extensionVersion: "0.8.0", ui: {},
     },
     tlsError: null, rungs: [], tracing: false, todos: [], checkpoints: [],
     sessions: [], selection: null, context: null, models: [], logs: [],
@@ -160,7 +161,7 @@ const sync = (b, over) => b.send({ type: "stateSync", state: state(over) });
       warnings: ["one server is disabled"],
     },
   });
-  ok("the strip offers every section", SECTIONS.length === 9, String(SECTIONS.length));
+  ok("the strip offers every section", SECTIONS.length === 10, String(SECTIONS.length));
 
   for (const id of SECTIONS) {
     const before = b.errors.length;
@@ -561,6 +562,81 @@ const sync = (b, over) => b.send({ type: "stateSync", state: state(over) });
   ok("docs: still renders with no folder open",
     /Prepare a skill/.test(text) && !/No folder open/.test(text), text.slice(0, 60));
   b.dom.window.close();
+}
+
+
+/* ── 10. About names the author and can actually report a bug ───────────── */
+{
+  const b = boot();
+  sync(b, {});
+  b.click('[data-section="about"]');
+  const text = b.pane().textContent;
+
+  ok("about: names the author", /Mohamed Amine Said/.test(text));
+  ok("about: gives the nickname", /Kryptonite/.test(text));
+  ok("about: gives the email", /amine8said@gmail\.com/.test(text));
+  ok("about: carries the wordmark", /GENESIS/.test(text));
+  // The mark is the shared crystal, not a second copy of the artwork.
+  ok("about: draws the shared mark",
+    b.pane().querySelector(".about-mark svg") !== null);
+
+  // The version must come from the state, not be typed into the section - a
+  // hardcoded version is a bug report against the wrong build.
+  ok("about: prints the version it was handed", /0\.8\.0/.test(text), text.slice(0, 120));
+  const src = SRC.slice(SRC.indexOf("function secAbout"), SRC.indexOf("function secSkills"));
+  ok("about: reads the version from config rather than a literal",
+    /S\.config\.extensionVersion/.test(src) && !/0\.8\.0/.test(src));
+
+  // Both buttons must actually post something.
+  b.sent.length = 0;
+  ok("about: the issue-tracker button is present", b.click('[data-act="issues"]'));
+  ok("about: it asks the host to open the tracker",
+    b.sent.some((m) => m.type === "openIssues"), JSON.stringify(b.sent));
+  // No URL on the wire: the host derives it from the manifest, so this message
+  // cannot become a general "open anything" hole.
+  ok("about: and sends no url with it",
+    b.sent.filter((m) => m.type === "openIssues").every((m) => m.url === undefined),
+    JSON.stringify(b.sent));
+
+  b.sent.length = 0;
+  ok("about: the copy-email button is present", b.click('[data-act="copyEmail"]'));
+  const copied = b.sent.find((m) => m.type === "copyText");
+  ok("about: it copies the address itself",
+    copied && copied.text === "amine8said@gmail.com", JSON.stringify(copied));
+
+  b.sent.length = 0;
+  ok("about: the bundle button is present", b.click('[data-act="export"]'));
+  ok("about: it exports the diagnostic bundle",
+    b.sent.some((m) => m.type === "exportBundle"), JSON.stringify(b.sent));
+
+  ok("about: renders without throwing", b.errors.length === 0, b.errors.join(" | "));
+  b.dom.window.close();
+}
+
+/* About describes the extension, not the workspace, so it too survives with no
+   folder open - which is where someone lands to report that nothing opened. */
+{
+  const b = boot();
+  b.send({ type: "stateSync", state: state({ workspace: { open: false, name: "" } }) });
+  b.click('[data-section="about"]');
+  const text = b.pane().textContent;
+  ok("about: still renders with no folder open",
+    /Mohamed Amine Said/.test(text) && !/No folder open/.test(text), text.slice(0, 60));
+  b.dom.window.close();
+}
+
+/* The manifest is where the author and the issue tracker actually live: the
+   host reads `bugs.url` from it, and the marketplace listing reads `author`. A
+   section naming a person the manifest does not is a section that will drift. */
+{
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  ok("the manifest names the author", pkg.author && pkg.author.name === "Mohamed Amine Said",
+    JSON.stringify(pkg.author));
+  ok("with the same address the panel shows",
+    pkg.author && pkg.author.email === "amine8said@gmail.com", JSON.stringify(pkg.author));
+  ok("and an issue tracker for openIssues to open",
+    typeof (pkg.bugs && pkg.bugs.url) === "string" && /^https:\/\//.test(pkg.bugs.url),
+    JSON.stringify(pkg.bugs));
 }
 
 
