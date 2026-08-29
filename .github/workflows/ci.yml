@@ -126,11 +126,20 @@ jobs:
       # test/vsix.cjs. That check cannot run anywhere else: it is the only one
       # that looks at what .vscodeignore actually let through, and a file
       # excluded by mistake fails at runtime with no build error at all.
+      # test/render.cjs paints the shipped panel and asserts computed colours
+      # and real boxes - the only suite here that can see a CSS defect, since
+      # jsdom has no layout and no paint. It SKIPS without a browser, so
+      # without this step it would skip on every CI run and gate nothing.
+      # That is not hypothetical: a composer whose floor computed to
+      # `transparent` passed every other assertion and shipped unreadable.
+      - name: Install Chromium for the render check
+        run: npx playwright install --with-deps chromium
+
       - name: Package and validate the archive
         run: npm run package
 
       - uses: actions/upload-artifact@v4
         with:
-          name: kryptonite-vsix
+          name: genesis-vsix
           path: "*.vsix"
           if-no-files-found: error

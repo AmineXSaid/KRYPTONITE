@@ -50,7 +50,18 @@ function findBrowser() {
   if (process.env.GENESIS_CHROME && fs.existsSync(process.env.GENESIS_CHROME)) {
     return process.env.GENESIS_CHROME;
   }
-  const roots = [process.env.PLAYWRIGHT_BROWSERS_PATH, "/opt/pw-browsers"].filter(Boolean);
+  // The default cache is where `npx playwright install` puts a browser when
+  // PLAYWRIGHT_BROWSERS_PATH is unset, which is the normal case for a
+  // developer and for CI. Without it this suite skipped on every machine that
+  // had done nothing unusual - and a gate that always skips is not a gate.
+  const home = os.homedir();
+  const defaults = process.platform === "darwin"
+    ? [path.join(home, "Library/Caches/ms-playwright")]
+    : process.platform === "win32"
+      ? [path.join(process.env.LOCALAPPDATA || home, "ms-playwright")]
+      : [path.join(home, ".cache/ms-playwright")];
+  const roots = [process.env.PLAYWRIGHT_BROWSERS_PATH, "/opt/pw-browsers", ...defaults]
+    .filter(Boolean);
   for (const r of roots) {
     let names = [];
     try { names = fs.readdirSync(r); } catch { continue; }
