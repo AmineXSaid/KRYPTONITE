@@ -582,6 +582,46 @@ function contrast(a, b) {
     await ctx.close();
   }
 
+  /* ── 5c3. the phase control is a segmented control ─────────────────── */
+  {
+    // ASK / PLAN / ACT are 3, 4 and 3 characters. In a monospace that is a
+    // hard one-character difference, so the segments were 34.5 / 42 / 35.5px
+    // and the filled one sat in a box a different size from its neighbours.
+    // Equal tracks are what makes it read as one control rather than three
+    // buttons that happen to touch.
+    //
+    // Also asserts the label is centred in its own segment, which is the other
+    // half of the same complaint and is easy to lose to a stray text-indent.
+    const { ctx, page } = await open(400, {});
+    const seg = await page.evaluate(() => {
+      const out = [];
+      for (const b of document.querySelectorAll(".seg button")) {
+        const r = b.getBoundingClientRect();
+        const cs = getComputedStyle(b);
+        const rng = document.createRange();
+        rng.selectNodeContents(b);
+        const ink = rng.getBoundingClientRect();
+        out.push({ label: (b.textContent || "").trim(),
+                   w: Math.round(r.width * 10) / 10,
+                   // Ink centre against the button's own centre.
+                   off: Math.round(((ink.left + ink.right) / 2 - (r.left + r.right) / 2) * 10) / 10,
+                   align: cs.textAlign });
+      }
+      return out;
+    });
+    ok("the phase control has three segments", seg.length === 3, JSON.stringify(seg));
+    const widths = [...new Set(seg.map((s) => s.w))];
+    ok("and every segment is the same width",
+      widths.length === 1, seg.map((s) => `${s.label} ${s.w}px`).join(", "));
+    for (const s of seg) {
+      // 1.5px covers the half-pixel of a centred odd-width glyph run plus the
+      // deliberate text-indent that compensates for trailing letter-spacing.
+      ok(`the ${s.label} label sits centred in its segment`,
+        Math.abs(s.off) <= 1.5, `off by ${s.off}px, text-align ${s.align}`);
+    }
+    await ctx.close();
+  }
+
   /* ── 5d. the MCP tab at a narrow dock ──────────────────────────────── */
   {
     // Neither of these was catchable from the document's scroll width, which is

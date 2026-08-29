@@ -284,6 +284,62 @@ async function main() {
     const bescape = typeof escape.content === "string" ? escape.content : JSON.stringify(escape.content);
     ck(!/Attached file/.test(bescape), "and neither is anything outside the workspace");
 
+    // Names the picker's detector was widened to reach. test/mentions.cjs
+    // proves the PICKER opens for these; without the other half a file could
+    // be found, offered, inserted, and then silently not attached - which is
+    // the exact failure this section exists for, one layer down.
+    const odd: Array<[string, string]> = [
+      ["Tests/café/menu.ts", "const CAFE = 1;\n"],
+      ["Tests/日本語/読む.ts", "const YOMU = 2;\n"],
+      ["Tests/c++/main.cc", "int cpp_main() { return 3; }\n"],
+      ["Tests/tag#1.txt", "hash-in-the-name\n"],
+      ["Tests/my notes.md", "# spaced\n"],
+    ];
+    for (const [rel, body] of odd) {
+      fs.mkdirSync(path.join(root, path.dirname(rel)), { recursive: true });
+      fs.writeFileSync(path.join(root, rel), body, "utf8");
+    }
+    for (const [rel, body] of odd) {
+      const marker = body.trim().split("\n")[0];
+      if (rel.includes(" ")) continue;
+      const msg = compose(`look at @${rel}`);
+      const b = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+      ck(b.includes(marker), `@${rel} is attached, contents and all`);
+      ck(b.includes(rel), `and named so the model knows which file  (${rel})`);
+    }
+
+    // A path with a space, both ways round. The bare form ends at the space -
+    // `@src/my notes.md` resolves `src/my`, which does not exist - and the
+    // file was then dropped in SILENCE, after the picker had found it, offered
+    // it and inserted it. The picker quotes such a path now, and the quoted
+    // form is what has to attach.
+    const spaced = "Tests/my notes.md";
+    const bare = compose(`look at @${spaced}`);
+    const bbare = typeof bare.content === "string" ? bare.content : JSON.stringify(bare.content);
+    ck(!bbare.includes("# spaced"),
+      "a bare mention of a path with a space still cannot resolve - it ends at the space");
+
+    const quoted = compose(`look at @"${spaced}"`);
+    const bq = typeof quoted.content === "string" ? quoted.content : JSON.stringify(quoted.content);
+    ck(bq.includes("# spaced"), "but the QUOTED form the picker writes does attach it");
+    ck(bq.includes(spaced), "and names it in full, space and all");
+
+    // Quoting must not become a way out of the workspace or past the gate.
+    const qEscape = compose('read @"../../../etc/passwd"');
+    const bqe = typeof qEscape.content === "string" ? qEscape.content : JSON.stringify(qEscape.content);
+    ck(!/Attached file/.test(bqe), "a quoted mention cannot escape the workspace either");
+    const qSecret = compose('check @".git-credentials"');
+    const bqs = typeof qSecret.content === "string" ? qSecret.content : JSON.stringify(qSecret.content);
+    ck(!/github\.com/.test(bqs), "nor inline a credential store");
+
+    // Inside quotes every character belongs to the name: a file really can end
+    // in a bracket, and the bare form's punctuation strip must not apply.
+    fs.writeFileSync(path.join(root, "Tests", "odd (1).txt"), "bracketed-name\n", "utf8");
+    const qBracket = compose('open @"Tests/odd (1).txt"');
+    const bqb = typeof qBracket.content === "string" ? qBracket.content : JSON.stringify(qBracket.content);
+    ck(bqb.includes("bracketed-name"),
+      "a quoted name keeps trailing punctuation that the bare form would strip");
+
     await app.dispose();
   }
 

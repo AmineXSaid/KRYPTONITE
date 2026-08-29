@@ -399,11 +399,23 @@ export class SessionController {
     let budget = BUDGET;
 
     // The same shape the picker inserts, plus a trailing slash for a folder.
-    // Trailing punctuation belongs to the sentence, not the path.
-    const re = /(?:^|\s)@([^\s]+)/g;
+    //
+    // Two forms, because a path may contain a space. The bare form ends at
+    // whitespace, so `@src/my notes.md` used to resolve `src/my` - a path that
+    // does not exist - and the file was then dropped in silence: the picker
+    // found it, offered it, inserted it, and nothing was attached. That is the
+    // same failure this whole method exists to fix, one case further out. The
+    // picker now writes `@"src/my notes.md"` whenever the path has whitespace
+    // in it, and the quoted form is read back here.
+    //
+    // Trailing punctuation belongs to the sentence, not the path - but only in
+    // the BARE form. Inside quotes every character is part of the name, and a
+    // file really can end in a bracket.
+    const re = /(?:^|\s)@(?:"([^"\n]+)"|([^\s]+))/g;
     for (const m of text.matchAll(re)) {
       if (budget <= 0) break;
-      let rel = m[1].replace(/[.,;:!?)\]}'"]+$/, "");
+      const quoted = m[1] !== undefined;
+      let rel = quoted ? m[1] : m[2].replace(/[.,;:!?)\]}'"]+$/, "");
       const wantsDir = rel.endsWith("/");
       if (wantsDir) rel = rel.slice(0, -1);
       if (!rel || seen.has(rel)) continue;

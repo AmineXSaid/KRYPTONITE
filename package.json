@@ -283,7 +283,7 @@
     "test:mcp": "npm install --no-save @modelcontextprotocol/server-filesystem @modelcontextprotocol/server-memory && esbuild test/mcp-e2e.ts --bundle --outdir=dist --out-extension:.js=.cjs --format=cjs --platform=node --target=node20 && node dist/mcp-e2e.cjs",
     "verify": "npm run typecheck && npm test",
     "vscode:prepublish": "npm run build",
-    "package": "vsce package --no-dependencies && node test/vsix.cjs && node test/render.cjs",
+    "package": "vsce package --no-dependencies && node test/vsix.cjs && node test/render.cjs && node test/mentions.cjs",
     "test:vsix": "node test/vsix.cjs",
     "test:render": "node test/render.cjs"
   },

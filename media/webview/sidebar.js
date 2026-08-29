@@ -3565,10 +3565,19 @@ function _sbRun() {
     } else if (r.file) {
       // A folder keeps its trailing slash so the model can tell "this
       // directory" from "a file with no extension".
-      var suffix = r.badge === "folder" ? "/ " : " ";
+      var pathText = r.file + (r.badge === "folder" ? "/" : "");
+      // A path containing whitespace is quoted. The host reads a bare mention
+      // up to the first space, so `@src/my notes.md` reached it as `src/my` -
+      // a path that does not exist - and the file was dropped without a word.
+      // The picker had found it, offered it and inserted it, so every visible
+      // sign said it had worked.
+      //
+      // The directory slash goes INSIDE the quotes. Outside it would sit after
+      // the closing quote, where the host's quoted branch never sees it.
+      var ref = /\s/.test(pathText) ? '"' + pathText + '"' : pathText;
       // Same class as the detector above, for the same reason: a narrower one
       // here would leave the tail of a non-ASCII path behind the inserted one.
-      draft.value = draft.value.replace(/@(\S*)$/, "@" + r.file + suffix);
+      draft.value = draft.value.replace(/@(\S*)$/, "@" + ref + " ");
     } else if (r.agent !== undefined) {
       post("setAgent", { name: r.agent });
       S.agentOpen = false;
