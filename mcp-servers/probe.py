@@ -51,12 +51,18 @@ from readonly_client.errors import AuthError, ServiceError, TransportError  # no
 from readonly_client.http import ReadOnlyClient  # noqa: E402
 from readonly_client.paths import gitlab as gl_paths  # noqa: E402
 from readonly_client.paths import jenkins as jk_paths  # noqa: E402
+from readonly_client.attachments import is_viewable_image  # noqa: E402
 from readonly_client.paths.atlassian import (  # noqa: E402
+    CONFLUENCE_ATTACHMENTS,
     CONFLUENCE_PROBE,
+    CONFLUENCE_SEARCH,
     EXTRA_HEADERS,
+    JIRA_ISSUE,
+    JIRA_SEARCH,
     JIRA_SERVER_INFO,
     SEARCH_POST_ALLOWLIST,
     WRONG_PATH_HINT,
+    download_url_for,
 )
 
 GREEN, RED, YELLOW, DIM, RESET = "\033[32m", "\033[31m", "\033[33m", "\033[2m", "\033[0m"
@@ -78,6 +84,150 @@ def warn(msg: str) -> None:
 
 def note(msg: str) -> None:
     print(f"    {DIM}{msg}{RESET}")
+
+
+async def _check_download(client, cfg, link: object, name: str) -> None:
+    """Confirm the download location the instance named is actually fetchable.
+
+    This is the only part of the attachment path that a metadata call cannot
+    prove. ``_links.download`` and Jira's ``content`` are strings in a payload;
+    whether a GET on them returns bytes depends on the context path, the
+    reverse proxy and whether attachments are served by the app at all - none
+    of which is visible from the JSON.
+
+    Capped hard. A probe that pulls a 40 MB screenshot to prove a route exists
+    is a probe nobody runs twice.
+    """
+    path = download_url_for(link, cfg.base_url)
+    if not path:
+        bad(f"  {name}: the payload named no usable download location.")
+        note(f"  raw value: {link!r}")
+        note("  If that is an absolute URL on another hostname, attachments are")
+        note("  served from a second host and these tools cannot follow it -")
+        note("  point the BASE_URL at whichever host serves both.")
+        return
+    try:
+        got = await client.get_bytes(path, max_bytes=262_144)
+    except ServiceError as exc:
+        if "abandoned" in str(exc) or "not downloaded" in str(exc):
+            # Bigger than the probe's cap, which proves the route works.
+            ok(f"  {name}: download route reachable (file exceeds the probe's 256 KB cap).")
+            return
+        bad(f"  {name}: GET {path} failed.")
+        note(f"  {exc}")
+        return
+    ok(f"  {name}: {len(got.content):,} bytes, served as {got.content_type or 'no content-type'}.")
+    if not is_viewable_image(got.content_type):
+        warn(f"  the instance served it as {got.content_type!r}, which a model cannot be shown.")
+
+
+async def _probe_confluence_attachments(client, cfg) -> None:
+    """Whether `child/attachment` exists here, and whether its links resolve.
+
+    Both are NEEDS-PROBE in paths/atlassian.py: `developer.atlassian.com` is
+    blocked from the build environment, so the shape is corroborated rather
+    than confirmed. This is the check that settles it against your instance.
+    """
+    print(f"\n{DIM}attachments{RESET}")
+    try:
+        found = await client.get(
+            CONFLUENCE_SEARCH,
+            params={"cql": "type = page ORDER BY lastmodified DESC", "limit": 8},
+        )
+    except ServiceError as exc:
+        warn("Could not list recent pages, so attachments were not probed.")
+        note(str(exc))
+        return
+
+    pages = [p for p in (found.get("results") or []) if isinstance(p, dict)]
+    if not pages:
+        warn("No pages visible to this account, so attachments were not probed.")
+        return
+
+    for page in pages:
+        pid = str(page.get("id") or "")
+        if not pid:
+            continue
+        try:
+            raw = await client.get(
+                CONFLUENCE_ATTACHMENTS.format(page_id=pid),
+                params={"limit": 10, "start": 0, "expand": "version"},
+            )
+        except ServiceError as exc:
+            bad(f"GET {CONFLUENCE_ATTACHMENTS.format(page_id=pid)} failed.")
+            note(str(exc))
+            note("A 404 here means this deployment does not serve attachments as")
+            note("children of content, and confluence_get_attachment cannot work.")
+            return
+        items = [a for a in (raw.get("results") or []) if isinstance(a, dict)]
+        if not items:
+            continue
+
+        ok(f"GET {CONFLUENCE_ATTACHMENTS.format(page_id='<id>')} -> 200 (page {pid})")
+        images = [
+            a for a in items
+            if is_viewable_image(
+                (a.get("extensions") or {}).get("mediaType")
+                or (a.get("metadata") or {}).get("mediaType")
+            )
+        ]
+        note(f"{len(items)} attachment(s), {len(images)} of them images a model can read")
+        target = images[0] if images else items[0]
+        links = target.get("_links") or {}
+        await _check_download(client, cfg, links.get("download"), str(target.get("title") or "?"))
+        return
+
+    warn("None of the 8 most recent pages has an attachment, so the download")
+    warn("route was not exercised. Re-run against a page you know has an image:")
+    note("  the listing endpoint answered, which is the half that could 404.")
+
+
+async def _probe_jira_attachments(client, cfg) -> None:
+    """The same question for Jira, where attachments are a FIELD, not a child.
+
+    So the listing half needs no new endpoint and cannot 404 on its own. What
+    is genuinely unverified is Jira's `content` URL: it is absolute, built by
+    the instance, and this client reduces it to a path on the configured host.
+    """
+    print(f"\n{DIM}attachments{RESET}")
+    try:
+        found = await client.get(
+            JIRA_SEARCH,
+            params={
+                "jql": "attachments IS NOT EMPTY ORDER BY updated DESC",
+                "maxResults": 1,
+                "fields": "key",
+            },
+        )
+    except ServiceError as exc:
+        warn("Could not search for issues with attachments.")
+        note(str(exc))
+        note("If that is a 400, this instance may name the field differently -")
+        note("try `attachment is not EMPTY` in the Jira UI and say which works.")
+        return
+
+    issues = [i for i in (found.get("issues") or []) if isinstance(i, dict)]
+    if not issues:
+        warn("No issue with an attachment is visible to this account, so the")
+        warn("download route was not exercised.")
+        return
+
+    key = str(issues[0].get("key") or "")
+    try:
+        raw = await client.get(JIRA_ISSUE.format(issue_key=key), params={"fields": "attachment"})
+    except ServiceError as exc:
+        bad(f"GET {JIRA_ISSUE.format(issue_key=key)}?fields=attachment failed.")
+        note(str(exc))
+        return
+
+    items = [a for a in ((raw.get("fields") or {}).get("attachment") or []) if isinstance(a, dict)]
+    ok(f"GET /rest/api/2/issue/<key>?fields=attachment -> 200 ({key})")
+    images = [a for a in items if is_viewable_image(a.get("mimeType"))]
+    note(f"{len(items)} attachment(s), {len(images)} of them images a model can read")
+    if not items:
+        return
+    target = images[0] if images else items[0]
+    await _check_download(client, cfg, target.get("content"), str(target.get("filename") or "?"))
 
 
 async def probe_jira() -> bool:
@@ -107,14 +257,26 @@ async def probe_jira() -> bool:
     note(f"CA bundle: {cfg.ca_bundle or 'system default'}")
     note(f"Proxy: {os.environ.get('HTTPS_PROXY') or 'none'}")
 
-    async with ReadOnlyClient(cfg) as client:
+    # One client for the whole section: reopening a pool per check would make
+    # a proxy or a CA problem look like an intermittent failure.
+    client = ReadOnlyClient(cfg)
+    try:
         try:
             data = await client.get(JIRA_SERVER_INFO)
         except ServiceError as exc:
             bad(f"GET {JIRA_SERVER_INFO} failed.")
             note(str(exc))
             return False
+        _report_jira(data)
+        await _probe_jira_attachments(client, cfg)
+    finally:
+        await client.aclose()
+    return True
 
+
+def _report_jira(data) -> None:
+    """The deployment report, split out so probe_jira reads as a sequence of
+    checks rather than one function with two jobs."""
     version = data.get("version", "unknown")
     deployment = data.get("deploymentType", "unknown")
     ok(f"GET {JIRA_SERVER_INFO} -> 200")
@@ -136,8 +298,6 @@ async def probe_jira() -> bool:
         note("Also set ATLASSIAN_AUTH_MODE=basic with email + API token.")
     else:
         warn(f"Unrecognised deploymentType {deployment!r}. Send me this output.")
-
-    return True
 
 
 async def probe_confluence() -> bool:
@@ -165,7 +325,9 @@ async def probe_confluence() -> bool:
 
     ok(f"Config loaded. Base URL {cfg.base_url}, auth mode {cfg.auth_mode}.")
 
-    async with ReadOnlyClient(cfg) as client:
+    # One client for the whole section: see probe_jira.
+    client = ReadOnlyClient(cfg)
+    try:
         try:
             data = await client.get(CONFLUENCE_PROBE, params={"limit": 1})
         except ServiceError as exc:
@@ -178,15 +340,19 @@ async def probe_confluence() -> bool:
             note("Cloud and I need to add a Cloud path set.")
             return False
 
-    ok(f"GET {CONFLUENCE_PROBE} -> 200")
-    ok("Data Center API root confirmed: /rest/api with no /wiki prefix.")
-    results = data.get("results", [])
-    note(f"visible spaces (first page) {data.get('size', len(results))}")
-    if results:
-        first = results[0]
-        note(f"sample space  {first.get('key', '?')} - {first.get('name', '?')}")
-    note("Confluence search: /rest/api/content/search?cql=... with start + limit.")
-    note("The Cloud v2 API (/wiki/api/v2/) does not exist on Data Center.")
+        ok(f"GET {CONFLUENCE_PROBE} -> 200")
+        ok("Data Center API root confirmed: /rest/api with no /wiki prefix.")
+        results = data.get("results", [])
+        note(f"visible spaces (first page) {data.get('size', len(results))}")
+        if results:
+            first = results[0]
+            note(f"sample space  {first.get('key', '?')} - {first.get('name', '?')}")
+        note("Confluence search: /rest/api/content/search?cql=... with start + limit.")
+        note("The Cloud v2 API (/wiki/api/v2/) does not exist on Data Center.")
+
+        await _probe_confluence_attachments(client, cfg)
+    finally:
+        await client.aclose()
     return True
 
 

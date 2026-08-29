@@ -3,6 +3,57 @@
 ## Unreleased
 
 ### Added
+- **An MCP server can now hand the model a picture.** An image content block in
+  a tool result reaches the request body as an image, instead of being
+  flattened to the six-character string `[image: image/png]`.
+
+  The reason this mattered is not that a feature was missing. It is that the
+  failure was silent: a read-only Confluence or Jira server could return the
+  diagram attached to a page, the model would receive the words "image, png",
+  and it would then answer about a document it had never seen. Nothing in the
+  transcript said a picture had been dropped.
+
+  The pipe already existed - it was built for browser screenshots, and only the
+  browser used it. Now every server shares it, with the bounds that a tool
+  result carrying pixels needs: png, jpeg, gif and webp only, since those are
+  what the model wires accept inline; caps by image count, per image and per
+  result; and a `data:` prefix stripped rather than forwarded, because a server
+  built by pasting a browser data URI in otherwise produces a 400 that names
+  neither the server nor the tool.
+
+  Every refusal is stated in the text where the picture would have been, and
+  numbered markers hold each image's place, so a result that is a caption, a
+  diagram, a second caption and a second diagram does not arrive as two
+  captions and two loose pictures.
+
+  **This needs an endpoint that declares vision** - `capabilities.vision: true`,
+  or `kind: multimodal`, which implies it. Without it the pixels are withheld
+  on purpose: a gateway that cannot take an image answers an image block with a
+  400 for the whole turn, which is worse than the description it replaced. The
+  model still gets the description, plus one line naming the field that would
+  have shown it the picture - so the next thing you read tells you what to
+  change, rather than leaving you to notice that the answer was invented.
+- **The Jira and Confluence MCP servers can fetch attachments.**
+  `confluence_get_attachment`, `confluence_list_attachments`,
+  `jira_get_attachment` and `jira_list_attachments`, in `mcp-servers/`. A
+  Confluence page body reaches the model as `[image: topology.png]`; these turn
+  that name into the picture. The page body now also says so once, naming the
+  tool, because a marker a model cannot act on reads exactly like a marker
+  there is nothing behind.
+
+  The download follows the location the instance itself named - Confluence's
+  `_links.download`, Jira's `content` - rather than a path built from a
+  template. That is what survives a context path, a reverse proxy and a version
+  that moved the route, and it matters more than usual here: this build
+  environment cannot reach `developer.atlassian.com`, so a hardcoded download
+  path would have been a guess dressed as a constant.
+
+  A redirect is followed only within the configured instance. The credential is
+  a client-wide header, so following a `Location` off-host would present the
+  token to whatever host answered - and nothing about a 302 is authenticated.
+  An attachment over ~3.75 MB is refused rather than truncated: half a file is
+  a decode error, not a picture.
+
 - **A read-only MCP server can now be used in Ask and Plan.** Mark it
   `"readOnly": true` in `.agent/mcp.json` and its tools are offered in the two
   modes that previously withheld MCP entirely.

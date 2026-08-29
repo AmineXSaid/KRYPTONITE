@@ -21,6 +21,9 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from readonly_client.attachments import shape_attachment
+from readonly_client.paths.atlassian import download_url_for
+
 # Requested from the API so the instance sends less over the wire, not just so
 # we drop less. On a wide instance this is the difference between a 2 MB search
 # response and a 60 KB one.
@@ -192,3 +195,28 @@ def shape_field(raw: Mapping[str, Any]) -> dict[str, Any]:
         "type": schema.get("type") if isinstance(schema, Mapping) else None,
         "clause_names": raw.get("clauseNames") or [],
     }
+
+
+def shape_jira_attachment(raw: Mapping[str, Any], *, base_url: str) -> dict[str, Any]:
+    """One entry from an issue's ``attachment`` field.
+
+    Jira's ``content`` is an ABSOLUTE URL built by the instance, which is why
+    it goes through ``download_url_for`` rather than being used as-is: that
+    reduces it to a path on this instance and returns None for any other host,
+    so the client's credential cannot follow a URL the payload chose.
+
+    ``thumbnail`` is deliberately ignored. It exists on image attachments and
+    is tempting - it is small - but it is a downscaled preview, and a model
+    asked to read a diagram from a thumbnail reports that the labels are
+    illegible, which is true and useless. The full file is what was asked for.
+    """
+    return shape_attachment(
+        attachment_id=str(raw.get("id")) if raw.get("id") is not None else None,
+        filename=raw.get("filename") if isinstance(raw.get("filename"), str) else None,
+        media_type=raw.get("mimeType") if isinstance(raw.get("mimeType"), str) else None,
+        size=raw.get("size") if isinstance(raw.get("size"), int) else None,
+        download_path=download_url_for(raw.get("content"), base_url),
+        page_url=raw.get("content") if isinstance(raw.get("content"), str) else None,
+        created=raw.get("created") if isinstance(raw.get("created"), str) else None,
+        author=_person(raw.get("author")),
+    )

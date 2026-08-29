@@ -14,6 +14,9 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from readonly_client.attachments import shape_attachment
+from readonly_client.paths.atlassian import download_url_for
+
 from .storage import html_excerpt, storage_to_markdown
 
 
@@ -132,13 +135,27 @@ def shape_page(
             node = body.get("storage")
             if isinstance(node, Mapping) and isinstance(node.get("value"), str):
                 storage = node["value"]
-        shaped["body"] = storage_to_markdown(storage)
+        markdown = storage_to_markdown(storage)
+        shaped["body"] = markdown
         shaped["body_format"] = "markdown"
         # Says plainly that a conversion happened, so a caller comparing this
         # against the page in a browser knows why the markup differs.
-        shaped["body_note"] = (
-            "Converted from Confluence storage format (XHTML) to Markdown."
-        )
+        note = "Converted from Confluence storage format (XHTML) to Markdown."
+        # An image survives the conversion as `[image: topology.png]`, which is
+        # a filename and not a picture. Said ONCE here rather than inlined at
+        # every marker: a page with twenty screenshots would otherwise repeat
+        # the same sentence twenty times, and the model needs the tool name, not
+        # the reminder. Without it, `[image: ...]` is a dead end that reads like
+        # one - which is how a model ends up describing a diagram it never saw.
+        images = markdown.count("[image: ")
+        if images:
+            note += (
+                f" {images} image(s) appear as [image: filename] markers. Those are"
+                " names, not pictures: call confluence_get_attachment(page_id,"
+                " filename) to actually see one, or confluence_list_attachments"
+                " to find out which of them are images at all."
+            )
+        shaped["body_note"] = note
 
     return shaped
 
@@ -152,3 +169,42 @@ def shape_space(raw: Mapping[str, Any], *, base_url: str) -> dict[str, Any]:
         "type": raw.get("type"),
         "url": _webui_url(raw, base_url),
     }
+
+
+def shape_confluence_attachment(raw: Mapping[str, Any], *, base_url: str) -> dict[str, Any]:
+    """One entry from ``content/{id}/child/attachment``.
+
+    Two fields are read from two places each, and neither pair is redundant:
+
+    ``extensions.mediaType`` and ``extensions.fileSize`` are where Data Center
+    puts them; ``metadata.mediaType`` is where Cloud does. This package targets
+    DC, but a user who points it at Cloud gets a working list rather than a
+    row of nulls that looks like an empty page - and the probe, not a silently
+    degraded payload, is what should tell them which they are on.
+
+    The download link is taken from ``_links.download`` rather than built,
+    because that is the only form that already carries the instance's context
+    path and its version query. See ``download_url_for``.
+    """
+    ext = raw.get("extensions") if isinstance(raw.get("extensions"), Mapping) else {}
+    meta = raw.get("metadata") if isinstance(raw.get("metadata"), Mapping) else {}
+    links = raw.get("_links") if isinstance(raw.get("_links"), Mapping) else {}
+
+    media = ext.get("mediaType") or meta.get("mediaType")
+    size = ext.get("fileSize")
+    if not isinstance(size, int):
+        size = None
+
+    version = raw.get("version") if isinstance(raw.get("version"), Mapping) else {}
+    by = version.get("by") if isinstance(version.get("by"), Mapping) else {}
+
+    return shape_attachment(
+        attachment_id=str(raw.get("id")) if raw.get("id") is not None else None,
+        filename=raw.get("title") if isinstance(raw.get("title"), str) else None,
+        media_type=media if isinstance(media, str) else None,
+        size=size,
+        download_path=download_url_for(links.get("download"), base_url),
+        page_url=_webui_url(raw, base_url),
+        created=version.get("when") if isinstance(version.get("when"), str) else None,
+        author=by.get("displayName") if isinstance(by.get("displayName"), str) else None,
+    )

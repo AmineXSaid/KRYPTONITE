@@ -16,11 +16,13 @@ import asyncio
 import sys
 from typing import Any
 
+from readonly_client.attachments import fetch_attachment, pick_attachment
 from readonly_client.config import ConfigError, load_config
-from readonly_client.mcp_compat import build_server
+from readonly_client.mcp_compat import ImageBlock, build_server
 from readonly_client.errors import ServiceError
 from readonly_client.http import ReadOnlyClient
 from readonly_client.paths.atlassian import (
+    CONFLUENCE_ATTACHMENTS,
     CONFLUENCE_CONTENT,
     CONFLUENCE_SEARCH,
     CONFLUENCE_SPACES,
@@ -28,7 +30,7 @@ from readonly_client.paths.atlassian import (
     WRONG_PATH_HINT,
 )
 
-from .shaping import shape_page, shape_search, shape_space
+from .shaping import shape_confluence_attachment, shape_page, shape_search, shape_space
 
 # FastMCP in SDK 1.x, MCPServer in 2.x - same decorator model either way.
 # See readonly_client.mcp_compat.
@@ -36,7 +38,8 @@ mcp = build_server(
     "confluence-mcp",
     instructions=(
         "Read-only access to a Confluence Data Center instance. Search with CQL"
-        ", read pages as Markdown, list spaces. This server cannot modify anything."
+        ", read pages as Markdown, list spaces, and fetch attached images so"
+        " they can actually be looked at. This server cannot modify anything."
     ),
 )
 
@@ -165,6 +168,97 @@ async def confluence_get_page(
         params={"expand": ",".join(expand)},
     )
     return shape_page(raw, base_url=_config.base_url, include_body=fmt == "storage")
+
+
+async def _attachments_for(page_id: str) -> list[dict[str, Any]]:
+    """Every attachment on a page, projected. Shared by both tools below.
+
+    Not a tool itself: `confluence_get_attachment` needs the same list in order
+    to resolve a filename to a download link, and calling the listing tool from
+    inside the fetching one would mean the fetch inherits whatever the listing
+    tool's paging did.
+    """
+    client = _require_client()
+    assert _config is not None
+    raw = await client.get(
+        CONFLUENCE_ATTACHMENTS.format(page_id=page_id),
+        # `version` carries who attached it and when. The cap is the config's,
+        # so a page with hundreds of attachments cannot flood the context.
+        params={"limit": _config.max_results_cap, "start": 0, "expand": "version"},
+    )
+    results = raw.get("results") if isinstance(raw, dict) else None
+    return [
+        shape_confluence_attachment(a, base_url=_config.base_url)
+        for a in (results or [])
+        if isinstance(a, dict)
+    ]
+
+
+@mcp.tool()
+async def confluence_list_attachments(page_id: str) -> dict[str, Any]:
+    """List the files attached to a Confluence page. READ-ONLY.
+
+    A page body converted to Markdown shows an image as `[image: name.png]`,
+    which is a filename and not a picture. This is how you find out what those
+    names refer to, and which of them confluence_get_attachment can actually
+    show you.
+
+    Args:
+        page_id: Numeric content id, e.g. "123456789" - the same id
+            confluence_get_page takes, not the page title.
+
+    Each entry carries filename, media_type, size, author and two flags worth
+    reading before you ask for the bytes:
+
+        viewable      - the model can look at this one. png, jpeg, gif, webp.
+        downloadable  - the instance told us where the bytes are.
+
+    A PDF or an .xlsx lists with viewable: false. That is not a failure, it is
+    the honest answer: this server does not convert documents, and pretending
+    otherwise would hand the model a blob it cannot read.
+    """
+    pid = (page_id or "").strip()
+    if not pid:
+        raise ServiceError(
+            "page_id is required. It is the numeric content id from "
+            "confluence_search, e.g. 123456789 - not the page title."
+        )
+    items = await _attachments_for(pid)
+    return {
+        "page_id": pid,
+        "returned": len(items),
+        "viewable": sum(1 for a in items if a.get("viewable")),
+        "attachments": items,
+    }
+
+
+@mcp.tool()
+async def confluence_get_attachment(page_id: str, filename: str) -> list[dict[str, Any] | ImageBlock]:
+    """Fetch one image attached to a Confluence page, so the model can SEE it.
+
+    READ-ONLY - this never modifies anything.
+
+    This is the tool that turns `[image: topology.png]` in a page body into an
+    actual picture. Use confluence_list_attachments first if you do not know
+    the exact filename; a near miss is matched case-insensitively and by
+    substring, but an ambiguous one is refused rather than guessed.
+
+    Args:
+        page_id: Numeric content id, e.g. "123456789".
+        filename: The attachment's name, e.g. "topology.png".
+
+    Returns a summary followed by the image itself. Only png, jpeg, gif and
+    webp are fetched - those are what a model can be shown - and anything
+    larger than a few megabytes is refused rather than truncated, because half
+    a file is a decode error rather than a picture.
+    """
+    pid = (page_id or "").strip()
+    if not pid:
+        raise ServiceError("page_id is required, e.g. 123456789.")
+
+    items = await _attachments_for(pid)
+    chosen = pick_attachment(items, filename, where=f"page {pid}")
+    return await fetch_attachment(chosen, _require_client())
 
 
 @mcp.tool()

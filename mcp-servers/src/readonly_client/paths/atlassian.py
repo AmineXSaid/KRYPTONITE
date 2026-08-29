@@ -36,6 +36,8 @@ Set ATLASSIAN_AUTH_MODE and the base URLs to match whichever the probe reports.
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 # ─────────────────────────────── Jira (Data Center) ────────────────────────
 #
 # Doc: https://developer.atlassian.com/server/jira/platform/rest/v10004/
@@ -68,6 +70,19 @@ JIRA_PROJECTS = "/rest/api/2/project"
 # ids that make the `fields` parameter usable.
 JIRA_FIELDS = "/rest/api/2/field"
 
+# Attachments are NOT a separate listing endpoint on Jira: they are a field on
+# the issue, so listing them is `JIRA_ISSUE` with `fields=attachment` and needs
+# no new path at all. Each entry carries a `content` URL that Jira builds
+# itself, and following that is what downloads the file.
+#
+# Status: NEEDS-PROBE, and deliberately unused unless the issue payload gives
+# us nothing. The `content` URL is the instance's own answer to "where is this
+# file", so it survives a context path, a reverse proxy rewriting /secure, and
+# any version that moved the route - none of which a hardcoded path survives.
+# This constant exists only so a payload missing `content` produces a request
+# rather than a shrug, and `download_url_for` below is what decides.
+JIRA_ATTACHMENT_CONTENT = "/secure/attachment/{attachment_id}/{filename}"
+
 
 # ──────────────────────────── Confluence (Data Center) ─────────────────────
 #
@@ -90,6 +105,62 @@ CONFLUENCE_CONTENT = "/rest/api/content/{page_id}"
 
 # Status: CONFIRMED-DC.
 CONFLUENCE_SPACES = "/rest/api/space"
+
+# Status: NEEDS-PROBE. Attachments are children of a page in Confluence's
+# content tree, which is why this is `child/attachment` rather than an
+# endpoint of its own. Each result carries `_links.download`, a path relative
+# to the instance's context path, and following THAT is how the bytes are
+# fetched - see `download_url_for`.
+CONFLUENCE_ATTACHMENTS = "/rest/api/content/{page_id}/child/attachment"
+
+
+def download_url_for(link: object, base_url: str) -> str | None:
+    """The download path an Atlassian payload named, or None if there is none
+    this client may fetch.
+
+    Both products hand back the location of an attachment's bytes IN the
+    metadata: Confluence as ``_links.download`` (a path), Jira as ``content``
+    (an absolute URL). Following what the instance said beats building a path
+    from a template, and not by a little:
+
+      * A Data Center instance behind a context path serves Confluence at
+        ``/confluence/rest/api/...``. Every template in this file is written
+        without one, because the base URL carries it - but ``_links.download``
+        already includes it, so a template and a payload link cannot both be
+        appended to the same base URL. The link wins, and is reduced to a path
+        so it is the CLIENT's base URL that it is joined to.
+      * The download route is the part of these APIs most likely to have moved
+        between versions, and the part this build environment could least
+        verify: ``developer.atlassian.com`` is blocked from here, so a
+        hardcoded ``/download/attachments/...`` would be a guess dressed as a
+        constant. The instance is never guessing.
+
+    Returns a PATH, never a host, so a caller cannot present its credential
+    anywhere the base URL does not name. An absolute URL on a DIFFERENT host
+    returns None rather than a path: reducing it to a path would quietly
+    request that path from the configured instance instead, which 404s with a
+    message about the wrong file. Saying "this attachment is served from
+    somewhere else" is the true answer.
+    """
+    if not isinstance(link, str) or not link.strip():
+        return None
+    raw = link.strip()
+    if "://" not in raw:
+        return raw if raw.startswith("/") else "/" + raw
+
+    parts = urlsplit(raw)
+    base = urlsplit(base_url or "")
+    default = {"http": 80, "https": 443}
+    same = (
+        parts.scheme == base.scheme
+        and (parts.hostname or "") == (base.hostname or "")
+        and (parts.port or default.get(parts.scheme)) == (base.port or default.get(base.scheme))
+    )
+    if not same:
+        return None
+    if not parts.path:
+        return None
+    return f"{parts.path}?{parts.query}" if parts.query else parts.path
 
 
 # ─────────────────────────── the read-only surface ─────────────────────────

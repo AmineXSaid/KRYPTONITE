@@ -58,6 +58,17 @@ RETRY_STATUSES = frozenset({429, 502, 503, 504})
 # the cut happened rather than being handed a silently truncated log.
 DEFAULT_TEXT_LIMIT = 2 * 1024 * 1024
 
+# The largest attachment worth downloading, and the number is not arbitrary.
+# An image reaches the model as base64, and base64 of N bytes is 4*ceil(N/3)
+# characters: 3,750,000 bytes is exactly 5,000,000 characters, which is the
+# per-image cap the client enforces at the other end of the pipe. A byte over
+# this and the picture is fetched, encoded, sent and then dropped by the
+# client - all the cost of the download and none of the benefit.
+DEFAULT_BINARY_LIMIT = 3_750_000
+
+# A download endpoint that redirects more than this is not pointing at a file.
+MAX_DOWNLOAD_REDIRECTS = 3
+
 # Sentinel for "the body was there and was not JSON", so the raise happens
 # outside the except block and does not chain a ValueError onto the message.
 _NON_JSON = object()
@@ -185,6 +196,37 @@ class TextResponse:
 
     def __str__(self) -> str:  # pragma: no cover - convenience only
         return self.text
+
+
+class BinaryResponse:
+    """Bytes that are not text and must not be treated as text.
+
+    Deliberately has no ``truncated`` flag, unlike :class:`TextResponse`, and
+    that asymmetry is the whole design. The tail of a truncated log is still
+    the answer to "why did the build fail"; the first three megabytes of a
+    four-megabyte PNG is not a picture, it is a decode error at the model's
+    end that costs the download and explains nothing. So an oversized
+    attachment is REFUSED, with its real size named, and never delivered in
+    part.
+    """
+
+    __slots__ = ("content", "content_type", "url", "headers")
+
+    def __init__(
+        self,
+        content: bytes,
+        *,
+        content_type: str,
+        url: str,
+        headers: httpx.Headers | None = None,
+    ) -> None:
+        self.content = content
+        self.content_type = content_type
+        self.url = url
+        self.headers = headers if headers is not None else httpx.Headers()
+
+    def __len__(self) -> int:  # pragma: no cover - convenience only
+        return len(self.content)
 
 
 def _looks_like_html(body: str, content_type: str) -> bool:
@@ -386,6 +428,171 @@ class ReadOnlyClient:
                 content_type=ctype,
                 headers=response.headers,
             )
+
+    async def get_bytes(
+        self,
+        path: str,
+        *,
+        params: Mapping[str, Any] | None = None,
+        max_bytes: int | None = None,
+    ) -> BinaryResponse:
+        """GET a binary body - an attachment - streamed, size-checked, and
+        REFUSED rather than truncated when it is too big.
+
+        Three things here are absent from the JSON and text paths, and each is
+        a way this particular call goes wrong that the others cannot.
+
+        **Accept.** Every other request advertises ``application/json``, which
+        is what makes Atlassian answer with JSON rather than a login page. A
+        download endpoint asked for JSON can answer 406, so this one request
+        asks for anything.
+
+        **Redirects, followed by hand, same-origin only.** The client is built
+        with ``follow_redirects=False`` and that stays true. An attachment URL
+        on Data Center commonly 302s to ``/download/...``, so the hop has to be
+        followed for the tool to work at all - but the credential is a
+        client-wide header, so httpx would present it to whatever host the
+        Location names, and nothing about a 302 is authenticated. The hop is
+        therefore resolved, checked against the configured origin, and refused
+        if it leaves it: a refusal the caller can read, rather than a token
+        already sent.
+
+        **A size check before the transfer, not after.** ``Content-Length`` is
+        consulted first, so an oversized attachment costs one round trip rather
+        than a full download, and the stream is abandoned mid-flight for a
+        server that sent no length.
+        """
+        limit = DEFAULT_BINARY_LIMIT if max_bytes is None else max(1, int(max_bytes))
+        assert_read_only("GET", path, self._config.search_post_allowlist)
+        clean_params = {k: v for k, v in (params or {}).items() if v is not None}
+
+        target: Any = path
+        # Only the first hop carries the caller's query. A redirect target
+        # already has everything it needs in it, and re-appending ours produces
+        # a signed Atlassian download URL with a duplicated parameter.
+        query: Mapping[str, Any] | None = clean_params or None
+
+        for _ in range(MAX_DOWNLOAD_REDIRECTS + 1):
+            hop = await self._one_download_hop(target, query, path, limit)
+            if isinstance(hop, BinaryResponse):
+                return hop
+            target, query = hop, None
+
+        raise ServiceError(
+            f"{self._config.product} redirected {normalise_path(path)} more than "
+            f"{MAX_DOWNLOAD_REDIRECTS} times. That is a redirect loop or an SSO portal, "
+            "not an attachment."
+        )
+
+    async def _one_download_hop(
+        self,
+        target: Any,
+        query: Mapping[str, Any] | None,
+        path: str,
+        limit: int,
+    ) -> "BinaryResponse | httpx.URL":
+        """One request: the bytes, or the next URL to try.
+
+        Split out of :meth:`get_bytes` so the retry loop and the redirect loop
+        are two loops in two places rather than one nest with a break whose
+        target has to be worked out by reading it twice.
+        """
+        attempt = 0
+        while True:
+            try:
+                async with self._client.stream(
+                    "GET", target, params=query, headers={"Accept": "*/*"}
+                ) as response:
+                    if self._should_retry(response.status_code, attempt):
+                        await response.aclose()
+                        await asyncio.sleep(self._retry_delay(response, attempt))
+                        attempt += 1
+                        continue
+
+                    if response.status_code in (301, 302, 303, 307, 308):
+                        location = response.headers.get("location", "")
+                        await response.aclose()
+                        return self._same_origin_hop(location, response.url, path)
+
+                    if response.status_code >= 400:
+                        await response.aread()
+                        self._check(response, path)
+
+                    declared = response.headers.get("content-length", "")
+                    if declared.isdigit() and int(declared) > limit:
+                        await response.aclose()
+                        raise ServiceError(
+                            f"That attachment is {int(declared):,} bytes, over the "
+                            f"{limit:,}-byte limit, so it was not downloaded. A file this "
+                            "size would be dropped before the model ever saw it. Open it "
+                            "in a browser instead."
+                        )
+
+                    chunks: list[bytes] = []
+                    size = 0
+                    oversize = False
+                    async for chunk in response.aiter_bytes():
+                        size += len(chunk)
+                        if size > limit:
+                            oversize = True
+                            break
+                        chunks.append(chunk)
+                    if oversize:
+                        raise ServiceError(
+                            f"That attachment is larger than the {limit:,}-byte limit, so the "
+                            "download was abandoned. Half a file is not a file: it would reach "
+                            "the model as a decode error rather than a picture. Open it in a "
+                            "browser instead."
+                        )
+                    raw = b"".join(chunks)
+                    ctype = response.headers.get("content-type", "")
+                    final_url = str(response.url)
+            except httpx.HTTPError as exc:
+                raise self._transport(exc) from None
+
+            if _looks_like_html(raw[:512].decode("utf-8", errors="replace"), ctype):
+                raise ServiceError(
+                    f"{self._config.product} answered {normalise_path(path)} with HTML "
+                    "instead of a file. That is an SSO or reverse-proxy login page, not the "
+                    f"attachment. Check that the credential in {self._config.env_prefix}_TOKEN "
+                    "is valid."
+                )
+            return BinaryResponse(
+                raw, content_type=ctype, url=final_url, headers=response.headers
+            )
+
+    def _same_origin_hop(self, location: str, current: httpx.URL, path: str) -> httpx.URL:
+        """Resolve a redirect, refusing to leave the configured instance.
+
+        The credential rides on the client rather than on the request, so httpx
+        would present it to whatever host a Location header names. That host is
+        chosen by whoever can answer for the instance, which on a compromised
+        or merely mis-proxied deployment is not the instance.
+        """
+        if not location:
+            raise ServiceError(
+                f"{self._config.product} redirected {normalise_path(path)} with no Location "
+                "header. That is a broken response, not an attachment."
+            )
+        nxt = current.join(location)
+        origin = httpx.URL(self._config.base_url)
+        # httpx leaves `port` as None when the URL used the scheme's default,
+        # so https://host and https://host:443 must compare equal.
+        default = {"http": 80, "https": 443}
+        same = (
+            nxt.scheme == origin.scheme
+            and nxt.host == origin.host
+            and (nxt.port or default.get(nxt.scheme)) == (origin.port or default.get(origin.scheme))
+        )
+        if not same:
+            raise ServiceError(
+                f"{self._config.product} redirected the download to {nxt.scheme}://{nxt.host} "
+                f"but {self._config.base_url_var} names {origin.scheme}://{origin.host}. The "
+                "request was abandoned rather than presenting your credential to another host. "
+                "If the instance really does serve attachments from a second hostname, point "
+                f"{self._config.base_url_var} at the one that serves both."
+            )
+        return nxt
 
     def _should_retry(self, status: int, attempt: int) -> bool:
         return status in RETRY_STATUSES and attempt < MAX_RETRIES

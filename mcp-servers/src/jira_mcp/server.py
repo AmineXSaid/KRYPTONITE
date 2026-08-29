@@ -16,8 +16,9 @@ import asyncio
 import sys
 from typing import Any
 
+from readonly_client.attachments import fetch_attachment, pick_attachment
 from readonly_client.config import ConfigError, load_config
-from readonly_client.mcp_compat import build_server
+from readonly_client.mcp_compat import ImageBlock, build_server
 from readonly_client.errors import ServiceError
 from readonly_client.http import ReadOnlyClient
 from readonly_client.paths.atlassian import (
@@ -34,6 +35,7 @@ from .shaping import (
     DEFAULT_ISSUE_FIELDS,
     shape_field,
     shape_issue,
+    shape_jira_attachment,
     shape_project,
     shape_search,
 )
@@ -44,7 +46,8 @@ mcp = build_server(
     "jira-mcp",
     instructions=(
         "Read-only access to a Jira Data Center instance. Search with JQL, read"
-        " issues, list projects and fields. This server cannot modify anything."
+        " issues, list projects and fields, and fetch attached images so they"
+        " can actually be looked at. This server cannot modify anything."
     ),
 )
 
@@ -176,6 +179,89 @@ async def jira_get_issue(
         params={"fields": ",".join(requested)},
     )
     return shape_issue(raw, base_url=_config.base_url, extra_fields=extra)
+
+
+async def _attachments_for(issue_key: str) -> list[dict[str, Any]]:
+    """Every attachment on an issue, projected.
+
+    Jira has no attachment listing endpoint: attachments are a FIELD, so this
+    is `jira_get_issue` asking for one field and nothing else. Requesting only
+    `attachment` matters on a wide instance - the default projection drags in
+    seven more fields, and this call needs none of them.
+    """
+    client = _require_client()
+    assert _config is not None
+    raw = await client.get(
+        JIRA_ISSUE.format(issue_key=issue_key), params={"fields": "attachment"}
+    )
+    fields = raw.get("fields") if isinstance(raw, dict) else None
+    items = fields.get("attachment") if isinstance(fields, dict) else None
+    return [
+        shape_jira_attachment(a, base_url=_config.base_url)
+        for a in (items or [])
+        if isinstance(a, dict)
+    ]
+
+
+@mcp.tool()
+async def jira_list_attachments(issue_key: str) -> dict[str, Any]:
+    """List the files attached to a Jira issue. READ-ONLY.
+
+    A bug report's evidence is usually a screenshot, and jira_get_issue does
+    not carry attachments in its default projection. This is how you find out
+    what is attached and which of it jira_get_attachment can show you.
+
+    Args:
+        issue_key: The human key, e.g. "PLATFORM-1423" - not the numeric id.
+
+    Each entry carries filename, media_type, size, author and two flags worth
+    reading before asking for the bytes:
+
+        viewable      - the model can look at this one. png, jpeg, gif, webp.
+        downloadable  - the instance told us where the bytes are.
+
+    A .log or a .har lists with viewable: false. That is the honest answer:
+    this server does not convert files, and a model handed one would get a
+    blob rather than a document.
+    """
+    key = (issue_key or "").strip()
+    if not key:
+        raise ServiceError("issue_key is required, e.g. PLATFORM-1423.")
+    items = await _attachments_for(key)
+    return {
+        "issue_key": key,
+        "returned": len(items),
+        "viewable": sum(1 for a in items if a.get("viewable")),
+        "attachments": items,
+    }
+
+
+@mcp.tool()
+async def jira_get_attachment(issue_key: str, filename: str) -> list[dict[str, Any] | ImageBlock]:
+    """Fetch one image attached to a Jira issue, so the model can SEE it.
+
+    READ-ONLY - this never modifies anything.
+
+    Use jira_list_attachments first if you do not know the exact filename; a
+    near miss is matched case-insensitively and by substring, but an ambiguous
+    one is refused rather than guessed - a model told the right name can
+    correct itself, one handed the wrong screenshot cannot.
+
+    Args:
+        issue_key: e.g. "PLATFORM-1423".
+        filename: The attachment's name, e.g. "stacktrace.png".
+
+    Returns a summary followed by the image itself. Only png, jpeg, gif and
+    webp are fetched, and anything larger than a few megabytes is refused
+    rather than truncated: half a file is a decode error, not a picture.
+    """
+    key = (issue_key or "").strip()
+    if not key:
+        raise ServiceError("issue_key is required, e.g. PLATFORM-1423.")
+
+    items = await _attachments_for(key)
+    chosen = pick_attachment(items, filename, where=f"issue {key}")
+    return await fetch_attachment(chosen, _require_client())
 
 
 @mcp.tool()

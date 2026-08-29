@@ -123,7 +123,7 @@ starting and 401ing on every call.
 ## Test
 
 ```bash
-pytest            # 226 tests, no network access required
+pytest            # 261 tests, no network access required
 ```
 
 ---
@@ -204,6 +204,14 @@ console log can be hundreds of megabytes.
   is merely still running.
 - **Jenkins consoles** are read from the END, capped, with failure lines pulled
   out and gaps marked, and the log's true size reported alongside.
+- **Attachments** are the one thing NOT shaped down, because there is nothing
+  to shape: `confluence_get_attachment` and `jira_get_attachment` return a
+  summary block followed by the image itself. The summary is not decoration —
+  pixels with no filename, size or page give the model nothing to cite when it
+  reports what the diagram showed. They are also the one path that refuses
+  rather than truncates: a capped log still answers "why did the build fail",
+  while the first three megabytes of a four-megabyte PNG is a decode error that
+  cost a full transfer.
 
 Three things are reported as absent rather than guessed at, because guessing in
 each case produces a confident and wrong answer:
@@ -265,8 +273,22 @@ intercepting it. A test asserts the string never appears in the error message.
    question is "the build for ticket CTH-8899", that needs a link between the
    two — a Jira field naming the job, or a job parameter carrying the key — and
    I need to know which your instance uses before building it.
-6. **Images from Confluence and Jira still do not reach the model.** Two
-   independent blockers, unchanged by this work: the servers never download
-   attachments, and KRYPTONITE's MCP bridge flattens an image content block to
-   the string `[image: image/png]`. Both are fixable, and it is its own piece
-   of work.
+6. **Images from Confluence and Jira now reach the model — if the endpoint can
+   look at one.** All three blockers are fixed. The servers download
+   attachments (`confluence_get_attachment`, `jira_get_attachment`); the
+   extension's MCP bridge carries an image content block through to the request
+   body instead of flattening it to `[image: image/png]`; and the third is
+   yours to set rather than mine to fix — **the active endpoint profile must
+   declare vision**, either `capabilities.vision: true` or `kind: multimodal`,
+   which implies it. Without it the pixels are withheld deliberately: a gateway
+   that does not support images answers an image block with a 400 for the whole
+   turn, which is worse than the description it replaced. The model is told, in
+   the tool result, that a picture existed and which field would have shown it.
+
+   Two limits are worth knowing before you file a bug against them. Only PNG,
+   JPEG, GIF and WebP are fetched, because those are what the model wires
+   accept inline — a PDF or an SVG lists with `viewable: false` rather than
+   arriving as a blob nobody can read. And an attachment over ~3.75 MB is
+   refused rather than truncated: half a file is a decode error, not a picture.
+   That figure is exactly the largest file whose base64 fits the extension's
+   per-image cap, so nothing is fetched that would be dropped one hop later.
