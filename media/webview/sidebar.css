@@ -2976,3 +2976,57 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   .popover { animation: g-fade-in 110ms linear both; }
 }
 @keyframes g-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   TERMINAL - the treatment that comes with the one-family type system.
+
+   The font change alone is most of this direction; these are the details that
+   make it read as deliberate rather than as a panel whose sans went missing.
+   Every rule here is a late override on purpose: it keeps the direction in one
+   block that can be lifted out whole, rather than smeared through the file.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* The wordmark is the body face at its heaviest with wide tracking, not a
+   display cut. JetBrains Mono's caps are drawn square enough to carry it, and
+   dropping Michroma is what let the design go to one file. */
+.kx-wordmark { font-weight: 700; letter-spacing: .22em; font-size: 10.5px; }
+.w-mark { font-weight: 700; letter-spacing: .18em; font-size: 13px; }
+
+/* Lowercase tabs with a leading dot - a path segment rather than a heading.
+   The dot is decorative: every tab carries an explicit aria-label (set in
+   sidebar.js) so the accessible name stays "Session" and not "· Session".
+   Generated content IS exposed in the accessibility tree in Chromium, so a
+   label that is only text content would have been corrupted by this. */
+.kx-tab { text-transform: lowercase; letter-spacing: .04em; font-size: 10px; }
+.kx-tab::before { content: "· "; color: var(--kx-fg-5); }
+.kx-tab[aria-selected="true"]::before { color: var(--kx-fg-4); }
+
+/* Section labels read as a shell prompt's bracketed field. Only the plain
+   variant: `.w-label.row` holds "Recent" plus a spacer and an All button, and
+   the closing bracket would land after the button rather than after the word. */
+.w-label:not(.row)::before { content: "[ "; color: var(--kx-fg-5); }
+.w-label:not(.row)::after  { content: " ]"; color: var(--kx-fg-5); }
+
+/* Dashed rules for the suggestion list. Solid hairlines read as table borders;
+   dashed reads as a terminal's own separators, and at .22 alpha the dashes are
+   still above the 3:1 the edge tokens are held to because they are decorative
+   rather than a control boundary. */
+.w-list { border-top-style: dashed; }
+.w-row  { border-bottom-style: dashed; }
+
+/* A comment marker on the tip, and a prompt caret on the composer. The caret
+   is on the container, not the textarea: `::before` cannot attach to a
+   placeholder, and the placeholder text itself is written in sidebar.js. */
+.tipbar .tip-k::before { content: "# "; }
+
+/* Mono is wider than the sans it replaced - roughly 8% more advance at the same
+   size - and the panel is 340px at its narrowest. These are the places where
+   that difference had nowhere to go; test/render.cjs measures each of them. */
+.welcome p { font-size: 11.5px; line-height: 1.72; }
+.w-row .t { font-size: 11.5px; }
+/* The placeholder only. Typed text stays at its own size - what comes down is
+   the hint, which is the longest string in the panel and the one that decides
+   whether the empty composer is one row or two. Shrinking the words was the
+   alternative, and the words are the product's copy, not the type system's. */
+#draft::placeholder { font-size: 11px; }

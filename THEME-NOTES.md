@@ -128,6 +128,36 @@ branch changes them.
   Anthropic Sans is removed - see "Reversals" below.
 - **Model kind on an endpoint profile**, mandatory, end to end.
 
+## The type system moved to one family
+
+The three-family system recorded above (Michroma / Space Mono / IBM Plex Sans)
+was replaced by **JetBrains Mono alone**, after the owner picked the "Terminal"
+direction from a set of six mockups. The entry above is left as written: it is
+an accurate record of what that earlier change did, and this is the later one.
+
+- All five type tokens now resolve to JetBrains Mono. They stay as five tokens
+  because they are ROLES, not families - `--kx-prose` in particular is the
+  single line that puts long-form model output back into a proportional face if
+  the mono transcript proves too costly to read.
+- Three woff2 files and three OFL texts deleted, one of each added. 96 KB to
+  40 KB.
+- The treatment that comes with it lives in one clearly marked block at the end
+  of `sidebar.css` so it can be lifted out whole: lowercase tabs with a leading
+  dot, `[ TRY ]` brackets on section labels, a `›` prompt caret on the
+  composer, `#` on the tip, dashed rules on the suggestion list.
+- Mono is wider than the sans it replaced. Three sizes came down to pay for it
+  (`.welcome p`, `.w-row .t`, and the composer placeholder), and
+  `test/render.cjs` now measures the placeholder against the textarea's content
+  box so the empty composer cannot silently grow to two rows again.
+
+Two test weaknesses surfaced while doing it, both fixed rather than worked
+around: `test/render.cjs` kept a hand-copied `@font-face` table that went on
+declaring three faces which no longer shipped - so the harness loaded nothing
+and measured a platform fallback while reporting green - and the assertion
+meant to catch a missing woff2 read `getComputedStyle().fontFamily`, which
+reports the declared stack whether or not the file ever loaded. Both now read
+from `src/ui/shell.ts` and from `document.fonts` respectively.
+
 ## Colours taken literally from the mockup
 
 The colour work went through a pass where it was reproduced from the mockup

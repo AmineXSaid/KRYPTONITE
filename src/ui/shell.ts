@@ -41,23 +41,17 @@ function makeNonce(): string {
 /**
  * Emit `@font-face` rules only when the woff2 files actually ship.
  *
- * The three families the Genesis design is drawn in, and nothing else:
+ * The one family the Genesis design is drawn in, and nothing else:
  *
- *   IBM Plex Sans  the whole interface. Shipped as the variable cut, which is
- *                  one 45 KB file covering 400/500/600 - the three weights the
- *                  design uses - rather than three static faces.
- *   Space Mono     every mono run in the design, and there are many: tab
- *                  labels, model ids, kind tags, timings, code. This is the
- *                  one that was previously *named* in the CSS and never
- *                  shipped, so it silently fell back to the platform mono and
- *                  no mono in the panel was the drawn one.
- *   Michroma       the GENESIS wordmark only. A display face at one size, used
- *                  nowhere else, which is why it is its own family rather than
- *                  a weight of the body face.
+ *   JetBrains Mono  the whole interface - prose, labels, the wordmark, code.
+ *                   Shipped as the variable cut, so one 40 KB file covers
+ *                   every weight the design uses. It replaced IBM Plex Sans,
+ *                   Space Mono and Michroma, which between them were 96 KB and
+ *                   three separate voices.
  *
- * All three are SIL Open Font License, so bundling them is redistribution the
- * licence expressly permits - see media/fonts/LICENSE-NOTE.md, which this
- * replaced an unresolved licensing question with.
+ * It is SIL Open Font License, so bundling it is redistribution the licence
+ * expressly permits - see media/fonts/LICENSE-NOTE.md, which this replaced an
+ * unresolved licensing question with.
  *
  * Absent files are skipped rather than 404'd, so a build with no `media/fonts/`
  * still renders on the system stack in the CSS. `font-src` is scoped to the
@@ -73,12 +67,12 @@ function fontFaces(extensionUri: vscode.Uri, webview: vscode.Webview): string {
   }
 
   const wanted: { file: string; family: string; weight: string; italic?: true }[] = [
-    // One variable file, declared across the range the design uses. A static
-    // face per weight would be three times the bytes for the same result.
-    { file: "IBMPlexSans-Variable.woff2", family: "IBM Plex Sans", weight: "100 700" },
-    { file: "SpaceMono-Regular.woff2", family: "Space Mono", weight: "400" },
-    { file: "SpaceMono-Bold.woff2", family: "Space Mono", weight: "700" },
-    { file: "Michroma-Regular.woff2", family: "Michroma", weight: "400" },
+    // ONE family now, and one file. The design is set entirely in JetBrains
+    // Mono - see the note over the font tokens in tokens.css - so the three
+    // families that used to be here are gone rather than dormant: 40 KB in
+    // place of 96 KB, and no way for a surface to drift onto a face the design
+    // no longer uses. The variable cut covers 100-800 in the one file.
+    { file: "JetBrainsMono-Variable.woff2", family: "JetBrains Mono", weight: "100 800" },
   ];
 
   const rules: string[] = [];

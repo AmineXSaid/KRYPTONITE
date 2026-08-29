@@ -78,13 +78,33 @@ console.log("\n──── the fonts, which fail silently when they do not ship
   // just the wrong typeface. The list is read from shell.ts so it cannot drift
   // from what actually loads.
   const shell = fs.readFileSync(path.join(ROOT, "src/ui/shell.ts"), "utf8");
-  const files = [...new Set([...shell.matchAll(/file:\s*"([^"]+\.woff2?)"/g)].map((m) => m[1]))];
-  ok("shell.ts declares the faces to load", files.length >= 3, String(files.length));
-  for (const f of files) ok(`${f} ships`, has("media/fonts/" + f));
+  const decls = [...shell.matchAll(/file:\s*"([^"]+\.woff2?)".*?family:\s*"([^"]+)"/g)]
+    .map((m) => ({ file: m[1], family: m[2] }));
+  ok("shell.ts declares at least one face", decls.length >= 1, String(decls.length));
+  for (const d of decls) ok(`${d.file} ships`, has("media/fonts/" + d.file));
 
-  // SIL OFL requires the licence text to travel with the font.
+  // SIL OFL requires the licence text to travel with the font. This used to be
+  // a count - "at least three licence files" - which was a proxy for the three
+  // families that happened to be here, and would have passed with three copies
+  // of the wrong one. It now ties each DECLARED FAMILY to a licence naming it,
+  // which is the obligation itself and survives the family list changing.
   const licences = listing.filter((f) => /^extension\/media\/fonts\/.*(OFL|LICENSE)/i.test(f));
-  ok("and their licences travel with them", licences.length >= 3, licences.join(", "));
+  ok("some licence text ships with the fonts", licences.length >= 1, licences.join(", "));
+  for (const d of decls) {
+    const slug = d.family.replace(/\s+/g, "").toLowerCase();
+    ok(`${d.family} has its own licence in the archive`,
+      licences.some((f) => f.replace(/\s+/g, "").toLowerCase().includes(slug)),
+      licences.join(", "));
+  }
+  // And nothing is left behind: a licence for a family no longer shipped is a
+  // stale file that makes the notice wrong in the other direction.
+  for (const f of licences) {
+    if (/LICENSE-NOTE/i.test(f)) continue;
+    const base = f.split("/").pop().replace(/^OFL-/i, "").replace(/\.txt$/i, "").toLowerCase();
+    ok(`the licence ${f.split("/").pop()} belongs to a family that ships`,
+      decls.some((d) => d.family.replace(/\s+/g, "").toLowerCase() === base.toLowerCase()),
+      decls.map((d) => d.family).join(", "));
+  }
 }
 
 console.log("\n──── the manifest's promises ────");

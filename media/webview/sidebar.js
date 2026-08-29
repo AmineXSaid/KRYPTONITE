@@ -981,18 +981,23 @@ function _sbRun() {
               '<span class="t">Author &amp; report an issue</span></button>' +
           '</div>' +
         '</header>' +
+        // Each tab carries an explicit aria-label. The terminal treatment puts a
+        // decorative "· " on every tab through CSS ::before, and generated
+        // content IS exposed in the accessibility tree - without a label the
+        // accessible name would read "· Session". The label also keeps the
+        // name free of the count badge that three of the four carry.
         '<nav class="kx-tabs" role="tablist">' +
-          '<button class="kx-tab" id="tabSession" role="tab" aria-selected="true" aria-controls="viewSession">Session</button>' +
+          '<button class="kx-tab" id="tabSession" role="tab" aria-selected="true" aria-label="Session" aria-controls="viewSession">Session</button>' +
           // MCP earns a tab now that it is real. 1a had a "SOON" placeholder,
           // which the review deleted; 1b replaces it with the live surface.
-          '<button class="kx-tab" id="tabMcp" role="tab" aria-selected="false" aria-controls="viewMcp">MCP<span class="tab-count" id="mcpCount" hidden></span></button>' +
+          '<button class="kx-tab" id="tabMcp" role="tab" aria-selected="false" aria-label="MCP" aria-controls="viewMcp">MCP<span class="tab-count" id="mcpCount" hidden></span></button>' +
           // Agents sit after MCP because that is the order they are chosen in:
           // a server has to be configured before an agent can be scoped to it.
           // This was a collapsed section inside Diagnostics, which is where a
           // thing goes when it is being inspected rather than used - and an
           // agent is picked before a turn, not diagnosed after one.
-          '<button class="kx-tab" id="tabAgents" role="tab" aria-selected="false" aria-controls="viewAgents">Agents<span class="tab-count" id="agentCount" hidden></span></button>' +
-          '<button class="kx-tab" id="tabDiag" role="tab" aria-selected="false" aria-controls="viewDiag">Diagnostics<span class="tab-count" id="tabCount" hidden></span></button>' +
+          '<button class="kx-tab" id="tabAgents" role="tab" aria-selected="false" aria-label="Agents" aria-controls="viewAgents">Agents<span class="tab-count" id="agentCount" hidden></span></button>' +
+          '<button class="kx-tab" id="tabDiag" role="tab" aria-selected="false" aria-label="Diagnostics" aria-controls="viewDiag">Diagnostics<span class="tab-count" id="tabCount" hidden></span></button>' +
         '</nav>' +
         '<div class="phase-banner" id="phaseBanner" data-phase="plan" hidden>' +
           '<span class="dot"></span><span class="lbl" id="phaseBannerLbl">Plan phase</span>' +
@@ -1078,7 +1083,7 @@ function _sbRun() {
               // marked, and the input above it is painted transparent.
               '<div class="draft-wrap">' +
                 '<div class="draft-mirror" id="draftMirror" aria-hidden="true"></div>' +
-                '<textarea id="draft" rows="1" aria-label="Message" placeholder="Ask Genesis anything…\u00A0\u00A0 (\u00A0/\u00A0skills\u00A0·\u00A0@\u00A0files\u00A0)"></textarea>' +
+                '<textarea id="draft" rows="1" aria-label="Message" placeholder="\u203A\u00A0Ask Genesis anything…\u00A0\u00A0(/skills\u00A0·\u00A0@files)"></textarea>' +
               '</div>' +
               '<div class="toolbar">' +
                 // #4 - the control row carries controls only. The keycap that
@@ -2812,7 +2817,12 @@ function _sbRun() {
    * Four placeholders used to carry their own copy of this string, and one of
    * them had already drifted out of step with the palette. One definition now.
    */
-  var COMPOSER_HINT = "\u00A0\u00A0 (\u00A0/\u00A0skills\u00A0·\u00A0@\u00A0files\u00A0)";
+  var COMPOSER_HINT = "\u00A0\u00A0(/skills\u00A0·\u00A0@files)";
+  /* The terminal treatment's prompt marker. It lives on the placeholder
+     rather than in the markup because the textarea auto-grows and a floating
+     element beside it would have to track that; the trade is that it goes
+     away once you type, which a real shell prompt would not do. */
+  var CARET = "\u203A\u00A0";
 
   function renderQueue() {
     var wrap = $("queue");
@@ -3184,7 +3194,10 @@ function _sbRun() {
     // because what happens is not what happens the rest of the time: it joins
     // the queue above rather than starting a turn. Naming the phase here would
     // be describing a mode that is not in force yet.
-    draft.placeholder = blocked
+    // Every branch carries the prompt caret, including the blocked one. Putting
+    // it on only some of them made the marker blink in and out as the phase
+    // changed, which reads as a rendering bug rather than a prompt.
+    draft.placeholder = CARET + (blocked
       ? "Configure an endpoint first…"
       : S.running
       ? "Queue another message…" + COMPOSER_HINT
@@ -3192,7 +3205,7 @@ function _sbRun() {
         ? "Describe what to plan…" + COMPOSER_HINT
         : S.phase === "ask"
           ? "Ask Genesis anything…" + COMPOSER_HINT
-          : "Tell Genesis what to do…" + COMPOSER_HINT;
+          : "Tell Genesis what to do…" + COMPOSER_HINT);
 
     var send = $("sendBtn");
     var typing = draft.value.trim() || (S.attachments && S.attachments.length);

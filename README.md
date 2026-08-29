@@ -48,12 +48,20 @@ alternative is silently seeding the wrong capabilities.
 
 ### Typography
 
-The panel ships the three families it is drawn in — **IBM Plex Sans** for the
-interface, **Space Mono** for every mono run, **Michroma** for the wordmark —
-all under the SIL Open Font License. They have to be bundled rather than linked:
-the webview CSP is `default-src 'none'` with `font-src` scoped to the extension
-origin, so a family merely named in the CSS renders in the platform fallback and
-nothing reports it. `media/fonts/LICENSE-NOTE.md` has the details.
+The panel is set in one family: **JetBrains Mono**, under the SIL Open Font
+License, shipped as the variable cut so a single 40 KB file covers every weight
+— prose, labels, the wordmark and code alike. It replaced IBM Plex Sans, Space
+Mono and Michroma, which were 96 KB and three separate voices.
+
+It has to be bundled rather than linked: the webview CSP is `default-src 'none'`
+with `font-src` scoped to the extension origin, so a family merely named in the
+CSS renders in the platform fallback and nothing reports it.
+`media/fonts/LICENSE-NOTE.md` has the details.
+
+Setting long-form model output in a monospace is the deliberate cost of this
+direction rather than an oversight. `--kx-prose` in `tokens.css` exists to undo
+exactly that one part: point it at a humanist sans and the transcript reads
+easily again without disturbing the rest of the interface.
 
 ### Why the transport is hand-built
 

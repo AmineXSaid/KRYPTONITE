@@ -96,16 +96,21 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "genesis-render-"));
 execFileSync("unzip", ["-q", "-o", VSIX, "extension/media/*", "-d", tmp]);
 const MEDIA = path.join(tmp, "extension/media");
 
-const FONTS = [
-  ["IBMPlexSans-Variable.woff2", "IBM Plex Sans", "100 700"],
-  ["SpaceMono-Regular.woff2", "Space Mono", "400"],
-  ["SpaceMono-Bold.woff2", "Space Mono", "700"],
-  ["Michroma-Regular.woff2", "Michroma", "400"],
-]
-  .map(([f, fam, w]) =>
-    `@font-face{font-family:'${fam}';font-style:normal;font-weight:${w};` +
-    `font-display:block;src:url('fonts/${f}') format('woff2')}`)
-  .join("");
+// Read from src/ui/shell.ts rather than restated here. This table used to be a
+// hand-kept copy, and when the design moved to one family it silently went on
+// declaring three faces that no longer ship - so the harness loaded NOTHING and
+// every type measurement below was quietly against a platform fallback. The
+// suite is supposed to test the shipped panel; it cannot do that from a stale
+// copy of the shipped panel's font list.
+const FONTS = (() => {
+  const shell = fs.readFileSync(path.join(ROOT, "src/ui/shell.ts"), "utf8");
+  const decls = [...shell.matchAll(/file:\s*"([^"]+\.woff2?)",\s*family:\s*"([^"]+)",\s*weight:\s*"([^"]+)"/g)];
+  if (!decls.length) throw new Error("no @font-face table found in src/ui/shell.ts");
+  return decls
+    .map((m) => `@font-face{font-family:'${m[2]}';font-style:normal;font-weight:${m[3]};` +
+                `font-display:block;src:url('fonts/${m[1]}') format('woff2')}`)
+    .join("");
+})();
 
 // The workbench colour the panel is designed against. The panel paints NO
 // ground of its own on purpose (see --kx-bg in tokens.css), so the harness has
@@ -221,12 +226,35 @@ function contrast(a, b) {
     const wordmark = await page.locator(".kx-wordmark").first().textContent();
     ok("the wordmark reads GENESIS", /genesis/i.test(wordmark || ""), wordmark);
 
-    // Michroma is the brand face and fails SILENTLY: a missing woff2 falls back
-    // to a system sans and the header still reads "GENESIS", just in the wrong
-    // typeface. Nothing but a real font stack can catch that.
+    // The brand face fails SILENTLY: a missing woff2 falls back to a platform
+    // face and the header still reads "GENESIS", just in the wrong typeface.
+    //
+    // The family name is read from tokens.css rather than typed here, so a
+    // change of face does not need this line edited - it needs the token
+    // edited, which is the point.
+    const brandFam = (() => {
+      const css = fs.readFileSync(path.join(MEDIA, "webview/tokens.css"), "utf8");
+      const m = /--kx-brand:\s*'([^']+)'/.exec(css);
+      return m ? m[1] : "";
+    })();
+    ok("tokens.css names a brand face", brandFam.length > 0, brandFam);
     const fam = await page.locator(".kx-wordmark").first()
       .evaluate((el) => getComputedStyle(el).fontFamily);
-    ok("and is set in the brand face", /michroma/i.test(fam), fam);
+    ok("and the wordmark is set in it", fam.includes(brandFam), fam);
+
+    // getComputedStyle reports the DECLARED stack whether or not the file
+    // loaded, so the check above cannot see a dropped woff2 - the failure its
+    // own comment describes. This can: FontFaceSet only holds a face the
+    // document actually has, and only reports "loaded" once the bytes parsed.
+    const faceState = await page.evaluate(async (family) => {
+      await document.fonts.ready;
+      await document.fonts.load(`700 11px "${family}"`).catch(() => {});
+      const faces = [...document.fonts].filter((f) => f.family.replace(/["']/g, "") === family);
+      return { count: faces.length, statuses: faces.map((f) => f.status) };
+    }, brandFam);
+    ok(`the ${brandFam} face is really loaded, not falling back`,
+      faceState.count > 0 && faceState.statuses.includes("loaded"),
+      JSON.stringify(faceState));
 
     const tabs = await page.locator(".kx-tabs [role='tab'], .kx-tabs button").allTextContents();
     const flat = tabs.join(" ").toUpperCase();
@@ -518,6 +546,40 @@ function contrast(a, b) {
         `${seen.n} of ${seen.text.length} characters of "${seen.text}" reach the panel`);
       await ctx.close();
     }
+  }
+
+  /* ── 5c2. the composer placeholder stays on one line ───────────────── */
+  {
+    // The design is set in a monospace, where every character is a full
+    // advance and there is no narrow "l" or "i" to absorb a long string. The
+    // placeholder went to two lines the moment the family changed, which grew
+    // the empty composer by 50px in a panel whose own comments call vertical
+    // space the scarce resource. Nothing asserted it, so nothing saw it.
+    //
+    // Measured against the textarea's content box with the REAL font, because
+    // the whole point is that this is font-dependent.
+    const { ctx, page } = await open(400, {});
+    const fit = await page.evaluate(async () => {
+      await document.fonts.ready;
+      const t = document.getElementById("draft");
+      const cs = getComputedStyle(t);
+      // The PLACEHOLDER's own computed style, not the textarea's. The two can
+      // differ - ::placeholder is styled separately here - and measuring the
+      // element's font reports a width the placeholder never renders at.
+      const ps = getComputedStyle(t, "::placeholder");
+      const probe = document.createElement("span");
+      probe.style.cssText = `position:absolute;left:-9999px;white-space:pre;font:${ps.font || cs.font}`;
+      probe.textContent = t.placeholder;
+      document.body.appendChild(probe);
+      const needs = probe.getBoundingClientRect().width;
+      probe.remove();
+      const have = t.getBoundingClientRect().width
+        - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      return { needs: Math.round(needs), have: Math.round(have), text: t.placeholder };
+    });
+    ok("the composer placeholder fits on one line at 400px",
+      fit.needs <= fit.have, `needs ${fit.needs}px, has ${fit.have}px for "${fit.text}"`);
+    await ctx.close();
   }
 
   /* ── 5d. the MCP tab at a narrow dock ──────────────────────────────── */

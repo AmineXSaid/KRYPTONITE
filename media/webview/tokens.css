@@ -254,28 +254,32 @@
   --kx-shadow:       rgba(7, 10, 15, .7);   /* the mockup's dialog shadow    */
 
   /* ── type ──
-   * The three families the Genesis design is actually drawn in, and all three
-   * now SHIP - see src/ui/shell.ts and media/fonts/LICENSE-NOTE.md.
+   * ONE family. The whole design is set in JetBrains Mono - prose, labels, the
+   * wordmark, code - and it ships; see src/ui/shell.ts and
+   * media/fonts/LICENSE-NOTE.md.
    *
-   * This previously named Anthropic Sans for the UI and Space Mono for the
-   * mono, and only the first of those was bundled. The webview CSP is
-   * `default-src 'none'` with `font-src` scoped to the extension, so a named
-   * family that is not bundled cannot be fetched: every mono run in the panel
-   * - tab labels, model ids, kind tags, timings, code - was silently falling
-   * back to the platform monospace, and the wordmark had no display face at
-   * all. Naming a font is not shipping one.
+   * This replaced IBM Plex Sans for the UI, Space Mono for mono runs and
+   * Michroma for the wordmark: three families, three voices, 96 KB. The one
+   * variable cut is 40 KB and covers every weight the design asks for.
    *
-   * Michroma is --kx-BRAND, not --kx-display, and the distinction is the whole
-   * point. It is a wide geometric face with a single weight, drawn to be set
-   * once at 11-14px under heavy letter-spacing: it is the GENESIS wordmark and
-   * nothing else. --kx-display is what prose headings use - a markdown h1, the
-   * welcome line, a browser panel title - and in this design that is simply the
-   * body face. Pointing --kx-display at Michroma would set every markdown
-   * heading in the transcript in a display face at a weight it does not have,
-   * which is the standard way to make a well-drawn family look broken. */
-  --kx-ui:      'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --kx-display: 'IBM Plex Sans', ui-sans-serif, system-ui, 'Segoe UI', sans-serif;
-  --kx-mono:    'Space Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-  --kx-brand:   'Michroma', 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+   * The CSP is `default-src 'none'` with `font-src` scoped to the extension, so
+   * a named family that is not bundled cannot be fetched - it falls back
+   * silently to the platform stack and nobody sees an error. That is exactly
+   * how the panel once shipped with no mono and no display face at all. Naming
+   * a font is not shipping one, so if you add a family here, add the file too.
+   *
+   * The five tokens stay separate even though all five now resolve to the same
+   * stack. They are ROLES, not families: --kx-mono is "this must align in a
+   * column", --kx-brand is "this is the wordmark", --kx-prose is "this is
+   * something a person reads at length". Collapsing them into one token would
+   * save a line and cost the ability to change any one role on its own - and
+   * --kx-prose in particular is the one to reach for first, because setting
+   * long-form model output in a monospace is the deliberate cost of this
+   * direction rather than an oversight. Point it at a humanist sans and the
+   * transcript goes back to being easy to read without disturbing the UI. */
+  --kx-ui:      'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --kx-display: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --kx-mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --kx-brand:   'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   --kx-prose:   var(--kx-ui);
 }

@@ -59,7 +59,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
   flex: none; display: flex; align-items: center; gap: 9px; padding: 9px 14px;
   border-bottom: 1px solid var(--kx-line);
 }
-.cc-wordmark { font-size: 12px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+.cc-wordmark { font-size: 11px; font-weight: 700; letter-spacing: .22em; text-transform: uppercase; }
 .cc-sub { flex: 0 1 auto; min-width: 0; font-size: 11.5px; color: var(--kx-fg-2); }
 .profile-chip {
   flex: none; font-family: var(--kx-mono); font-size: 10.5px; padding: 2px 8px;
@@ -363,13 +363,13 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 }
 .about-mark { flex: none; display: flex; }
 .about-id { min-width: 0; }
-/* --kx-BRAND, not --kx-display: tokens.css is explicit that Michroma is the
-   GENESIS wordmark and nothing else, and an About card is exactly that use.
-   14px is the top of the range the face is drawn for; the sidebar sets it at
-   11px with the same .2em tracking. */
+/* --kx-brand is still the right token even though every token now resolves to
+   JetBrains Mono: it says "this is the wordmark", so a future change to the
+   wordmark's face lands here and nowhere else. The weight and tracking match
+   the sidebar's .kx-wordmark, which is the same mark at a smaller size. */
 .about-name {
-  font-family: var(--kx-brand); font-size: 14px; font-weight: 400;
-  letter-spacing: .2em; text-transform: uppercase; color: var(--kx-fg);
+  font-family: var(--kx-brand); font-size: 14px; font-weight: 700;
+  letter-spacing: .22em; text-transform: uppercase; color: var(--kx-fg);
   margin-bottom: 6px;
 }
 .about-sub { font-size: 11.5px; }

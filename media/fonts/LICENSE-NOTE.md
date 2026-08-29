@@ -1,26 +1,32 @@
 # Fonts bundled with this extension
 
-The four `.woff2` files in this folder are bundled into the packaged `.vsix`,
-which means the extension **redistributes** them to everyone who installs it.
-All four are under the **SIL Open Font License 1.1**, which expressly permits
-that, including inside a commercial product, provided the fonts are not sold on
-their own and the licence travels with them.
+The one `.woff2` file in this folder is bundled into the packaged `.vsix`,
+which means the extension **redistributes** it to everyone who installs it. It
+is under the **SIL Open Font License 1.1**, which expressly permits that,
+including inside a commercial product, provided the font is not sold on its own
+and the licence travels with it.
 
 | File | Family | Licence | Upstream |
 | --- | --- | --- | --- |
-| `IBMPlexSans-Variable.woff2` | IBM Plex Sans | OFL 1.1 | github.com/IBM/plex |
-| `SpaceMono-Regular.woff2` | Space Mono 400 | OFL 1.1 | github.com/googlefonts/spacemono |
-| `SpaceMono-Bold.woff2` | Space Mono 700 | OFL 1.1 | github.com/googlefonts/spacemono |
-| `Michroma-Regular.woff2` | Michroma | OFL 1.1 | github.com/googlefonts/michroma |
+| `JetBrainsMono-Variable.woff2` | JetBrains Mono | OFL 1.1 | github.com/JetBrains/JetBrainsMono |
 
-These are the three families the Genesis design is drawn in: IBM Plex Sans for
-the interface, Space Mono for every mono run in it, and Michroma for the
-GENESIS wordmark alone.
+This is the single family the Genesis design is drawn in — prose, labels, the
+wordmark and code all share it. It is the **latin subset** as served by Google
+Fonts, in the variable cut, so one 40 KB file covers every weight the design
+uses (400 for body, 700 for the wordmark and emphasis).
 
-All four are the **latin subset** as served by Google Fonts
-(`U+0000-00FF` plus the usual punctuation and symbol ranges). IBM Plex Sans is
-the variable cut, so one 45 KB file covers the 400/500/600 the design uses
-instead of three static faces. 94 KB total.
+`test/vsix.cjs` ties each family declared in `src/ui/shell.ts` to a licence file
+naming it, in both directions: a family with no licence fails, and a licence for
+a family that no longer ships fails too. That is the OFL obligation rather than
+a file count, so this table cannot quietly go stale.
+
+## What was here before
+
+Three families totalling 96 KB — IBM Plex Sans for the interface, Space Mono for
+mono runs, Michroma for the wordmark alone. The Terminal direction set the whole
+design in one monospace, so all three were removed rather than left dormant:
+40 KB instead of 96 KB, and no way for a surface to drift back onto a face the
+design no longer uses.
 
 ## What this replaced, and why it matters
 

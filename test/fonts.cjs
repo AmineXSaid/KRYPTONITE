@@ -1,5 +1,5 @@
 /**
- * The three families the Genesis design is drawn in, and whether they ship.
+ * The families the Genesis design is drawn in, and whether they ship.
  *
  * This exists because the failure mode is silent. The webview CSP is
  * `default-src 'none'` with `font-src` scoped to the extension origin, so a
@@ -33,12 +33,14 @@ const files = fs.readdirSync(FONT_DIR);
 
 console.log("\n──── the design's families ship ────");
 {
-  const want = [
-    ["IBMPlexSans-Variable.woff2", "IBM Plex Sans"],
-    ["SpaceMono-Regular.woff2", "Space Mono"],
-    ["SpaceMono-Bold.woff2", "Space Mono"],
-    ["Michroma-Regular.woff2", "Michroma"],
-  ];
+  // Derived from shell.ts, not restated. A hand-kept copy of this list is how
+  // test/render.cjs came to declare three faces that no longer shipped while
+  // still reporting green - the harness loaded nothing and measured a platform
+  // fallback. A list that cannot drift is worth more than a list that is right
+  // today.
+  const want = [...SHELL.matchAll(/file:\s*"([^"]+\.woff2?)",\s*family:\s*"([^"]+)"/g)]
+    .map((m) => [m[1], m[2]]);
+  ok("shell.ts declares a face table", want.length >= 1, String(want.length));
   for (const [file, family] of want) {
     const there = files.includes(file);
     ok(`${family} ships as ${file}`, there,
@@ -89,28 +91,40 @@ console.log("\n──── the unlicensed family is gone ────");
     /Open Font License/.test(fs.readFileSync(path.join(FONT_DIR, "LICENSE-NOTE.md"), "utf8")));
 }
 
-console.log("\n──── Michroma is a wordmark face, not a heading face ────");
+console.log("\n──── the wordmark keeps its own token ────");
 {
-  // One weight, very wide, drawn for tracking at small sizes. Setting prose in
-  // it - a markdown h1, a panel title - is the standard way to make a
-  // well-drawn family look broken, so it lives on its own token.
+  // Every type token now resolves to the same family, so this section is no
+  // longer about keeping a display face out of prose - it is about keeping the
+  // ROLES separate. --kx-brand means "this is the wordmark". If the wordmark
+  // spreads to other elements, changing the wordmark's face later stops being a
+  // one-line change, which is the only reason the token exists.
   const brand = TOKENS.match(/--kx-brand:\s*([^;]+);/)[1];
-  const display = TOKENS.match(/--kx-display:\s*([^;]+);/)[1];
-  ok("--kx-brand is Michroma", /Michroma/.test(brand), brand.trim());
-  ok("--kx-display is not", !/Michroma/.test(display), display.trim());
-  // Comments are stripped first. The rule below is preceded by prose that
-  // explains why it is NOT set at 700, and scanning raw text matches the
-  // explanation as though it were the declaration.
+  const first = brand.trim().split(",")[0].trim().replace(/^['"]|['"]$/g, "");
+  ok("--kx-brand leads with a family that ships",
+    SHELL.includes(`family: "${first}"`), first);
+
   const side = fs.readFileSync(path.join(ROOT, "media/webview/sidebar.css"), "utf8")
     .replace(/\/\*[\s\S]*?\*\//g, "");
   const rules = [...side.matchAll(/([^{}]+)\{([^}]*var\(--kx-brand\)[^}]*)\}/g)];
   const users = rules.map((m) => m[1].trim());
-  ok("and only the wordmarks use it", users.length <= 2 && users.every((u) => /wordmark|w-mark/.test(u)),
-    users.join(" / "));
-  // Michroma has no bold. Asking for one synthesises a smear.
-  const heavy = rules.filter((m) => /font-weight:\s*[5-9]00/.test(m[2]));
-  ok("nothing asks it for a weight it does not have", heavy.length === 0,
-    heavy.map((h) => h[1].trim()).join(" / "));
+  ok("and only the wordmarks use it",
+    users.length <= 2 && users.every((u) => /wordmark|w-mark/.test(u)), users.join(" / "));
+
+  // The old rule here was "nothing asks it for a weight it does not have",
+  // because Michroma shipped one weight and a synthesised bold is a smear. The
+  // variable cut has real weights, so the check is now that the weight asked
+  // for is inside the range the face actually declares.
+  const decl = SHELL.match(new RegExp(`family: "${first}", weight: "([^"]+)"`));
+  ok("shell.ts declares the weight range", Boolean(decl), decl && decl[1]);
+  if (decl) {
+    const parts = decl[1].trim().split(/\s+/).map(Number);
+    const [lo, hi] = parts.length === 2 ? parts : [parts[0], parts[0]];
+    const asked = [...side.matchAll(/font-family:\s*var\(--kx-brand\)[^}]*/g)]
+      .flatMap((m) => [...m[0].matchAll(/font-weight:\s*(\d{3})/g)].map((w) => Number(w[1])));
+    const outside = asked.filter((w) => w < lo || w > hi);
+    ok("and nothing asks the wordmark for a weight outside it",
+      outside.length === 0, `range ${lo}-${hi}, asked ${asked.join(", ")}`);
+  }
 }
 
 console.log(`\n──── ${pass} passed, ${failures.length} failed ────`);

@@ -573,18 +573,30 @@ const pasteTests = (async () => {
   ok("13 Ask's banner promises no plan either",
     /no edits, no plan/.test(banner.querySelector(".sub").textContent));
   ok("13 Ask's placeholder asks a question",
-    /^Ask Genesis anything/.test(d.getElementById("draft").placeholder));
+    /^\u203A\u00A0Ask Genesis anything/.test(d.getElementById("draft").placeholder),
+    d.getElementById("draft").placeholder);
 
   btn("plan").click();
   ok("13 Plan's banner is its own", banner.getAttribute("data-phase") === "plan" &&
     /no edits applied/.test(banner.querySelector(".sub").textContent));
   ok("13 Plan's placeholder describes planning",
-    /^Describe what to plan/.test(d.getElementById("draft").placeholder));
+    /^\u203A\u00A0Describe what to plan/.test(d.getElementById("draft").placeholder),
+    d.getElementById("draft").placeholder);
 
   btn("act").click();
   ok("13 Act hides the banner", banner.hidden === true);
   ok("13 Act's placeholder is a work order",
-    /^Tell Genesis what to do/.test(d.getElementById("draft").placeholder));
+    /^\u203A\u00A0Tell Genesis what to do/.test(d.getElementById("draft").placeholder),
+    d.getElementById("draft").placeholder);
+  // Every phase, not just the three checked above: the caret went on two of
+  // five branches first time round, so it appeared and vanished as the phase
+  // changed. A prompt marker that is conditional is a rendering bug.
+  for (const ph of ["ask", "plan", "act"]) {
+    btn(ph).click();
+    ok(`13 the ${ph} placeholder carries the prompt caret`,
+      d.getElementById("draft").placeholder.startsWith("\u203A\u00A0"),
+      d.getElementById("draft").placeholder);
+  }
 
   // Shift+Tab cycles ask -> plan -> act -> ask. A two-state toggle cannot
   // reach a third phase, which is the bug this replaced.
