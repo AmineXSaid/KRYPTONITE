@@ -160,7 +160,7 @@ const sync = (b, over) => b.send({ type: "stateSync", state: state(over) });
       warnings: ["one server is disabled"],
     },
   });
-  ok("the strip offers every section", SECTIONS.length === 8, String(SECTIONS.length));
+  ok("the strip offers every section", SECTIONS.length === 9, String(SECTIONS.length));
 
   for (const id of SECTIONS) {
     const before = b.errors.length;
@@ -190,7 +190,19 @@ const sync = (b, over) => b.send({ type: "stateSync", state: state(over) });
       !/&lt;(div|span|button)/.test(html));
     ok(`${id}: marks its tab selected`,
       b.d.querySelector(`[data-section="${id}"]`).getAttribute("aria-selected") === "true");
+    // The STRIP, not just the pane. The "undefined" guard above reads
+    // `pane()`, so when a new section had no entry in `counts` the tab itself
+    // rendered "DOCUMENTATION undefined" and every pane assertion passed. The
+    // badge is built from a lookup that can miss; this is where that shows.
+    const tab = b.d.querySelector(`[data-section="${id}"]`).textContent;
+    ok(`${id}: its tab prints no undefined`, !/undefined/.test(tab), tab);
+    ok(`${id}: its tab prints no [object Object]`, !/\[object Object\]/.test(tab), tab);
   }
+  // A section that counts nothing carries no pill at all. "0" would claim
+  // there are zero of something countable, which for Documentation is a lie.
+  b.click('[data-section="docs"]');
+  ok("a section with no count renders no badge",
+    b.d.querySelector('[data-section="docs"] .nav-badge') === null);
   b.dom.window.close();
 }
 
@@ -445,6 +457,112 @@ const sync = (b, over) => b.send({ type: "stateSync", state: state(over) });
   // closed, and the suite hangs after printing its summary.
   b.dom.window.close();
 }
+
+/* ── 9. the Documentation section cannot drift from the loaders ─────────── */
+/* A how-to that has quietly gone stale is worse than none: it reads as
+   authoritative and sends someone to edit a key nothing parses. Every number
+   and name the Documentation tab prints is therefore checked against the source
+   that actually enforces it, not against a copy of itself. */
+{
+  const b = boot();
+  sync(b, {});
+  b.click('[data-section="docs"]');
+  // The three guides are accordions and only the first is open, so read the
+  // markup rather than the text: a collapsed body is hidden, not absent.
+  const html = b.pane().innerHTML;
+  const text = html.replace(/<[^>]*>/g, " ");
+
+  ok("docs: all three guides are present",
+    /Prepare a skill/.test(html) && /Prepare an MCP server/.test(html) &&
+    /Prepare an agent/.test(html));
+
+  const skillSrc = fs.readFileSync(path.join(ROOT, "src/skills/loader.ts"), "utf8");
+  const agentSrc = fs.readFileSync(path.join(ROOT, "src/agents/loader.ts"), "utf8");
+  const mcpSrc = fs.readFileSync(path.join(ROOT, "src/mcp/registry.ts"), "utf8");
+  const toolSrc = fs.readFileSync(path.join(ROOT, "src/agent/tools.ts"), "utf8");
+
+  /** `24_000` / `24000` in the source, `24,000` as a human reads it. */
+  const constant = (src, name) => {
+    const m = src.match(new RegExp(name + "\\s*=\\s*([0-9_]+)"));
+    return m ? Number(m[1].replace(/_/g, "")) : NaN;
+  };
+  const grouped = (n) => n.toLocaleString("en-US");
+
+  for (const [src, name, label] of [
+    [skillSrc, "MAX_BODY_CHARS", "the skill body limit"],
+    [agentSrc, "MAX_MEMORY_CHARS", "the agent memory limit"],
+    [agentSrc, "MAX_PERSONA_CHARS", "the agent persona limit"],
+  ]) {
+    const n = constant(src, name);
+    ok(`docs: ${label} is a real number in the source`, Number.isFinite(n), name);
+    ok(`docs: ${label} is printed as the loader enforces it`,
+      text.includes(grouped(n)), `${name} = ${grouped(n)}`);
+  }
+
+  // Every built-in tool the agent guide lists must exist, and every tool that
+  // exists must be listed. A one-directional check lets the list rot as tools
+  // are added, which is the direction it would actually rot in.
+  const realTools = [...toolSrc.matchAll(/name: "([a-z_]+)"/g)].map((m) => m[1]).sort();
+  // Scoped to the ONE block that claims to be the built-in list. Scanning every
+  // <pre> instead needs an exclusion list for the MCP examples, whose
+  // `read_text_file` and `list_directory` are a server's tools rather than
+  // built-ins - and an exclusion list is the part that would rot.
+  const toolBlock = (() => {
+    const i = html.indexOf("built-in tool names");
+    const m = /<div class="pre">([\s\S]*?)<\/div>/.exec(html.slice(i));
+    return m ? m[1] : "";
+  })();
+  ok("docs: the built-in tool block was found", toolBlock.length > 40, String(toolBlock.length));
+  const listed = realTools.filter((t) => new RegExp("\\b" + t + "\\b").test(toolBlock));
+  ok("docs: every built-in tool is listed in the agent guide",
+    listed.length === realTools.length,
+    "missing: " + realTools.filter((t) => !listed.includes(t)).join(", "));
+  const invented = [...toolBlock.matchAll(/\b([a-z]+_[a-z_]+)\b/g)]
+    .map((m) => m[1]).filter((n) => !realTools.includes(n));
+  ok("docs: that block invents no tool that does not exist",
+    invented.length === 0, [...new Set(invented)].join(", "));
+
+  // Every key the MCP guide documents must be one the registry actually reads.
+  const mcpKeys = ["command", "args", "env", "cwd", "url", "type", "headers",
+                   "timeoutMs", "enabled", "approval", "readOnly"];
+  for (const k of mcpKeys) {
+    ok(`docs: the MCP guide's "${k}" is read by the registry`,
+      new RegExp("(cfg|raw|s)\\." + k + "\\b").test(mcpSrc), k);
+    ok(`docs: "${k}" is documented`, new RegExp("<code>" + k + "</code>").test(html), k);
+  }
+
+  // The three transport values the guide offers must be the three the registry
+  // recognises as remote.
+  for (const t of ["http", "streamable-http", "sse"]) {
+    ok(`docs: transport "${t}" is accepted by the registry`,
+      mcpSrc.includes(`"${t}"`), t);
+  }
+
+  // Paths. These are the whole point of the guide - a wrong one sends someone
+  // to create a folder nothing reads.
+  ok("docs: the agent folder matches the loader",
+    /\.agent\/agents\//.test(text) && agentSrc.includes(".agent/agents/"));
+  ok("docs: the MCP file matches the registry",
+    /\.agent\/mcp\.json/.test(text) && mcpSrc.includes(".agent/mcp.json"));
+  ok("docs: the skills folder comes from config rather than a literal",
+    SRC.includes("S.config.skillsDirectory"));
+
+  ok("docs: renders without throwing", b.errors.length === 0, b.errors.join(" | "));
+  b.dom.window.close();
+}
+
+/* Documentation is reference text, so it is the one section that must still
+   render with no folder open - which is exactly when someone reads it. */
+{
+  const b = boot();
+  b.send({ type: "stateSync", state: state({ workspace: { open: false, name: "" } }) });
+  b.click('[data-section="docs"]');
+  const text = b.pane().textContent;
+  ok("docs: still renders with no folder open",
+    /Prepare a skill/.test(text) && !/No folder open/.test(text), text.slice(0, 60));
+  b.dom.window.close();
+}
+
 
 if (failures.length) {
   for (const f of failures) console.log("FAIL  " + f);

@@ -27,7 +27,7 @@ export type Surface = "sidebar" | "cc";
 
 export type CcSection =
   | "endpoints" | "wire" | "auth" | "tls" | "proxy"
-  | "diag" | "agent" | "skills" | "checkpoints" | "logs";
+  | "diag" | "agent" | "skills" | "checkpoints" | "logs" | "docs";
 
 export type ApprovalMode = "ask" | "edits-auto" | "full-auto";
 export type ExportScope = "current" | "all";

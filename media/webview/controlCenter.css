@@ -350,6 +350,17 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 
 .tr2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); gap: 10px; padding: 8px 10px; }
 .tr2 + .tr2 { border-top: 1px solid var(--kx-line); }
+/* Documentation definition rows. .tr2 is a three-column grid; a term/meaning
+   pair needs two, with the term column wide enough for `streamable-http`. */
+.doc-kv { display: grid; grid-template-columns: minmax(0, 148px) minmax(0, 1fr); gap: 10px 14px; padding: 8px 10px; }
+.doc-kv + .doc-kv { border-top: 1px solid var(--kx-line); }
+.doc-kv .k { font-size: 11.5px; font-weight: 600; }
+.doc-kv .v { font-size: 11.5px; color: var(--kx-fg-2); line-height: 1.6; }
+/* Under ~520px the two columns cannot both hold a line, so stack them. */
+@media (max-width: 520px) {
+  .doc-kv { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+}
+
 .tr3 { display: grid; grid-template-columns: 32px minmax(0, 2fr) minmax(0, 1fr); gap: 10px; padding: 8px 10px; }
 .tr3 + .tr3 { border-top: 1px solid var(--kx-line); }
 .tr4 {

@@ -4845,7 +4845,7 @@ function _sbRun() {
       else if (a === "exportChat") post("exportChat", { scope: "current" });
       else if (a === "exportAll") post("exportChat", { scope: "all" });
       else if (a === "settings") post("openSettings");
-      else if (a === "docs") post("openControlCenter", { section: "logs" });
+      else if (a === "docs") post("openControlCenter", { section: "docs" });
       else if (a === "issue") post("openControlCenter", { section: "logs" });
     });
     $("historyPop").addEventListener("click", function (e) {

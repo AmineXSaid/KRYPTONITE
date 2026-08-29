@@ -55,7 +55,7 @@ function _run() {
        removed; every field and both buttons are still here. */
     ["endpoints", "Endpoints"], ["conn", "Connection"], ["diag", "Diagnostics"],
     ["agent", "Agent & tools"], ["mcp", "MCP servers"], ["skills", "Skills"], ["checkpoints", "Checkpoints"],
-    ["logs", "Logs & export"]
+    ["logs", "Logs & export"], ["docs", "Documentation"]
   ];
 
   var RUNG_LABELS = {
@@ -584,11 +584,22 @@ function _run() {
     var html = "";
     for (var i = 0; i < SECTIONS.length; i++) {
       var id = SECTIONS[i][0], label = SECTIONS[i][1];
-      var badge = String(counts[id]);
+      /* A section with no entry in `counts` gets NO badge, rather than the
+         string "undefined".
+
+         This is the third time that bug has shipped - the comment on `mcp`
+         below records the second - so it is fixed here, at the one place a
+         badge is built, instead of by adding another key and waiting for the
+         fourth. A count is genuinely optional: Documentation counts nothing,
+         and an empty pill reading "0" would be a worse lie than no pill. */
+      var badge = counts[id] === undefined || counts[id] === null ? "" : String(counts[id]);
       if (id === "endpoints" && errorCount()) badge = S.profiles.length + " · " + errorCount() + "!";
       html += '<button role="tab" data-section="' + id + '" aria-selected="' +
         (S.section === id ? "true" : "false") + '">' + esc(label) +
-        '<span class="nav-badge' + (alerts[id] ? " alert" : "") + '">' + esc(badge) + "</span></button>";
+        (badge === ""
+          ? ""
+          : '<span class="nav-badge' + (alerts[id] ? " alert" : "") + '">' + esc(badge) + "</span>") +
+        "</button>";
     }
     $("strip").innerHTML = html;
 
@@ -602,7 +613,10 @@ function _run() {
   function render() {
     renderStrip();
     var pane = $("pane");
-    if (!S.workspace.open) {
+    // Documentation is reference text rather than a view of the workspace, so
+    // it is the one section that still renders with no folder open - that is
+    // exactly when someone is reading about how to set one up.
+    if (!S.workspace.open && S.section !== "docs") {
       pane.innerHTML = "<h3>No folder open</h3>" +
         '<div class="explainer">Genesis reads endpoint profiles and skills from the folder you have open. ' +
         "Open a folder to configure it.</div>";
@@ -617,6 +631,11 @@ function _run() {
       case "skills": pane.innerHTML = secSkills(); break;
       case "checkpoints": pane.innerHTML = secCheckpoints(); break;
       case "logs": pane.innerHTML = secLogs(); break;
+      case "docs": pane.innerHTML = secDocs(); break;
+      /* Without this arm an unrecognised section id - `navigate` accepts
+         whatever the host sends - leaves the PREVIOUS pane on screen with
+         no tab selected, which reads as a frozen panel rather than a bug. */
+      default: pane.innerHTML = secEndpoints(); break;
     }
     // Set as a property, never interpolated into the markup above.
     if (S.epForm && S.epForm.apiKey && $("fKey")) $("fKey").value = S.epForm.apiKey;
@@ -1032,7 +1051,10 @@ function _run() {
      to a request between the keystroke and the model. They were four tabs
      holding zero editable controls between them, which is a report wearing a
      control panel's clothes. Folded into one section, opened one at a time. */
-  var CONN_OPEN = { wire: true, auth: false, tls: false, proxy: false };
+  /* Also seeds the Documentation accordions: connBlock and this map are reused
+     there rather than duplicated, and `doc*` ids cannot collide with these. */
+  var CONN_OPEN = { wire: true, auth: false, tls: false, proxy: false,
+    docSkill: true, docMcp: false, docAgent: false };
 
   function connBlock(id, title, badge, body) {
     var open = CONN_OPEN[id];
@@ -1391,6 +1413,291 @@ function _run() {
   }
 
   /* ── skills ── */
+
+  /* ── documentation ────────────────────────────────────────────────────
+     How to extend Genesis with the three things it takes from a workspace: a
+     skill, an MCP server, an agent.
+
+     The "Documentation" menu item used to open Logs & export, which documents
+     nothing. It opens here now.
+
+     Every path, key and limit below is written against the loaders rather than
+     from memory - src/skills/loader.ts, src/mcp/registry.ts,
+     src/agents/loader.ts - because a how-to that has drifted from the parser is
+     worse than none. test/control-center.cjs pins the ones that are easy to
+     get wrong against the source, so a limit cannot change here alone. */
+
+  function pre(lines) { return '<div class="pre">' + esc(lines.join("\n")) + "</div>"; }
+  function kvTable(rows) {
+    var h = "";
+    for (var i = 0; i < rows.length; i++) {
+      h += '<div class="doc-kv"><span class="k">' + rows[i][0] + '</span>' +
+           '<span class="v">' + rows[i][1] + "</span></div>";
+    }
+    return '<div class="tbl">' + h + "</div>";
+  }
+
+  /* ── how to prepare a skill ── */
+  function docSkill() {
+    var dir = esc(S.config.skillsDirectory || ".agent/skills");
+    return '<div class="explainer">A skill is a folder of instructions the model opens only when it ' +
+      "decides the task calls for them. That staging is the whole point: only the one-line index " +
+      "sits in the system prompt, so forty skills cost about what five do until one is actually " +
+      "used.</div>" +
+
+      '<div class="block"><h4>1 &middot; Make the folder</h4>' +
+      '<div class="explainer">One folder per skill under <code>' + dir + '</code>. The folder name ' +
+      "becomes the skill name unless the frontmatter overrides it.</div>" +
+      pre([
+        dir + "/",
+        "  tls-basics/",
+        "    SKILL.md            <- required; everything else is optional",
+        "    handshake.md",
+        "    templates/",
+        "      report.md"
+      ]) + "</div>" +
+
+      '<div class="block"><h4>2 &middot; Write SKILL.md</h4>' +
+      '<div class="explainer">YAML frontmatter over a Markdown body. <code>name</code> and ' +
+      "<code>description</code> are the two keys that are read; anything else is kept but unused " +
+      "today.</div>" +
+      pre([
+        "---",
+        "name: tls-basics",
+        "description: How to read a TLS handshake capture and name the failure.",
+        "---",
+        "",
+        "Read the ClientHello first. The cipher list tells you...",
+        "",
+        "For a worked example see handshake.md.",
+        "For the report layout use templates/report.md."
+      ]) +
+      '<div class="explainer" style="margin-top:9px"><b>The description is the entire trigger.</b> ' +
+      "It is the only sentence the model sees before deciding whether to open the skill, so say " +
+      "<i>when to use it</i>, not what it contains. A skill with no description still loads, and " +
+      "warns in the Skills tab - it simply never fires.</div></div>" +
+
+      '<div class="block"><h4>3 &middot; Understand the three levels</h4>' +
+      '<div class="explainer">Each level is paid for only when it is reached. This is what makes a ' +
+      "large skill library affordable on a small context window.</div>" +
+      kvTable([
+        ["Always loaded",
+         "<code>name</code> + <code>description</code> &mdash; about two lines per skill"],
+        ["On demand",
+         "the SKILL.md body, fetched when the model calls <code>read_skill</code>"],
+        ["Only if pointed at",
+         "bundled files, listed by <code>read_skill</code> and opened with <code>read_file</code>"]
+      ]) +
+      '<div class="explainer" style="margin-top:9px">So the body should <i>name its supporting ' +
+      "files by path</i>. A file the body never mentions is a file the model has no reason to open. " +
+      "Subdirectories are listed three levels deep, sixty files at most.</div></div>" +
+
+      '<div class="block"><h4>4 &middot; Load it</h4>' +
+      '<div class="explainer">A watcher on <code>' + dir + '</code> picks up new and changed skills ' +
+      "without a reload. If one does not appear, the Skills tab has a Reload button and lists the " +
+      "parse warnings. Every skill has a switch there: a disabled skill stays on disk and out of " +
+      "the prompt.</div></div>" +
+
+      '<div class="block"><h4>Limits</h4>' +
+      kvTable([
+        ["Body", "24,000 characters. Past that it is a reference document rather than an " +
+                 "instruction &mdash; move the bulk into a bundled file."],
+        ["Files listed", "60, to a depth of 3"],
+        ["Folder", "set by the <code>genesis.skillsDirectory</code> setting"]
+      ]) + "</div>";
+  }
+
+  /* ── how to prepare an MCP server ── */
+  function docMcp() {
+    return '<div class="explainer">MCP servers are declared in <code>.agent/mcp.json</code>, in the ' +
+      "same shape Claude Desktop and Claude Code use &mdash; a server block copies between them " +
+      "verbatim. Their tools reach the model as <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>.</div>" +
+
+      '<div class="block"><h4>1 &middot; A local server (stdio)</h4>' +
+      '<div class="explainer">Genesis starts the command as a child process and speaks MCP over its ' +
+      "stdin and stdout. This is the common case.</div>" +
+      pre([
+        "{",
+        '  "mcpServers": {',
+        '    "filesystem": {',
+        '      "command": "npx",',
+        '      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],',
+        '      "approval": "ask",',
+        '      "readOnly": false',
+        "    }",
+        "  }",
+        "}"
+      ]) + "</div>" +
+
+      '<div class="block"><h4>2 &middot; A remote server (HTTP or SSE)</h4>' +
+      '<div class="explainer">Anything with a <code>url</code>, or an explicit <code>type</code>, is ' +
+      "treated as remote and nothing is spawned. <code>headers</code> is where a token goes.</div>" +
+      pre([
+        "{",
+        '  "mcpServers": {',
+        '    "jira": {',
+        '      "type": "http",',
+        '      "url": "https://mcp.example.com/jira",',
+        '      "headers": { "Authorization": "Bearer ..." },',
+        '      "readOnly": true',
+        "    }",
+        "  }",
+        "}"
+      ]) +
+      '<div class="explainer" style="margin-top:9px"><code>type</code> may be <code>http</code>, ' +
+      "<code>streamable-http</code> or <code>sse</code>. A server declared remote with no " +
+      "<code>url</code> is reported as a warning rather than started.</div></div>" +
+
+      '<div class="block"><h4>3 &middot; Every key</h4>' +
+      kvTable([
+        ["<code>command</code>", "stdio only. The executable to run. Required unless the server is remote."],
+        ["<code>args</code>", "stdio only. Argument list."],
+        ["<code>env</code>", "stdio only. Extra environment for the child process."],
+        ["<code>cwd</code>", "stdio only. Working directory for the child process."],
+        ["<code>url</code>", "remote only. Required when <code>type</code> is set."],
+        ["<code>type</code>", "<code>http</code>, <code>streamable-http</code> or <code>sse</code>. " +
+                              "Omit for stdio."],
+        ["<code>headers</code>", "remote only. Sent on every request &mdash; this is where auth goes."],
+        ["<code>timeoutMs</code>", "per-call timeout."],
+        ["<code>enabled</code>", "<code>false</code> keeps the server declared but never starts it. " +
+                                 "It still shows in the MCP tab, marked disabled, because " +
+                                 "configuration should stay visible."],
+        ["<code>approval</code>", "<b>Genesis&rsquo;s own.</b> <code>ask</code> (default) routes every " +
+                                  "call through the permission gate; <code>auto</code> does not."],
+        ["<code>readOnly</code>", "<b>Genesis&rsquo;s own.</b> Your claim that the server only reads. " +
+                                  "See below."]
+      ]) + "</div>" +
+
+      '<div class="block"><h4>4 &middot; readOnly, and why it is yours to declare</h4>' +
+      '<div class="explainer">Ask and Plan promise the model can only look. MCP gives a server no way ' +
+      "to declare a tool read-only, so there is nothing for Genesis to check &mdash; which is why " +
+      "those two modes withhold MCP entirely by default, locking out servers that genuinely only " +
+      "read.<br><br><code>readOnly: true</code> is you saying otherwise, and it is the only thing " +
+      "that opens Ask and Plan to a server. It is a claim, not a proof: nothing inspects what the " +
+      "server actually does, exactly as nothing checks whether <code>approval: \"auto\"</code> is " +
+      "wise. Set it for a docs or search server; leave it off for anything that can write.</div></div>" +
+
+      '<div class="block"><h4>5 &middot; Load it</h4>' +
+      '<div class="explainer">The MCP tab lists every declared server with its transport, its state ' +
+      "and its tool count, and has a Reload button. A server that fails to start stays listed with " +
+      "its error rather than disappearing.</div></div>";
+  }
+
+  /* ── how to prepare an agent ── */
+  function docAgent() {
+    return '<div class="explainer">An agent is a persona, optionally a model, optionally a memory ' +
+      "file, and a list of what it may reach. One Markdown file each in <code>.agent/agents/</code>, " +
+      "YAML frontmatter over a body &mdash; deliberately the same shape as a SKILL.md so the two " +
+      "read alike.</div>" +
+
+      '<div class="block"><h4>1 &middot; Write the file</h4>' +
+      '<div class="explainer"><code>.agent/agents/tls-triage.md</code>:</div>' +
+      pre([
+        "---",
+        "name: tls-triage",
+        "description: Reads TLS captures and explains handshake failures.",
+        "model: openai/gpt-oss-20b        # optional; overrides the profile's model",
+        "memory: .agent/memory/tls-triage.md",
+        "tools: [read_file, search, glob, list_files]",
+        "skills: [tls-basics]",
+        "mcp:",
+        "  filesystem:",
+        "    tools:",
+        "      include: [read_text_file, list_directory]",
+        "      exclude: [write_*]",
+        "  memory: true",
+        "---",
+        "",
+        "You are a TLS triage specialist. You read captures and name the",
+        "failure. You do not change configuration."
+      ]) +
+      '<div class="explainer" style="margin-top:9px"><b>Only <code>name</code> is required</b>, and ' +
+      "every omission means <i>unrestricted</i>, not <i>nothing</i>. An agent that declares no " +
+      "<code>tools</code> gets the full built-in set; one that declares no <code>mcp</code> gets " +
+      "every configured server. An agent should be able to start as a persona and acquire limits " +
+      "afterwards.</div></div>" +
+
+      '<div class="block"><h4>2 &middot; Every key</h4>' +
+      kvTable([
+        ["<code>name</code>", "Required. Letters, digits, dot, dash, underscore."],
+        ["<code>description</code>", "Shown in the Agents tab and the <code>/agent</code> list."],
+        ["<code>model</code>", "Overrides the active profile&rsquo;s model for this agent only. " +
+                               "Omit to use the profile&rsquo;s."],
+        ["<code>memory</code>", "A workspace-relative file, read into the system prompt every turn. " +
+                                "8,000 characters."],
+        ["<code>tools</code>", "Built-in allowlist. Omit for all the phase permits."],
+        ["<code>skills</code>", "Skill allowlist. Omit for every enabled skill."],
+        ["<code>mcp</code>", "Which servers and which of their tools. Five forms &mdash; see below."],
+        ["body", "The persona, appended to the system prompt. 12,000 characters."]
+      ]) + "</div>" +
+
+      '<div class="block"><h4>3 &middot; The built-in tool names</h4>' +
+      '<div class="explainer">These are the values <code>tools:</code> takes. The phase still applies ' +
+      "on top: naming <code>write_file</code> does not let an agent write while Ask is in force.</div>" +
+      pre([
+        "read_file      list_files     glob          search",
+        "write_file     edit_file      run_command   read_skill",
+        "browser        fetch_url      web_search    generate_image",
+        "update_todos"
+      ]) + "</div>" +
+
+      '<div class="block"><h4>4 &middot; The five forms of <code>mcp:</code></h4>' +
+      pre([
+        'mcp: "*"                                  every server, every tool',
+        "mcp: none                                 no MCP at all",
+        "mcp: [filesystem, memory]                 those servers, every tool",
+        "mcp: { filesystem: [read_*, list_*] }     that server, those tools",
+        "mcp:                                      the fully explicit form",
+        "  filesystem:",
+        "    tools:",
+        "      include: [read_*]",
+        "      exclude: [write_*]"
+      ]) +
+      '<div class="explainer" style="margin-top:9px">Omitting the key entirely is the same as ' +
+      "<code>\"*\"</code>. Only one wildcard character is supported, deliberately: <code>read_*</code> " +
+      "matches <code>read_file</code> and <code>read_text_file</code>, <code>read_file</code> matches " +
+      "only itself. A fuller glob dialect is a way to write a filter nobody can predict.</div></div>" +
+
+      '<div class="block"><h4>5 &middot; Why the scoping matters</h4>' +
+      '<div class="explainer">It is not decoration. Every tool offered costs context on every ' +
+      "request, and a tool the model can see is a tool it can call: handing a server&rsquo;s whole " +
+      "surface to an agent that needs two of its tools spends tokens on the other twelve and leaves " +
+      "the destructive ones one hallucination away.<br><br>It is also enforced rather than " +
+      "advertised. The same predicate runs where tools are offered <i>and</i> where a call is " +
+      "executed, so a tool name the model produced from earlier in the transcript is refused rather " +
+      "than run.</div></div>" +
+
+      '<div class="block"><h4>6 &middot; Use it</h4>' +
+      '<div class="explainer"><code>/agent</code> in the composer, the command palette, and the ' +
+      "Agents tab all reach the same list. While an agent is active a bar under the tabs names it " +
+      "and states its scope. The count on the Agents tab is <i>files that failed to parse</i>, not " +
+      "agents, so it stays dark when nothing is wrong.</div></div>" +
+
+      '<div class="block"><h4>On &ldquo;Hermes&rdquo;</h4>' +
+      '<div class="explainer">There is one agent format, and it <i>is</i> Hermes Agent&rsquo;s: the ' +
+      "<code>mcp:</code> block above takes Hermes&rsquo;s own shape, so a server filter lifts " +
+      "between the two unchanged. The difference here is that Hermes scopes one global agent, while " +
+      "these are per-agent &mdash; because what people actually want is several, each seeing only " +
+      "the tools its job needs.<br><br>Separately, and unrelated to the file format: models in the " +
+      "Hermes and Qwen lineage emit tool calls as XML (<code>&lt;tool_call&gt;</code> or " +
+      "<code>&lt;function=&hellip;&gt;</code>) rather than JSON. Genesis parses both dialects " +
+      "automatically. Pointing an agent&rsquo;s <code>model:</code> at one needs no extra " +
+      "configuration.</div></div>";
+  }
+
+  function secDocs() {
+    var html = secHead("docs", "Documentation",
+      "How to extend Genesis with the three things it reads out of a workspace. Each guide is " +
+      "written against the loader that actually parses the file, so the paths, keys and limits " +
+      "below are the enforced ones.");
+    html += '<div class="acc-wrap">' +
+      connBlock("docSkill", "Prepare a skill", ".agent/skills/", docSkill()) +
+      connBlock("docMcp", "Prepare an MCP server", ".agent/mcp.json", docMcp()) +
+      connBlock("docAgent", "Prepare an agent", ".agent/agents/", docAgent()) +
+      "</div>";
+    return html;
+  }
+
   function secSkills() {
     var enabled = S.skills.filter(function (s) { return s.enabled; });
     var html = secHead("skills", "Skills",
