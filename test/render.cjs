@@ -883,6 +883,70 @@ function contrast(a, b) {
     await ctx.close();
   }
 
+  /* ── 5i. every header glyph actually paints ────────────────────────── */
+  {
+    // A glyph is drawn as <use href="#i-foo">. If the symbol is missing - a
+    // rename that missed a call site, a typo - the browser reports NO error:
+    // the shadow tree is simply empty and the button renders as blank space of
+    // exactly the right size. Nothing else in the suite can see that, because
+    // every layout and contrast assertion still passes over an empty button.
+    // getBBox() on the <use> is the instrument that can: it is 0x0 when the
+    // reference dangles and the glyph's extent when it does not.
+    const { ctx, page } = await open(400, {});
+
+    for (const [id, label] of [["#newBtn", "new chat"], ["#histBtn", "history"], ["#moreBtn", "more"]]) {
+      const box = await page.locator(id + " use").evaluate((u) => {
+        const b = u.getBBox();
+        return { w: b.width, h: b.height, href: u.getAttribute("href") || "" };
+      });
+      ok(`the ${label} glyph resolves to a defined symbol`,
+        box.w > 0 && box.h > 0, `${box.href} drew ${box.w}x${box.h}`);
+    }
+
+    // The three glyphs must also differ from each other. Two buttons pointing
+    // at the same symbol is the other half of a botched rename, and every
+    // reference resolves, so the check above passes clean.
+    //
+    // Scoped to the three buttons, NOT to `.kx-header use`: the header also
+    // contains the crystal mark and both popovers, and the two Export rows
+    // there share `i-download` on purpose because they are the same verb.
+    const hrefs = await page.locator("#newBtn use, #histBtn use, #moreBtn use").evaluateAll(
+      (us) => us.map((u) => u.getAttribute("href")));
+    ok("and no two header buttons share a glyph",
+      new Set(hrefs).size === hrefs.length, hrefs.join(" "));
+
+    // The distinction the ICON_DEFS comment describes, pinned so that a later
+    // "these are both clocks, merge them" cannot quietly undo it. A bare dial
+    // means TIME - correct on the queue, which really is waiting. History
+    // needs the return arrow, which is what carries "back".
+    ok("history is not the plain clock",
+      !hrefs.includes("#i-clock"), hrefs.join(" "));
+
+    await ctx.close();
+  }
+
+  /* ── 5j. no icon() call names a symbol that does not exist ─────────── */
+  {
+    // 5i covers the three buttons a rendered panel shows. This covers every
+    // other glyph in the file, including those in states this suite never
+    // opens - an error box, a queued steer note - where a dangling reference
+    // would ship unseen.
+    const src = fs.readFileSync(path.join(MEDIA, "webview/sidebar.js"), "utf8");
+    // Defs live in BOTH files: crystal.js owns the product mark (`i-kx`) so the
+    // two surfaces share one copy of it, and sidebar.js pulls it in via
+    // CRYSTAL_DEFS. Scanning only sidebar.js would report the mark as dangling.
+    const crystalSrc = fs.readFileSync(path.join(MEDIA, "webview/crystal.js"), "utf8");
+    const defined = new Set([...(src + crystalSrc).matchAll(/<symbol id="(i-[a-z0-9-]+)"/g)].map((m) => m[1]));
+    const used = new Set([...src.matchAll(/icon\(\s*"(i-[a-z0-9-]+)"/g)].map((m) => m[1]));
+    // Ternaries inside an icon() call - icon(x ? "i-up" : "i-clock") - are not
+    // matched by the pattern above, so pick up every quoted i-* token too.
+    for (const m of src.matchAll(/"(i-[a-z0-9-]+)"/g)) used.add(m[1]);
+    const dangling = [...used].filter((n) => !defined.has(n));
+    ok("every glyph named in the shipped sidebar.js is defined",
+      dangling.length === 0, dangling.join(", "));
+    ok("and the defs were actually found", defined.size > 15, String(defined.size));
+  }
+
   /* ── 6. the session list, as the reference draws it ────────────────── */
   {
     const { ctx, page } = await open(400, {

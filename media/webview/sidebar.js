@@ -23,10 +23,32 @@ function _sbRun() {
   var CRYSTAL_DEFS = window.__kxCrystal.defs;
 
   var S6 = 'stroke="currentColor" fill="none"';
+  /* S6 leaves stroke-linecap/linejoin at the SVG default - butt and mitre -
+     which is right for the plain bars and circles most glyphs are made of. The
+     glyphs below that carry a taper or a sharp corner (the pencil tip, the
+     return arrow) need round, or the mitre grows a visible barb at 16px. */
+  var S6R = S6 + ' stroke-linecap="round" stroke-linejoin="round"';
   var ICON_DEFS =
-    '<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" ' + S6 + ' stroke-width="1.7"/></symbol>' +
+    /* Compose rather than a bare "+": a plus reads as generic "add" - add a
+       file? a folder? - while a pencil on a page says start writing, which is
+       what the button does and what every chat client uses for it. */
+    '<symbol id="i-compose" viewBox="0 0 24 24">' +
+      '<path d="M12.5 5H6.5A1.5 1.5 0 0 0 5 6.5v11A1.5 1.5 0 0 0 6.5 19h11a1.5 1.5 0 0 0 1.5-1.5v-6" ' + S6R + ' stroke-width="1.7"/>' +
+      '<path d="M17 4.2a1.7 1.7 0 0 1 2.4 2.4l-6 6-2.9.5.5-2.9z" ' + S6R + ' stroke-width="1.7"/></symbol>' +
+    /* Two glyphs, not one, because they say different things. A bare clock
+       face means TIME - it is correct on the queue, where the subject really
+       is waiting. It does not mean THE PAST: the counter-clockwise arrow
+       wrapped round the dial is what carries "back", and is what VS Code's own
+       `history` codicon uses, so it reads right to anyone living in the
+       editor. Do not collapse these two into one symbol. */
     '<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" ' + S6 + ' stroke-width="1.6"/><path d="M12 8v4.4l3 1.7" ' + S6 + ' stroke-width="1.6"/></symbol>' +
-    '<symbol id="i-dots" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/></symbol>' +
+    '<symbol id="i-history" viewBox="0 0 24 24">' +
+      '<path d="M4.6 9.4A8 8 0 1 1 4 12.6" ' + S6R + ' stroke-width="1.6"/>' +
+      '<path d="M4.2 4.8v4.8h4.8" ' + S6R + ' stroke-width="1.6"/>' +
+      '<path d="M12 8.2v4.2l2.8 1.6" ' + S6R + ' stroke-width="1.6"/></symbol>' +
+    /* Vertical, because the menu it opens drops downward from the panel's
+       right edge and a kebab points the way the menu travels. */
+    '<symbol id="i-kebab" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="19" r="1.5" fill="currentColor"/></symbol>' +
     '<symbol id="i-chev" viewBox="0 0 10 10"><path d="M2.5 0.5L7 5l-4.5 4.5" ' + S6 + ' stroke-width="1.4"/></symbol>' +
     '<symbol id="i-caret" viewBox="0 0 10 10"><path d="M1 3l4 4.5L9 3" ' + S6 + ' stroke-width="1.3"/></symbol>' +
     '<symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3h7l5 5v13H6z" ' + S6 + ' stroke-width="1.5"/><path d="M13 3v5h5" ' + S6 + ' stroke-width="1.5"/></symbol>' +
@@ -934,9 +956,9 @@ function _sbRun() {
           // space on every panel for two facts that are status rather than
           // controls - and vertical space in a 340px sidebar is the thing the
           // conversation is short of.
-          '<button class="icon-btn" id="newBtn" title="New chat" aria-label="New chat">' + icon("i-plus") + '</button>' +
-          '<button class="icon-btn" id="histBtn" title="History" aria-label="Chat history" aria-haspopup="menu" aria-expanded="false">' + icon("i-clock") + '</button>' +
-          '<button class="icon-btn" id="moreBtn" title="More" aria-label="More actions" aria-haspopup="menu" aria-expanded="false">' + icon("i-dots") + '</button>' +
+          '<button class="icon-btn" id="newBtn" title="New chat" aria-label="New chat">' + icon("i-compose") + '</button>' +
+          '<button class="icon-btn" id="histBtn" title="History" aria-label="Chat history" aria-haspopup="menu" aria-expanded="false">' + icon("i-history") + '</button>' +
+          '<button class="icon-btn" id="moreBtn" title="More" aria-label="More actions" aria-haspopup="menu" aria-expanded="false">' + icon("i-kebab") + '</button>' +
           '<div class="popover" id="historyPop" role="menu" hidden></div>' +
           '<div class="popover" id="morePop" role="menu" hidden>' +
             '<button class="pop-row" role="menuitem" data-more="control">' + crystal(15) + '<span class="t">Control Center</span></button>' +
