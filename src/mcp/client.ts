@@ -322,13 +322,18 @@ export class McpClient {
   }
 
   /**
-   * Call a tool. Returns the flattened text the model should see.
+   * Call a tool. Returns the text the model should see, and any pixels with it.
    *
    * MCP results carry a content array plus an `isError` flag; a tool that failed
    * reports it in the payload rather than as a JSON-RPC error, because the model
    * is supposed to read the failure and react to it.
+   *
+   * `pixels` is the caller's answer to "can this endpoint look at an image at
+   * all", and it has to be asked here rather than assumed, because an image
+   * block forwarded to a gateway without vision is a 400 for the whole turn -
+   * strictly worse than the description it replaced.
    */
-  async callTool(tool: string, args: unknown): Promise<{ content: string; isError?: boolean }> {
+  async callTool(tool: string, args: unknown, pixels = true): Promise<McpCallResult> {
     if (this.state !== "ready") {
       return { content: `MCP server "${this.spec.name}" is not connected.`, isError: true };
     }
@@ -337,7 +342,8 @@ export class McpClient {
         name: tool,
         arguments: args ?? {},
       })) as any;
-      return { content: flattenContent(res), isError: res?.isError === true };
+      const { text, images } = splitContent(res, pixels);
+      return { content: text, isError: res?.isError === true, ...(images.length ? { images } : {}) };
     } catch (e: any) {
       return { content: `${this.spec.name}/${tool} failed: ${e.message}`, isError: true };
     }
@@ -504,25 +510,134 @@ export class McpClient {
   }
 }
 
+/** An image an MCP server handed back, in the shape both model wires want. */
+export interface McpImage {
+  mediaType: string;
+  /** base64, with no `data:` prefix. */
+  data: string;
+}
+
+/** What a tool call answers with: text always, pixels when there are any. */
+export interface McpCallResult {
+  content: string;
+  isError?: boolean;
+  images?: McpImage[];
+}
+
 /**
- * MCP content blocks -> plain text for the model.
+ * Media types both wires accept for an inline image.
  *
- * Text passes through. Anything binary is described rather than inlined: a
- * base64 image dropped into a tool result would burn the context window for a
- * payload the text path cannot use anyway.
+ * Anthropic names exactly these four, and chat-completions takes whatever the
+ * data: URI declares but the gateways in front of it do not. A server may
+ * legitimately return an image/svg+xml or an image/tiff; sending one is a 400
+ * from the endpoint, so those are described in the text instead of carried.
  */
-export function flattenContent(res: any): string {
+const WIRE_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+
+/**
+ * Caps on what one tool result may put in the context window as pixels.
+ *
+ * These are much tighter than the text cap and they are not the same kind of
+ * limit. Truncated text is still partly useful; half an image is not an image,
+ * so an oversized one is dropped whole and said so. The per-image figure is
+ * Anthropic's documented ceiling on a base64 image payload; the per-result one
+ * exists because a page with a dozen diagrams would otherwise blow the request
+ * even though each diagram is individually legal.
+ */
+export const MCP_IMAGE_MAX = 4;
+export const MCP_IMAGE_CHARS = 5_000_000;
+export const MCP_IMAGE_TOTAL_CHARS = 10_000_000;
+
+const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
+
+/**
+ * Normalise whatever a server put in an image block's `data` field.
+ *
+ * Returns undefined for anything that would not survive the wire. Two of these
+ * are worth naming because they are what servers actually get wrong:
+ *
+ *  - A `data:image/png;base64,` prefix. The MCP schema says the field is raw
+ *    base64, but servers built by pasting a browser data URI in include the
+ *    prefix. Forwarding it produces a 400 from the endpoint with a message
+ *    that names neither the server nor the tool, so it is stripped here.
+ *  - Whitespace. base64 wrapped at 76 columns is valid base64 to a decoder and
+ *    is rejected by at least one gateway; removing it costs nothing.
+ *
+ * Anything still not base64-shaped after that is not an image, whatever the
+ * block claimed. Better to describe it than to spend a request finding out.
+ */
+function wireBase64(raw: unknown): string | undefined {
+  if (typeof raw !== "string" || !raw) return undefined;
+  const comma = raw.startsWith("data:") ? raw.indexOf(",") : -1;
+  const body = (comma >= 0 ? raw.slice(comma + 1) : raw).replace(/\s+/g, "");
+  if (!body || !BASE64.test(body) || body.length % 4 !== 0) return undefined;
+  return body;
+}
+
+/**
+ * MCP content blocks -> the text the model reads, plus the pixels it looks at.
+ *
+ * Text passes through. An image block is carried as an image WHEN the caller
+ * can use one: the wire takes the media type, it is inside the caps, and the
+ * caller asked for pixels at all. Otherwise it is described, which is what this
+ * did for every image before - the description is the fallback, not the design.
+ *
+ * The text keeps a marker at the image's position either way. Without one, a
+ * result that is a caption followed by a diagram followed by a second caption
+ * reaches the model as two captions and two images with nothing saying which
+ * belongs to which.
+ *
+ * `pixels: false` is not the same as "no images were there". The descriptions
+ * stay, and one line at the end says how many pictures the model is not being
+ * shown and which profile field would change that. Silence here is the failure
+ * this whole path exists to fix: a model handed `[image: image/png]` answers
+ * about a document it cannot see, and neither it nor the user learns why.
+ */
+export function splitContent(res: any, pixels = true): { text: string; images: McpImage[] } {
   const blocks = res?.content;
-  if (typeof res?.text === "string" && !Array.isArray(blocks)) return res.text;
+  if (typeof res?.text === "string" && !Array.isArray(blocks)) return { text: res.text, images: [] };
   if (!Array.isArray(blocks)) {
-    return res === undefined ? "" : typeof res === "string" ? res : JSON.stringify(res);
+    const text = res === undefined ? "" : typeof res === "string" ? res : JSON.stringify(res);
+    return { text, images: [] };
   }
   const parts: string[] = [];
+  const images: McpImage[] = [];
+  let totalChars = 0;
+  let withheld = 0;
+
   for (const b of blocks) {
     if (!b || typeof b !== "object") continue;
     if (b.type === "text" && typeof b.text === "string") parts.push(b.text);
-    else if (b.type === "image") parts.push(`[image: ${b.mimeType ?? "unknown"}]`);
-    else if (b.type === "audio") parts.push(`[audio: ${b.mimeType ?? "unknown"}]`);
+    else if (b.type === "image") {
+      const mediaType = typeof b.mimeType === "string" ? b.mimeType.toLowerCase() : "";
+      const data = wireBase64(b.data);
+      // Ordered cheapest-refusal-first so the message names the FIRST reason
+      // the image cannot be carried rather than an incidental later one.
+      const why = !pixels
+        ? undefined // the caller explains this one; it knows why it said no
+        : !WIRE_IMAGE_TYPES.has(mediaType)
+          ? `${mediaType || "unknown type"} is not an inline image type`
+          : !data
+            ? "the data was not base64"
+            : data.length > MCP_IMAGE_CHARS
+              // Characters of base64, not kilobytes of image. Rounding to kB
+              // produced "5000 kB exceeds the 5000 kB cap" for a payload four
+              // characters over, which reads like a bug in the cap.
+              ? `${data.length} characters of base64 exceeds the ${MCP_IMAGE_CHARS} per-image cap`
+              : images.length >= MCP_IMAGE_MAX
+                ? `only the first ${MCP_IMAGE_MAX} images of a result are sent`
+                : totalChars + data.length > MCP_IMAGE_TOTAL_CHARS
+                  ? "the result's images together exceed the per-result cap"
+                  : null;
+      if (why === null && data) {
+        images.push({ mediaType, data });
+        totalChars += data.length;
+        parts.push(`[image ${images.length}: ${mediaType}, attached below]`);
+      } else {
+        if (!pixels) withheld++;
+        parts.push(`[image: ${b.mimeType ?? "unknown"}${why ? ` - not attached, ${why}` : ""}]`);
+      }
+    } else if (b.type === "audio") parts.push(`[audio: ${b.mimeType ?? "unknown"}]`);
     else if (b.type === "resource_link") parts.push(`[resource: ${b.uri ?? "?"}]`);
     else if (b.type === "resource") {
       const r = b.resource ?? {};
@@ -531,5 +646,22 @@ export function flattenContent(res: any): string {
       );
     }
   }
-  return parts.join("\n").trim();
+  if (withheld) parts.push(noVisionNote(withheld));
+  return { text: parts.join("\n").trim(), images };
+}
+
+/**
+ * Why the model is reading a label where a picture should be, and what to change.
+ *
+ * Named separately so the wording is pinned by one test rather than asserted on
+ * by substring in several. It names the two profile fields because either will
+ * do and a user who set only `kind` would otherwise be told to set the other.
+ */
+export function noVisionNote(count: number): string {
+  return (
+    `[${count} image(s) from this tool were not sent: the active endpoint does not ` +
+    `declare vision, and a gateway without it answers an image block with a 400 ` +
+    `rather than a degraded reply. Set capabilities.vision: true - or kind: ` +
+    `multimodal, which implies it - in the profile if the gateway supports images.]`
+  );
 }

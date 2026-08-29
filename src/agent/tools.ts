@@ -107,7 +107,12 @@ export interface ToolContext {
      * tool may be offered outside Act. Nothing verifies the claim.
      */
     isReadOnly(name: string): boolean;
-    call(name: string, args: unknown): Promise<{ content: string; isError?: boolean }>;
+    /**
+     * May answer with pixels as well as text, on the same terms as `browser`
+     * above: only the caller knows whether the active endpoint declares vision,
+     * so the caller decides, and this signature only has to admit the answer.
+     */
+    call(name: string, args: unknown): Promise<ToolResult>;
   };
   /**
    * Image generation, present only when the active profile declares one.

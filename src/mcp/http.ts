@@ -1,5 +1,11 @@
 import { request } from "undici";
-import { flattenContent, type McpServerSpec, type McpState, type McpTool } from "./client";
+import {
+  splitContent,
+  type McpCallResult,
+  type McpServerSpec,
+  type McpState,
+  type McpTool,
+} from "./client";
 
 /**
  * A Model Context Protocol client over Streamable HTTP.
@@ -121,13 +127,15 @@ export class McpHttpClient {
     return out;
   }
 
-  async callTool(tool: string, args: unknown): Promise<{ content: string; isError?: boolean }> {
+  /** See the stdio client's `callTool`; `pixels` means the same thing here. */
+  async callTool(tool: string, args: unknown, pixels = true): Promise<McpCallResult> {
     if (this.state !== "ready") {
       return { content: `MCP server "${this.spec.name}" is not connected.`, isError: true };
     }
     try {
       const res = (await this.rpc("tools/call", { name: tool, arguments: args ?? {} })) as any;
-      return { content: flattenContent(res), isError: res?.isError === true };
+      const { text, images } = splitContent(res, pixels);
+      return { content: text, isError: res?.isError === true, ...(images.length ? { images } : {}) };
     } catch (e: any) {
       return { content: `${this.spec.name}/${tool} failed: ${e.message}`, isError: true };
     }
@@ -511,13 +519,15 @@ export class McpSseClient {
     return out;
   }
 
-  async callTool(tool: string, args: unknown): Promise<{ content: string; isError?: boolean }> {
+  /** See the stdio client's `callTool`; `pixels` means the same thing here. */
+  async callTool(tool: string, args: unknown, pixels = true): Promise<McpCallResult> {
     if (this.state !== "ready") {
       return { content: `MCP server "${this.spec.name}" is not connected.`, isError: true };
     }
     try {
       const res = (await this.rpc("tools/call", { name: tool, arguments: args ?? {} })) as any;
-      return { content: flattenContent(res), isError: res?.isError === true };
+      const { text, images } = splitContent(res, pixels);
+      return { content: text, isError: res?.isError === true, ...(images.length ? { images } : {}) };
     } catch (e: any) {
       return { content: `${this.spec.name}/${tool} failed: ${e.message}`, isError: true };
     }

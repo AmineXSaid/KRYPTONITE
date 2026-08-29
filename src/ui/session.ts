@@ -635,28 +635,41 @@ export class SessionController {
       // drive a whole turn.
       readOutsideWorkspace: this.app.configDto().readOutsideWorkspace,
       skills: this.app.enabledSkills(agent),
+      // Wrapped rather than handed over, always - even with no agent active.
+      // Two per-TURN facts have to reach the call and the registry holds
+      // neither: the agent's scope, and whether this profile can look at an
+      // image. The registry outlives the turn and serves every conversation,
+      // so anything it remembered about either would be wrong the moment the
+      // user switched agent or profile mid-conversation.
+      //
       // The agent's MCP scope is enforced at the call, not only in the list of
       // tools offered - a name the model produced from earlier in the
       // transcript never passed through the filter that built that list.
-      mcp: agent
-        ? {
-            has: (name: string) => this.app.mcp.has(name),
-            needsApproval: (name: string) => this.app.mcp.needsApproval(name),
-            // Delegated unchanged: the read-only claim is about the SERVER,
-            // and the agent's scope is about which of its tools may be
-            // reached. They are orthogonal, and the scope is enforced in
-            // `call` below - narrowing it here too would refuse a tool the
-            // agent is allowed for a reason that has nothing to do with it.
-            isReadOnly: (name: string) => this.app.mcp.isReadOnly(name),
-            call: async (name: string, args: unknown) => {
-              const q = parseQualified(name);
-              if (!q || !agentAllowsMcp(agent, q.server, q.tool)) {
-                return { content: agentRefusal(agent, name), isError: true };
-              }
-              return this.app.mcp.call(name, args);
-            },
+      mcp: {
+        has: (name: string) => this.app.mcp.has(name),
+        needsApproval: (name: string) => this.app.mcp.needsApproval(name),
+        // Delegated unchanged: the read-only claim is about the SERVER, and
+        // the agent's scope is about which of its tools may be reached. They
+        // are orthogonal, and the scope is enforced in `call` below -
+        // narrowing it here too would refuse a tool the agent is allowed for
+        // a reason that has nothing to do with it.
+        isReadOnly: (name: string) => this.app.mcp.isReadOnly(name),
+        call: async (name: string, args: unknown) => {
+          if (agent) {
+            const q = parseQualified(name);
+            if (!q || !agentAllowsMcp(agent, q.server, q.tool)) {
+              return { content: agentRefusal(agent, name), isError: true };
+            }
           }
-        : this.app.mcp,
+          // Same gate, and for the same reason, as the browser's screenshot
+          // above: an image block sent to a gateway that does not declare
+          // vision is a 400 for the whole turn, which is strictly worse than
+          // the description it would have replaced. Without vision the model
+          // still gets the description AND a line naming the profile field
+          // that would let it see the picture.
+          return this.app.mcp.call(name, args, profile.capabilities.vision === true);
+        },
+      },
       // Present only when the profile declares an image model. That absence is
       // what withholds the tool from the model entirely, rather than offering
       // one that could only ever answer "not configured".

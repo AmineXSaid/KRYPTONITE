@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { McpClient, type McpServerSpec, type McpTool } from "./client";
+import { McpClient, type McpCallResult, type McpServerSpec, type McpTool } from "./client";
 import { McpHttpClient, McpSseClient } from "./http";
 import type { ToolDef } from "../providers/client";
 
@@ -414,7 +414,16 @@ export class McpRegistry {
     return { client, tool };
   }
 
-  async call(name: string, args: unknown): Promise<{ content: string; isError?: boolean }> {
+  /**
+   * Route a namespaced tool name to its server and call it.
+   *
+   * `pixels` travels down rather than being decided here: the registry outlives
+   * every turn and serves every conversation, and whether an image may be sent
+   * is a fact about the profile the CURRENT turn is running on. A registry that
+   * remembered the answer would send pixels to a text endpoint the moment the
+   * user switched profiles mid-conversation.
+   */
+  async call(name: string, args: unknown, pixels = true): Promise<McpCallResult> {
     const q = parseQualified(name);
     if (!q) return { content: `"${name}" is not an MCP tool name.`, isError: true };
     const client = this.clients.get(q.server);
@@ -432,7 +441,7 @@ export class McpRegistry {
       const known = client.tools.map((t) => t.name).join(", ") || "none";
       return { content: `Server "${q.server}" has no tool "${q.tool}". It exposes: ${known}.`, isError: true };
     }
-    return capOutput(await client.callTool(q.tool, args), `${q.server}/${q.tool}`);
+    return capOutput(await client.callTool(q.tool, args, pixels), `${q.server}/${q.tool}`);
   }
 }
 
@@ -448,10 +457,12 @@ export class McpRegistry {
  */
 export const MCP_OUTPUT_CAP = 60_000;
 
-export function capOutput(
-  res: { content: string; isError?: boolean },
-  label: string
-): { content: string; isError?: boolean } {
+export function capOutput(res: McpCallResult, label: string): McpCallResult {
+  // Spread below, so `images` survives the truncation. That is deliberate and
+  // not incidental: this cap is about the TEXT a server can flood the context
+  // with, and the images have already been capped, by count and by bytes, in
+  // `splitContent`. Dropping them here would mean a chatty caption silently
+  // costing the model the diagram it was captioning.
   if (typeof res.content !== "string" || res.content.length <= MCP_OUTPUT_CAP) return res;
   return {
     ...res,
