@@ -518,3 +518,83 @@ async def test_an_empty_job_path_is_refused_before_the_network(wired) -> None:
     with pytest.raises(ServiceError):
         await srv.jenkins_list_builds("   ")
     assert rec.requests == []
+
+
+# ── a job path that is really a ticket ─────────────────────────────────────
+#
+# `CTH-8899` is a valid Jenkins job path AND a valid Jira issue key, and
+# nothing about the string says which was meant. Handled the wrong way this is
+# a bare 404 that teaches the caller nothing, and it asks the same wrong
+# question again.
+
+
+def test_an_issue_key_shape_is_recognised() -> None:
+    assert paths.issue_key_hint("CTH-8899")
+    assert paths.issue_key_hint("PLATFORM-1423")
+    assert paths.issue_key_hint("/CTH-8899/"), "surrounding slashes are noise"
+
+
+def test_an_ordinary_job_path_gets_no_hint() -> None:
+    """The hint must not appear on a normal 404: it would send an
+    investigation into Jira for a job that was simply renamed."""
+    assert paths.issue_key_hint("team/backend/build") is None
+    assert paths.issue_key_hint("nightly") is None
+    assert paths.issue_key_hint("cth-8899") is None, "issue keys are uppercase"
+
+
+def test_a_ticket_named_job_inside_a_folder_is_left_alone() -> None:
+    """`release/CTH-8899` is unambiguously a job path - it has a folder in it -
+    so a 404 there is an ordinary missing job."""
+    assert paths.issue_key_hint("release/CTH-8899") is None
+
+
+async def test_a_404_on_a_ticket_shaped_job_says_which_mistake_it_was(wired) -> None:
+    """Only on the 404. A shop that really does name its jobs after tickets is
+    a real shop, and refusing up front would break it for a naming convention
+    we merely find surprising - so the check runs where there is evidence."""
+    wired(httpx.Response(404, json={"message": "not found"}))
+    with pytest.raises(NotFoundError) as exc:
+        await srv.jenkins_get_build("CTH-8899")
+    said = str(exc.value)
+    assert "Jira issue key" in said
+    assert "jenkins_list_jobs" in said
+    # The second reading of the question, and the honest answer to it: Jenkins
+    # does not record a link to a ticket, so this names where one usually ends
+    # up rather than pretending there is an endpoint for it.
+    assert "changeset" in said or "parameters" in said
+
+
+async def test_a_job_that_really_exists_is_never_second_guessed(wired) -> None:
+    """The hint is attached at the error path only, so a real job named after a
+    ticket answers normally."""
+    rec = wired(_json({"number": 12, "result": "SUCCESS", "building": False}))
+    out = await srv.jenkins_get_build("CTH-8899")
+    assert out["job"] == "CTH-8899"
+    assert out["status"] == "SUCCESS"
+    assert rec.paths == ["/job/CTH-8899/lastBuild/api/json"]
+
+
+async def test_the_hint_reaches_every_job_scoped_tool(wired) -> None:
+    """Five tools take a job path, and a caller that guessed wrong may hit any
+    of them first. They share one helper so a sixth added later inherits it."""
+    for call in (
+        lambda: srv.jenkins_list_builds("CTH-8899"),
+        lambda: srv.jenkins_get_build("CTH-8899"),
+        lambda: srv.jenkins_get_console("CTH-8899"),
+        lambda: srv.jenkins_list_artifacts("CTH-8899"),
+        lambda: srv.jenkins_get_artifact("CTH-8899", "out.txt", "lastBuild"),
+    ):
+        wired(httpx.Response(404, json={"message": "not found"}))
+        with pytest.raises(NotFoundError) as exc:
+            await call()
+        assert "Jira issue key" in str(exc.value), call
+
+
+async def test_a_missing_artifact_on_a_real_job_still_says_so(wired) -> None:
+    """The artifact 404 has its own advice about listing what was archived, and
+    the ticket hint must not displace it for an ordinary job path."""
+    wired(httpx.Response(404, json={"message": "not found"}))
+    with pytest.raises(NotFoundError) as exc:
+        await srv.jenkins_get_artifact("team/backend/build", "out.txt", "lastBuild")
+    assert "jenkins_list_artifacts" in str(exc.value)
+    assert "Jira issue key" not in str(exc.value)

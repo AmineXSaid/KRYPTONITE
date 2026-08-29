@@ -51,6 +51,8 @@ trips, and a hundred kilobytes off the wire instead of two hundred megabytes.
 
 from __future__ import annotations
 
+import re
+
 from urllib.parse import quote
 
 # Response headers on /logText/progressiveText. See the module docstring.
@@ -89,6 +91,39 @@ def job_path(job: str) -> str:
     if not parts:
         raise ValueError(f"{job!r} contains no job name.")
     return "".join(f"/job/{quote(p, safe='')}" for p in parts)
+
+
+#: A Jira issue key: two or more uppercase letters, a hyphen, digits.
+#: PLATFORM-1423, CTH-8899. Matched only against a WHOLE single-segment job
+#: path, so a real job called `release/CTH-8899` is not affected.
+_ISSUE_KEY = re.compile(r"^[A-Z][A-Z0-9]+-\d+$")
+
+
+def issue_key_hint(job: str) -> str | None:
+    """A sentence to append to a 404, when the job path was probably a ticket.
+
+    ``CTH-8899`` is a Jenkins job path and a Jira issue key and there is no way
+    to tell which was meant by looking at it. So this does NOT refuse the
+    request - a shop that names its jobs after tickets is a real shop, and
+    refusing would break it for a naming convention we merely find surprising.
+    The check runs only where there is EVIDENCE: after Jenkins has answered
+    404, when the job demonstrably does not exist under that name.
+
+    Returns None for anything that is not issue-key-shaped, so the ordinary
+    "no such job" error is left alone.
+    """
+    raw = (job or "").strip().strip("/")
+    if not _ISSUE_KEY.match(raw):
+        return None
+    return (
+        f"Note that {raw!r} is shaped like a Jira issue key rather than a Jenkins "
+        "job path, and no job by that name exists here. If you meant the ticket, "
+        "read it with the Jira server instead - this one knows nothing about "
+        "tickets. If you meant \"the build FOR that ticket\", nothing in Jenkins "
+        "records that link on its own: find the job with jenkins_list_jobs, then "
+        "look for the key in a build's changeset commit messages or its "
+        "parameters, which is where an integration usually leaves it."
+    )
 
 
 def build_path(job: str, build: int | str) -> str:

@@ -89,6 +89,28 @@ def _job(job: str) -> str:
     return job
 
 
+async def _job_scoped(job: str, call):
+    """Await a job-scoped call, explaining a 404 that was probably a ticket.
+
+    `CTH-8899` is a valid Jenkins job path and a valid Jira issue key, and
+    nothing about the string says which was meant. The disambiguation therefore
+    happens HERE, where there is evidence - Jenkins has answered 404, so no job
+    by that name exists - rather than up front, which would refuse a real job at
+    a shop that names its jobs after tickets.
+
+    Takes the coroutine rather than wrapping each tool, so the five job-scoped
+    tools share one answer and a sixth added later gets it by using the same
+    helper.
+    """
+    try:
+        return await call
+    except NotFoundError as exc:
+        hint = paths.issue_key_hint(job)
+        if not hint:
+            raise
+        raise NotFoundError(f"{exc}\n\n{hint}") from None
+
+
 def _limit(requested: int | None, default: int = 20) -> int:
     assert _config is not None
     return _config.clamp_max_results(requested if requested is not None else default)
@@ -152,12 +174,16 @@ async def jenkins_list_builds(job: str, max_results: int = 20) -> dict[str, Any]
     """
     client = _require_client()
     cap = _limit(max_results, 20)
-    raw = await client.get(
-        paths.job_api(_job(job)),
-        # The range on the tree is load-bearing: without it Jenkins serialises
-        # every build the job has ever had, which on a nightly job is tens of
-        # thousands of records built server-side before anything is sent.
-        params={"tree": paths.builds_tree(cap)},
+    raw = await _job_scoped(
+        job,
+        client.get(
+            paths.job_api(_job(job)),
+            # The range on the tree is load-bearing: without it Jenkins
+            # serialises every build the job has ever had, which on a nightly
+            # job is tens of thousands of records built server-side before
+            # anything is sent.
+            params={"tree": paths.builds_tree(cap)},
+        ),
     )
     if not isinstance(raw, dict):
         raise ServiceError(f"Jenkins returned no record for job {job!r}.")
@@ -189,9 +215,8 @@ async def jenkins_get_build(job: str, build: str = "lastBuild") -> dict[str, Any
     `jenkins_list_artifacts` is worth calling.
     """
     client = _require_client()
-    raw = await client.get(
-        paths.build_api(_job(job), build),
-        params={"tree": paths.BUILD_DETAIL_TREE},
+    raw = await _job_scoped(
+        job, client.get(paths.build_api(_job(job), build), params={"tree": paths.BUILD_DETAIL_TREE})
     )
     if not isinstance(raw, dict):
         raise ServiceError(f"Jenkins returned no record for {job!r} build {build!r}.")
@@ -233,13 +258,17 @@ async def jenkins_get_console(
     progressive = paths.progressive_text(job, build)
 
     if whole_log:
-        body = await client.get_text(progressive, params={"start": 0}, max_bytes=limit)
+        body = await _job_scoped(
+            job, client.get_text(progressive, params={"start": 0}, max_bytes=limit)
+        )
         return _console_result(job, build, body, limit, tail=False, log_bytes=None)
 
     # Step one: the headers carry the log's full size, and they arrive before
     # the body. `max_bytes=1` makes the reader stop at the first chunk, so this
     # costs one chunk rather than the whole log.
-    probe = await client.get_text(progressive, params={"start": 0}, max_bytes=1)
+    probe = await _job_scoped(
+        job, client.get_text(progressive, params={"start": 0}, max_bytes=1)
+    )
     size = probe.header_int(paths.TEXT_SIZE_HEADER)
 
     if size is None:
@@ -323,8 +352,8 @@ async def jenkins_list_artifacts(job: str, build: str = "lastBuild") -> dict[str
     artifact, and inventing a placeholder would be worse than its absence.
     """
     client = _require_client()
-    raw = await client.get(
-        paths.build_api(_job(job), build), params={"tree": paths.ARTIFACTS_TREE}
+    raw = await _job_scoped(
+        job, client.get(paths.build_api(_job(job), build), params={"tree": paths.ARTIFACTS_TREE})
     )
     if not isinstance(raw, dict):
         raise ServiceError(f"Jenkins returned no record for {job!r} build {build!r}.")
@@ -386,13 +415,16 @@ async def jenkins_get_artifact(
     try:
         body = await client.get_text(url, max_bytes=limit)
     except NotFoundError as exc:
-        # 404 here has two meanings and they lead different places: the build
-        # archived nothing at all, or it archived something else.
-        raise NotFoundError(
-            f"{exc}\n\nList what this build actually archived with "
+        # 404 here has three meanings and they lead different places: the job
+        # does not exist, the build archived nothing at all, or it archived
+        # something else. The job-shaped one is checked first because the other
+        # two advice lines are useless if there is no job.
+        hint = paths.issue_key_hint(job) or (
+            f"List what this build actually archived with "
             f"jenkins_list_artifacts(job={job!r}, build={build!r}) - the path "
             "must match its `path` exactly, including directories."
-        ) from None
+        )
+        raise NotFoundError(f"{exc}\n\n{hint}") from None
 
     out: dict[str, Any] = {
         "job": job,

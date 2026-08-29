@@ -123,7 +123,7 @@ starting and 401ing on every call.
 ## Test
 
 ```bash
-pytest            # 261 tests, no network access required
+pytest            # 270 tests, no network access required
 ```
 
 ---
@@ -267,12 +267,31 @@ intercepting it. A test asserts the string never appears in the error message.
    to this one, because the two have genuinely different availability and a
    single tool that sometimes works is worse than two that each say what they
    need.
-5. **Jenkins job naming.** Your `CTH-8899` example reads like a Jira issue key
-   rather than a Jenkins job path. If your jobs really are named after Jira
-   keys, `jenkins_list_jobs` will find them and nothing changes. If instead the
-   question is "the build for ticket CTH-8899", that needs a link between the
-   two — a Jira field naming the job, or a job parameter carrying the key — and
-   I need to know which your instance uses before building it.
+5. **Jenkins job naming — still one question for you.** Your `CTH-8899` example
+   reads like a Jira issue key rather than a Jenkins job path, and nothing about
+   the string says which was meant.
+
+   Half of that is now handled. A 404 on a job path shaped like an issue key
+   says so, names both readings, and points at `jenkins_list_jobs` — rather than
+   answering "not found" and letting the same wrong question be asked again. It
+   fires only on the 404, never up front, because a shop that really does name
+   its jobs after tickets is a real shop and refusing would break it for a
+   convention we merely find surprising. A job called `CTH-8899` that exists
+   answers normally.
+
+   The other half needs you. If the question is **"the build FOR ticket
+   CTH-8899"**, Jenkins records no such link on its own, so something in your
+   setup carries it and I cannot guess which:
+
+   - a **job parameter** holding the key (`ISSUE`, `TICKET`, `JIRA_KEY`…), or
+   - a **commit message** in the build's changeset mentioning it, or
+   - a **Jira field or remote link** naming the build, or
+   - a **branch name** containing the key, on a multibranch pipeline.
+
+   Tell me which and it is a small tool — the build payload already carries
+   causes and changeset commit messages, so for the middle two the data is
+   fetched today and only the search is missing. Built against the wrong one it
+   silently returns nothing, which is why it is a question rather than a guess.
 6. **Images from Confluence and Jira now reach the model — if the endpoint can
    look at one.** All three blockers are fixed. The servers download
    attachments (`confluence_get_attachment`, `jira_get_attachment`); the
