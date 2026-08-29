@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+### Fixed
+- **The mode sheet said it was modal and was not.** It renders as
+  `role="dialog" aria-modal="true"`, which promises the rest of the panel is
+  unreachable while it is up. Measured, it kept none of that: focus never
+  entered it, 8 of 12 Tab presses left it, and Escape did nothing at all.
+
+  The first two Tabs landed on **attach and send, behind the scrim** — and
+  Enter there posted the message. So a keyboard user sent a draft they never
+  meant to send, from behind a dialog they could not dismiss. The scrim stopped
+  a mouse and stopped nothing else.
+
+  Now: opening it puts focus on the mode currently in force, Tab and Shift+Tab
+  wrap inside the card, Escape closes it, and focus returns to the button that
+  opened it. The key handler is on `document` in the capture phase — once focus
+  has escaped, a listener on the sheet never sees the keystroke, which was the
+  whole failure — and it stops what it handles, so Escape closes the sheet
+  rather than also interrupting a running turn. The sheet is marked `inert` for
+  its 380 ms exit, where it stays visible and focusable.
+
+- **The Control Center printed `undefined` at the user.** The Request-shape card
+  showed `Timeout: undefined ms` and `Retries: undefined` for any profile that
+  omits them — the ordinary case, since both are optional. The four rows around
+  them guard correctly and show `-`; these two did not.
+
+  The suite already asserted "prints no undefined" across every section, and
+  still missed it, for a reason worth recording: `textContent` runs a row's
+  label straight into its value, so an unguarded field reads as
+  `Timeoutundefined ms` — and `\bundefined\b` needs a non-word character before
+  the `u`, which there is not. The word-bounded pattern silently passed the one
+  shape this table actually produces. It is now bare, which also closes the same
+  hole for every other section.
+
 ### Changed
 - **Every menu in the panel now arrives instead of appearing.** The mode sheet
   was the only one that moved - it rides up from the bottom edge on an expo-out

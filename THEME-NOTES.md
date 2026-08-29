@@ -276,7 +276,9 @@ not built yet on this branch:
 - **C3** - the token-highlight mirror layer over the textarea.
 - **C8/C9** - thinking toggle and effort selector. `SelectModelMsg` carries
   endpoint and model only.
-- **F3** - focus trap and focus restore on the modals.
+- ~~F3 - focus trap and focus restore on the modals.~~ Done for the one
+  modal the panel has, the mode sheet: initial focus, a wrapping Tab trap,
+  Escape, and focus restore. See `permKeydown` in `sidebar.js`.
 - ~~The Agents tab carries two identical "New agent" buttons.~~ Done: the
   footer copy is gone and the footer now states which agent is in force and
   nothing else. See the note beside `sk-foot` in `sidebar.js`.

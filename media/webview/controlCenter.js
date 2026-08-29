@@ -745,8 +745,13 @@ function _run() {
         ["Base URL", a.baseUrl],
         ["Chat path", a.chatPath || "(loader default)"],
         ["Model", a.model],
-        ["Timeout", a.timeoutMs + " ms"],
-        ["Retries", String(a.retries)],
+        // Guarded like every row under them. Both are OPTIONAL on a profile
+        // (src/endpoints/profile.ts), so a profile that simply does not set
+        // them - the ordinary case - printed "undefined ms" and "undefined"
+        // at the user, in the one card whose whole job is to say what request
+        // will be sent.
+        ["Timeout", a.timeoutMs != null ? a.timeoutMs + " ms" : "-"],
+        ["Retries", a.retries != null ? String(a.retries) : "-"],
         ["Context window", a.capabilities && a.capabilities.contextWindow != null
           ? String(a.capabilities.contextWindow) : "-"],
         ["Max output", a.capabilities && a.capabilities.maxOutputTokens != null

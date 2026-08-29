@@ -807,6 +807,82 @@ function contrast(a, b) {
     await ctx.close();
   }
 
+  /* ── 5h. the mode sheet is a modal, and behaves like one ───────────── */
+  {
+    // It renders as role="dialog" aria-modal="true", which promises the rest
+    // of the panel is unreachable while it is up. It kept none of that: focus
+    // never entered it, 8 of 12 Tabs left it, and Escape did nothing. The
+    // first two Tabs landed on attach and send BEHIND the scrim, where Enter
+    // posted the message - so a keyboard user sent something they never wrote.
+    //
+    // Only a real browser can test this. jsdom has no sequential focus
+    // navigation, so Tab moves nothing there and every assertion below would
+    // pass against a completely broken trap.
+    const { ctx, page } = await open(400, {});
+    const inCard = () => page.evaluate(() => {
+      const card = document.querySelector("#permPop .perm-card");
+      return !!(card && document.activeElement && card.contains(document.activeElement));
+    });
+
+    await page.click("#permBtn");
+    await page.waitForTimeout(450);
+    ok("opening the mode sheet moves focus into it", await inCard(),
+      await page.evaluate(() => document.activeElement.className || document.activeElement.id));
+    // On the mode in force, not on the close button: that is the question the
+    // sheet is open to answer.
+    ok("and onto the mode currently in force",
+      await page.evaluate(() => (document.activeElement.getAttribute("data-on") === "1")));
+
+    // Twelve, because that is more than the sheet holds - a trap that merely
+    // has enough members to outlast a short walk is not a trap.
+    const trail = [];
+    for (let i = 0; i < 12; i++) {
+      await page.keyboard.press("Tab");
+      trail.push(await inCard());
+    }
+    ok("and Tab never leaves it", trail.every(Boolean),
+      `${trail.filter((x) => !x).length} of 12 landed outside`);
+
+    // Both directions: Shift+Tab off the first member has its own wrap.
+    const back = [];
+    for (let i = 0; i < 8; i++) {
+      await page.keyboard.press("Shift+Tab");
+      back.push(await inCard());
+    }
+    ok("nor does Shift+Tab", back.every(Boolean),
+      `${back.filter((x) => !x).length} of 8 landed outside`);
+
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(500);
+    ok("Escape closes it", await page.evaluate(() => document.getElementById("permPop").hidden));
+    ok("and hands focus back to the button that opened it",
+      await page.evaluate(() => document.activeElement.id === "permBtn"),
+      await page.evaluate(() => document.activeElement.id));
+    await ctx.close();
+  }
+  {
+    // THE CONSEQUENCE, not the mechanism. Every assertion above could be
+    // satisfied by a trap that is subtly wrong; this one reproduces what
+    // actually went wrong and asserts the harm does not happen.
+    const { ctx, page } = await open(400, {});
+    await page.click("#draft");
+    await page.type("#draft", "a message the user never meant to send");
+    await page.evaluate(() => { window.__sent.length = 0; });
+    await page.click("#permBtn");
+    await page.waitForTimeout(450);
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(300);
+    const sent = await page.evaluate(() => window.__sent.map((m) => m.type));
+    ok("Tab and Enter inside the sheet cannot send the draft",
+      !sent.includes("sendMessage"), JSON.stringify(sent));
+    // And it is not inert in the other direction: choosing a mode still works.
+    ok("while choosing a mode still reaches the host",
+      sent.includes("setConfig"), JSON.stringify(sent));
+    await ctx.close();
+  }
+
   /* ── 6. the session list, as the reference draws it ────────────────── */
   {
     const { ctx, page } = await open(400, {

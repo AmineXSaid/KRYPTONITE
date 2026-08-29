@@ -174,7 +174,13 @@ const sync = (b, over) => b.send({ type: "stateSync", state: state(over) });
     // The bug the file's own comments record: a missing count key printed the
     // word "undefined" into the panel. It is worth catching everywhere, not
     // only where it happened.
-    ok(`${id}: prints no undefined`, !/\bundefined\b/.test(text),
+    // NOT `\bundefined\b`. `textContent` runs a kv row's label straight into
+    // its value with no separator, so an unguarded field reads as
+    // "Timeoutundefined ms" - and `\b` needs a non-word character before the
+    // "u", which there is not. The word-bounded form silently passed the one
+    // shape this table actually produces. Bare, because the panel has no
+    // business printing that string anywhere, glued or not.
+    ok(`${id}: prints no undefined`, !/undefined/.test(text),
       text.slice(Math.max(0, text.indexOf("undefined") - 30), text.indexOf("undefined") + 20));
     ok(`${id}: prints no [object Object]`, !/\[object Object\]/.test(text));
     // Not asserting on `${` here: a profile's auth summary is *supposed* to
@@ -204,7 +210,7 @@ const sync = (b, over) => b.send({ type: "stateSync", state: state(over) });
     ok(`${id}: renders with nothing configured`, b.pane().textContent.trim().length > 10);
     ok(`${id}: throws nothing when empty`, b.errors.length === before,
       b.errors.slice(before).join(" | "));
-    ok(`${id}: prints no undefined when empty`, !/\bundefined\b/.test(b.pane().textContent));
+    ok(`${id}: prints no undefined when empty`, !/undefined/.test(b.pane().textContent));
   }
   ok("the chip falls back to no profile",
     /no profile/.test(b.d.getElementById("ccChip").textContent));
@@ -229,7 +235,7 @@ const sync = (b, over) => b.send({ type: "stateSync", state: state(over) });
     b.click(`[data-section="${id}"]`);
     ok(`${id}: survives a profile with null capabilities`, b.errors.length === before,
       b.errors.slice(before).join(" | "));
-    ok(`${id}: prints no undefined for it`, !/\bundefined\b/.test(b.pane().textContent));
+    ok(`${id}: prints no undefined for it`, !/undefined/.test(b.pane().textContent));
   }
   b.click('[data-section="endpoints"]');
   ok("the parse error is shown to the user",
@@ -404,7 +410,7 @@ const sync = (b, over) => b.send({ type: "stateSync", state: state(over) });
   for (const id of SECTIONS) {
     b.click(`[data-section="${id}"]`);
     ok(`${id}: prints no undefined for partial capabilities`,
-      !/\bundefined\b/.test(b.pane().textContent));
+      !/undefined/.test(b.pane().textContent));
   }
   b.click('[data-section="endpoints"]');
   ok("an undeclared capability reads as a dash",
@@ -412,6 +418,31 @@ const sync = (b, over) => b.send({ type: "stateSync", state: state(over) });
   // jsdom is booted with pretendToBeVisual, which starts a requestAnimationFrame
   // loop. Leaving the window open holds the event loop and the whole suite hangs
   // AFTER printing its summary - every other block here closes for this reason.
+  b.dom.window.close();
+}
+
+/* The same gap, one field further out: a profile that declares no TIMEOUT and
+   no RETRIES.
+   Both are optional in src/endpoints/profile.ts, so this is what most profiles
+   look like - and the fixture above supplies them, which is the only reason
+   the `prints no undefined` loop had never seen the Request-shape card without
+   them. The assertion was already right; it had simply never been handed this
+   input. Guarding the four rows below Timeout and leaving those two bare let
+   "Timeout: undefined ms" reach the card. */
+{
+  const b = boot();
+  sync(b, { profiles: [profile({ timeoutMs: undefined, retries: undefined })] });
+  for (const id of SECTIONS) {
+    b.click(`[data-section="${id}"]`);
+    ok(`${id}: prints no undefined without a timeout or retries`,
+      !/undefined/.test(b.pane().textContent));
+  }
+  b.click('[data-section="endpoints"]');
+  const text = b.pane().textContent;
+  ok("an unset timeout reads as a dash", /Timeout[\s\S]{0,40}-/.test(text));
+  ok("and so does an unset retry count", /Retries[\s\S]{0,40}-/.test(text));
+  // As above: jsdom's rAF loop holds the event loop open if the window is not
+  // closed, and the suite hangs after printing its summary.
   b.dom.window.close();
 }
 

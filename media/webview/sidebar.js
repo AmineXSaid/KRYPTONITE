@@ -1521,6 +1521,76 @@ function _sbRun() {
   /* The exit timer, held so a fast close-then-open cannot leave the sheet
      hidden after it has already been asked to reopen. */
   var permExit = null;
+  /* Where focus was when the sheet opened, so closing can put it back. */
+  var permReturn = null;
+  /* The document-level key handler while the sheet is open, held so it can be
+     taken off again. See `permKeydown`. */
+  var permKeys = null;
+
+  /**
+   * Everything inside the card that a Tab can reach, in order.
+   *
+   * `getClientRects()` rather than `offsetParent`: the sheet is
+   * `position: fixed`, which makes `offsetParent` answer about the wrong
+   * element, while a zero-length rect list is a reliable "not rendered".
+   */
+  function permFocusable() {
+    var card = $("permPop") && $("permPop").querySelector(".perm-card");
+    if (!card) return [];
+    var all = card.querySelectorAll("button, [href], input, select, textarea, [tabindex]");
+    return [].slice.call(all).filter(function (el) {
+      return !el.disabled && el.tabIndex !== -1 && el.getClientRects().length > 0;
+    });
+  }
+
+  /**
+   * Make the sheet behave like the modal it says it is.
+   *
+   * It renders as `role="dialog" aria-modal="true"`, which promises that the
+   * rest of the panel is unreachable while it is up. It was not: measured, 8
+   * of 12 Tab presses left the sheet, and the FIRST TWO landed on attach and
+   * send behind the scrim - where Enter posted the message. The scrim stops a
+   * mouse and stopped nothing else, so a keyboard user sent a message they
+   * never wrote, from behind a dialog Escape would not close either.
+   *
+   * On `document`, not on the sheet: once focus has escaped to `#sendBtn` a
+   * listener on the sheet never sees the keystroke, which is the whole failure.
+   * In the CAPTURE phase, and stopping what it handles, so Escape closes the
+   * sheet rather than also reaching the composer's own Escape - which
+   * interrupts the running turn.
+   */
+  function permKeydown(e) {
+    var pop = $("permPop");
+    if (!pop || pop.hidden) return;
+
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      togglePerm(false);
+      return;
+    }
+    if (e.key !== "Tab") return;
+
+    var f = permFocusable();
+    if (!f.length) return;
+    var first = f[0];
+    var last = f[f.length - 1];
+    var here = f.indexOf(document.activeElement);
+
+    // Already outside - pull it back rather than let Tab walk further away.
+    if (here === -1) {
+      e.preventDefault();
+      (e.shiftKey ? last : first).focus();
+      return;
+    }
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
 
   /**
    * Open or close the mode sheet, with the transition sidebar.css describes.
@@ -1549,15 +1619,46 @@ function _sbRun() {
     if (permExit) { clearTimeout(permExit); permExit = null; }
 
     if (want) {
+      // Read before the sheet takes focus, so close has somewhere to put it.
+      permReturn = document.activeElement;
+      pop.inert = false;
       pop.hidden = false;
       renderPerm();
+      // AFTER renderPerm, which rebuilds the rows through innerHTML - anything
+      // queried before this line is detached from the document.
+      //
+      // Landing on the mode in force rather than on the close button: it tells
+      // a keyboard user what is currently set, which is the question the sheet
+      // is open to answer.
+      var land = pop.querySelector('.perm-row[data-on="1"]') || pop.querySelector("[data-perm-close]");
+      if (land && land.focus) land.focus();
+      if (!permKeys) {
+        permKeys = permKeydown;
+        document.addEventListener("keydown", permKeys, true);
+      }
       // Two frames, not one: the first commits the un-hidden layout, the
       // second is where the transition has a value to start from.
       requestAnimationFrame(function () {
         requestAnimationFrame(function () { pop.setAttribute("data-open", "1"); });
       });
     } else {
+      if (permKeys) {
+        document.removeEventListener("keydown", permKeys, true);
+        permKeys = null;
+      }
       pop.removeAttribute("data-open");
+      // Whether the sheet still holds focus has to be asked BEFORE `inert`,
+      // which blurs whatever is inside it.
+      var held = pop.contains(document.activeElement);
+      // Out of the tab order the instant it starts leaving. The card stays
+      // `hidden = false` and focusable for the whole 380ms exit below, and
+      // `inert` covers that window without depending on `transitionend` -
+      // which the note above explains does not reliably fire.
+      pop.inert = true;
+      // Only when the sheet had it. This runs on every document click, and a
+      // click elsewhere has already put focus where the user wanted it.
+      if (held && permReturn && permReturn.focus) permReturn.focus();
+      permReturn = null;
       // Card 340ms plus the backdrop's 200ms, with a little slack.
       permExit = setTimeout(function () {
         pop.hidden = true;
