@@ -233,11 +233,19 @@
      every outlined button at 2.03, so the send button, the attach button, the
      mode button, the phase segment and the composer itself were shapes you
      had to already know were there.
-     .34 composites to rgb(102,102,102) over #181818: 3.12:1, with the margin
-     going to the control rather than to the rule beside it. Dividers keep .22
-     on purpose - making them louder to fix a button would have been a
-     redesign of the panel's rhythm to solve a problem the buttons had. */
-  --kx-edge:     rgba(255, 255, 255, .34);
+     .38 AND NOT .34, and the reason is the one thing that is easy to get
+     backwards about a wash. A white wash gets DARKER in absolute terms as the
+     ground under it darkens, because there is less ground light to add - and
+     at the black end the +0.05 flare term in the contrast formula dominates,
+     so the ratio falls rather than rises. .34 measured 3.12:1 on #181818 and
+     2.94 on the #010409 this panel is actually docked against, which is the
+     wrong side of 3 on the ground that matters. .38 is 3.58 and 3.46: it
+     clears on BOTH, and test/contrast.cjs now checks both rather than
+     assuming --kx-bg is the only ground there is.
+     Dividers keep .22 on purpose - making them louder to fix a button would
+     have been a redesign of the panel's rhythm to solve a problem the buttons
+     had. */
+  --kx-edge:     rgba(255, 255, 255, .38);
   --kx-raised:   rgba(251, 250, 253, .25);
   --kx-hover:    rgba(255, 255, 255, .04);  /* the mockup's row hover, exact */
 

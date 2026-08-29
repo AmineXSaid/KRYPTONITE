@@ -18,6 +18,17 @@
   count badges and the tip strip were all measured and left alone, because the
   text in them is what carries their meaning and it already passes.
 
+  The edge is checked on **two grounds**, because the panel paints neither: it
+  sets no background at all and takes the workbench container's colour, so
+  `--kx-bg` is the ground the palette is designed against rather than one it is
+  guaranteed to sit on. The direction surprises — a white wash gets *darker* in
+  absolute terms as the ground beneath it darkens, and at the black end the
+  contrast formula's flare term dominates, so the ratio falls. The first
+  revision of this fix measured 3.12:1 on Dark Modern's `#181818` and **2.94 on
+  the near-black `#010409`** an owner's workbench actually samples: passing the
+  suite while failing where it counts. It is 3.59 and 3.42 now, and
+  `contrast.cjs` measures both.
+
   `tokens.css` had claimed in a comment that its alphas "keep the 3:1 boundary
   contrast the suite enforces". Both halves were untrue — 2.03 is not 3, and
   `test/contrast.cjs` had never read a line token at all, which is how every

@@ -171,9 +171,25 @@ for (const [ink, fill] of [["kx-on-action", "kx-action"], ["kx-on-accent", "kx-a
    and the fix for one is the wrong answer for the other. */
 console.log("\n──── the edge of a control ────");
 {
+  // BOTH GROUNDS, because the panel paints neither. It sets no background at
+  // all (see the `body` rule in sidebar.css) and takes the workbench
+  // container's colour, so --kx-bg is the ground the palette is DESIGNED
+  // against rather than the one it is guaranteed to sit on. Dark Modern's
+  // side bar is #181818; the owner's own workbench samples #010409.
+  //
+  // The two are not interchangeable, and the direction surprises: a white wash
+  // gets DARKER in absolute terms as the ground beneath it darkens, because
+  // there is less ground light to add, and at the black end the +0.05 flare
+  // term dominates - so the ratio FALLS. --kx-edge shipped one revision at .34
+  // measuring 3.12 here and 2.94 there, passing this file while failing on the
+  // ground that matters.
+  const NEAR_BLACK = "#010409";
+  for (const [where, ground] of [["the assumed ground", BG], ["a near-black container", NEAR_BLACK]]) {
+    const r = ratio(over(rawToken("kx-edge"), ground), ground);
+    console.log(`  ${r >= 3 ? "PASS" : "FAIL"}  kx-edge on ${where.padEnd(24)} ${r.toFixed(2)}:1  (min 3)`);
+    ck("kx-edge is a boundary you can see on " + where, r, 3);
+  }
   const r = ratio(token("kx-edge"), BG);
-  console.log(`  ${r >= 3 ? "PASS" : "FAIL"}  kx-edge on the panel  ${r.toFixed(2)}:1  (min 3)`);
-  ck("kx-edge is a boundary you can see", r, 3);
   // On the composer's own floor too - the toolbar's buttons sit on that, not
   // on the panel.
   //
