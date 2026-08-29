@@ -3,6 +3,27 @@
 ## Unreleased
 
 ### Changed
+- **Every menu in the panel now arrives instead of appearing.** The mode sheet
+  was the only one that moved - it rides up from the bottom edge on an expo-out
+  curve with a scrim and a staggered row entrance. The model picker, the `/`
+  and `@` pickers and both header menus flipped from hidden to visible on a
+  single frame. Those are the ones opened constantly, so the polish had landed
+  on the least-used surface.
+
+  They now rise (or, for the header menus, drop) 6px into place and fade in
+  over 130ms, on the same curve as the sheet - one family at two speeds. 130
+  rather than the sheet's 340 because these open mid-keystroke: `/` fires on a
+  single character, and anything long enough to admire is long enough to feel
+  like lag.
+
+  **No exit, deliberately.** An entrance that is eased reads as considered; a
+  dismissal that is eased reads as slow. Escape should return the panel at
+  once, because the thing you wanted is behind the menu.
+
+  With motion reduced they fade without travelling. That setting asks not to be
+  moved, not to be shown nothing, and a menu that materialises with no change
+  at all is the abruptness this removes.
+
 - **The welcome mark now arrives spinning and settles into its turn.** Two fast
   turns in a second, decelerating hard, handing off to the steady 6s rotation
   it had before. The steady turn is unchanged; what is new is the second in

@@ -180,11 +180,14 @@ function contrast(a, b) {
 (async () => {
   const browser = await chromium.launch({ executablePath: EXE, args: ["--no-sandbox"] });
 
-  async function open(width, state) {
+  async function open(width, state, opts = {}) {
     const ctx = await browser.newContext({
       viewport: { width, height: 640 },
       deviceScaleFactor: 2, // 200%, the reference the owner gave
       colorScheme: "dark",
+      // Only the menu-entrance suite passes this. Every other caller runs at
+      // the default, so the panel is measured the way it is normally seen.
+      ...(opts.reducedMotion ? { reducedMotion: "reduce" } : {}),
     });
     const page = await ctx.newPage();
     const errors = [];
@@ -705,6 +708,102 @@ function contrast(a, b) {
     });
     ok("a session list arriving still redraws the welcome", refreshed.present);
     ok("but does not replay the entrance", !refreshed.spins);
+    await ctx.close();
+  }
+
+  /* ── 5g. menus arrive, they do not appear ──────────────────────────── */
+  {
+    // The mode sheet was the only thing in the panel that arrived. The model
+    // picker, the / and @ pickers and both header menus flipped from hidden to
+    // visible on one frame - and those are the ones opened constantly, so the
+    // polish had landed on the least-used surface.
+    //
+    // Sampled rather than read off the stylesheet, because these are keyframe
+    // animations triggered by an element ceasing to be display:none. Whether
+    // that actually restarts the animation is a browser behaviour, not a
+    // property of the CSS, and a declaration that never runs looks identical
+    // to one that does in the computed style.
+    const MENUS = [
+      ["the model picker", "#qp", async (p) => p.click("#modelBtn")],
+      ["the slash picker", "#qp", async (p) => { await p.click("#draft"); await p.type("#draft", "/"); }],
+      ["the history menu", "#historyPop", async (p) => p.click("#histBtn")],
+      ["the more menu", "#morePop", async (p) => p.click("#moreBtn")],
+    ];
+
+    /** Open one menu and watch its top edge and opacity for half a second. */
+    async function watch(page, sel, act) {
+      await page.evaluate((s) => {
+        window.__s = [];
+        (function tick() {
+          const el = document.querySelector(s);
+          if (el && !el.hidden) {
+            const r = el.getBoundingClientRect();
+            window.__s.push({ top: r.top, op: +getComputedStyle(el).opacity });
+          }
+          if (window.__s.length < 48) requestAnimationFrame(tick);
+        })();
+      }, sel);
+      await act(page);
+      await page.waitForTimeout(450);
+      const s = await page.evaluate(() => window.__s);
+      if (!s.length) return null;
+      const tops = s.map((x) => x.top), ops = s.map((x) => x.op);
+      return {
+        moved: Math.max(...tops) - Math.min(...tops),
+        faded: Math.max(...ops) - Math.min(...ops),
+        frames: s.length,
+      };
+    }
+
+    for (const [name, sel, act] of MENUS) {
+      const { ctx, page } = await open(400, {
+        sessions: [{ id: "a", title: "an earlier chat", when: "7m ago", count: 4 }],
+        skills: [{ name: "review", description: "Review a diff", enabled: true }],
+      });
+      const m = await watch(page, sel, act);
+      ok(`${name} opens at all`, !!m, sel);
+      if (m) {
+        ok(`${name} travels into place rather than appearing`, m.moved > 2,
+          `${m.moved.toFixed(1)}px over ${m.frames} frames`);
+        ok(`${name} fades in with it`, m.faded > 0.5, m.faded.toFixed(2));
+      }
+      await ctx.close();
+    }
+  }
+  {
+    // AND THE OVERRIDE ACTUALLY WINS. This is the bug that was nearly shipped:
+    // the reduced-motion block was written beside the keyframes, hundreds of
+    // lines ABOVE `.qp`'s own rule - and a media query does not raise
+    // specificity, so `.qp` kept its travel with motion turned off. Reading
+    // the CSS shows a correct-looking block either way; only running it at the
+    // setting tells you which rule won.
+    const { ctx, page } = await open(400, {}, { reducedMotion: true });
+    const m = await page.evaluate(async () => {
+      window.__s = [];
+      (function tick() {
+        const el = document.querySelector("#qp");
+        if (el && !el.hidden) {
+          const r = el.getBoundingClientRect();
+          window.__s.push({ top: r.top, op: +getComputedStyle(el).opacity });
+        }
+        if (window.__s.length < 48) requestAnimationFrame(tick);
+      })();
+      document.getElementById("modelBtn").click();
+      await new Promise((r) => setTimeout(r, 450));
+      const s = window.__s;
+      if (!s.length) return null;
+      const tops = s.map((x) => x.top), ops = s.map((x) => x.op);
+      return { moved: Math.max(...tops) - Math.min(...tops),
+               faded: Math.max(...ops) - Math.min(...ops) };
+    });
+    ok("with motion reduced, the menu still opens", !!m);
+    if (m) {
+      ok("and does not travel", m.moved < 1.5, `${m.moved.toFixed(1)}px`);
+      // Not silence. A menu that materialises with no change at all is the
+      // abruptness the entrance exists to remove, and reduced motion asks not
+      // to be MOVED rather than not to be shown anything.
+      ok("but still fades, so it is not back to appearing", m.faded > 0.5, m.faded.toFixed(2));
+    }
     await ctx.close();
   }
 
