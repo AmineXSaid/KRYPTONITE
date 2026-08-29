@@ -3,6 +3,27 @@
 ## Unreleased
 
 ### Fixed
+- **The controls whose border IS the control now have a visible one.** Measured
+  on the shipped panel, the composer's outline sat at **1.47:1** against the
+  ground and every outlined button — send, attach, mode, the phase segment, and
+  the `.btn` family — at **2.03:1**. WCAG 1.4.11 asks 3:1 of the visual
+  information required to identify a component, and for a button with a
+  transparent fill the border is all there is.
+
+  `--kx-edge` is a new token for exactly that job, at 3.14:1 on the panel and
+  3.07:1 on the composer's own floor. **Dividers keep `--kx-line` at 2.04:1 on
+  purpose** — a rule that climbed to 3:1 would turn a list of rows into a grid
+  of boxes, which is a redesign of the panel's rhythm to solve a problem the
+  buttons had. Nothing else moved: the row hairlines, the status pills, the
+  count badges and the tip strip were all measured and left alone, because the
+  text in them is what carries their meaning and it already passes.
+
+  `tokens.css` had claimed in a comment that its alphas "keep the 3:1 boundary
+  contrast the suite enforces". Both halves were untrue — 2.03 is not 3, and
+  `test/contrast.cjs` had never read a line token at all, which is how every
+  check in that file passed while the composer had no visible edge. It reads
+  both tokens now, and asserts them in opposite directions.
+
 - **The mode sheet said it was modal and was not.** It renders as
   `role="dialog" aria-modal="true"`, which promises the rest of the panel is
   unreachable while it is up. Measured, it kept none of that: focus never

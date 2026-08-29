@@ -214,11 +214,30 @@
   --kx-hairline: rgba(251, 250, 253, .06);
   --kx-divider:  rgba(251, 250, 253, .10);
   /* Rules are washes for the same reason the surfaces are: a solid #4c4b51
-     hairline is a grey wire on a near-black container. The alphas are chosen
-     so that over Dark Modern's #181818 they land where the solid values were,
-     which is what keeps the 3:1 boundary contrast the suite enforces. */
+     hairline is a grey wire on a near-black container.
+     These are DIVIDERS - the line between two rows, under a header, across a
+     popover. A divider is meant to be quiet, and quiet is what .22 buys: over
+     Dark Modern's #181818 it composites to rgb(75,75,75), which is 2.03:1
+     against that ground.
+     This comment used to claim the alphas "keep the 3:1 boundary contrast the
+     suite enforces". Both halves were wrong. 2.03 is not 3, and no suite
+     enforced it - test/contrast.cjs never read a line token at all. The number
+     is right for a divider and was wrong for everything that borrowed it to
+     draw a CONTROL, which is what --kx-edge below is for. */
   --kx-line:     rgba(255, 255, 255, .22);
   --kx-line-2:   rgba(255, 255, 255, .28);
+  /* THE EDGE OF A CONTROL, which is a different job from a divider.
+     WCAG 1.4.11 wants 3:1 for the visual information required to identify a
+     component - and for a button with a transparent fill the border IS the
+     component. Measured on the shipped panel, the composer sat at 1.47:1 and
+     every outlined button at 2.03, so the send button, the attach button, the
+     mode button, the phase segment and the composer itself were shapes you
+     had to already know were there.
+     .34 composites to rgb(102,102,102) over #181818: 3.12:1, with the margin
+     going to the control rather than to the rule beside it. Dividers keep .22
+     on purpose - making them louder to fix a button would have been a
+     redesign of the panel's rhythm to solve a problem the buttons had. */
+  --kx-edge:     rgba(255, 255, 255, .34);
   --kx-raised:   rgba(251, 250, 253, .25);
   --kx-hover:    rgba(255, 255, 255, .04);  /* the mockup's row hover, exact */
 

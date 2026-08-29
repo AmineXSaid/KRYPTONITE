@@ -32,6 +32,13 @@ const TOKENS = fs.readFileSync(path.join(__dirname, "..", "media", "webview", "t
  * chain is still followed to its literal, so a token can be pointed at a
  * `--vscode-*` value with a fallback without breaking the measurement.
  */
+/** The token exactly as tokens.css declares it, alpha and all. */
+function rawToken(name) {
+  const m = TOKENS.match(new RegExp("--" + name + ":\\s*([^;]+);"));
+  if (!m) throw new Error("token not found: --" + name);
+  return m[1].trim();
+}
+
 function token(name) {
   const m = TOKENS.match(new RegExp("--" + name + ":\\s*([^;]+);"));
   if (!m) throw new Error("token not found: --" + name);
@@ -68,6 +75,16 @@ function rgb(hex) {
   const h = hex.replace("#", "").trim();
   const n = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
   return [0, 2, 4].map((i) => parseInt(n.slice(i, i + 2), 16));
+}
+
+/** An rgba() wash composited over an opaque hex ground. */
+function over(wash, groundHex) {
+  const m = wash.match(/^rgba?\(([^)]+)\)$/i);
+  if (!m) return wash;
+  const p = m[1].split(",").map((x) => parseFloat(x.trim()));
+  const a = p.length > 3 ? p[3] : 1;
+  const g = rgb(groundHex);
+  return hex([0, 1, 2].map((i) => g[i] + (p[i] - g[i]) * a));
 }
 
 /** Relative luminance, per WCAG 2.1. */
@@ -136,6 +153,47 @@ for (const [ink, fill] of [["kx-on-action", "kx-action"], ["kx-on-accent", "kx-a
   const r = ratio(token(ink), token(fill));
   console.log(`  ${r >= 4.5 ? "PASS" : "FAIL"}  ${ink} over ${fill.padEnd(10)} ${r.toFixed(2)}:1`);
   ck(ink + " over " + fill, r, 4.5);
+}
+
+/* ── the edge of a control ───────────────────────────────────────────────
+   WCAG 1.4.11 asks 3:1 of "the visual information required to identify user
+   interface components". For a button with a transparent fill the border IS
+   that information: remove it and there is no button, only a word.
+
+   NO LINE TOKEN WAS EVER CHECKED HERE, which is how this shipped. tokens.css
+   asserted in a comment that its alphas "keep the 3:1 boundary contrast the
+   suite enforces" - and the suite read --kx-fg*, the hues and the ink/fill
+   pairs, and never once read --kx-line. Measured on the shipped panel the
+   composer sat at 1.47:1 and every outlined button at 2.03, while every check
+   in this file passed.
+
+   Both tokens are asserted, in opposite directions, because they are two jobs
+   and the fix for one is the wrong answer for the other. */
+console.log("\n──── the edge of a control ────");
+{
+  const r = ratio(token("kx-edge"), BG);
+  console.log(`  ${r >= 3 ? "PASS" : "FAIL"}  kx-edge on the panel  ${r.toFixed(2)}:1  (min 3)`);
+  ck("kx-edge is a boundary you can see", r, 3);
+  // On the composer's own floor too - the toolbar's buttons sit on that, not
+  // on the panel.
+  //
+  // Composited BY HAND, over the surface. `token()` resolves every alpha over
+  // --kx-bg by design, which is right for the panel and wrong here: it would
+  // measure an edge-over-panel against a surface it never touches. A white
+  // wash gains contrast as the ground beneath it darkens, so using the panel's
+  // figure would have understated the real one.
+  const rs = ratio(over(rawToken("kx-edge"), SURF), SURF);
+  console.log(`  ${rs >= 3 ? "PASS" : "FAIL"}  kx-edge on the surface ${rs.toFixed(2)}:1  (min 3)`);
+  ck("kx-edge holds on the composer floor too", rs, 3);
+}
+{
+  // And --kx-line stays QUIET. A divider that climbed to 3:1 would turn a list
+  // of rows into a grid of boxes, which is the redesign this token split
+  // exists to avoid - so the assertion is that it does NOT reach a control's
+  // edge, not that it does.
+  const r = ratio(token("kx-line"), BG);
+  console.log(`  kx-line ${r.toFixed(2)}:1 against the panel - a divider, and meant to stay one`);
+  ck("kx-line stays quieter than a control edge", ratio(token("kx-edge"), BG) - r, 0);
 }
 
 /* Correct tokens are not enough: they have to be paired correctly at the point
