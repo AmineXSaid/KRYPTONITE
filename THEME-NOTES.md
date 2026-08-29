@@ -136,6 +136,7 @@ all four were places where an earlier reading of the design was wrong:
 
 | Surface | Was | Is | Why |
 |---|---|---|---|
+| The purple token's name | `--kx-mcp` | `--kx-agent` | the design gives MCP green and purple to agents, and a connected server was once painted purple on the strength of the name alone |
 | Active phase segment | coloured text on a raised plate | filled with the phase hue, ink label | the mockup fills it |
 | Phase hues | Ask blue-300, Plan orange, Act green | Ask blue-400, Plan purple-400, Act orange-400 | the mockup's own assignment |
 | Tab underline | one blue for all four | Session blue, MCP green, Agents purple, Diagnostics orange | the mockup gives each tab a hue |
@@ -143,7 +144,7 @@ all four were places where an earlier reading of the design was wrong:
 
 Fills are the mockup's `-400` values unaltered. Only **text** is lifted, and
 only where the mockup's own value misses WCAG AA on the ground it sits on:
-`--kx-fg-2`, `--kx-fg-3`, `--kx-error`, `--kx-mcp`, and the Plan banner label,
+`--kx-fg-2`, `--kx-fg-3`, `--kx-error`, `--kx-agent`, and the Plan banner label,
 which takes purple-300 because purple-400 as text on `--kx-bg` is 4.11:1.
 Ink on all three phase fills clears AA without help (5.25 / 4.94 / 7.03).
 
@@ -229,10 +230,31 @@ nothing is wrong. The mockup paints idle orange, which is what pointed at it.
 
 ## Verification
 
-`npm test`: **2457 assertions, 0 failed, exit 0.**
+`npm run verify`: **2732 assertions, 0 failed, exit 0.**
+`npm run package`: the archive gate at **29** and the paint gate at **51**.
 Every tab and the Control Center screenshotted with 0 runtime errors, driven
 by a fixture shaped to main's real DTOs, plus an automated overflow probe at
 280px and 900px that fails the run rather than being eyeballed.
+
+### What the overflow probe could not see
+
+A later screenshot pass at 280px found three defects the probe reported clean,
+and the reason is worth keeping: **`document.scrollWidth` is the wrong
+instrument for a panel made of scroll containers.**
+
+- "Edit config" was past the right edge of `.mcp-wrap`, which is a scroller.
+  It was therefore CLIPPED rather than pushing the page, so the document never
+  widened and the probe saw nothing. A button can be absent without costing a
+  pixel.
+- A server's tool count was painted over its read-only pill. An overlap costs
+  no width at all.
+- The composer's action group wrapped onto a row of its own. Every control was
+  inside the panel; only its POSITION was wrong.
+
+`test/render.cjs` now asks the three questions that catch those: is each
+control inside its own scroll container, does any text box intersect a
+control's box, and which item is the one that wraps. Each was checked by
+putting the defect back and watching the assertion name it.
 
 The exit code is the signal. A crash is not a FAIL line and a hang is not a
 failure, and an exit code you never received is not an exit code of zero.
@@ -255,9 +277,9 @@ not built yet on this branch:
 - **C8/C9** - thinking toggle and effort selector. `SelectModelMsg` carries
   endpoint and model only.
 - **F3** - focus trap and focus restore on the modals.
-- The Agents tab carries **two identical "New agent" buttons**, one in the
-  header and one in the footer. Pre-existing on `main`; removing a control is
-  a product decision, not a theme one.
+- ~~The Agents tab carries two identical "New agent" buttons.~~ Done: the
+  footer copy is gone and the footer now states which agent is in force and
+  nothing else. See the note beside `sk-foot` in `sidebar.js`.
 - **G1-G5** - the Control tab as the audit describes it.
 - **H3/H4/H5/H8** - the `s_client`, endpoint, skills and live-command dumps.
 - **J4** - the per-feature regression pass over all 20 commands.

@@ -374,7 +374,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
   color: var(--kx-fg-2);
 }
 .btn:hover:not(:disabled) { background: var(--kx-surface-4); }
-.btn.primary { background: var(--kx-mcp); border-color: var(--kx-mcp); color: var(--kx-on-accent); }
+.btn.primary { background: var(--kx-agent); border-color: var(--kx-agent); color: var(--kx-on-accent); }
 .btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
 /* The affirmative action: an oxide outline, not another filled block.
  *
@@ -543,7 +543,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 }
 .seg-b:hover { color: var(--kx-fg); background: var(--kx-surface-3); }
 .seg-b[aria-checked="true"] {
-  background: var(--kx-mcp); border-color: var(--kx-mcp); color: var(--kx-on-accent);
+  background: var(--kx-agent); border-color: var(--kx-agent); color: var(--kx-on-accent);
 }
 .hint2.blocked { color: var(--kx-warn); }
 

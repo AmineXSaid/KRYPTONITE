@@ -398,6 +398,188 @@ function contrast(a, b) {
     await ctx.close();
   }
 
+  /* ── 5c. what the composer gives up, and in what order ─────────────── */
+  {
+    // Section 5 asks whether anything escaped the panel. Nothing did, at 280px,
+    // and the row was still wrong: the phase segment and the mode button kept
+    // the first line while attach and send wrapped to a second one on their
+    // own, hugged right, with the whole left half of the composer empty. A
+    // control inside the panel can still be in the wrong place, so this asks
+    // WHICH item wraps rather than whether one fell off.
+    const { ctx, page } = await open(280, {});
+    const rows = await page.evaluate(() => {
+      const tb = document.querySelector(".toolbar");
+      const kids = [...tb.children].filter((e) => getComputedStyle(e).display !== "none");
+      // Grouped by the vertical band each sits in, not by `top`: the row is
+      // centre-aligned, so a 23px segment and a 30px button on the SAME line
+      // have different tops and would otherwise read as two rows.
+      const mid = (e) => { const r = e.getBoundingClientRect(); return (r.top + r.bottom) / 2; };
+      const bands = [];
+      for (const e of kids) {
+        const m = mid(e);
+        let b = bands.find((x) => Math.abs(x.mid - m) < 8);
+        if (!b) bands.push((b = { mid: m, names: [] }));
+        b.names.push(e.id || e.className.split(" ")[0]);
+      }
+      bands.sort((a, b) => a.mid - b.mid);
+      return bands.map((b) => b.names);
+    });
+    // -1 for both sides would make "same row" trivially true, so the probe
+    // has to find each control before it can compare them.
+    const rowOf = (name) => rows.findIndex((r) => r.includes(name));
+    for (const n of ["phaseSeg", "modelBtn", "tb-actions"]) {
+      ok(`the toolbar still has ${n} to place`, rowOf(n) >= 0, JSON.stringify(rows));
+    }
+    ok("the composer toolbar wraps at 280px rather than crushing every control",
+      rows.length >= 2, JSON.stringify(rows));
+    // The heart of it. `.tb-actions` exists so a wrap does not orphan send by
+    // itself; it must not be orphaned as a PAIR either.
+    ok("and send and attach stay on the row with the phase segment",
+      rowOf("tb-actions") === rowOf("phaseSeg"), JSON.stringify(rows));
+    ok("while the model button is what moves to the second row",
+      rowOf("modelBtn") > rowOf("phaseSeg"), JSON.stringify(rows));
+    ok("which leaves no row carrying nothing but the two action buttons",
+      !rows.some((r) => r.length === 1 && r[0] === "tb-actions"), JSON.stringify(rows));
+    await ctx.close();
+  }
+  {
+    // The model name at an ordinary dock width, measured as CHARACTERS that
+    // actually reach a reader rather than as a box width.
+    //
+    // It rendered "claud…" here. Every model this extension is pointed at
+    // begins that way, so the visible text told two different models apart not
+    // at all - and a truncation that stops before the first distinguishing
+    // character is the same as showing no name. The bar is therefore not "does
+    // it fit" but "is what fits longer than the prefix these ids share".
+    const SHARED = "claude-".length;
+    for (const width of [360, 400]) {
+      const { ctx, page } = await open(width, {});
+      const seen = await page.evaluate(() => {
+        const el = document.getElementById("modelName");
+        const box = el.getBoundingClientRect();
+        const text = el.textContent || "";
+        // Walk the text node and count the characters whose own box ends
+        // inside the element's. Reading `textContent` would count the ones the
+        // ellipsis is hiding, which is exactly the mistake being tested for.
+        const node = el.firstChild;
+        if (!node || node.nodeType !== 3) return { n: text.length, text };
+        const r = document.createRange();
+        let n = 0;
+        for (let i = 1; i <= text.length; i++) {
+          r.setStart(node, i - 1); r.setEnd(node, i);
+          if (r.getBoundingClientRect().right <= box.right + 0.5) n = i; else break;
+        }
+        return { n, text };
+      });
+      ok(`the model name is legible past the shared prefix at ${width}px`,
+        seen.n > SHARED,
+        `${seen.n} of ${seen.text.length} characters of "${seen.text}" reach the panel`);
+      await ctx.close();
+    }
+  }
+
+  /* ── 5d. the MCP tab at a narrow dock ──────────────────────────────── */
+  {
+    // Neither of these was catchable from the document's scroll width, which is
+    // why section 5's probe reported clean while both were on screen and wrong.
+    // `.mcp-wrap` is a scroll container, so a button past its right edge is
+    // CLIPPED rather than pushing the page - it simply is not there, with no
+    // scrollbar to say it exists. And an overlap costs no width at all.
+    const { ctx, page } = await open(280, {
+      mcp: { warnings: [], servers: [
+        { name: "confluence", state: "ready", command: "confluence-mcp", approval: "ask",
+          readOnly: true, toolCount: 5, tools: ["confluence_search", "confluence_get_page"],
+          serverInfo: { name: "confluence-mcp", version: "1.0.0" } },
+        { name: "gitlab-remote", state: "failed", command: "https://mcp.example.internal/mcp",
+          approval: "ask", readOnly: true, toolCount: 0, tools: [],
+          error: "connect ECONNREFUSED 10.4.2.9:443" },
+      ] },
+    });
+    await page.click("#tabMcp");
+    await page.waitForTimeout(250);
+
+    const mcp = await page.evaluate(() => {
+      const wrap = document.querySelector(".mcp-wrap");
+      const head = document.querySelector(".mcp-head");
+      const edge = Math.min(document.documentElement.clientWidth,
+        wrap.getBoundingClientRect().right);
+      const clipped = [...head.querySelectorAll(".btn")]
+        .filter((b) => b.getBoundingClientRect().right > edge + 0.5)
+        .map((b) => b.textContent.trim());
+      // A tool count painted on top of a pill. Text over a control, not merely
+      // a tight row - and invisible to any width measurement.
+      const hits = [];
+      document.querySelectorAll(".mcp-row").forEach((row) => {
+        const c = row.querySelector(".count");
+        if (!c) return;
+        const cb = c.getBoundingClientRect();
+        row.querySelectorAll(".mcp-pill, .mcp-ro").forEach((p) => {
+          const pb = p.getBoundingClientRect();
+          if (cb.left < pb.right - 0.5 && cb.right > pb.left + 0.5 &&
+              cb.top < pb.bottom - 0.5 && cb.bottom > pb.top + 0.5) {
+            hits.push(row.querySelector(".nm").textContent + " over " + p.textContent.trim());
+          }
+        });
+      });
+      const cap = document.querySelector(".mcp-cap");
+      return { clipped, hits, sideways: wrap.scrollWidth > wrap.clientWidth + 1,
+        capH: cap ? Math.round(cap.getBoundingClientRect().height) : -1 };
+    });
+
+    ok("both MCP header actions are reachable at 280px",
+      mcp.clipped.length === 0, "clipped: " + JSON.stringify(mcp.clipped));
+    ok("and the server list does not scroll sideways to hide them", !mcp.sideways);
+    ok("no tool count is painted over a status or read-only pill",
+      mcp.hits.length === 0, JSON.stringify(mcp.hits));
+    // "SERVERS" and "· 4 configured" are one caption. As two flex siblings the
+    // phrase broke between the dot and the word, which reads as two facts.
+    ok("the servers caption stays on one line", mcp.capH > 0 && mcp.capH < 26,
+      "caption height " + mcp.capH);
+    await ctx.close();
+  }
+
+  /* ── 5e. one right gutter per tab ──────────────────────────────────── */
+  {
+    // The active-agent bar's stop control sat 8px from the panel edge while
+    // "New agent" and every "Open" directly beneath it sat at 14px. Six pixels
+    // is small on its own and obvious in a column: three right-aligned
+    // controls stacked vertically, one of them out of line.
+    const { ctx, page } = await open(360, {
+      agents: [
+        { name: "reviewer", description: "Reads a diff.", model: "", memory: "",
+          tools: ["read_file"], skills: [], allMcp: true, mcp: [],
+          file: ".agent/agents/reviewer.md", active: true },
+      ],
+      activeAgent: "reviewer",
+    });
+    await page.click("#tabAgents");
+    await page.waitForTimeout(250);
+    const gutters = await page.evaluate(() => {
+      const w = document.documentElement.clientWidth;
+      const seen = {};
+      // The tab's own controls, PLUS the active-agent bar - which lives in the
+      // shell rather than inside #viewAgents, and is precisely the control that
+      // was out of line. Selecting only the view would have measured three
+      // buttons that already agreed and reported a clean gutter.
+      //
+      // The panel header's icon buttons are excluded on purpose: they are
+      // borderless and carry their own optical inset, which is a different
+      // measurement from a bordered control's box.
+      document.querySelectorAll("#viewAgents button, .agent-bar button").forEach((b) => {
+        const r = b.getBoundingClientRect();
+        if (!r.width || !r.height) return;
+        const gap = Math.round(w - r.right);
+        if (gap > 40) return; // not a right-aligned control
+        (seen[gap] = seen[gap] || []).push((b.textContent || b.id).trim().slice(0, 14));
+      });
+      return seen;
+    });
+    const values = Object.keys(gutters);
+    ok("every right-aligned control on the Agents tab shares one right gutter",
+      values.length === 1, JSON.stringify(gutters));
+    await ctx.close();
+  }
+
   /* ── 6. the session list, as the reference draws it ────────────────── */
   {
     const { ctx, page } = await open(400, {

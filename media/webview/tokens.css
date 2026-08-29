@@ -145,10 +145,17 @@
    *   information / links / read-only / focus → blue
    */
   --kx-accent: #2ea562;  /* green    - success, health, added line, Act      */
-  --kx-mcp:    #9a7edd;  /* purple   - MCP servers and the tools they expose.
-                          * Genesis has no teal; purple is its "capability
-                          * from outside" hue (agent / live / queued), which
-                          * is the same claim main's teal was making.        */
+  --kx-agent:  #9a7edd;  /* purple   - agents, and the one filled "commit" fill.
+                          * It was called --kx-mcp, and that name was a trap.
+                          * The design gives MCP GREEN (see --kx-tab-mcp, and
+                          * the note on .mcp-row) and gives purple to agents;
+                          * a connected server was once painted purple on the
+                          * strength of the old name alone, which is exactly
+                          * the bug the rename is here to stop recurring.
+                          * Not one of its call sites is an MCP server: the
+                          * agent chip and active row, .btn.primary, the
+                          * reasoning kind, accept-edits mode, and a syntax
+                          * colour.                                          */
   --kx-active: #d99530;  /* orange   - the Plan phase: pending, attention    */
   --kx-ask:    #63a6e9;  /* blue-300 - the Ask phase. main used amber here;
                           * Genesis's table puts read-only on blue, and Ask
@@ -189,7 +196,7 @@
 
   /* ── washes ── */
   --kx-accent-wash: rgba(45, 161, 96, .14);
-  --kx-mcp-wash:    rgba(148, 117, 219, .16);
+  --kx-agent-wash:  rgba(148, 117, 219, .16);
   --kx-info-wash:   rgba(66, 143, 220, .16);
   --kx-warn-wash:   rgba(217, 149, 48, .16);
   --kx-error-wash:  rgba(221, 43, 14, .32);

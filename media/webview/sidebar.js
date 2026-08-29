@@ -217,7 +217,7 @@ function _sbRun() {
    */
   var LLM_KINDS = [
     { id: "chat", label: "Chat", note: "General instruction-following turns", hue: "var(--kx-fg-3)" },
-    { id: "reasoning", label: "Reasoning", note: "Thinks before answering; slower, stronger", hue: "var(--kx-mcp)" },
+    { id: "reasoning", label: "Reasoning", note: "Thinks before answering; slower, stronger", hue: "var(--kx-agent)" },
     { id: "multimodal", label: "Multimodal", note: "Reads images as well as text", hue: "var(--kx-accent)" },
     { id: "coding", label: "Coding", note: "Tuned for code edits and repo work", hue: "var(--kx-ask)" },
     { id: "completion", label: "Completion", note: "Fill-in-the-middle; drives ghost text", hue: "var(--kx-active)" }
@@ -1450,7 +1450,7 @@ function _sbRun() {
     // with a stray fourth option. The design's own name for this mode is
     // Manual, which is both unambiguous and what the sheet already called it.
     ["ask", "Manual", "Always ask before making changes", "Manual", "i-hand", "var(--kx-fg)"],
-    ["edits-auto", "Accept edits", "File edits run automatically. Shell commands still ask.", "Edits", "i-code", "var(--kx-mcp)"],
+    ["edits-auto", "Accept edits", "File edits run automatically. Shell commands still ask.", "Edits", "i-code", "var(--kx-agent)"],
     ["full-auto", "Auto", "The agent handles permission decisions itself", "Auto", "i-bolt", "var(--kx-error)"]
   ];
 
@@ -3957,7 +3957,7 @@ function _sbRun() {
       'fill="none" aria-hidden="true">' +
       '<circle class="a1" cx="12" cy="12" r="10" stroke="var(--kx-accent)" stroke-width="2.5" ' +
         'stroke-linecap="round" stroke-dasharray="16 47"/>' +
-      '<circle class="a2" cx="12" cy="12" r="6.5" stroke="var(--kx-mcp)" stroke-width="2.5" ' +
+      '<circle class="a2" cx="12" cy="12" r="6.5" stroke="var(--kx-agent)" stroke-width="2.5" ' +
         'stroke-linecap="round" stroke-dasharray="10 31"/>' +
       '<circle class="a3" cx="12" cy="12" r="3" stroke="var(--kx-active)" stroke-width="2.5" ' +
         'stroke-linecap="round" stroke-dasharray="5 14"/>' +
@@ -4007,12 +4007,25 @@ function _sbRun() {
     var m = S.mcp || { servers: [], warnings: [] };
     var servers = m.servers || [];
 
+    // Caption and actions are two GROUPS, not five siblings, for the same
+    // reason the composer's `.tb-actions` is a group: this row wraps at a
+    // narrow panel, and a flex-grow spacer is itself a wrappable item. With
+    // `.sp` between them, "Edit config" left the panel entirely at 280px -
+    // clipped by the scroller, with no scrollbar to say so. Grouped, the two
+    // buttons drop to a second row together and both stay reachable.
+    //
+    // "Servers" and "· 4 configured" are one group for a second reason: as
+    // siblings the phrase broke between "·" and "configured", which reads as
+    // two facts rather than one caption.
     var head = '<div class="mcp-head">' +
-      "<span class=\"l\">Servers</span>" +
-      '<span class="when">' + (servers.length ? "· " + servers.length + " configured" : "") + "</span>" +
-      '<span class="sp"></span>' +
-      '<button class="btn sm" data-mcp="reload">' + icon("i-refresh", "ic-13") + "<span>Reload</span></button>" +
-      '<button class="btn sm" data-mcp="open">Edit config</button>' +
+      '<span class="mcp-cap">' +
+        "<span class=\"l\">Servers</span>" +
+        '<span class="when">' + (servers.length ? "· " + servers.length + " configured" : "") + "</span>" +
+      "</span>" +
+      '<span class="mcp-acts">' +
+        '<button class="btn sm" data-mcp="reload">' + icon("i-refresh", "ic-13") + "<span>Reload</span></button>" +
+        '<button class="btn sm" data-mcp="open">Edit config</button>' +
+      "</span>" +
       "</div>";
 
     if (m.warnings && m.warnings.length) {

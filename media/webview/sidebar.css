@@ -799,7 +799,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    `tools.ts` cost the same effort to read. */
 .p-dir { color: var(--kx-fg-4); }
 .p-name { color: var(--kx-fg); font-weight: 600; }
-.p-ext { color: var(--kx-mcp); }
+.p-ext { color: var(--kx-agent); }
 .tool[data-error="1"] .p-name { color: var(--kx-error); }
 /* Diff stat on the row that produced it, so an edit is legible at a glance. */
 .tool-stat { flex: none; font-family: var(--kx-mono); font-size: 10.5px; }
@@ -902,7 +902,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   color: var(--kx-fg-2);
 }
 .btn:hover:not(:disabled) { background: var(--kx-surface-4); }
-.btn.primary { background: var(--kx-mcp); border-color: var(--kx-mcp); color: var(--kx-on-accent); }
+.btn.primary { background: var(--kx-agent); border-color: var(--kx-agent); color: var(--kx-on-accent); }
 .btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
 /* The affirmative action: an oxide outline, not another filled block.
  *
@@ -1143,22 +1143,28 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 /* -------------------------- agents --------------------------
    The bar is drawn only while an agent is selected, so an unused feature
    costs no vertical space at all. */
+/* 14px on the right, matching the left and matching `.ag-row` below.
+   It was 8, so the bar's stop control sat six pixels proud of "New agent" and
+   every "Open" directly beneath it - two right-aligned controls in one column,
+   out of line by enough to see. */
 .agent-bar {
-  flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 14px;
+  flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 14px;
   background: var(--kx-surface);
   border-bottom: 1px solid var(--kx-line);
   font-family: var(--kx-ui); font-size: 11.5px;
   min-width: 0;
 }
-/* Teal, the palette's MCP colour. An agent is a persona over a scoped set of
-   MCP servers, so it belongs to that family - and the pink and amber are
-   already spoken for by Plan and Ask, where a second meaning would read as a
-   phase the composer does not have. */
+/* Purple, which the design gives to agents. The comment here used to say
+   "teal, the palette's MCP colour", and was wrong twice over: the value is not
+   teal, and reasoning from MCP is what once painted a connected SERVER purple.
+   The hue is right for the reason it was chosen wrongly - an agent is borrowed
+   capability - and the pink and amber are spoken for by Plan and Ask, where a
+   second meaning would read as a phase the composer does not have. */
 .agent-bar .dot {
   width: 6px; height: 6px; flex: none; border-radius: 50%;
-  background: var(--kx-mcp);
+  background: var(--kx-agent);
 }
-.agent-bar .nm { flex: none; font-weight: 600; color: var(--kx-mcp); }
+.agent-bar .nm { flex: none; font-weight: 600; color: var(--kx-agent); }
 .agent-bar .sub { min-width: 0; flex: 1; color: var(--kx-fg-2); font-family: var(--kx-mono); font-size: 10.5px; }
 .agent-bar .tb-btn { flex: none; }
 
@@ -1185,13 +1191,13 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .ag-empty p { margin: 0 0 10px; }
 .ag-empty code { font-family: var(--kx-mono); font-size: 11px; color: var(--kx-fg); }
 .ag-row { padding: 8px 14px; border-bottom: 1px solid var(--kx-line); }
-.ag-row[data-on="1"] { background: var(--kx-mcp-wash); }
+.ag-row[data-on="1"] { background: var(--kx-agent-wash); }
 .ag-head { display: flex; align-items: center; gap: 7px; }
 .ag-head .ic { flex: none; color: var(--kx-fg-3); }
 .ag-head .n { min-width: 0; font-family: var(--kx-ui); font-size: 12px; font-weight: 600; }
 .ag-live {
   flex: none; padding: 1px 6px; border-radius: 3px;
-  background: var(--kx-mcp); color: var(--kx-on-accent);
+  background: var(--kx-agent); color: var(--kx-on-accent);
   font-family: var(--kx-ui); font-size: 9.5px; font-weight: 700;
   letter-spacing: .05em; text-transform: uppercase;
 }
@@ -1794,7 +1800,10 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 
 /* The endpoint's health, folded onto the control that already names its
-   model, so it costs no space of its own. */
+   model, so it needs no row of its own.
+   It is not free, though: 5px of dot and 5px of gap are about a character and
+   a half of model name at a 360px panel, and this file's own rule is that the
+   model name wins the space those two compete over. */
 .ep-dot {
   width: 5px; height: 5px; flex: none; border-radius: 50%;
   background: var(--kx-accent);
@@ -1906,8 +1915,8 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    marking; the other two are states someone should be able to notice from
    across the room, because they mean the agent will act without stopping. */
 .perm-btn[data-mode="edits-auto"] {
-  color: var(--kx-mcp); border-color: color-mix(in srgb, var(--kx-mcp) 38%, transparent);
-  background: color-mix(in srgb, var(--kx-mcp) 12%, transparent);
+  color: var(--kx-agent); border-color: color-mix(in srgb, var(--kx-agent) 38%, transparent);
+  background: color-mix(in srgb, var(--kx-agent) 12%, transparent);
 }
 .perm-btn[data-mode="full-auto"] {
   color: var(--kx-error); border-color: color-mix(in srgb, var(--kx-error) 42%, transparent);
@@ -1917,7 +1926,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    the button falls back to coloured text, which is the previous behaviour and
    still legible - so this is a progressive enhancement, not a dependency. */
 @supports not (color: color-mix(in srgb, red 10%, transparent)) {
-  .perm-btn[data-mode="edits-auto"] { color: var(--kx-mcp); }
+  .perm-btn[data-mode="edits-auto"] { color: var(--kx-agent); }
   .perm-btn[data-mode="full-auto"] { color: var(--kx-error); }
 }
 /* Below ~330px the control row has to choose between wrapping onto a second
@@ -2076,8 +2085,8 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   border-radius: 50%; border: 1.7px solid var(--kx-line);
 }
 .perm-row .dot { width: 8px; height: 8px; border-radius: 50%; background: transparent; }
-.perm-row[data-on="1"] .ring { border-color: var(--kx-mcp); }
-.perm-row[data-on="1"] .dot { background: var(--kx-mcp); }
+.perm-row[data-on="1"] .ring { border-color: var(--kx-agent); }
+.perm-row[data-on="1"] .dot { background: var(--kx-agent); }
 .ep { display: flex; align-items: center; gap: 5px; min-width: 0; }
 .ep .dot { width: 5px; height: 5px; flex: none; border-radius: 50%; background: var(--kx-accent); }
 .ep[data-err="1"] { color: var(--kx-error); }
@@ -2091,9 +2100,21 @@ ul.md-l li.md-task, ol.md-l li.md-task {
  * is gone - see `.mcp-row`.
  */
 .mcp-wrap { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+/* The row wraps, and its two groups are what wrap.
+ *
+ * Unwrapped, "Edit config" ran past the panel edge at 280px and was clipped by
+ * `.mcp-wrap`'s scroller - a button half off screen with no scrollbar to say
+ * it was there. Same failure the composer had, so it takes the same shape: the
+ * actions are a GROUP held right by `margin-left: auto` rather than pushed by
+ * a flex-grow spacer, because a spacer is itself a wrappable item and becomes
+ * an empty row of its own the moment the line breaks. */
 .mcp-head {
-  display: flex; align-items: center; gap: 8px; padding: 12px 16px 10px; flex: none;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  padding: 12px 16px 10px; flex: none;
 }
+/* One caption, so "· 4 configured" cannot break between the dot and the word. */
+.mcp-cap { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.mcp-acts { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 /* ── syntax highlighting ──
    Drawn from the doorway palette, and assigned by how much each token needs to
    be found rather than by tradition. Strings and comments are the two things
@@ -2104,7 +2125,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .tk-st { color: var(--kx-accent); }                 /* strings: the turquoise wall */
 .tk-cm { color: var(--kx-fg-4); font-style: italic; } /* comments: stone, receding */
 .tk-kw { color: var(--kx-active); font-weight: 600; } /* keywords: the pink frame */
-.tk-ty { color: var(--kx-mcp); }                    /* types and tags: teal */
+.tk-ty { color: var(--kx-agent); }                  /* types and tags: purple */
 .tk-fn { color: var(--kx-link); }                   /* calls: the blue door */
 .tk-nu { color: var(--kx-info); }                   /* numbers: measurement */
 .tk-at { color: var(--kx-warn); }                   /* keys, attributes, decorators */
@@ -2137,7 +2158,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   color: var(--kx-fg-3); overflow-wrap: anywhere;
 }
 
-.tk-va { color: var(--kx-mcp); }                    /* $variables: shell and PowerShell */
+.tk-va { color: var(--kx-agent); }                    /* $variables: shell and PowerShell */
 /* A diff's added and removed lines. Not --kx-diff-add/--kx-diff-del: those are
    translucent washes meant to sit behind a row, and at 14% and 30% alpha they
    are close to invisible as text. These two are the same hues at full strength,
@@ -2173,7 +2194,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 .btn[data-busy="1"]::after {
   content: ""; position: absolute; left: -40%; bottom: 0; height: 2px; width: 40%;
-  background: linear-gradient(90deg, transparent, var(--kx-accent), var(--kx-mcp), transparent);
+  background: linear-gradient(90deg, transparent, var(--kx-accent), var(--kx-agent), transparent);
   animation: kxsweep 1.1s linear infinite;
 }
 @keyframes kxsweep { to { left: 100%; } }
@@ -2254,14 +2275,34 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .mcp-row[data-state="disabled"] .sub,
 .mcp-row[data-state="disabled"] .count { opacity: .55; }
 .mcp-row .mid { min-width: 0; }
-.mcp-row .top { display: flex; align-items: center; gap: 8px; }
-.mcp-row .nm { font-size: 12px; font-weight: 600; color: var(--kx-fg); }
+/* The name line WRAPS, and that is the whole fix for a real overlap.
+ *
+ * A pill is `flex: none`, so `.top`'s min-content is the name plus every pill
+ * laid end to end. The grid column is `minmax(0, 1fr)`, which permits a column
+ * narrower than its content - so at 280px the pills simply ran on and the tool
+ * count painted over the top of them. Text on a control, not merely tight.
+ *
+ * Wrapping moves the pills to a second line instead, which costs a row on a
+ * narrow panel and costs nothing on a wide one, since the line only breaks
+ * when it must. */
+.mcp-row .top { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; row-gap: 5px; }
+/* Long enough to need it, and a hyphen is a break opportunity the name did not
+   ask for: "gitlab-remote" was breaking into "gitlab-" / "remote" while there
+   was room for it whole. */
+.mcp-row .nm {
+  font-size: 12px; font-weight: 600; color: var(--kx-fg);
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .mcp-row .sub {
   display: block; margin-top: 2px;
   font-family: var(--kx-mono); font-size: 11px; color: var(--kx-fg-3);
 }
+/* `align-self: start` rather than the row's centre: once `.top` can wrap, a
+   two-line row would drift the count into the vertical middle of a block it
+   does not belong to. It labels the name, so it sits on the name's line. */
 .mcp-row .count {
   font-family: var(--kx-mono); font-size: 11px; color: var(--kx-fg-2); white-space: nowrap;
+  align-self: start; padding-top: 1px;
 }
 
 .mcp-pill {
@@ -2752,15 +2793,66 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   .perm-btn .ic-15 { width: 17px; height: 17px; }
 }
 
-/* Narrower still: the phase segment gives up its side padding.
-   It is the widest fixed item in the row at 115px, and three uppercase words
-   at 9px do not need 7px of air on each side of each one. This buys back about
-   18px, which is the difference between one row and two at a 300px panel. */
-@media (max-width: 330px) {
+/* The phase segment gives up its side padding at 400, not at 330.
+ *
+ * It is the widest fixed item in the row at 115px, and three uppercase words
+ * at 9px do not need 7px of air on each side of each one. That was already the
+ * concession made below 330; the reason it moves up is the file's own stated
+ * priority - "the model is the one you actually need to read before pressing
+ * send" - which was not being met at 360px, the most ordinary sidebar width
+ * there is. The model button computed to 77px there and rendered "claud…":
+ * every model this extension talks to begins that way, so the visible text
+ * distinguished nothing at all, and truncating before the first distinguishing
+ * character is the same as showing no name. The 18px this releases takes it to
+ * "claude-sonne…", which does distinguish.
+ *
+ * Above 400px nothing changes, so the mockup's 5px 7px segment is what a panel
+ * at its drawn width still shows. */
+@media (max-width: 400px) {
   .seg button { padding: 5px 4px; }
-  .toolbar { gap: 4px; }
+  /* A GREEN dot is the absence of news, and at a narrow panel it is spending a
+     character and a half of the model name to say nothing. The red one stays,
+     at every width: "the gateway is failing" is the entire reason the dot is
+     here, and it is the one state you must not have to widen the panel to
+     find. So the dot is hidden only while it has nothing to report. */
+  .ep-dot[data-err="0"] { display: none; }
+}
+/* Narrower still: the gaps and the panel's own gutters give way, in that
+   order, because they are the pixels nobody can see go. */
+@media (max-width: 330px) {
+  .toolbar { gap: 4px; padding-left: 7px; padding-right: 7px; }
   .composer-wrap { padding-left: 10px; padding-right: 10px; }
   /* And the model button asks for less to start with. It grows into whatever
      is left over anyway; the basis only decides whether the row wraps. */
   #modelBtn { flex-basis: 48px; }
+}
+/* THE WRAP, WHEN IT FINALLY COMES, PUTS THE MODEL ON THE SECOND ROW.
+ *
+ * Below about 265px the five controls genuinely do not fit, and something has
+ * to go to a second line. Left to the natural order that was `.tb-actions` -
+ * attach and send stranded on a row of their own, hugged to the right, with
+ * the whole left half of the composer empty. The group was introduced so a
+ * wrap would not orphan send by ITSELF; it stopped send being orphaned alone
+ * and left the pair orphaned together.
+ *
+ * `order` sends the model button down instead. Row one keeps the three
+ * controls that are pressed - phase, mode, send - and row two is the model
+ * name at full width, which is the one item that gets BETTER for the space:
+ * the whole id fits where a moment ago it was five characters and an ellipsis.
+ *
+ * The threshold is 350px, and it is set by LEGIBILITY rather than by the width
+ * at which the row happens to break. Inline, the model button gets whatever is
+ * left after four fixed controls: about 8 characters at 360px, 6 at 320, 3 at
+ * 300. Eight is enough to tell claude-sonnet from claude-opus; six is not, and
+ * three is a letter and an ellipsis. So the button stops competing for the row
+ * at the width where competing stops paying, and takes a full line instead -
+ * where the whole id fits with room over.
+ *
+ * Keyboard and screen-reader order are unchanged. `order` moves the paint, not
+ * the DOM, and the visual sequence still reads left-to-right, top-to-bottom. */
+@media (max-width: 350px) {
+  .seg { order: 0; }
+  .perm-btn { order: 1; }
+  .tb-actions { order: 2; }
+  #modelBtn { order: 3; flex: 1 1 100%; max-width: none; justify-content: center; }
 }

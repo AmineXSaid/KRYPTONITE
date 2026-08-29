@@ -2,6 +2,48 @@
 
 ## Unreleased
 
+### Fixed
+- **A button on the MCP tab was unreachable at a narrow dock.** "Edit config"
+  ran past the panel edge at 280px and was clipped by the server list's own
+  scroller - half a button, no scrollbar to say the rest existed. The header
+  row wraps now, and its two actions wrap as a group, so they arrive on a
+  second line together rather than one of them leaving.
+
+  Two more on the same tab, both invisible to a width measurement because
+  neither costs any width. A server's tool count was painted **on top of** its
+  read-only pill, text over a control; the name line wraps instead. And
+  "Servers · 4 configured" broke between the dot and the word, which reads as
+  two facts rather than one caption.
+
+- **The composer's send and attach buttons were stranded on their own row at
+  280px**, hugged to the right with the whole left half of the composer empty.
+  They were made a group so a wrap would not orphan send by itself; it stopped
+  send being orphaned alone and left the pair orphaned together. Below 350px
+  the **model button** takes the second row instead - and gets better for it,
+  since the whole model id fits there.
+
+- **The model name was truncated before its first distinguishing character.**
+  At 360px, the most ordinary sidebar width there is, the button rendered
+  `claud…`. Every model this extension talks to begins that way, so the visible
+  text told two models apart not at all. The phase segment gives up its side
+  padding below 400px rather than below 330px, and a **green** endpoint dot -
+  which is the absence of news - stands aside at those widths. The red one
+  never does: a failing gateway is the entire reason the dot is there. Together
+  that is `claude-sonnet…` where it was five characters and an ellipsis.
+
+- **The active-agent bar's stop control sat six pixels proud** of "New agent"
+  and every "Open" directly beneath it. Three right-aligned controls in one
+  column, one out of line.
+
+### Changed
+- **`--kx-mcp` is now `--kx-agent`.** The name was a trap: the design gives MCP
+  green and gives purple to agents, and a connected server was once painted
+  purple on the strength of the old name alone. Not one of the token's call
+  sites is an MCP server - it is the agent chip, the active-agent row,
+  `.btn.primary`, the reasoning kind, accept-edits mode and a syntax colour.
+  Purely a rename; the contrast suite pins the values and is unchanged in what
+  it asserts.
+
 ### Added
 - **An MCP server can now hand the model a picture.** An image content block in
   a tool result reaches the request body as an image, instead of being

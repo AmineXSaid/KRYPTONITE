@@ -108,7 +108,7 @@ for (const [name, min] of [["kx-fg", 4.5], ["kx-fg-2", 4.5], ["kx-fg-3", 4.5], [
 /* Every semantic hue is used as text somewhere: a failing rung, a warning,
    a link, a connected server, a token in a code block. */
 console.log("\n──── palette as text ────");
-for (const name of ["kx-accent", "kx-error", "kx-warn", "kx-link", "kx-mcp", "kx-info", "kx-active", "kx-ask"]) {
+for (const name of ["kx-accent", "kx-error", "kx-warn", "kx-link", "kx-agent", "kx-info", "kx-active", "kx-ask"]) {
   const onBg = ratio(token(name), BG);
   const onSurf = ratio(token(name), SURF);
   const worst = Math.min(onBg, onSurf);
@@ -132,7 +132,7 @@ for (const [ink, fill] of [["kx-on-action", "kx-action"], ["kx-on-accent", "kx-a
   // The active phase segment is a filled block with an ink label, and so
   // is the selected model-kind chip and the primary button.
   ["kx-on-accent", "kx-phase-ask"], ["kx-on-accent", "kx-phase-plan"],
-  ["kx-on-accent", "kx-phase-act"], ["kx-on-accent", "kx-mcp"]]) {
+  ["kx-on-accent", "kx-phase-act"], ["kx-on-accent", "kx-agent"]]) {
   const r = ratio(token(ink), token(fill));
   console.log(`  ${r >= 4.5 ? "PASS" : "FAIL"}  ${ink} over ${fill.padEnd(10)} ${r.toFixed(2)}:1`);
   ck(ink + " over " + fill, r, 4.5);
