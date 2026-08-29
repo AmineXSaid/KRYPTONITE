@@ -104,6 +104,9 @@ const SKILLS = [
   // if either shadows the other one of them silently stops working.
   { name: "fix", description: "A skill that collides with /fix", source: "workspace", enabled: true, files: [] },
   { name: "disabled-one", description: "Switched off", source: "workspace", enabled: false, files: [] },
+  // Its name contains "review" but does not start with it: the prefix-only
+  // filter could never find this by typing what a person actually remembers.
+  { name: "lin-test-review", description: "Review LIN test cases", source: "workspace", enabled: true, files: [] },
 ];
 
 const BASE = {
@@ -143,8 +146,8 @@ const FILES = [
     page.on("pageerror", (e) => errors.push(String(e)));
     page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
     await page.goto("file://" + PAGE);
-    await page.evaluate((s) => window.dispatchEvent(
-      new MessageEvent("message", { data: { type: "stateSync", state: s } })), { ...BASE, ...state });
+    await page.evaluate((s) => { window.__lastState = s; window.dispatchEvent(
+      new MessageEvent("message", { data: { type: "stateSync", state: s } })); }, { ...BASE, ...state });
     await page.waitForTimeout(250);
     // Stand in for the host's file search: reply to every searchFiles with a
     // filtered list, the way src/core/app.ts does.
@@ -199,8 +202,10 @@ const FILES = [
     }) : [];
     const groups = openNow ? [...qp.querySelectorAll(".qp-group")].map((g) => g.textContent.trim()) : [];
     const empty = openNow ? qp.querySelector(".qp-empty") : null;
+    const scope = openNow ? qp.querySelector(".qp-scope") : null;
     return { open: openNow, mode: openNow ? qp.getAttribute("data-mode") : null,
              emptyText: empty ? empty.textContent.trim() : "",
+             scope: scope ? scope.textContent.trim() : null,
              rows, groups, draft: document.getElementById("draft").value,
              sent: (window.__sent || []).map((m) => m.type),
              searches: window.__searches || [] };
@@ -535,6 +540,112 @@ const FILES = [
     ok("edge: Escape on an empty picker closes it", s.open === false);
     ok("edge: and sends nothing", !s.sent.includes("sendMessage"), s.sent.join(","));
     await ctx.close();
+  }
+
+
+  /* ── 9. `/` is a search, not just a completer ────────────────────────── */
+  {
+    const { ctx, page } = await open();
+
+    // The whole list on a bare slash, so it can be browsed rather than guessed.
+    await type(page, "/");
+    let s = await snapshot(page);
+    const skillRows = s.rows.filter((r) => r.kind === "skill");
+    const cmdRows = s.rows.filter((r) => r.kind === "cmd");
+    ok("slash: a bare / lists every enabled skill",
+      skillRows.length === 4, `${skillRows.length}: ` + skillRows.map((r) => r.label).join(" "));
+    ok("slash: and every command beside them", cmdRows.length >= 10, String(cmdRows.length));
+    ok("slash: the disabled one is still withheld",
+      !s.rows.some((r) => /disabled-one/.test(r.label)), s.rows.map((r) => r.label).join(" "));
+
+    // The list is scrollable rather than clipped - it is longer than the box.
+    const scroll = await page.evaluate(() => {
+      const qp = document.getElementById("qp");
+      return { h: Math.round(qp.clientHeight), content: Math.round(qp.scrollHeight),
+               overflow: getComputedStyle(qp).overflowY };
+    });
+    ok("slash: the picker scrolls rather than clipping the list",
+      scroll.content > scroll.h && /auto|scroll/.test(scroll.overflow),
+      `${scroll.content}px of rows in ${scroll.h}px, overflow-y ${scroll.overflow}`);
+
+    // A substring, not just a prefix. This is the half that was missing: the
+    // name people remember is often the middle of it.
+    await type(page, "/review");
+    s = await snapshot(page);
+    ok("slash: a mid-name match is found",
+      s.rows.some((r) => r.kind === "skill" && r.label === "/lin-test-review"),
+      s.rows.map((r) => `${r.kind}:${r.label}`).join(" "));
+    ok("slash: alongside the command that starts with it",
+      s.rows.some((r) => r.kind === "cmd" && r.label === "/review"),
+      s.rows.map((r) => `${r.kind}:${r.label}`).join(" "));
+    // Prefix still outranks a mid-string hit within its own group.
+    await type(page, "/fix");
+    s = await snapshot(page);
+    const cmds = s.rows.filter((r) => r.kind === "cmd").map((r) => r.label);
+    ok("slash: a prefix match ranks above a later one",
+      cmds[0] === "/fix", cmds.join(" "));
+    await ctx.close();
+  }
+
+  /* ── 10. `@` says where it is looking ────────────────────────────────── */
+  {
+    // The picker lists paths relative to a root it never named, so "where is
+    // this pointing?" had no answer on screen. It searches the whole
+    // workspace from the root - there is no current directory, the composer
+    // is not a shell - and now it says so.
+    const { ctx, page } = await open();
+
+    await type(page, "@");
+    let s = await snapshot(page);
+    ok("scope: the file picker names its scope", s.scope !== null, String(s.scope));
+    ok("scope: it names the workspace folder", /repo\//.test(s.scope || ""), s.scope);
+    ok("scope: and says how far it reaches", /whole workspace/i.test(s.scope || ""), s.scope);
+
+    // A bare @ offers something to browse rather than an empty box. WHICH
+    // things, and in what order, is the host's job - test/at-picker.ts pins
+    // "top-level folders first, then the shallowest files" against the real
+    // scan. What belongs here is that the webview renders the answer it was
+    // given, folders marked as folders.
+    ok("scope: a bare @ offers the workspace to browse", s.rows.length > 0, String(s.rows.length));
+    ok("scope: and a folder is drawn as a folder, slash and all",
+      s.rows.some((r) => r.kind === "folder" && /\/$/.test(r.label)),
+      s.rows.map((r) => `${r.kind}:${r.label}`).join(" "));
+
+    // Present on the empty state too - the moment the question gets asked.
+    await type(page, "@zzznope");
+    s = await snapshot(page);
+    ok("scope: it is still shown when nothing matched", s.scope !== null, String(s.scope));
+    ok("scope: beside the no-matches line", /No matching files/.test(s.emptyText), s.emptyText);
+
+    // The slash picker has no scope to state and must not grow one.
+    await type(page, "/");
+    s = await snapshot(page);
+    ok("scope: the slash picker carries no scope header", s.scope === null, String(s.scope));
+    await ctx.close();
+
+    // The no-folder branch of the header is reached by the folder CLOSING
+    // while the picker is open, not by typing into a closed workspace: the
+    // composer is disabled when `workspace.open` is false, so `@` cannot be
+    // typed at all in that state. Driving it the other way hung the suite on
+    // Playwright waiting for a disabled textarea to become clickable.
+    const shut = await open();
+    await type(shut.page, "@");
+    let t = await snapshot(shut.page);
+    ok("scope: the picker is open before the folder closes", t.open === true);
+    await shut.page.evaluate(() => window.dispatchEvent(new MessageEvent("message", {
+      data: { type: "stateSync", state: Object.assign({}, window.__lastState,
+        { workspace: { open: false, name: "" } }) } })));
+    await shut.page.evaluate(() => {
+      // The picker re-renders from the composer's own path on the next input;
+      // ask for it directly, since there is no keystroke to be had once the
+      // textarea is disabled.
+      document.getElementById("draft").dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await shut.page.waitForTimeout(200);
+    t = await snapshot(shut.page);
+    ok("scope: once the folder closes the header says there is nothing to attach",
+      t.scope === null || /No folder open/i.test(t.scope), String(t.scope));
+    await shut.ctx.close();
   }
 
   await browser.close();

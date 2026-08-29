@@ -95,6 +95,9 @@ async function main() {
     "over 1MB of bodies costs nothing until a skill is opened",
     `${(totalBodies / 1024).toFixed(0)} KB of bodies, ${idx2.length} chars of index`);
 
+  console.log("\n──── two folders cannot claim one skill name ────");
+  await duplicates();
+
   console.log(`\n──── ${pass} passed, ${fail} failed ────`);
   try {
     fs.rmSync(ROOT, { recursive: true, force: true });
@@ -102,6 +105,58 @@ async function main() {
     /* temp dir */
   }
   process.exit(fail ? 1 : 0);
+}
+
+
+/* ── duplicate names ─────────────────────────────────────────────────────
+   A skill's NAME is its identity: it is what the prompt index lists, what
+   read_skill is called with, and what an agent's `skills:` allowlist names.
+   Two folders claiming one name are one name with two bodies, and the loser
+   used to be dropped without a word - so editing the wrong folder changed
+   nothing and said nothing. */
+async function duplicates() {
+  const DUP = path.join(ROOT, "dupes");
+  const mk = (folder: string, declared: string, body: string) => {
+    const dir = path.join(DUP, folder);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "SKILL.md"),
+      `---\nname: ${declared}\ndescription: d\n---\n\n${body}`, "utf8");
+  };
+  // Two folders, one declared name. The folder names differ, so nothing but
+  // the frontmatter reveals the collision.
+  mk("alpha", "review", "FIRST-BODY");
+  mk("beta", "review", "SECOND-BODY");
+  mk("gamma", "unique", "OWN-BODY");
+
+  const { skills, warnings } = loadSkills(DUP);
+  ck(skills.filter((s) => s.name === "review").length === 1,
+    "only one skill is stored for a duplicated name",
+    skills.map((s) => s.name).join(", "));
+  ck(skills.length === 2, "and the unrelated skill still loads", String(skills.length));
+
+  const first = skills.find((s) => s.name === "review");
+  ck(!!first && first.body.includes("FIRST-BODY"),
+    "the first folder in directory order wins",
+    first ? first.body.slice(0, 20) : "(none)");
+
+  const w = warnings.join(" | ");
+  ck(/both named "review"/.test(w), "the collision is reported", w);
+  ck(/alpha/.test(w) && /beta/.test(w),
+    "and names BOTH folders, because 'review is a duplicate' is not actionable", w);
+
+  // The folder name is not the identity - two folders can collide through
+  // frontmatter alone, which is the case a folder-name check would miss.
+  const DUP2 = path.join(ROOT, "dupes2");
+  fs.mkdirSync(DUP2, { recursive: true });
+  const d1 = path.join(DUP2, "totally-different-folder");
+  const d2 = path.join(DUP2, "another-folder-entirely");
+  for (const d of [d1, d2]) fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(d1, "SKILL.md"), "---\nname: shared\ndescription: a\n---\n\nA", "utf8");
+  fs.writeFileSync(path.join(d2, "SKILL.md"), "---\nname: shared\ndescription: b\n---\n\nB", "utf8");
+  const two = loadSkills(DUP2);
+  ck(two.skills.length === 1,
+    "a collision declared only in frontmatter is caught too",
+    two.skills.map((s) => s.name).join(", "));
 }
 
 main().catch((e) => {

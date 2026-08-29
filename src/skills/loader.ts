@@ -110,10 +110,30 @@ function listFiles(dir: string): string[] {
   return out;
 }
 
+/**
+ * Load every skill under `root`, refusing duplicate names.
+ *
+ * A skill's NAME is its identity everywhere it matters: it is what the index
+ * in the system prompt lists, what `read_skill` is called with, and what an
+ * agent's `skills:` allowlist names. Two folders declaring the same name are
+ * therefore not two skills - they are one name with two bodies, and whichever
+ * happened to load second used to win silently.
+ *
+ * That is worse than it sounds. The folder name and the frontmatter name need
+ * not match, so `a/SKILL.md` and `b/SKILL.md` can both say `name: review` and
+ * the panel shows one row called "review" with no hint that the other exists.
+ * Edit the wrong folder and nothing changes, with no error to explain why.
+ *
+ * The first one wins - directory order, which readdir returns sorted on every
+ * platform this ships to - and the loser is reported with BOTH paths, because
+ * "review is a duplicate" is not actionable and "these two files claim it" is.
+ */
 export function loadSkills(root: string): { skills: Skill[]; warnings: string[] } {
   const skills: Skill[] = [];
   const warnings: string[] = [];
   if (!fs.existsSync(root)) return { skills, warnings };
+  /** name -> the folder that claimed it first. */
+  const claimed = new Map<string, string>();
 
   for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
@@ -135,6 +155,16 @@ export function loadSkills(root: string): { skills: Skill[]; warnings: string[] 
           `Move the detail into a reference file and point at it from the body.`
       );
     }
+    const already = claimed.get(name);
+    if (already !== undefined) {
+      warnings.push(
+        `Two skills are both named "${name}": ${already}/SKILL.md and ${entry.name}/SKILL.md. ` +
+          `Keeping the first; rename one of them, or the wrong body is the one that loads.`
+      );
+      continue;
+    }
+    claimed.set(name, entry.name);
+
     delete meta.name;
     delete meta.description;
     skills.push({ name, description, body: body.trim(), dir, files: listFiles(dir), meta });

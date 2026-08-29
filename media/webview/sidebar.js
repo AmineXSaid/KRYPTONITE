@@ -3413,12 +3413,32 @@ function _sbRun() {
    * in the model's system prompt, so offering it here would invoke a name the
    * model has never been told about.
    */
+  /**
+   * 0 when `q` starts the name, 1 when it appears later, -1 when not at all.
+   *
+   * The filter was prefix-only, which made `/` a completer rather than a
+   * search: `tls-basics` sat in the list while typing `basics` found nothing.
+   * A name is often easier to recall by its middle than its start, and the
+   * list is long enough that scrolling is not an answer on its own.
+   *
+   * Prefix still ranks first, because when someone types the beginning of a
+   * name that is the one they mean.
+   */
+  function slashRank(name, q) {
+    var i = name.indexOf(q);
+    return i < 0 ? -1 : i === 0 ? 0 : 1;
+  }
+
   function slashItems(q) {
     var rows = [];
-    // An empty q matches every name, so this is also the "just typed /" case.
-    var skills = S.skills.filter(function (s) {
-      return s.enabled && s.name.toLowerCase().indexOf(q) === 0;
-    });
+    // An empty q matches every name, so this is also the "just typed /" case:
+    // the whole list, alphabetical, to be scrolled or narrowed.
+    var skills = S.skills
+      .filter(function (s) { return s.enabled && slashRank(s.name.toLowerCase(), q) >= 0; })
+      .sort(function (a, b) {
+        return slashRank(a.name.toLowerCase(), q) - slashRank(b.name.toLowerCase(), q) ||
+          a.name.localeCompare(b.name);
+      });
     if (skills.length) {
       rows.push({ group: "Skills" });
       for (var i = 0; i < skills.length; i++) {
@@ -3429,7 +3449,12 @@ function _sbRun() {
         });
       }
     }
-    var cmds = CMDS.filter(function (c) { return c[0].slice(1).indexOf(q) === 0; });
+    var cmds = CMDS
+      .filter(function (c) { return slashRank(c[0].slice(1), q) >= 0; })
+      .sort(function (a, b) {
+        return slashRank(a[0].slice(1), q) - slashRank(b[0].slice(1), q) ||
+          a[0].localeCompare(b[0]);
+      });
     if (cmds.length) {
       rows.push({ group: "Commands" });
       for (var j = 0; j < cmds.length; j++) {
@@ -3439,15 +3464,41 @@ function _sbRun() {
     return rows;
   }
 
+  /**
+   * What `@` is looking at, said out loud.
+   *
+   * `@` searches the whole workspace from its root, always - there is no
+   * "current directory" to be in, because the composer is not a shell. But
+   * nothing said so, and the question "where is this pointing?" has no answer
+   * anywhere on screen: the rows show paths relative to a root that is never
+   * named, which reads as relative to something the user has to guess.
+   *
+   * It is shown on the EMPTY states too. That is the moment the question
+   * actually gets asked - a search that found nothing is when you want to know
+   * where it looked.
+   */
+  function scopeLine() {
+    var open = S.workspace && S.workspace.open;
+    var name = (S.workspace && S.workspace.name) || "";
+    if (!open) {
+      return '<div class="qp-scope" data-none="1">' + icon("i-folder", "ic-11") +
+        "<span>No folder open - nothing to attach</span></div>";
+    }
+    return '<div class="qp-scope">' + icon("i-folder", "ic-11") +
+      '<span class="qp-scope-t ell">' + esc(name) + "/</span>" +
+      '<span class="sp"></span>' +
+      '<span class="qp-scope-n">whole workspace</span></div>';
+  }
+
   function renderQuickPick() {
     var qp = $("qp");
     var items = qpItems();
     var selectable = items.filter(function (r) { return !r.group; });
     if (!items.length) {
       if (S.qp && S.qp.kind === "file") {
-        qp.innerHTML = S.searching
+        qp.innerHTML = scopeLine() + (S.searching
           ? '<div class="qp-empty" data-busy="1">Searching the workspace…</div>'
-          : '<div class="qp-empty">No matching files</div>';
+          : '<div class="qp-empty">No matching files</div>');
         qp.hidden = false;
       } else {
         qp.hidden = true;
@@ -3538,7 +3589,9 @@ function _sbRun() {
           "</button>";
       }
     }
-    qp.innerHTML = html;
+    // The scope header rides above the rows for the file picker only: the
+    // slash list has no scope to state, it is the extension's own commands.
+    qp.innerHTML = (S.qp && S.qp.kind === "file" ? scopeLine() : "") + html;
     // Which picker this is. The model listbox is drawn as a list of things to
     // compare rather than a fuzzy-find dropdown, and the CSS keys off this
     // rather than guessing from the rows it happens to contain.

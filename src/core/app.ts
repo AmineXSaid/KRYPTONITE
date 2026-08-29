@@ -756,12 +756,27 @@ export class App {
       : { skills: [] as Skill[], warnings: [] as string[] };
 
     // Workspace wins name collisions - a repo's own version of a skill is the
-    // one its authors intended.
+    // one its authors intended. That is deliberate, but it was also SILENT:
+    // a workspace skill could shadow a bundled one of the same name and the
+    // only visible effect was that the bundled skill's body stopped being the
+    // one that loaded. Intentional behaviour still has to be legible, so the
+    // shadowing is reported. Duplicates WITHIN either directory are refused
+    // outright by loadSkills - see the note there.
     const merged = new Map<string, Skill>();
     for (const s of bundled.skills) merged.set(s.name, s);
-    for (const s of workspaceSkills.skills) merged.set(s.name, s);
+    const shadowed: string[] = [];
+    for (const s of workspaceSkills.skills) {
+      if (merged.has(s.name)) shadowed.push(s.name);
+      merged.set(s.name, s);
+    }
     this.skills = [...merged.values()];
     this.skillWarnings = [...workspaceSkills.warnings, ...bundled.warnings];
+    if (shadowed.length) {
+      this.skillWarnings.push(
+        `Your workspace overrides ${shadowed.length === 1 ? "a bundled skill" : "bundled skills"}: ` +
+          `${shadowed.join(", ")}. The workspace copy is the one that loads.`
+      );
+    }
 
     const loaded = loadAgents(this.agentsDir());
     this.agents = loaded.agents;
