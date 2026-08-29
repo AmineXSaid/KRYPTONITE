@@ -300,11 +300,41 @@ function contrast(a, b) {
     const anim = await mark.evaluate((el) => {
       const cs = getComputedStyle(el);
       return { name: cs.animationName, count: cs.animationIterationCount,
-               dur: cs.animationDuration, timing: cs.animationTimingFunction };
+               duration: cs.animationDuration, timing: cs.animationTimingFunction,
+               delay: cs.animationDelay };
     });
-    ok("it is animated", anim.name === "g-sweep", anim.name);
-    ok("and it never stops", anim.count === "infinite", anim.count);
-    ok("linearly", anim.timing === "linear", anim.timing);
+    // TWO animations now, and the pair is the design: a finite eased entrance
+    // in front of the endless linear turn it settles into. These used to read
+    // `name === "g-sweep"`, `count === "infinite"` and `timing === "linear"`,
+    // which described the mark correctly right up until it grew an arrival -
+    // so they are not relaxed here, they are re-aimed at each phase, and the
+    // motion itself is measured in section 5f rather than inferred from names.
+    // Split on TOP-LEVEL commas only: `cubic-bezier(0.15, 0.45, 0.4, 0.985)`
+    // carries three of its own, and a naive split reports five phases.
+    const phases = (v) => {
+      const out = []; let depth = 0, cur = "";
+      for (const ch of String(v || "")) {
+        if (ch === "(") depth++;
+        else if (ch === ")") depth--;
+        if (ch === "," && depth === 0) { out.push(cur.trim()); cur = ""; continue; }
+        cur += ch;
+      }
+      if (cur.trim()) out.push(cur.trim());
+      return out;
+    };
+    const [entrance, steady] = [phases(anim.name), phases(anim.count)];
+    ok("it runs two animations: an entrance and the turn it settles into",
+      entrance.length === 2, anim.name);
+    ok("the entrance runs exactly once", steady[0] === "1", anim.count);
+    ok("and the turn behind it never stops", steady[1] === "infinite", anim.count);
+    const timings = phases(anim.timing);
+    ok("the entrance is eased, which is what makes it decelerate",
+      /cubic-bezier/.test(timings[0] || ""), anim.timing);
+    // Linear, still, and for the reason it always was: a curve on an infinite
+    // rotation stutters at the wrap where one turn meets the next.
+    ok("while the turn it settles into stays linear", timings[1] === "linear", anim.timing);
+    const durs = phases(anim.duration || "");
+    ok("and that turn is the slow 6s one", durs[1] === "6s", anim.duration);
 
     // The computed style only says an animation was DECLARED. Whether the mark
     // moves is a question about pixels, and it is the question the owner asked.
@@ -577,6 +607,104 @@ function contrast(a, b) {
     const values = Object.keys(gutters);
     ok("every right-aligned control on the Agents tab shares one right gutter",
       values.length === 1, JSON.stringify(gutters));
+    await ctx.close();
+  }
+
+  /* ── 5f. the welcome mark arrives spinning, and settles ────────────── */
+  {
+    // A motion bug is invisible to a screenshot and to every static
+    // assertion, so this samples the real transform matrix over two seconds
+    // and reads the angle out of it.
+    //
+    // The one it exists for actually happened. The steady turn is a second
+    // animation layered behind the entrance, and `g-sweep` declares only a
+    // `to` - so its implicit start resolved to the entrance's filled 720deg
+    // and the mark handed off into rotating BACKWARDS at 120deg/s, forever.
+    // Both keyframe sets read as correct on their own; only the composition
+    // is wrong, and only a measurement can see it.
+    const { ctx, page } = await open(400, {});
+    const spin = await page.evaluate(() => new Promise((resolve) => {
+      const el = document.querySelector(".welcome .crystal");
+      if (!el) return resolve({ err: "no mark on the welcome screen" });
+      const anims = el.getAnimations();
+      if (!anims.length) return resolve({ err: "the mark is not animated" });
+      // Restart from a known zero: the harness has already waited, so the
+      // entrance would otherwise be sampled half-finished.
+      anims.forEach((a) => { a.cancel(); a.play(); });
+      const t0 = performance.now();
+      const out = [];
+      let turns = 0, prev = null;
+      (function tick() {
+        const m = new DOMMatrixReadOnly(getComputedStyle(el).transform);
+        let a = Math.atan2(m.b, m.a) * 180 / Math.PI;
+        // atan2 wraps at 180; unwrap so the angle keeps climbing past a turn.
+        if (prev !== null && a - prev < -180) turns++;
+        prev = a;
+        out.push({ t: performance.now() - t0, deg: a + turns * 360 });
+        if (performance.now() - t0 < 2100) requestAnimationFrame(tick);
+        else resolve({ samples: out });
+      })();
+    }));
+
+    if (spin.err) {
+      ok("the welcome mark is animated", false, spin.err);
+    } else {
+      const r = spin.samples;
+      const at = (ms) => r.reduce((b, x) => (Math.abs(x.t - ms) < Math.abs(b.t - ms) ? x : b), r[0]);
+      const vel = (ms, win = 120) =>
+        (at(ms + win / 2).deg - at(ms - win / 2).deg) / ((at(ms + win / 2).t - at(ms - win / 2).t) / 1000);
+
+      // THE REGRESSION. Any frame lower than the one before it is the mark
+      // going the wrong way; the tolerance is for sampling noise, not for a
+      // little reversal being acceptable.
+      const back = r.filter((x, i) => i && x.deg < r[i - 1].deg - 1);
+      ok("the mark never rotates backwards", back.length === 0,
+        back.length ? `${back.length} frames, first at ${Math.round(back[0].t)}ms` : "");
+
+      // Position continuity. The entrance has to end on a whole number of
+      // turns or the handoff to the steady turn is a visible jump.
+      const landed = at(1000).deg;
+      ok("the entrance lands on a whole number of turns",
+        Math.abs(landed % 360) < 6 || Math.abs((landed % 360) - 360) < 6,
+        `${landed.toFixed(1)}deg after the entrance`);
+
+      // Rate continuity, the other half. The entrance's last measured speed
+      // has to be near the steady turn's 60deg/s, or the mark stops dead and
+      // starts again.
+      const tail = vel(930);
+      const steady = vel(1600);
+      ok("and hands off at close to the steady rate",
+        Math.abs(tail - 60) < 45, `tail ${Math.round(tail)}deg/s vs steady 60`);
+      ok("the steady turn afterwards is the 6s one, forwards",
+        steady > 40 && steady < 80, `${Math.round(steady)}deg/s`);
+
+      // It is an ENTRANCE: it has to be much faster than what it settles into,
+      // or there is no transition to see.
+      let peak = 0;
+      for (let ms = 50; ms < 500; ms += 25) peak = Math.max(peak, vel(ms));
+      ok("the entrance is much faster than the turn it settles into",
+        peak > 8 * steady, `peak ${Math.round(peak)}deg/s vs steady ${Math.round(steady)}`);
+
+      // And not SO fast that it aliases. The bezel repeats every 90deg, so a
+      // frame that advances it more than 45 reverses its apparent direction -
+      // the wagon-wheel effect, which reads as a strobe rather than a spin.
+      ok("but slow enough to read as a spin rather than a strobe",
+        peak / 60 < 45, `${(peak / 60).toFixed(1)}deg per frame at 60Hz`);
+    }
+    // ARRIVAL ONLY. `renderWelcome` runs on a data refresh as well as on a
+    // real arrival, and a session list landing under the panel used to redraw
+    // the whole screen. With an entrance attached that would throw the logo
+    // across the screen while the user is reading it - which is exactly why
+    // the flag this asserts was removed once and had to come back.
+    const refreshed = await page.evaluate(() => {
+      window.dispatchEvent(new MessageEvent("message", {
+        data: { type: "sessionsListed", sessions: [] },
+      }));
+      const el = document.querySelector(".welcome .crystal");
+      return { present: !!el, spins: !!el && el.classList.contains("spin-in") };
+    });
+    ok("a session list arriving still redraws the welcome", refreshed.present);
+    ok("but does not replay the entrance", !refreshed.spins);
     await ctx.close();
   }
 

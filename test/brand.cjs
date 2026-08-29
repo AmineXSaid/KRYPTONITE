@@ -131,6 +131,52 @@ console.log("\n──── the welcome mark rotates ────");
   ok("the keyframe it names is defined", /@keyframes\s+g-sweep/.test(CSS));
 }
 
+console.log("\n──── and it arrives spinning before it settles into that ────");
+{
+  // The steady turn above is what the mark settles INTO. The entrance is a
+  // second rule, and the two numbers that make the handoff invisible are
+  // asserted here as source text; test/render.cjs measures the motion itself.
+  const rule = /\.welcome\s+\.crystal\.spin-in\s*\{([^}]*)\}/.exec(CSS);
+  ok("the entrance is its own rule, on its own class", !!rule);
+  const decl = rule ? rule[1] : "";
+
+  ok("it runs the entrance and the steady turn together",
+    /g-spin-in/.test(decl) && /g-turn/.test(decl), decl.trim());
+  ok("and eases the entrance, which is what makes it decelerate",
+    /cubic-bezier/.test(decl), decl.trim());
+
+  // POSITION. The entrance has to end on a whole number of turns or the
+  // handoff to the steady turn is a visible jump.
+  // The block, then the `to` inside it. A single `[^}]*` cannot reach past the
+  // brace that closes `from`, which is why this is two steps.
+  const spinKf = /@keyframes\s+g-spin-in\s*\{([\s\S]*?)\n\}/.exec(CSS);
+  const to = spinKf && /to\s*\{\s*transform:\s*rotate\((\d+)deg\)/.exec(spinKf[1]);
+  ok("the entrance names a final angle", !!to, to && to[1]);
+  ok("and it is a whole number of turns, so the handoff cannot jump",
+    !!to && Number(to[1]) % 360 === 0, to && to[1] + "deg");
+
+  // TIMING. The steady turn's delay has to equal the entrance's duration, or
+  // the two overlap and fight for the same property.
+  const dur = /g-spin-in\s+(\d+)ms/.exec(decl);
+  const delay = /g-turn\s+[\ds.]+\s+linear\s+(\d+)ms/.exec(decl);
+  ok("the steady turn waits exactly as long as the entrance runs",
+    !!dur && !!delay && dur[1] === delay[1],
+    `entrance ${dur && dur[1]}ms, delay ${delay && delay[1]}ms`);
+  // "kinda fast", as the brief put it. A logo entrance that outstays a second
+  // and a half is a loading screen.
+  ok("and the whole entrance is over quickly",
+    !!dur && Number(dur[1]) <= 1200, dur && dur[1] + "ms");
+
+  // g-turn, not g-sweep. `g-sweep` declares only `to`, so layered behind a
+  // filled entrance its implicit start resolves to the entrance's final angle
+  // and the mark rotates BACKWARDS. It did.
+  const turn = /@keyframes\s+g-turn\s*\{([^}]*)\}/.exec(CSS);
+  ok("the steady keyframe is defined", !!turn);
+  ok("with an explicit start, so it cannot inherit the entrance's angle",
+    !!turn && /from\s*\{\s*transform:\s*rotate\(0deg\)/.test(turn[1]),
+    turn && turn[1].trim());
+}
+
 console.log("\n──── and the one-shot it replaced is gone, not merely unused ────");
 {
   // The mark used to turn once and stop, driven by a data-greet attribute that
@@ -140,10 +186,19 @@ console.log("\n──── and the one-shot it replaced is gone, not merely unu
   ok("no data-greet rule survives in the stylesheet", !CSS.includes("data-greet"));
   ok("and nothing in the panel still sets it", !JS.includes("data-greet"));
   ok("the greet trigger is gone", !JS.includes("greetMark"));
-  ok("and renderWelcome no longer takes a flag it would ignore",
-    /function renderWelcome\(\)/.test(JS));
-  ok("so no call site passes one",
-    !/renderWelcome\(true\)/.test(JS));
+  // The flag is BACK, and the assertion is inverted rather than dropped. What
+  // it was guarding against is "an argument nothing reads" - so now that the
+  // mark arrives again and the flag decides whether it does, the failure mode
+  // is the opposite one: a parameter declared and never passed, which would
+  // spin the logo on every data refresh exactly as before.
+  ok("renderWelcome takes the arrival flag again",
+    /function renderWelcome\(arriving\)/.test(JS));
+  ok("and the refresh call sites actually pass it",
+    (JS.match(/renderWelcome\(false\)/g) || []).length >= 2,
+    String((JS.match(/renderWelcome\(false\)/g) || []).length) + " call sites");
+  // A default of "this is an arrival" is what makes a call with no opinion
+  // mean the right thing; passing `true` explicitly would be noise.
+  ok("while an arrival needs no argument", !/renderWelcome\(true\)/.test(JS));
 }
 
 console.log("\n──── motion can still be turned off ────");
@@ -153,8 +208,16 @@ console.log("\n──── motion can still be turned off ────");
   const blocks = [...CSS.matchAll(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{([\s\S]*?)\n\}/g)]
     .map((m) => m[1]);
   ok("a reduced-motion block exists", blocks.length > 0, String(blocks.length));
+  // BOTH the steady turn and the entrance. A reduced-motion setting is asking
+  // not to see a fast spin more clearly than it is asking not to see a slow
+  // one, so stilling only the base rule would leave in the louder of the two.
+  const stills = (sel) =>
+    blocks.some((b) => new RegExp(sel + "[^{]*\\{\\s*animation:\\s*none").test(b));
   ok("and one of them stills the welcome mark",
-    blocks.some((b) => /\.welcome\s+\.crystal\s*\{\s*animation:\s*none/.test(b)),
+    stills("\\.welcome\\s+\\.crystal"),
+    blocks.map((b) => b.trim().slice(0, 40)).join(" | "));
+  ok("including its arrival, which is the louder half",
+    stills("\\.welcome\\s+\\.crystal\\.spin-in"),
     blocks.map((b) => b.trim().slice(0, 40)).join(" | "));
 }
 

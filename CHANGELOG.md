@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Changed
+- **The welcome mark now arrives spinning and settles into its turn.** Two fast
+  turns in a second, decelerating hard, handing off to the steady 6s rotation
+  it had before. The steady turn is unchanged; what is new is the second in
+  front of it.
+
+  Two numbers make the handoff invisible, and neither is a guess. The entrance
+  ends on **720deg** - a whole number of turns - so it renders identically to
+  the 0deg the steady turn starts at; any other angle would jump. And its
+  easing is shaped so the final velocity lands near **60deg/s**, which is what
+  the steady turn runs at, so the deceleration runs out exactly as the constant
+  rate takes over instead of stopping dead and starting again.
+
+  Two turns rather than three, and the ceiling is the mark's own geometry: the
+  bezel repeats every 90deg, so its apparent direction reverses once a frame
+  advances it more than 45. At 60Hz that is about six turns a second. Three
+  turns in 900ms peaked at nearly seventeen and the first sixth of a second was
+  not a fast spin but a strobe. This peaks at 5.8, just under the ceiling - the
+  fastest the mark can actually be seen to move forwards. It still reads as
+  very fast, because what sells that is the ratio to what follows, and the
+  steady turn is a sixth of a revolution per second.
+
+  Only a deliberate arrival spins. A session list landing under the panel
+  re-renders the welcome screen, and would otherwise throw the logo across it
+  while you are reading.
+
 ### Fixed
 - **A button on the MCP tab was unreachable at a narrow dock.** "Edit config"
   ran past the panel edge at 280px and was clipped by the server list's own

@@ -1598,25 +1598,33 @@ function _sbRun() {
   /**
    * The welcome screen.
    *
-   * This used to take a `greet` flag, because the mark turned exactly once and
-   * only on first arrival - so a re-render caused by the session list changing
-   * had to be told not to spin the logo at a data refresh. The mark now rotates
-   * for as long as the page is up (see `.welcome .crystal` in sidebar.css), so
-   * there is no longer a first arrival to distinguish, and the flag is gone
-   * rather than left behind as an argument nothing reads.
+   * `arriving` is back, and it is load-bearing again.
+   *
+   * It was removed when the mark became a plain infinite rotation, because
+   * with nothing to trigger there was no first arrival to distinguish. The
+   * mark now ARRIVES - three fast turns decelerating into the steady one - and
+   * that brings the original problem back with it: this function is called on
+   * a data refresh as well as on a real arrival, and a session list landing
+   * under the panel would otherwise throw the logo across the screen while the
+   * user is reading. Two of the four call sites are refreshes; they pass
+   * false, and the default is the arrival, because that is what a call with no
+   * opinion means.
+   *
+   * The flag decides one class. See `.welcome .crystal.spin-in`.
    */
-  function renderWelcome() {
+  function renderWelcome(arriving) {
+    var spin = arriving !== false ? " spin-in" : "";
     clearTranscript();
     if (!S.workspace.open) {
       logEl.appendChild(div("welcome",
-        crystal(46, "crystal") +
+        crystal(46, "crystal" + spin) +
         "<h2>Open a folder to use Genesis</h2>" +
         "<p>Genesis reads endpoint profiles and skills from the folder you have open, and edits files inside it.</p>"));
       return;
     }
     if (!hasEndpoint()) {
       logEl.appendChild(div("welcome",
-        crystal(46, "crystal") +
+        crystal(46, "crystal" + spin) +
         "<h2>No endpoint configured</h2>" +
         "<p>Genesis works against endpoint profiles defined in .agent/endpoints/. Create one to get started.</p>" +
         '<div class="chips">' +
@@ -1654,7 +1662,7 @@ function _sbRun() {
      * so two of them read as eyes - and as eyes they were ugly. The mark is a
      * BEZEL: four notches on a ring, which is a thing that turns. So it turns,
      * once, a beat after the panel arrives, and then it is a logo again. */
-    var body = crystal(34, "crystal") +
+    var body = crystal(34, "crystal" + spin) +
       '<div class="w-mark">Genesis</div>' +
       '<p>' + (recent.length
         ? "Pick up where you left off, or start something new."
@@ -5290,7 +5298,7 @@ function _sbRun() {
         renderEndpoints();
         renderFooter();
         syncComposer();
-        if (logEl.querySelector(".welcome")) renderWelcome();
+        if (logEl.querySelector(".welcome")) renderWelcome(false); // a refresh under the panel, not an arrival
         break;
 
       case "endpointCheckStarted":
@@ -5467,7 +5475,7 @@ function _sbRun() {
         // until something else forced a re-render.
         S.sessions = m.sessions || [];
         renderHistory();
-        if (logEl.querySelector(".welcome")) renderWelcome();
+        if (logEl.querySelector(".welcome")) renderWelcome(false); // a refresh under the panel, not an arrival
         break;
 
 

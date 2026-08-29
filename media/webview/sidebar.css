@@ -327,25 +327,40 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 /* Left-aligned, as the design draws it, and not only for fidelity: everything
    below the intro is a list of rows, and a centred mark above a left-aligned
    list gives the column two different axes. One edge, top to bottom. */
-/* IT KEEPS TURNING, FOR AS LONG AS THE WELCOME PAGE IS UP.
+/* IT ARRIVES SPINNING, AND SETTLES INTO ITS STEADY TURN.
  *
  * It was briefly a pair of marks that blinked. Two roundels read as eyes -
  * a ring around a core is an eye - and as eyes they were ugly. The mark is a
  * BEZEL: four notches on a ring, which is a thing that turns.
  *
- * This turned ONCE on arrival and then stopped, on the argument that a mark
- * that keeps moving is an animation rather than a logo. The owner asked for a
- * rotating logo on the welcome page, which settles that: it rotates.
+ * The steady state, which is what it settles INTO, is a linear 6s turn. The
+ * two other `g-sweep` users are STATUS - the streaming notch at 1.4s and the
+ * working-conversation mark at 2.4s - and both mean "something is happening
+ * right now". This one means nothing is happening, so it has to be visibly
+ * slower than either or it reads as work in flight on an idle panel. 6s is a
+ * quarter the speed of the slower of the two, and it stays linear because any
+ * curve on an infinite rotation stutters at the wrap, where the end of one
+ * turn meets the start of the next at a different rate.
  *
- * Linear and slow. The two other `g-sweep` users are STATUS - the streaming
- * notch at 1.4s and the working-conversation mark at 2.4s - and both mean
- * "something is happening right now". This one means nothing is happening, so
- * it has to be visibly slower than either or it reads as work in flight on an
- * idle panel. 6s is a quarter the speed of the slower of the two.
+ * The arrival is two fast turns in a second, decelerating hard. Two animations
+ * rather than one, because a single keyframe set cannot both ease and loop
+ * without that stutter - so the entrance runs once and the steady turn starts
+ * behind it, on a delay exactly as long as the entrance.
  *
- * Easing would be wrong here in a way it was not for the one-shot: any curve
- * on an infinite rotation produces a visible stutter at the wrap, where the
- * end of one turn meets the start of the next at a different rate. */
+ * TWO NUMBERS MAKE THE HANDOFF INVISIBLE, and neither is a guess:
+ *
+ *   POSITION. The entrance ends at 1080deg, which is three whole turns, so it
+ *   renders identically to the 0deg the steady turn begins at. Any angle that
+ *   was not a multiple of 360 would jump.
+ *
+ *   RATE. The steady turn is 60deg/s (360 over 6s). The entrance's easing is
+ *   shaped so its FINAL velocity lands near that figure, which is what the
+ *   second control point of the curve buys: the deceleration runs out just as
+ *   the steady rate takes over, instead of stopping dead and starting again.
+ *   test/render.cjs samples the real matrix and pins both.
+ *
+ * `both` on the entrance so the mark is at 0deg before it starts rather than
+ * flashing at its resting angle for a frame. */
 .welcome .crystal {
   /* Left-aligned, as the design draws it, and not only for fidelity:
      everything below the intro is a list of rows, and a centred mark above a
@@ -356,9 +371,50 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   transform-origin: 50% 50%;
   animation: g-sweep 6s linear infinite;
 }
-/* Motion off: no turn. The mark is simply there, which is all it has to be. */
+/* Only a deliberate arrival at the welcome screen spins. See `renderWelcome`
+   in sidebar.js: a re-render caused by the session list changing under the
+   panel must not re-throw the logo across the screen. */
+.welcome .crystal.spin-in {
+  animation:
+    g-spin-in 1000ms cubic-bezier(.15, .45, .4, .985) both,
+    g-turn 6s linear 1000ms infinite;
+}
+/* TWO turns, not three, and the ceiling is the MARK's own symmetry.
+ *
+ * The bezel repeats every 90deg, so its apparent direction reverses once a
+ * frame advances it more than 45deg - the wagon-wheel effect. At 60Hz that is
+ * about 6 turns a second. Three turns in 900ms peaked at nearly 17 and the
+ * first sixth of a second was not a fast spin but a strobe; measured
+ * candidates at 8 and 11 turns a second were no better. This peaks at 5.8,
+ * just under the ceiling, which is the fastest the mark can actually be seen
+ * to move forwards.
+ *
+ * It still reads as "very fast" because what sells that is the RATIO to what
+ * follows, and the steady turn is a sixth of a revolution per second: the
+ * entrance is thirty-five times it. */
+@keyframes g-spin-in {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(720deg); }
+}
+/* `g-turn` and not `g-sweep`, and the difference is one word: `from`.
+ *
+ * `g-sweep` declares only `to`, so its start is the element's UNDERLYING
+ * value - which here is the entrance's `both` fill, holding 1080deg. The
+ * steady turn therefore ran 1080deg to 360deg: the mark handed off and
+ * immediately began rotating BACKWARDS at 120deg/s, for six seconds, forever.
+ * It is a real thing that happened and it is invisible to reading the CSS,
+ * because both keyframe sets look correct on their own. An explicit `from`
+ * is what makes the second animation independent of the first. */
+@keyframes g-turn {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+/* Motion off: no turn, and no arrival either. The mark is simply there, which
+   is all it has to be - and a fast spin is the one thing a reduced-motion
+   setting is most clearly asking not to see. */
 @media (prefers-reduced-motion: reduce) {
-  .welcome .crystal { animation: none; }
+  .welcome .crystal,
+  .welcome .crystal.spin-in { animation: none; }
 }
 /* Michroma, at the one size and tracking it is drawn for. */
 .w-mark {
