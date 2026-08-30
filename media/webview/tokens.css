@@ -281,5 +281,11 @@
   --kx-display: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   --kx-mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   --kx-brand:   'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-  --kx-prose:   var(--kx-ui);
+  /* NOT var(--kx-ui). This is the one role that left the monospace, and the
+     comment above predicted it would be the first to: a mono sets every
+     character at a full advance, so a line of prose with no narrow letters in
+     it wraps early, and the transcript was breaking mid-sentence while a
+     proportional face still had room on the same line. The UI keeps the mono;
+     what a person READS AT LENGTH does not. */
+  --kx-prose:   'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 }

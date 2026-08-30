@@ -41,17 +41,16 @@ function makeNonce(): string {
 /**
  * Emit `@font-face` rules only when the woff2 files actually ship.
  *
- * The one family the Genesis design is drawn in, and nothing else:
+ * The two families the Genesis design is drawn in, and nothing else:
  *
- *   JetBrains Mono  the whole interface - prose, labels, the wordmark, code.
- *                   Shipped as the variable cut, so one 40 KB file covers
- *                   every weight the design uses. It replaced IBM Plex Sans,
- *                   Space Mono and Michroma, which between them were 96 KB and
- *                   three separate voices.
+ *   JetBrains Mono  the interface. Labels, tabs, the wordmark, code, and every
+ *                   id that has to line up in a column. 40 KB, variable.
+ *   IBM Plex Sans   prose, and only prose - see --kx-prose in tokens.css for
+ *                   the exact surfaces. 45 KB, variable.
  *
- * It is SIL Open Font License, so bundling it is redistribution the licence
- * expressly permits - see media/fonts/LICENSE-NOTE.md, which this replaced an
- * unresolved licensing question with.
+ * Both are SIL Open Font License, so bundling them is redistribution the
+ * licence expressly permits - see media/fonts/LICENSE-NOTE.md, which this
+ * replaced an unresolved licensing question with.
  *
  * Absent files are skipped rather than 404'd, so a build with no `media/fonts/`
  * still renders on the system stack in the CSS. `font-src` is scoped to the
@@ -67,12 +66,20 @@ function fontFaces(extensionUri: vscode.Uri, webview: vscode.Webview): string {
   }
 
   const wanted: { file: string; family: string; weight: string; italic?: true }[] = [
-    // ONE family now, and one file. The design is set entirely in JetBrains
-    // Mono - see the note over the font tokens in tokens.css - so the three
-    // families that used to be here are gone rather than dormant: 40 KB in
-    // place of 96 KB, and no way for a surface to drift onto a face the design
-    // no longer uses. The variable cut covers 100-800 in the one file.
+    // Two faces, one per ROLE, both variable so each is a single file.
+    //
+    // JetBrains Mono is the interface: labels, tabs, the wordmark, code, and
+    // every id that has to line up in a column.
+    //
+    // IBM Plex Sans is prose, and only prose - --kx-prose in tokens.css names
+    // exactly the surfaces it reaches. Setting long-form model output in a
+    // monospace was the deliberate cost of the terminal direction, and it came
+    // due: every character is a full advance, so a line with no narrow letters
+    // to absorb it wraps early, and the transcript broke mid-sentence at a
+    // dock width where a proportional face still had room. That is the one
+    // place the trade was not worth it.
     { file: "JetBrainsMono-Variable.woff2", family: "JetBrains Mono", weight: "100 800" },
+    { file: "IBMPlexSans-Variable.woff2", family: "IBM Plex Sans", weight: "100 700" },
   ];
 
   const rules: string[] = [];

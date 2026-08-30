@@ -2976,7 +2976,25 @@ ul.md-l li.md-task, ol.md-l li.md-task {
  *
  * Keyboard and screen-reader order are unchanged. `order` moves the paint, not
  * the DOM, and the visual sequence still reads left-to-right, top-to-bottom. */
-@media (max-width: 350px) {
+/* The model name gets a row to itself until the shared row can actually hold
+   it, which is not until about 500px.
+   
+   This was 350, and the result was that the NARROWEST panel showed the model
+   name in full while every ordinary dock width truncated it. Measured with
+   `claude-sonnet-4-6`, which needs 122px:
+   
+     340px  17/17 characters   (its own row)
+     380px  10/17
+     420px   5/17              <- the worst case, just past the old breakpoint
+     460px  11/17
+     520px  17/17              (the row is finally wide enough)
+   
+   Five characters is "claud", which every model this extension is pointed at
+   begins with - a truncation that stops before the first distinguishing
+   character shows nothing at all. Below 500 the row cannot fit the segment
+   control, the permission button, three icon buttons AND a model id, so the
+   id takes the row it needs. */
+@media (max-width: 500px) {
   .seg { order: 0; }
   .perm-btn { order: 1; }
   .tb-actions { order: 2; }
@@ -3017,14 +3035,32 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .kx-wordmark { font-weight: 700; letter-spacing: .22em; font-size: 10.5px; }
 .w-mark { font-weight: 700; letter-spacing: .18em; font-size: 13px; }
 
-/* Lowercase tabs with a leading dot - a path segment rather than a heading.
-   The dot is decorative: every tab carries an explicit aria-label (set in
-   sidebar.js) so the accessible name stays "Session" and not "· Session".
-   Generated content IS exposed in the accessibility tree in Chromium, so a
-   label that is only text content would have been corrupted by this. */
-.kx-tab { text-transform: lowercase; letter-spacing: .04em; font-size: 10px; }
-.kx-tab::before { content: "· "; color: var(--kx-fg-5); }
-.kx-tab[aria-selected="true"]::before { color: var(--kx-fg-4); }
+/* The tab strip, rewritten.
+   
+   It read `· session · mcp · agents · diagnostics`: 10px, lowercase, each with
+   a leading dot. Three things were wrong with it and only one was the font.
+   
+   The dots were decoration that had to be apologised for - generated content
+   is exposed in the accessibility tree, so every tab needed an explicit
+   aria-label just to stop its name being read as "· Session". A decoration
+   that costs an attribute per element to stay correct is not paying for
+   itself.
+   
+   Lowercasing destroyed MCP. It is an acronym, and `mcp` reads as a word that
+   is not one - the label stopped naming the thing it labels.
+   
+   And 10px uppercase at .14em tracking was set for a proportional face. In a
+   monospace, tracking is added to characters that are already evenly spaced,
+   which is how you get a strip that is wide, faint and hard to scan at once.
+   
+   So: sentence case, which keeps MCP's shape; no dots; 11.5px, which is the
+   panel's own body size rather than a size chosen to fit a treatment; and the
+   weight does the work of saying which tab you are on. The per-tab hue on the
+   underline is untouched - it was the one part that was working. */
+.kx-tab {
+  font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none;
+}
+.kx-tab[aria-selected="true"] { font-weight: 700; }
 
 /* Section labels read as a shell prompt's bracketed field. Only the plain
    variant: `.w-label.row` holds "Recent" plus a spacer and an All button, and

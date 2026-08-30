@@ -91,6 +91,33 @@ console.log("\n──── the unlicensed family is gone ────");
     /Open Font License/.test(fs.readFileSync(path.join(FONT_DIR, "LICENSE-NOTE.md"), "utf8")));
 }
 
+console.log("\n──── prose is not set in the monospace ────");
+{
+  // The design is a monospace everywhere EXCEPT prose, and that exception is
+  // the whole reason --kx-prose exists as its own token. A mono sets every
+  // character at a full advance, so a line of prose with no narrow letters in
+  // it wraps early - the transcript was breaking mid-sentence at a dock width
+  // where a proportional face still had room.
+  //
+  // Nothing caught the revert. Both tokens lead with a bundled family, so the
+  // "every named family ships" check above passes whichever way --kx-prose
+  // points. What has to hold is that the two are DIFFERENT.
+  const lead = (tok) => {
+    const m = TOKENS.match(new RegExp("--" + tok + ":\\s*([^;]+);"));
+    if (!m) return "";
+    let v = m[1].trim();
+    // Follow one level of var(), which is how --kx-prose used to be written.
+    const chain = v.match(/^var\(\s*(--[\w-]+)/);
+    if (chain) return lead(chain[1].replace(/^--/, ""));
+    return v.split(",")[0].trim().replace(/^['"]|['"]$/g, "");
+  };
+  const prose = lead("kx-prose");
+  const mono = lead("kx-mono");
+  ok("--kx-prose names a family", prose.length > 0, prose);
+  ok("and it is not the one --kx-mono uses", prose !== mono, `prose=${prose}, mono=${mono}`);
+  ok("and that family ships", SHELL.includes(`family: "${prose}"`), prose);
+}
+
 console.log("\n──── the wordmark keeps its own token ────");
 {
   // Every type token now resolves to the same family, so this section is no

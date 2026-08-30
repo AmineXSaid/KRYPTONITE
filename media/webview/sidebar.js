@@ -981,11 +981,14 @@ function _sbRun() {
               '<span class="t">Author &amp; report an issue</span></button>' +
           '</div>' +
         '</header>' +
-        // Each tab carries an explicit aria-label. The terminal treatment puts a
-        // decorative "· " on every tab through CSS ::before, and generated
-        // content IS exposed in the accessibility tree - without a label the
-        // accessible name would read "· Session". The label also keeps the
-        // name free of the count badge that three of the four carry.
+        // Each tab carries an explicit aria-label so the accessible name stays
+        // the tab's name and nothing else. Three of the four append a count
+        // badge, and without a label the name reads "Diagnostics2".
+        //
+        // It was also load-bearing for a decorative "· " that CSS ::before put
+        // on every tab - generated content IS exposed in the accessibility
+        // tree, so the name read "· Session". That treatment is gone; the
+        // badge reason is the one that remains, and it is enough on its own.
         '<nav class="kx-tabs" role="tablist">' +
           '<button class="kx-tab" id="tabSession" role="tab" aria-selected="true" aria-label="Session" aria-controls="viewSession">Session</button>' +
           // MCP earns a tab now that it is real. 1a had a "SOON" placeholder,

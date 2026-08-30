@@ -522,7 +522,10 @@ function contrast(a, b) {
     // character is the same as showing no name. The bar is therefore not "does
     // it fit" but "is what fits longer than the prefix these ids share".
     const SHARED = "claude-".length;
-    for (const width of [360, 400]) {
+    // 420 and 460 are the ones that mattered: they sat just past the old 350px
+    // rule, where the model shared a row that could not hold it. Checking only
+    // 360 and 400 missed the worst case entirely.
+    for (const width of [360, 400, 420, 460, 520]) {
       const { ctx, page } = await open(width, {});
       const seen = await page.evaluate(() => {
         const el = document.getElementById("modelName");
@@ -544,6 +547,14 @@ function contrast(a, b) {
       ok(`the model name is legible past the shared prefix at ${width}px`,
         seen.n > SHARED,
         `${seen.n} of ${seen.text.length} characters of "${seen.text}" reach the panel`);
+      // Past the prefix is the floor, not the goal. The id gets a row of its
+      // own below 500px precisely so it can be read WHOLE, and the bug that
+      // rule fixed was that the narrowest panel showed all 17 characters while
+      // 420px showed five - so a width-by-width check is the only one that
+      // catches it.
+      ok(`and it is shown in full at ${width}px`,
+        seen.n === seen.text.length,
+        `${seen.n} of ${seen.text.length}: "${seen.text.slice(0, seen.n)}"`);
       await ctx.close();
     }
   }
