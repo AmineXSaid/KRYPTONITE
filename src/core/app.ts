@@ -17,6 +17,12 @@ import { clearSecureContexts } from "../endpoints/transport";
 import { EndpointClient } from "../providers/client";
 import { systemPromptFor, PHASES } from "../agent/loop";
 import { runOneShot, OneShotOptions } from "../agent/oneShot";
+import {
+  MicroCompactor,
+  AUX_WINDOW_FLOOR,
+  type MicroCompactConfig,
+  type Summariser,
+} from "../agent/compact";
 import { loadSkills, Skill, skillIndex } from "../skills/loader";
 import {
   loadAgents,
@@ -280,6 +286,9 @@ export class App {
    * invalidation below were ever missed.
    */
   private memorySnapshot?: { agent: string; memory: string | undefined };
+
+  /** Has the compaction feasibility line been logged in this window yet? */
+  private compactionReported = false;
   running = false;
   tracing = false;
   rungs: RungDto[] = [];
@@ -952,6 +961,78 @@ export class App {
         this.systemPrompt(this.phase, { model: profile.model, endpoint: profile.name })
       ),
     ]);
+  }
+
+  /* ─────────────────────── micro-compaction ─────────────────────── */
+
+  /** The knobs, read fresh so a settings change lands on the next conversation. */
+  microCompactConfig(): Partial<MicroCompactConfig> {
+    return {
+      micro_compact: this.cfg().get<boolean>("microCompact", false) === true,
+      micro_compact_every_n_turns: Math.max(
+        1,
+        Number(this.cfg().get<number>("microCompactEveryNTurns", 1)) || 1
+      ),
+      micro_compact_defrag_threshold_tokens:
+        Number(this.cfg().get<number>("microCompactDefragThresholdTokens", 2000)) || 2000,
+    };
+  }
+
+  /**
+   * A second, cheaper model to condense with.
+   *
+   * `kind:` is what picks it, which is the reason that field exists: a profile
+   * that says `chat` is a plain instruct model, and condensing an exchange is
+   * the least demanding thing a model can be asked to do. Sending it to a
+   * reasoning profile would spend a thinking budget on paraphrase, and sending
+   * it to the profile already running the turn would double what that endpoint
+   * is billed for, which is the opposite of the point.
+   *
+   * The active profile is excluded for that reason, so this returns something
+   * only when the workspace really has a second endpoint to spare. Absent is
+   * the normal case and is not a failure - `feasible()` says so once and the
+   * loop keeps trimming as it always did.
+   */
+  auxSummariser(): Summariser | undefined {
+    const active = this.activeProfile();
+    const aux = this.profiles.find(
+      (p) => p.name !== active?.name && p.kind === "chat" && p.capabilities.contextWindow >= AUX_WINDOW_FLOOR
+    );
+    if (!aux) return undefined;
+    return {
+      name: aux.name,
+      contextWindow: aux.capabilities.contextWindow,
+      summarise: async (transcript, targetChars, signal) =>
+        runOneShot(this.clientFor(aux), transcript, {
+          system:
+            "Condense the transcript below into a compact note, written in the first person as " +
+            "the assistant recalling its own earlier work. Keep file paths, identifiers, " +
+            "commands, decisions and anything discovered; drop narration and repetition. No " +
+            "preamble and no closing remark.",
+          maxTokens: Math.max(128, Math.ceil(targetChars / 3.6)),
+          temperature: 0,
+          signal,
+        }),
+    };
+  }
+
+  /**
+   * A compactor for one conversation, and a line in the log the first time.
+   *
+   * Said once per window rather than per session, because the answer depends on
+   * the profiles and the settings and not on which chat is open - and a line on
+   * every new chat would be noise. Reported at `info` in both directions: "off"
+   * and "on" are both things someone debugging a shrinking context needs to
+   * know, and neither is a warning.
+   */
+  newCompactor(): MicroCompactor {
+    const c = new MicroCompactor(this.microCompactConfig(), this.auxSummariser());
+    if (!this.compactionReported) {
+      this.compactionReported = true;
+      const f = c.feasible();
+      this.log("info", `Micro-compaction: ${f.ok ? "on" : "not running"} - ${f.why}.`);
+    }
+    return c;
   }
 
   /**

@@ -4,6 +4,7 @@ import * as crypto from "node:crypto";
 import { request } from "undici";
 import type { Msg } from "../providers/client";
 import { runAgent, type ExitReason } from "../agent/loop";
+import type { MicroCompactor } from "../agent/compact";
 import { isUntitled, titleFrom, sanitizeTitle } from "../core/sessions";
 import type { FileChange, ToolContext, TodoItem, ToolImage } from "../agent/tools";
 import { mentionable } from "../agent/tools";
@@ -111,6 +112,15 @@ const EXIT_REASONS: Partial<Record<ExitReason, string>> = {
 export class SessionController {
   history: Msg[] = [];
   sessionId: string;
+
+  /**
+   * What this conversation has condensed, and how patient it is still being.
+   *
+   * Per conversation, and reset when the conversation changes: the summaries it
+   * holds are keyed by messages from a transcript that is no longer on screen,
+   * and its patience counters describe a run that is over.
+   */
+  private compactor?: MicroCompactor;
   running = false;
 
   /** Set by "Always allow" on a write or edit. Session-scoped by design. */
@@ -852,6 +862,12 @@ export class SessionController {
         signal: turn.abort.signal,
         phase,
         mcpTools: this.app.agentMcpTools(),
+        // One per conversation, minted lazily so a window where compaction is
+        // off never builds one. It has to outlive the turn: the every-N-turns
+        // pacing and the run of ineffective attempts are both counted over a
+        // conversation, and a fresh compactor each turn would reset them and
+        // summarise the same exchange again on every send.
+        compactor: (this.compactor ??= this.app.newCompactor()),
         // Read fresh off App rather than captured at construction: the file has
         // a watcher, and an edit made mid-conversation should reach the very
         // next turn rather than the next window.
@@ -1587,6 +1603,8 @@ export class SessionController {
     this.turnDiffs.clear();
     // The change list belongs to the conversation, so it leaves with it.
     this.changes.clear();
+    // So does everything the compactor learned about it.
+    this.compactor = undefined;
     // So does anything waiting to be said in it. These were typed into a
     // composer that is no longer on screen; the old code left them in the
     // array, invisible, to be sent into whatever conversation happened to be

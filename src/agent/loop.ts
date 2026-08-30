@@ -17,6 +17,11 @@ const HOLD_RE = /^(```|<\/?(?:tool_call|function)\b|[^A-Za-z\s]{0,12}\{)/i;
 /** The same XML call, found anywhere rather than only at the start. */
 const XML_CALL_RE = /<(?:tool_call\s*>|function\s*=)/i;
 import { TOOL_DEFS, runTool, ToolContext, ToolResult } from "./tools";
+import { estimateTokens, messageTokens } from "./tokens";
+import type { MicroCompactor } from "./compact";
+/* Re-exported from their new home so every existing importer - and the tests
+   that pin what an image is allowed to cost - keeps working unchanged. */
+export { estimateTokens, messageTokens } from "./tokens";
 import { skillIndex, Skill } from "../skills/loader";
 import { agentAllowsTool, agentPrompt, agentRefusal, type Agent } from "../agents/loader";
 
@@ -393,68 +398,15 @@ export function parseTextToolCall(
   return { name, arguments: args, consumed: text };
 }
 
-/** No tokenizer, no network. Deliberately conservative so air-gapped setups work. */
-export function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 3.6);
-}
-
-/**
- * Messages are immutable once appended, so their size is worth remembering.
- *
- * This re-serialised every message on every iteration of the agent loop, which
- * on a long transcript meant megabytes of JSON.stringify blocking the
- * extension host immediately before the request went out.
- */
-const tokenCache = new WeakMap<Msg, number>();
-
-/**
- * What an image costs a model, which is a count of pixels and not of bytes.
- *
- * Both major wires price an image by its dimensions - roughly width times
- * height over 750 - so the same photograph costs the same whether it arrived
- * as a 1.2 MB png or the 170 KB jpeg of the identical picture.
- *
- * Measuring the base64 instead, which is what serialising the content block
- * does, is not a small error: one 1280x800 screenshot is about 1,400 tokens
- * and about 570 KB of base64, so counting the characters overstates it by a
- * factor of a hundred. On a 32k gateway that is the difference between a
- * screenshot costing four percent of the window and appearing to cost five
- * times the whole of it - at which point `fitToWindow` throws the entire
- * conversation away to make room for something that already fits.
- *
- * Only the header is decoded. It is the first few bytes, and decoding half a
- * megabyte of base64 to read six of them would be its own kind of waste.
- */
-const IMAGE_TOKENS_UNKNOWN = 1_600;
-
-function imageBlockTokens(b: { mediaType: string; data: string }): number {
-  const d = imageDimensions(Buffer.from(b.data.slice(0, 4096), "base64"));
-  if (!d || !d.width || !d.height) return IMAGE_TOKENS_UNKNOWN;
-  return Math.ceil((d.width * d.height) / 750);
-}
-
-function contentTokens(content: Msg["content"]): number {
-  if (typeof content === "string") return estimateTokens(content);
-  let n = 0;
-  for (const b of content) {
-    n += b.type === "image" ? imageBlockTokens(b) : estimateTokens(b.text);
-  }
-  return n;
-}
-
-/** Exported for the tests that pin what an image is allowed to cost. */
-export function messageTokens(m: Msg): number {
-  const hit = tokenCache.get(m);
-  if (hit !== undefined) return hit;
-  const n =
-    contentTokens(m.content) + (m.toolCalls ? estimateTokens(JSON.stringify(m.toolCalls)) : 0) + 8;
-  tokenCache.set(m, n);
-  return n;
-}
-
 /**
  * Drop the oldest exchanges when the window fills, always keeping the system
  * prompt, the first user turn, and never orphaning a tool result from its call.
+ *
+ * The backstop, not the strategy. `MicroCompactor` runs ahead of this and
+ * absorbs old exchanges into summaries, which is strictly better because what
+ * it removes is still represented. This is what happens when that is off, has
+ * no auxiliary model, is cooling down after a failure, or could not free
+ * enough - and what happened on every long run before it existed.
  */
 export function fitToWindow(messages: Msg[], limit: number, reserve: number): Msg[] {
   const budget = limit - reserve;
@@ -471,9 +423,16 @@ export function fitToWindow(messages: Msg[], limit: number, reserve: number): Ms
       total -= messageTokens(tail.shift()!);
     }
   }
+  // The old wording ended "Ask if you need something from them", which was an
+  // offer nothing could honour: the turns are not archived anywhere, they are
+  // discarded, and a model that asked would be told nothing. Saying so plainly
+  // is worth more - a model that knows a fact is unrecoverable re-derives it,
+  // where one that thinks it can ask waits for an answer that is not coming.
   const note: Msg = {
     role: "user",
-    content: "[Earlier turns were dropped to stay within the context window. Ask if you need something from them.]",
+    content:
+      "[Earlier turns were discarded to stay within the context window and cannot be " +
+      "recovered. If you need something from them, work it out again from the workspace.]",
   };
   return [...head, note, ...tail];
 }
@@ -574,6 +533,15 @@ export interface AgentRunOptions {
    * bound it only by the step cap.
    */
   tokenBudget?: number;
+  /**
+   * Absorbs old exchanges into summaries instead of letting them be dropped.
+   *
+   * Held by the caller across turns, because the every-N-turns gate and the
+   * run of ineffective attempts only mean anything over a conversation. Absent
+   * - which is the default - leaves the old behaviour exactly: `fitToWindow`
+   * trims the front when the window fills.
+   */
+  compactor?: MicroCompactor;
   signal?: AbortSignal;
   /**
    * The workspace's own standing instructions, already formatted.
@@ -775,11 +743,19 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
       };
     }
 
-    // Images first, then the window. The order matters: an evicted picture
-    // becomes one short line, so trimming afterwards sees the sizes that are
-    // actually going out and throws away less history to make room.
+    // Images, then compaction, then the window, and the order is the whole of
+    // the reasoning. An evicted picture becomes one short line, so everything
+    // after it sees the sizes actually going out. Compaction runs next because
+    // it is the lossless-ish step: an exchange it absorbs is still represented,
+    // where one `fitToWindow` drops is simply gone. `fitToWindow` stays last
+    // and unchanged, as the backstop for the case compaction could not fix -
+    // a compactor that is off, has no aux model, is cooling down or has given
+    // up leaves this line exactly as it was.
+    const compacted = opts.compactor
+      ? await opts.compactor.fit(fitImages(messages, caps.maxImageBytes), opts.signal)
+      : fitImages(messages, caps.maxImageBytes);
     const fitted = fitToWindow(
-      fitImages(messages, caps.maxImageBytes),
+      compacted,
       caps.contextWindow,
       caps.maxOutputTokens + 512
     );
