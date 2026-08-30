@@ -1,8 +1,14 @@
 /* ─────────────────────────────────────────────────────────────────────────
    KRYPTONITE Control Center.
 
-   Same token discipline as the sidebar: --vscode-* for everything structural,
-   three brand accents with one job each. The difference is width - this
+   Same token discipline as the sidebar, and this line used to describe the
+   opposite of what the file does: it said "--vscode-* for everything
+   structural", which stopped being true when the panel took its own palette
+   and stayed on the page for every revision since. Everything here is --kx-*,
+   and test/contrast.cjs now asserts that no --vscode-* colour reaches either
+   this sheet or the JS beside it - because a light theme resolves those
+   against the DARK ground the panels paint, which is how a green tick landed
+   at 2.84:1. Three brand accents with one job each. The difference is width - this
    surface can be a full editor column or a narrow split, so every table uses
    minmax(0, …) tracks and every card grid is auto-fit. Nothing here may push a
    horizontal scrollbar onto the pane.

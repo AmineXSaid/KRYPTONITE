@@ -2995,8 +2995,8 @@ function _sbRun() {
           : "Denied · not run";
       el.className = "perm-done";
       el.innerHTML = (decision === "deny"
-        ? '<span style="color:var(--vscode-editorError-foreground);display:flex">' + icon("i-x", "ic-13") + "</span>"
-        : '<span style="color:var(--vscode-testing-iconPassed);display:flex">' + icon("i-check", "ic-13") + "</span>") +
+        ? '<span style="color:var(--kx-error);display:flex">' + icon("i-x", "ic-13") + "</span>"
+        : '<span style="color:var(--kx-accent);display:flex">' + icon("i-check", "ic-13") + "</span>") +
         "<span>" + esc(label) + "</span>";
       return;
     }
@@ -3992,7 +3992,7 @@ function _sbRun() {
       rows += '<div class="trow" data-status="' + p.status + '">' +
         (iconId === "i-kx"
           ? "<span>" + crystal(16) + "</span>"
-          : '<span style="color:var(--vscode-descriptionForeground)">' + icon(iconId, "ic-14") + "</span>") +
+          : '<span style="color:var(--kx-fg-3)">' + icon(iconId, "ic-14") + "</span>") +
         '<span class="ell"><span class="id ell">' + esc(p.id) + "</span>" +
         '<span class="url ell" title="' + esc(p.status === "error" ? p.error || "" : p.baseUrl) + '">' +
         esc(p.status === "error" ? (p.error || "Failed to parse") : p.baseUrl) + "</span></span>" +
@@ -4398,7 +4398,7 @@ function _sbRun() {
       rows += '<button class="skill" data-src="' + esc(s.source) + '" data-skill="' + esc(s.name) +
         '" role="checkbox" aria-checked="' + (s.enabled ? "true" : "false") + '">' +
         '<span class="cbx"' + (s.enabled
-          ? ' style="background:var(--kx-accent);border-color:var(--kx-accent);color:var(--vscode-sideBar-background)"'
+          ? ' style="background:var(--kx-accent);border-color:var(--kx-accent);color:var(--kx-on-accent)"'
           : "") + ">" + (s.enabled ? icon("i-check", "ic-9") : "") + "</span>" +
         '<span class="nm ell">' + esc(s.name) + "</span>" +
         '<span class="ds ell" title="' + esc(s.description) + '">' + esc(s.description) + "</span>" +

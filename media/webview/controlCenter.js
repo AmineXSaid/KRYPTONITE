@@ -1173,7 +1173,7 @@ function _run() {
       ]) + '<div class="ok-mark" style="margin-top:8px">' + icon("i-check", "ic-11") +
         "expiry-aware refresh on</div>") +
       card("Secret resolution",
-        '<div class="tbl"><div class="tr2 head" style="font-size:10.5px;text-transform:uppercase;color:var(--vscode-descriptionForeground)">' +
+        '<div class="tbl"><div class="tr2 head" style="font-size:10.5px;text-transform:uppercase;color:var(--kx-fg-3)">' +
         "<span>Reference</span><span>Source</span><span>Resolved from</span></div>" +
         secretRows(a) + "</div>") +
       "</div>";
@@ -1260,12 +1260,12 @@ function _run() {
             ["Min version", p.tls.minVersion || "(default)"]]);
     }
     var expires = (rung.detail.match(/Leaf expires (.+)$/) || [])[1] || "-";
-    var rows = '<div class="tr3 head" style="font-size:10.5px;text-transform:uppercase;color:var(--vscode-descriptionForeground)">' +
+    var rows = '<div class="tr3 head" style="font-size:10.5px;text-transform:uppercase;color:var(--kx-fg-3)">' +
       "<span>#</span><span>Subject</span><span>Expiry</span></div>";
     for (var i = 0; i < chain.length; i++) {
       var isRoot = i === chain.length - 1;
       var expiry = i === 0 ? expires : isRoot ? "in trust store" : "-";
-      var cls = S.tlsError && isRoot ? ' style="color:var(--vscode-editorError-foreground)"' : "";
+      var cls = S.tlsError && isRoot ? ' style="color:var(--kx-error)"' : "";
       rows += '<div class="tr3"><span class="muted">' + (i + 1) + "</span>" +
         '<span class="ell" title="' + esc(chain[i]) + '">' + esc(chain[i]) + "</span>" +
         "<span" + cls + ">" + esc(S.tlsError && isRoot ? "not in trust store" : expiry) + "</span></div>";
@@ -1324,8 +1324,8 @@ function _run() {
       "</div>";
 
     if (S.tlsError) {
-      html += '<div class="card" style="margin-top:14px;border-color:var(--vscode-editorError-foreground)">' +
-        '<div class="t" style="color:var(--vscode-editorError-foreground)">' + icon("i-x", "ic-13") +
+      html += '<div class="card" style="margin-top:14px;border-color:var(--kx-error)">' +
+        '<div class="t" style="color:var(--kx-error)">' + icon("i-x", "ic-13") +
         " TLS failure at " + esc(S.tlsError.rung) + "</div>" +
         '<div class="err-line" style="margin-bottom:8px">' + esc(S.tlsError.message) + "</div>" +
         kv([["Endpoint", S.tlsError.endpoint],
@@ -1401,7 +1401,7 @@ function _run() {
         ui.openTouched !== false, true) +
       "</div>";
 
-    var rows = '<div class="tr3 head" style="grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) minmax(0,1fr);font-size:10.5px;text-transform:uppercase;color:var(--vscode-descriptionForeground)">' +
+    var rows = '<div class="tr3 head" style="grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) minmax(0,1fr);font-size:10.5px;text-transform:uppercase;color:var(--kx-fg-3)">' +
       "<span>Tool</span><span>Arguments</span><span>Sandbox</span></div>";
     for (var i = 0; i < TOOLS.length; i++) {
       rows += '<div class="tr3" style="grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) minmax(0,1fr)">' +
@@ -1819,7 +1819,7 @@ function _run() {
       return html;
     }
 
-    var rows = '<div class="tr4 head" style="font-size:10.5px;text-transform:uppercase;color:var(--vscode-descriptionForeground)">' +
+    var rows = '<div class="tr4 head" style="font-size:10.5px;text-transform:uppercase;color:var(--kx-fg-3)">' +
       "<span>Label</span><span>When</span><span>Hash</span><span></span></div>";
     for (var i = 0; i < S.checkpoints.length; i++) {
       var c = S.checkpoints[i];

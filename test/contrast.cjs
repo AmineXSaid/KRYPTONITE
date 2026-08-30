@@ -313,6 +313,71 @@ console.log("\n──── the composer's focus indicator stands on its own ─
   }
 }
 
+/* ── the palette does not leak out of the stylesheets ────────────────────
+   The sidebar's own header states the invariant: "Nothing below reads a
+   --vscode-* colour." It held in the STYLESHEETS and was broken ten times in
+   the JS, which builds markup by string concatenation and can therefore write
+   an inline `style=` this file never read.
+
+   The reason it matters is the one thing that is easy to miss about a panel
+   that paints no ground: `body.vscode-light` in sidebar.css DOES paint one,
+   at --kx-bg, so a light theme gets a DARK panel with LIGHT-theme --vscode-*
+   values injected into it. Measured that way, Light Modern's
+   `testing.iconPassed` (#007100) - the tick recording that an edit was
+   allowed - fell from 8.87:1 to 2.84:1, and the tick inside an enabled
+   skill's checkbox landed at 2.96:1 on the green fill it sits on.
+
+   So both halves are asserted: no --vscode-* colour in the webview JS at all,
+   and every inline ink/fill pair the JS writes clears 4.5:1 the same way the
+   stylesheet pairs above do. */
+console.log("\n──── no --vscode-* colour leaks into the webview JS ────");
+{
+  const SCRIPTS = ["sidebar.js", "controlCenter.js", "browser.js"];
+  let leaks = 0;
+  for (const f of SCRIPTS) {
+    const js = fs.readFileSync(path.join(__dirname, "..", "media", "webview", f), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split("\n")
+      .filter((l) => !/^\s*\/\//.test(l))
+      .join("\n");
+    for (const m of js.matchAll(/var\(\s*(--vscode-[\w-]+)/g)) {
+      leaks++;
+      ck(`${f} paints from ${m[1]}, which a light theme resolves against a dark panel`, 0, 1);
+    }
+  }
+  console.log(`  ${leaks ? "FAIL" : "PASS"}  ${leaks} --vscode-* colour reference(s) in the webview JS`);
+  if (!leaks) pass++;
+}
+
+console.log("\n──── ink and fill paired in an inline style ────");
+{
+  const SCRIPTS = ["sidebar.js", "controlCenter.js"];
+  const lit = (v) => {
+    const m = /var\(\s*(--kx-[a-z0-9-]+)\s*\)/.exec(String(v).trim());
+    if (!m) return null;
+    let t;
+    try { t = token(m[1].replace(/^--/, "")); } catch { return null; }
+    return /^#[0-9a-fA-F]{3,8}$/.test(t) ? t : null;
+  };
+  for (const f of SCRIPTS) {
+    const js = fs.readFileSync(path.join(__dirname, "..", "media", "webview", f), "utf8");
+    // Every `style="…"` the JS writes, whether quoted with ' or \".
+    for (const m of js.matchAll(/style=\\?["']([^"'\\]*)\\?["']/g)) {
+      const decls = m[1];
+      const bg = /(?:^|;)\s*background(?:-color)?:\s*([^;]+)/.exec(decls);
+      const fg = /(?:^|;)\s*color:\s*([^;]+)/.exec(decls);
+      if (!bg || !fg) continue;
+      const b = lit(bg[1]);
+      const g = lit(fg[1]);
+      if (!b || !g) continue;
+      const r = ratio(g, b);
+      const where = f + "  " + decls.replace(/\s+/g, " ").slice(0, 52);
+      console.log(`  ${r >= 4.5 ? "PASS" : "FAIL"}  ${where.padEnd(66)} ${r.toFixed(2)}:1`);
+      ck(where, r, 4.5);
+    }
+  }
+}
+
 console.log(`\n──── ${pass} passed, ${fails.length} failed ────`);
 for (const f of fails) console.log("  FAIL  " + f);
 process.exit(fails.length ? 1 : 0);
