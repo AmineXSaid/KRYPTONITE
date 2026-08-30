@@ -14,6 +14,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { McpRegistry, loadMcpConfig, qualify, parseQualified } from "../src/mcp/registry";
+import { agentAllowsMcp, type Agent } from "../src/agents/loader";
 
 const ROOT = path.join(os.tmpdir(), "kx-mcp-test-" + Date.now());
 let pass = 0;
@@ -137,6 +138,50 @@ async function main() {
   const listTool = defs.find((d) => /list_directory$/.test(d.name));
   const readTool = defs.find((d) => /read_text_file$|read_file$/.test(d.name));
   check(!!listTool, "list_directory is exposed", listTool?.name);
+
+  /* ── the name form an agent's scope is matched against ── */
+  //
+  // The claim being checked is that the filter sees the server's own tool
+  // names, before `mcp__<server>__` is built around them. It matters because
+  // registry.ts refuses a server id containing `__` and splits on the first
+  // one: a server exposing `list-directory` or `fs.read` can only ever be
+  // filtered on the raw name. Asserted against a live server rather than a
+  // fixture, because the raw names are the server's to choose.
+  {
+    const shown: Array<{ server: string; tool: string }> = [];
+    reg.toolDefs((server, tool) => {
+      shown.push({ server, tool });
+      return true;
+    });
+    check(shown.length > 0, "the scope predicate is consulted at all", String(shown.length));
+    check(
+      shown.every((s) => !s.tool.startsWith("mcp__") && !s.tool.includes("__")),
+      "and is given the server's own tool names, unqualified",
+      shown.slice(0, 4).map((s) => s.tool).join(", ")
+    );
+    check(shown.every((s) => s.server === "fs"), "with the server named separately");
+
+    // The same predicate an agent's scope goes through, driven with a glob
+    // written the way a Hermes config writes one.
+    const reader = {
+      name: "reader",
+      allMcp: false,
+      mcp: [{ server: "fs", include: ["list_*", "read-*", "fs.*"], exclude: [] }],
+      tools: [],
+      skills: [],
+    } as unknown as Agent;
+    const kept = reg.toolDefs((server, tool) => agentAllowsMcp(reader, server, tool));
+    check(
+      kept.length > 0 && kept.length < defs.length,
+      "a glob against those names narrows the list",
+      `${kept.length} of ${defs.length}`
+    );
+    check(
+      kept.every((d) => /^mcp__fs__(list_|read-|fs\.)/.test(d.name)),
+      "keeping only what it named",
+      kept.map((d) => d.name).join(", ").slice(0, 90)
+    );
+  }
 
   /* approval policy */
   check(reg.needsApproval("mcp__fs__read_text_file") === false, "approval: auto is honoured");

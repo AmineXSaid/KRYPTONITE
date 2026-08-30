@@ -85,17 +85,72 @@ const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 /**
  * `read_*` matches `read_file` and `read_text_file`; `read_file` matches only
- * itself. One wildcard character, deliberately - Hermes documents `*` globs and
- * nothing more, and a full glob dialect in a tool filter is a way to write a
- * filter nobody can predict the effect of.
+ * itself.
+ *
+ * Three wildcards, not one. The comment here used to claim Hermes documents
+ * `*` and nothing more, and that a fuller dialect would be a filter nobody
+ * could predict - which read as restraint and was in fact the bug. Hermes
+ * supports `*`, `?` and `[...]`, case-sensitively, and the file above promises
+ * that a server block lifts from a Hermes config unchanged. A `?` or a `[`
+ * pattern contains no `*`, so it fell through to the exact-string comparison
+ * and matched nothing at all: a filter that silently denied everything it was
+ * asked to allow, which is the least predictable behaviour available.
+ *
+ * `.` stays literal. It is not special in fnmatch either, and tool names
+ * contain dots.
+ *
+ * An unbalanced `[` is the one case that has no meaning, and it must not throw
+ * on a path that runs at every tool call and every advertisement. It degrades
+ * to a literal bracket, and the whole construction sits inside a try/catch that
+ * falls back to an exact comparison, so the worst a malformed pattern can do is
+ * match only itself.
  */
 export function matchesGlob(pattern: string, name: string): boolean {
   if (pattern === "*") return true;
-  if (!pattern.includes("*")) return pattern === name;
-  const rx = new RegExp(
-    "^" + pattern.split("*").map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$"
-  );
-  return rx.test(name);
+  if (!/[*?[]/.test(pattern)) return pattern === name;
+  try {
+    let rx = "^";
+    for (let i = 0; i < pattern.length; i++) {
+      const c = pattern[i];
+      if (c === "*") {
+        rx += ".*";
+        continue;
+      }
+      if (c === "?") {
+        rx += ".";
+        continue;
+      }
+      if (c === "[") {
+        // fnmatch's rules, which differ from a regex class in two places: `!`
+        // negates rather than `^`, and a `]` immediately after the opening
+        // bracket (or after the `!`) is a literal rather than the close.
+        let j = i + 1;
+        const neg = pattern[j] === "!" || pattern[j] === "^";
+        if (neg) j++;
+        if (pattern[j] === "]") j++;
+        while (j < pattern.length && pattern[j] !== "]") j++;
+        if (j >= pattern.length) {
+          rx += "\\[";
+          continue;
+        }
+        // Ranges pass through - `[a-z]` means the same thing in both - but a
+        // backslash, a bracket or a caret inside the class has to be escaped
+        // or it changes what the class means.
+        const body = pattern
+          .slice(i + (neg ? 2 : 1), j)
+          .replace(/\\/g, "\\\\")
+          .replace(/\]/g, "\\]")
+          .replace(/\^/g, "\\^");
+        rx += "[" + (neg ? "^" : "") + body + "]";
+        i = j;
+        continue;
+      }
+      rx += c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+    return new RegExp(rx + "$").test(name);
+  } catch {
+    return pattern === name;
+  }
 }
 
 /**
@@ -113,6 +168,19 @@ export function agentAllowsMcp(agent: Agent | undefined, server: string, tool: s
   if (agent.allMcp) return true;
   const scope = agent.mcp.find((s) => s.server === server);
   if (!scope) return false;
+  // Include narrows, then exclude subtracts from what is left. Hermes resolves
+  // a block with both keys the other way - "if both are present: include wins",
+  // which makes exclude a no-op - and this deliberately does not follow it.
+  //
+  // The two readings disagree about exactly one config, `include: [read_*]`
+  // with `exclude: [read_secrets]`, and they disagree in the dangerous
+  // direction: adopting Hermes's rule would hand that agent read_secrets. A
+  // config written to withhold one tool must not start allowing it because the
+  // author also wrote an include. Nobody writes both keys meaning the second
+  // to be ignored.
+  //
+  // So the deviation is real and the comment on `readMcp` below says so
+  // instead of claiming a parity that is not there.
   if (scope.include.length && !scope.include.some((p) => matchesGlob(p, tool))) return false;
   if (scope.exclude.some((p) => matchesGlob(p, tool))) return false;
   return true;
@@ -185,7 +253,18 @@ function asList(v: unknown): string[] {
  *   mcp: { filesystem: { tools: { include: [...], exclude: [...] } } }
  *
  * The last is Hermes's own shape, so a server block can be lifted from a
- * Hermes config unchanged.
+ * Hermes config unchanged - with one deviation, stated here rather than left
+ * for someone to find at runtime. A block that sets both `include` and
+ * `exclude` is read as "these, minus those"; Hermes reads it as "these", with
+ * `exclude` ignored. See `agentAllowsMcp` for why this side of the difference
+ * is the safe one. Every other shape - the globs, the name form, a block with
+ * only one of the two keys - behaves identically.
+ *
+ * The names matched are the server's own, before `mcp__<server>__<tool>` is
+ * built around them, which is Hermes's behaviour and is what lets a filter
+ * name a tool like `list-directory` that could not survive qualification.
+ * `McpRegistry.toolDefs` passes the raw name to the predicate for exactly this
+ * reason; test/agents.ts pins it.
  */
 function readMcp(
   raw: unknown,

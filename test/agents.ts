@@ -216,6 +216,108 @@ ck(matchesGlob("*_file", "read_file"), "a leading star matches a suffix");
 // A pattern is not a regular expression: a dot is a dot.
 ck(!matchesGlob("read.file", "read_file"), "a dot in a pattern is a literal dot");
 
+// The rest of Hermes's dialect. Each of these used to contain no `*`, fall
+// through to the exact-string comparison, and match nothing - so a lifted
+// Hermes block silently denied every tool it was written to allow.
+console.log("\n──── the rest of the dialect ────");
+ck(matchesGlob("read_?", "read_a"), "a question mark matches one character");
+ck(!matchesGlob("read_?", "read_ab"), "and not two");
+ck(!matchesGlob("read_?", "read_"), "nor none");
+ck(matchesGlob("read_file?", "read_file2"), "it works at the end of a pattern");
+ck(matchesGlob("tool[123]", "tool2"), "a class matches one of its members");
+ck(!matchesGlob("tool[123]", "tool4"), "and nothing outside it");
+ck(matchesGlob("tool[a-f]", "toolc"), "a range works");
+ck(!matchesGlob("tool[a-f]", "toolz"), "and stops where it says");
+ck(matchesGlob("tool[!0-9]", "toolx"), "`!` negates, as fnmatch spells it");
+ck(!matchesGlob("tool[!0-9]", "tool5"), "so a member of the class is refused");
+ck(matchesGlob("read[_-]*", "read-text"), "a class and a star compose");
+ck(matchesGlob("read[_-]*", "read_text"), "over either member");
+// Case matters. Hermes matches case-sensitively and a filter that quietly did
+// not would be a scope that admits names its author never wrote.
+ck(!matchesGlob("read_*", "READ_FILE"), "matching is case-sensitive");
+ck(!matchesGlob("tool[a-f]", "toolC"), "including inside a class");
+
+// A pattern nobody could have meant. It must not throw - this runs on every
+// tool call and every advertisement - and it must not become a wildcard.
+console.log("\n──── a malformed pattern ────");
+for (const bad of ["read[", "read[a-", "[", "read[]"]) {
+  let threw = false;
+  let matched = false;
+  try {
+    matched = matchesGlob(bad, "read_file") || matchesGlob(bad, "anything");
+  } catch {
+    threw = true;
+  }
+  ck(!threw && !matched, `an unbalanced "${bad}" is inert rather than fatal`);
+}
+ck(matchesGlob("read[", "read["), "and still matches itself literally");
+
+/* ── 3b. include and exclude together ──────────────────────────────────── */
+console.log("\n──── include and exclude together ────");
+{
+  // The one place this deviates from Hermes, which resolves a block with both
+  // keys as "include wins" and ignores exclude entirely. The two readings
+  // disagree in the dangerous direction, so Genesis keeps the subtraction and
+  // says so in readMcp's comment rather than claiming a parity it does not
+  // have. Pinned here so a later "let us match the spec" is a failing test
+  // rather than an agent quietly gaining a tool.
+  write(
+    "both-keys.md",
+    `---
+name: both-keys
+description: Sets include and exclude on one server.
+mcp:
+  filesystem:
+    tools:
+      include: ["read_*"]
+      exclude: [read_secrets]
+---
+
+Reads, except the one.
+`
+  );
+  const both = loadAgents(dir).agents.find((a) => a.name === "both-keys")!;
+  ck(!!both, "the block loads");
+  ck(agentAllowsMcp(both, "filesystem", "read_text_file"), "include still admits what it names");
+  ck(
+    !agentAllowsMcp(both, "filesystem", "read_secrets"),
+    "and exclude still removes what it names, rather than being ignored"
+  );
+  ck(!agentAllowsMcp(both, "filesystem", "write_file"), "and include still narrows");
+}
+
+/* ── 3c. the name form the filter sees ─────────────────────────────────── */
+console.log("\n──── hyphens and dots survive the filter ────");
+{
+  // Hermes matches the server's own tool names, before the mcp__<server>__
+  // prefix is built around them. Genesis does too - McpRegistry.toolDefs hands
+  // the predicate `t.name` raw - and it has to, because registry.ts rejects a
+  // name containing `__`: a server exposing `list-directory` could not be
+  // filtered at all if the predicate saw the qualified form.
+  write(
+    "hyphenated.md",
+    `---
+name: hyphenated
+description: Scopes a server whose tools have hyphens and dots.
+mcp:
+  files:
+    tools:
+      include: ["list-*", "fs.read"]
+---
+
+Reads.
+`
+  );
+  const h = loadAgents(dir).agents.find((a) => a.name === "hyphenated")!;
+  ck(agentAllowsMcp(h, "files", "list-directory"), "a hyphenated tool name matches a glob");
+  ck(agentAllowsMcp(h, "files", "fs.read"), "and a dotted one matches exactly");
+  ck(!agentAllowsMcp(h, "files", "fs_read"), "with the dot still a literal dot");
+  ck(
+    !agentAllowsMcp(h, "files", "mcp__files__list-directory"),
+    "the qualified form is not what the filter is given"
+  );
+}
+
 /* ── 4. the refusal is written for the model to act on ─────────────────── */
 console.log("\n──── refusals ────");
 const refusal = agentRefusal(t, "mcp__github__create_issue");
