@@ -181,6 +181,36 @@ console.log("──── the keyboard can reach the panel ────");
   }
 }
 
+console.log("──── the offline bundle carries what the loaders read ────");
+/* A bundle for an air-gapped machine that ships two of the five things it needs
+   is a folder somebody carries across a room to discover has no agents, no MCP
+   servers and no standing instructions in it.
+
+   Asserted against the LOADERS rather than against a list retyped here, so
+   adding a sixth thing the runtime reads fails this until the bundle carries
+   it too. */
+{
+  const app = read("src/core/app.ts");
+  const bundle = app.split("async exportBundle(")[1].split("\n  }")[0];
+  for (const [what, needle] of [
+    ["endpoint profiles", "profileDir"],
+    ["skills", "skillsDir"],
+    ["agents", '".agent/agents"'],
+    ["MCP servers", '".agent/mcp.json"'],
+    ["transform modules", '".agent/transforms"'],
+    ["the standing instructions", "instructions"],
+  ]) {
+    ok(`the bundle carries ${what}`, bundle.includes(needle), needle);
+  }
+  ok("and the extension itself, when one has been built", /\.vsix/.test(bundle));
+  ok("with a note saying what to do with the folder", /bundleReadme\(/.test(bundle));
+
+  const readme = app.split("private bundleReadme(")[1].split("\n  }")[0];
+  ok("the note says how to install", /install-extension|Install from VSIX/.test(readme));
+  ok("and that the keys did not travel", /SecretStorage/.test(readme) && /secret:/.test(readme));
+  ok("and where to put them back", /Endpoints/.test(readme));
+}
+
 if (failures.length) for (const f of failures) console.log("FAIL  " + f);
 console.log(`\n──── ${pass} passed, ${failures.length} failed ────`);
 process.exitCode = failures.length ? 1 : 0;

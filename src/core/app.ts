@@ -2484,32 +2484,117 @@ export class App {
     this.log("info", `Restored checkpoint ${hash.slice(0, 8)}.`);
   }
 
+  /**
+   * Everything a second machine needs, for a machine that cannot reach a network.
+   *
+   * THIS SHIPPED WITH TWO OF THE FIVE THINGS IT NEEDS. It copied
+   * `profileDirectory` and `skillsDirectory` and wrote a manifest, and left
+   * behind `.agent/mcp.json`, `.agent/agents/`, `.agent/instructions.md` and
+   * `.agent/transforms/` - every one of which is loaded at runtime and none of
+   * which the receiving machine could get any other way. So somebody carried a
+   * folder to an air-gapped box and found no agents, no MCP servers, no
+   * standing instructions and no note explaining what to do with any of it.
+   *
+   * What it deliberately does NOT carry is a credential. Endpoint YAML holds
+   * `${secret:…}` references rather than keys, which is what makes a profile
+   * safe to hand over - and the README says so, because a receiving user who
+   * does not know that reads a working profile and a failing connection.
+   */
   async exportBundle(): Promise<void> {
     const root = this.requireRoot();
     const profileDir = this.cfg().get<string>("profileDirectory", ".agent/endpoints");
     const skillsDir = this.cfg().get<string>("skillsDirectory", ".agent/skills");
+    const instructions = this.cfg().get<string>("instructionsFile", ".agent/instructions.md");
     const out = path.join(root, "dist", "genesis-offline-bundle");
     const agentOut = path.join(out, ".agent");
 
     fs.mkdirSync(agentOut, { recursive: true });
+    const carried: string[] = [];
     const copyIfPresent = (rel: string) => {
       const from = path.join(root, rel);
       if (!fs.existsSync(from)) return;
       fs.cpSync(from, path.join(agentOut, path.basename(rel)), { recursive: true });
+      carried.push(rel);
     };
+    // The two that were always here, plus the three that are loaded at runtime
+    // and were not. Each is copied only if it exists, so a workspace using none
+    // of them exports exactly what it did before.
     copyIfPresent(profileDir);
     copyIfPresent(skillsDir);
+    copyIfPresent(".agent/agents");
+    copyIfPresent(".agent/mcp.json");
+    copyIfPresent(".agent/transforms");
+    copyIfPresent(instructions);
 
+    // The extension itself, when a .vsix has been built beside the workspace.
+    // A bundle for an air-gapped machine that assumes the Marketplace is
+    // reachable is a bundle for a machine that is not air-gapped.
+    let vsix: string | null = null;
+    try {
+      const built = fs.readdirSync(root).filter((f) => f.endsWith(".vsix")).sort();
+      if (built.length) {
+        vsix = built[built.length - 1];
+        fs.copyFileSync(path.join(root, vsix), path.join(out, vsix));
+      }
+    } catch {
+      // No .vsix beside the workspace is the normal case; the README says how
+      // to build one.
+    }
+
+    const version = String(this.context.extension.packageJSON.version ?? "0.0.0");
     const manifest = {
       generatedAt: new Date().toISOString(),
-      extensionVersion: this.context.extension.packageJSON.version ?? "0.0.0",
+      extensionVersion: version,
       profiles: this.profiles.map((p) => p.name),
       skills: this.enabledSkills().map((s) => s.name),
+      agents: this.agents.map((a) => a.name),
+      mcpServers: this.mcp.statuses().map((m) => m.name),
+      carried,
+      vsix,
     };
     fs.writeFileSync(path.join(out, "manifest.json"), JSON.stringify(manifest, null, 2), "utf8");
+    fs.writeFileSync(path.join(out, "README.md"), this.bundleReadme(version, carried, vsix), "utf8");
 
     this.broadcast({ type: "bundleExported", path: out });
     this.log("info", `Exported offline bundle to ${out}.`);
+  }
+
+  /** What to do with the folder, for the person who receives it. */
+  private bundleReadme(version: string, carried: string[], vsix: string | null): string {
+    return [
+      `# Genesis offline bundle`,
+      "",
+      `Genesis ${version}. Everything below is configuration this workspace was using;`,
+      "no credential is in it.",
+      "",
+      "## Install",
+      "",
+      vsix
+        ? `1. \`code --install-extension ${vsix}\` (or Extensions › … › Install from VSIX).`
+        : "1. Install the Genesis `.vsix`. One was not found beside the workspace when this " +
+          "bundle was made - build it with `npm run package` and copy it in here.",
+      "2. Copy the `.agent/` folder in this bundle into the root of the workspace you want to use it in.",
+      "3. Open that folder in VS Code.",
+      "",
+      "## What is here",
+      "",
+      ...(carried.length
+        ? carried.map((c) => `- \`${c}\``)
+        : ["- Nothing: this workspace had no `.agent/` configuration to carry."]),
+      "",
+      "## What is deliberately NOT here",
+      "",
+      "**API keys.** Endpoint profiles reference their credential as `${secret:…}`, which",
+      "resolves out of VS Code's SecretStorage on the machine that holds it. That is what",
+      "makes a profile safe to hand to someone else - and it means the connection will fail",
+      "on this machine until the key is entered: open the Genesis panel, go to Diagnostics ›",
+      "Endpoints, edit the profile, and paste the key. It is stored in SecretStorage, never",
+      "in the YAML.",
+      "",
+      "`genesis.caBundlePath` is not here either. It is an absolute path on the machine that",
+      "made this bundle; set your own under Settings › Genesis if your gateway needs one.",
+      "",
+    ].join("\n");
   }
 
   /**
