@@ -230,6 +230,18 @@ ck(matchesGlob("tool[a-f]", "toolc"), "a range works");
 ck(!matchesGlob("tool[a-f]", "toolz"), "and stops where it says");
 ck(matchesGlob("tool[!0-9]", "toolx"), "`!` negates, as fnmatch spells it");
 ck(!matchesGlob("tool[!0-9]", "tool5"), "so a member of the class is refused");
+// And `^` does NOT negate - fnmatch reads it as an ordinary member of the
+// class, where a regular expression reads it as an operator. Getting this
+// backwards inverted every `[^...]` pattern, which for an include list means
+// admitting exactly the tools it was written to keep out. Found by running
+// this function against Python's own fnmatch over a grid of patterns; these
+// four are the shape that failed.
+ck(matchesGlob("tool[^0-9]", "tool5"), "`^` is a literal member, not an operator");
+ck(matchesGlob("tool[^0-9]", "tool^"), "so the caret itself is in the class");
+ck(!matchesGlob("tool[^0-9]", "toolx"), "and a character outside it does not match");
+ck(matchesGlob("x[]]y", "x]y"), "a `]` straight after the bracket is a literal");
+ck(matchesGlob("x[!]]y", "x-y"), "and after a `!` too");
+ck(!matchesGlob("x[!]]y", "x]y"), "with the negation still applying");
 ck(matchesGlob("read[_-]*", "read-text"), "a class and a star compose");
 ck(matchesGlob("read[_-]*", "read_text"), "over either member");
 // Case matters. Hermes matches case-sensitively and a filter that quietly did
@@ -251,6 +263,17 @@ for (const bad of ["read[", "read[a-", "[", "read[]"]) {
   ck(!threw && !matched, `an unbalanced "${bad}" is inert rather than fatal`);
 }
 ck(matchesGlob("read[", "read["), "and still matches itself literally");
+
+// A pattern that gets all the way to a regular expression and is rejected
+// there. `[z-a]` is a reversed range: fnmatch quietly matches nothing, and a
+// JavaScript RegExp throws outright, so this is the one input that reaches the
+// try/catch. What matters is which way it falls back - to an exact comparison,
+// never to a wildcard. A malformed pattern that matched everything would widen
+// an agent's scope to every tool on the server, which is the failure this whole
+// filter exists to prevent.
+ck(!matchesGlob("x[z-a]y", "xay"), "a reversed range matches nothing, as fnmatch has it");
+ck(!matchesGlob("x[z-a]y", "anything"), "and is emphatically not a wildcard");
+ck(matchesGlob("x[z-a]y", "x[z-a]y"), "though it still matches itself literally");
 
 /* ── 3b. include and exclude together ──────────────────────────────────── */
 console.log("\n──── include and exclude together ────");

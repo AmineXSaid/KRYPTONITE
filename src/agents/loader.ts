@@ -122,10 +122,19 @@ export function matchesGlob(pattern: string, name: string): boolean {
       }
       if (c === "[") {
         // fnmatch's rules, which differ from a regex class in two places: `!`
-        // negates rather than `^`, and a `]` immediately after the opening
-        // bracket (or after the `!`) is a literal rather than the close.
+        // negates and `^` does NOT - it is an ordinary member of the class -
+        // and a `]` immediately after the opening bracket (or after the `!`)
+        // is a literal rather than the close.
+        //
+        // Treating `^` as negation here was a real parity break, found by
+        // running this function against Python's own `fnmatch.fnmatchcase`
+        // over a grid of patterns: `[^0-9]` means "a caret or a digit" to
+        // Hermes and meant "not a digit" here, so an include list written that
+        // way admitted precisely the tools it was meant to exclude. The escape
+        // below is what keeps a caret literal once it is no longer read as an
+        // operator.
         let j = i + 1;
-        const neg = pattern[j] === "!" || pattern[j] === "^";
+        const neg = pattern[j] === "!";
         if (neg) j++;
         if (pattern[j] === "]") j++;
         while (j < pattern.length && pattern[j] !== "]") j++;

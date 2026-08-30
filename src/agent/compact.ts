@@ -120,18 +120,21 @@ export const MICRO_COMPACT_DEFAULTS: MicroCompactConfig = {
   micro_compact_defrag_threshold_tokens: 2000,
   protect_first_n: 3,
   protect_last_n: 6,
-  summary_target_ratio: 0.35,
+  summary_target_ratio: 0.20,
 };
 
 /**
  * The smallest context window an auxiliary model may have and still be used.
  *
- * Hermes's floor. A summariser has to hold the exchange it is summarising, and
+ * Hermes's `MINIMUM_CONTEXT_LENGTH`, which is 64,000 and not the 65,536 that
+ * "64K" invites you to write - checked against their source rather than
+ * inferred from the unit. A summariser has to hold the exchange it is
+ * summarising, and
  * an exchange can be most of a window on its own - a model with less room than
  * the material it is being asked to condense will either refuse or, worse,
  * silently summarise the half it could see.
  */
-export const AUX_WINDOW_FLOOR = 65_536;
+export const AUX_WINDOW_FLOOR = 64_000;
 
 /**
  * A cheap second model, used for nothing but condensing.
@@ -206,8 +209,18 @@ export function tailStart(messages: Msg[], cfg: MicroCompactConfig): number {
  * straddles either boundary is left alone rather than clipped, which is what
  * keeps the ranges from ever splitting a call from its result.
  */
+export function headEnd(messages: Msg[], cfg: MicroCompactConfig): number {
+  // Hermes's semantics, which are easy to get a message out on: protect_first_n
+  // counts NON-SYSTEM head messages, and the system prompt is protected on top
+  // of that rather than counted against it. Reading it as "the first three
+  // messages" protects the system prompt plus two turns, which is one turn less
+  // than the number says.
+  const system = messages.length && messages[0].role === "system" ? 1 : 0;
+  return system + cfg.protect_first_n;
+}
+
 export function compactable(messages: Msg[], cfg: MicroCompactConfig): Exchange[] {
-  const head = cfg.protect_first_n;
+  const head = headEnd(messages, cfg);
   const tail = tailStart(messages, cfg);
   return exchanges(messages).filter((e) => e.start >= head && e.end <= tail);
 }

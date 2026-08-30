@@ -24,6 +24,7 @@ import type { ToolContext } from "../src/agent/tools";
 import {
   exchanges,
   compactable,
+  headEnd,
   tailStart,
   exchangeTokens,
   renderExchange,
@@ -135,9 +136,21 @@ function ck(ok: boolean, label: string, detail = "") {
     const usable = compactable(t, cfg);
     ck(usable.length > 0, "there is something to compact at all", rangesOf(usable));
     ck(
-      usable.every((e) => e.start >= cfg.protect_first_n),
+      usable.every((e) => e.start >= headEnd(t, cfg)),
       "nothing inside the protected head is offered",
       rangesOf(usable)
+    );
+    // Hermes counts protect_first_n in non-system messages, with the system
+    // prompt protected on top. Reading it as "the first three messages" would
+    // leave one more turn compactable than the number promises.
+    ck(
+      headEnd(t, cfg) === cfg.protect_first_n + 1,
+      "and the system prompt is protected on top of the count, not inside it",
+      String(headEnd(t, cfg))
+    );
+    ck(
+      headEnd([usr("no system here")], cfg) === cfg.protect_first_n,
+      "with no system prompt the count stands alone"
     );
     const tail = tailStart(t, cfg);
     ck(
