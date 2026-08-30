@@ -2413,7 +2413,20 @@ export class App {
   }
 
   private async applyCaBundle(value: string): Promise<void> {
-    await this.cfg().update("caBundlePath", value, vscode.ConfigurationTarget.Workspace);
+    /* THE USER'S OWN SETTINGS, NOT THE REPOSITORY'S.
+     *
+     * This wrote to ConfigurationTarget.Workspace, which is .vscode/settings.json
+     * inside the checkout - with an ABSOLUTE path from a file picker on this
+     * machine. One engineer fixing their corporate CA and committing that file
+     * hands every colleague a TLS failure pointing at a path that does not
+     * exist for them, and the cause is a setting they never made.
+     *
+     * `genesis.caBundlePath` is machine-scoped in the manifest for the same
+     * reason, so a workspace override is refused outright; this is the writer
+     * agreeing with it. `system` is the one value that would travel correctly,
+     * and singling it out would make the destination depend on the value, which
+     * is worse than one rule. */
+    await this.cfg().update("caBundlePath", value, vscode.ConfigurationTarget.Global);
     clearAuthCache();
     await this.reload("ca bundle");
     this.broadcast({ type: "configChanged", config: this.configDto() });

@@ -207,7 +207,8 @@
         "genesis.caBundlePath": {
           "type": "string",
           "default": "",
-          "description": "Global fallback CA bundle merged into every profile's tls.caBundle at load time. Accepts a file path or the literal 'system'."
+          "scope": "machine",
+          "markdownDescription": "Global fallback CA bundle merged into every profile's `tls.caBundle` at load time. Accepts a file path or the literal `system`.\n\nMachine-scoped on purpose: this is an absolute path on **your** machine, so it must not be written into a repository's workspace settings, where it would resolve to nothing for everybody else who clones it."
         },
         "genesis.codeLens": {
           "type": "boolean",
@@ -238,7 +239,8 @@
         "genesis.searchApiKey": {
           "type": "string",
           "default": "",
-          "markdownDescription": "API key for the search provider. Supports `${env:NAME}` and `${file:path}`, the same as an endpoint profile, so the key need not sit here in the clear."
+          "scope": "machine",
+          "markdownDescription": "API key for the search provider.\n\n**Point this at the key rather than pasting it**: `${env:BRAVE_KEY}` and `${file:~/.config/brave.key}` both work, the same as in an endpoint profile. A literal here is stored in the clear.\n\nMachine-scoped, so it cannot be set in a repository's workspace settings and committed."
         },
         "genesis.searchEngineId": {
           "type": "string",
@@ -267,10 +269,29 @@
       "editor/title": [
         {
           "command": "genesis.focusSidebar",
-          "group": "navigation@1"
+          "group": "navigation@1",
+          "when": "editorLangId"
         }
       ]
-    }
+    },
+    "keybindings": [
+      {
+        "command": "genesis.focusSidebar",
+        "key": "ctrl+alt+g",
+        "mac": "cmd+alt+g"
+      },
+      {
+        "command": "genesis.newChat",
+        "key": "ctrl+alt+n",
+        "mac": "cmd+alt+n"
+      },
+      {
+        "command": "genesis.explainSelection",
+        "key": "ctrl+alt+e",
+        "mac": "cmd+alt+e",
+        "when": "editorTextFocus"
+      }
+    ]
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

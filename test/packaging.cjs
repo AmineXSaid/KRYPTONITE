@@ -108,6 +108,79 @@ for (const s of ["vscode:prepublish", "package", "build"]) {
   ok(`npm run ${s} is defined`, typeof pkg.scripts[s] === "string", pkg.scripts[s]);
 }
 
+console.log("──── settings that must not travel ────");
+/* THE DEFAULT SCOPE IS "window", AND IT IS WRONG FOR TWO OF THESE.
+ *
+ * A window-scoped setting can be written into a workspace's
+ * .vscode/settings.json and committed, and is replicated by Settings Sync.
+ *
+ * That is exactly what the TLS repair flow did: applyCaBundle wrote an
+ * ABSOLUTE, machine-local path to genesis.caBundlePath at
+ * ConfigurationTarget.Workspace, and the panel's own hint advertised it. One
+ * engineer fixing their corporate CA committed "C:\\Users\\them\\certs\\corp.pem"
+ * and gave ninety-nine colleagues a TLS failure pointing at a file that does
+ * not exist on their machine.
+ *
+ * genesis.searchApiKey is the same mechanism with a worse payload: a literal
+ * API key, in a repository, in the clear.
+ *
+ * "machine" is the scope that refuses a workspace override. */
+{
+  const props = pkg.contributes.configuration.properties;
+  for (const key of ["genesis.caBundlePath", "genesis.searchApiKey"]) {
+    ok(`${key} is machine-scoped`, props[key] && props[key].scope === "machine",
+      props[key] && props[key].scope);
+  }
+  // And the writer has to agree with the manifest, or the scope is decoration.
+  const app = read("src/core/app.ts");
+  ok("the CA bundle is written to the user's own settings, not the workspace's",
+    /caBundlePath", value, vscode\.ConfigurationTarget\.Global/.test(app));
+  ok("and the panel's hint says where it goes",
+    !/genesis\.caBundlePath<\/code> \(Workspace settings\)/.test(read("media/webview/sidebar.js")));
+}
+
+console.log("──── contributions that appear everywhere ────");
+{
+  // An editor/title contribution with no `when` puts a button in the title bar
+  // of EVERY editor - settings, image previews, markdown previews, diff views,
+  // and Genesis's own Control Center tab - forever, on a hundred installs.
+  for (const [menu, items] of Object.entries(pkg.contributes.menus || {})) {
+    for (const item of items) {
+      ok(`${menu} › ${item.command} is conditional`,
+        typeof item.when === "string" && item.when.length > 0, item.when);
+    }
+  }
+}
+
+console.log("──── the keyboard can reach the panel ────");
+{
+  /* ZERO KEYBINDINGS SHIPPED. Escape-to-interrupt and Shift+Tab for the phase
+     both exist and both need focus to already be inside the webview - which is
+     the one thing there was no shortcut for. A keyboard-only user had to open
+     the command palette and type "Genesis: Focus sidebar" every single time.
+     Three, and only three: the way in, a fresh conversation, and the editor
+     action that is worth reaching without the mouse. */
+  const binds = pkg.contributes.keybindings || [];
+  ok("some keybindings ship", binds.length >= 1, String(binds.length));
+  ok("but not many - every one costs somebody a chord they already use",
+    binds.length <= 4, String(binds.length));
+  const bound = new Set(binds.map((b) => b.command));
+  ok("the panel itself is reachable", bound.has("genesis.focusSidebar"));
+  const known = new Set(pkg.contributes.commands.map((c) => c.command));
+  for (const b of binds) {
+    ok(`${b.command} is a real command`, known.has(b.command));
+    ok(`${b.command} binds a mac chord too`, typeof b.mac === "string" && b.mac.length > 0, b.mac);
+    // ctrl+shift+* is where VS Code keeps its own; alt-based chords collide with
+    // far less.
+    ok(`${b.command} does not take a ctrl+shift chord`, !/^ctrl\+shift\+/.test(b.key), b.key);
+  }
+  // Anything needing an editor says so, or it fires into nothing.
+  for (const b of binds.filter((x) => /explainSelection|writeTests|documentSymbol|fixProblem/.test(x.command))) {
+    ok(`${b.command} only fires with an editor focused`,
+      typeof b.when === "string" && /editor/.test(b.when), b.when);
+  }
+}
+
 if (failures.length) for (const f of failures) console.log("FAIL  " + f);
 console.log(`\n──── ${pass} passed, ${failures.length} failed ────`);
 process.exitCode = failures.length ? 1 : 0;

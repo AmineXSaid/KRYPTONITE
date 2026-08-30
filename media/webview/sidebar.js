@@ -4246,7 +4246,10 @@ function _sbRun() {
         html += '<div class="upload"><label for="caPath">CA bundle file (.pem, .crt, .cer)</label>' +
           '<div class="split"><input id="caPath" readonly placeholder="No file selected…" value="' + esc(S.caUpload.path) + '">' +
           '<button class="btn" data-tls="browse">Browse…</button></div>' +
-          '<div class="hint2">The selected path will be written to <code>genesis.caBundlePath</code> (Workspace settings).</div>' +
+          '<div class="hint2">The selected path will be written to <code>genesis.caBundlePath</code> ' +
+            'in your <b>user</b> settings. It is a path on this machine, so it deliberately does ' +
+            'not go into the repository&rsquo;s workspace settings, where it would resolve to ' +
+            'nothing for everyone else who clones it.</div>' +
           '<div class="row"><button class="btn" data-tls="cancelUpload">Cancel</button>' +
           '<button class="btn primary" data-tls="saveCa"' + (S.caUpload.path ? "" : " disabled") + ">Save &amp; Retry</button></div></div>";
       } else {
