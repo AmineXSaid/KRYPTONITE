@@ -992,7 +992,10 @@ function contrast(a, b) {
     await page.evaluate(() => { window.__sent.length = 0; });
     await page.click("#permBtn");
     await page.waitForTimeout(450);
-    await page.keyboard.press("Tab");
+    // One Tab from the landing row reaches "Accept edits". It used to be two,
+    // which reached full-auto - and full-auto now arms on the first press
+    // rather than committing, so the assertion below would have been measuring
+    // the new confirmation step instead of the trap it exists for.
     await page.keyboard.press("Tab");
     await page.keyboard.press("Enter");
     await page.waitForTimeout(300);
@@ -1002,6 +1005,39 @@ function contrast(a, b) {
     // And it is not inert in the other direction: choosing a mode still works.
     ok("while choosing a mode still reaches the host",
       sent.includes("setConfig"), JSON.stringify(sent));
+    await ctx.close();
+  }
+  {
+    /* THE ONE MODE THAT TAKES TWO PRESSES, IN A REAL BROWSER.
+     *
+     * jsdom asserts the mechanism; this asserts that a real click lands on a
+     * real element and that the armed state actually paints - full-auto was a
+     * single click on a row of the same weight as the other two, so browsing
+     * the sheet to see what the modes were could hand the agent unattended
+     * shell access. */
+    const { ctx, page } = await open(400, {});
+    await page.click("#permBtn");
+    await page.waitForTimeout(450);
+    await page.evaluate(() => { window.__sent.length = 0; });
+    await page.click('#permPop [data-perm="full-auto"]');
+    await page.waitForTimeout(120);
+    ok("the first press on Auto sends nothing",
+      !(await page.evaluate(() => window.__sent.some((m) => m.type === "setConfig"))));
+    ok("and the row says it is waiting for a second",
+      /press again/i.test(await page.evaluate(
+        () => document.querySelector('#permPop [data-perm="full-auto"] .m').textContent)));
+    // The armed row has to be visibly different, or "press again" is a sentence
+    // in a row that looks exactly like the two beside it.
+    const armedBg = await page.evaluate(() => getComputedStyle(
+      document.querySelector('#permPop [data-perm="full-auto"]')).backgroundColor);
+    const plainBg = await page.evaluate(() => getComputedStyle(
+      document.querySelector('#permPop [data-perm="edits-auto"]')).backgroundColor);
+    ok("and is painted unlike its neighbours", armedBg !== plainBg, `${armedBg} vs ${plainBg}`);
+    await page.click('#permPop [data-perm="full-auto"]');
+    await page.waitForTimeout(120);
+    ok("the second press commits it",
+      await page.evaluate(() => window.__sent.some(
+        (m) => m.type === "setConfig" && m.value === "full-auto")));
     await ctx.close();
   }
 
