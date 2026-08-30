@@ -2632,8 +2632,17 @@ function _sbRun() {
       '<div class="diff-body">' + body + "</div>" +
       (m.truncated ? '<div class="trunc-note" style="padding:0 9px 6px">' + icon("i-warn", "ic-11") +
         "<span>Patch truncated at 30,000 characters</span></div>" : "") +
+      /* The mark, then straight to the decision.
+      
+         This carried "Genesis: 3 additions, 1 deletions" as well, which is the
+         same count the card's HEADER states as `+3 -1` two rows above. That
+         sentence measured 228px in a 390px footer, so the row needed 487px and
+         wrapped: Accept ended up alone on one line with Reject and Diff view
+         underneath it. Three controls of one decision, split across two rows,
+         with the primary one separated from its alternatives.
+      
+         The counts were the redundant part, so the counts went. */
       '<div class="diff-foot">' + crystal(16) +
-        "<span>Genesis: " + m.added + " additions, " + m.removed + " deletions</span>" +
         '<span class="sp"></span>' +
         '<button class="btn sm go" data-diff="accept">Accept</button>' +
         '<button class="btn sm" data-diff="reject">Reject</button>' +

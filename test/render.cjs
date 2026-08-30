@@ -1126,6 +1126,47 @@ function contrast(a, b) {
     await ctx.close();
   }
 
+  /* ── 5l. a decision's controls stay on one row ─────────────────────── */
+  {
+    // The diff card's footer carried "Genesis: 3 additions, 1 deletions" -
+    // the same count its own HEADER states as `+3 -1` two rows above. That
+    // sentence was 228px in a 390px footer, so the row needed 487px and
+    // wrapped: Accept alone on one line, Reject and Diff view underneath.
+    // Three controls of one decision, split, with the primary one separated
+    // from its alternatives.
+    //
+    // Asserted by measuring where the buttons LAND, not by looking for the
+    // string that used to push them: any future addition to this row fails
+    // the same way, which is the point.
+    for (const width of [340, 400, 460]) {
+      const { ctx, page } = await open(width, {});
+      await page.evaluate((patch) => {
+        window.dispatchEvent(new MessageEvent("message", { data: {
+          type: "diffPending", turnId: "t1", file: "src/providers/http.ts",
+          added: 3, removed: 1, patch, truncated: false } }));
+        window.dispatchEvent(new MessageEvent("message", { data: {
+          type: "permissionRequest", id: "p1", summary: "Run npm test -- http" } }));
+      }, "--- a/x\n+++ b/x\n@@ -41,1 +41,3 @@\n-  const res = await fetch(url);\n+  const res = await withRetry(\n");
+      await page.waitForTimeout(250);
+
+      const rows = (sel) => page.evaluate((s) => {
+        const box = document.querySelector(s);
+        if (!box) return null;
+        const tops = [...box.querySelectorAll("button")]
+          .map((b) => Math.round(b.getBoundingClientRect().top));
+        return { count: tops.length, rows: new Set(tops).size };
+      }, sel);
+
+      const d = await rows(".diff-foot");
+      ok(`the diff decision keeps its controls on one row at ${width}px`,
+        d && d.count >= 2 && d.rows === 1, JSON.stringify(d));
+      const p = await rows(".perm-actions");
+      ok(`and the permission decision does too at ${width}px`,
+        p && p.count >= 2 && p.rows === 1, JSON.stringify(p));
+      await ctx.close();
+    }
+  }
+
   /* ── 6. the session list, as the reference draws it ────────────────── */
   {
     const { ctx, page } = await open(400, {
