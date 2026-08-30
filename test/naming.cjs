@@ -142,6 +142,90 @@ for (const file of [...walk(path.join(ROOT, "src")), ...walk(path.join(ROOT, "me
 ok("nothing outside the allow-list still says Kryptonite",
   leaks.length === 0, leaks.slice(0, 6).join("\n        "));
 
+console.log("──── sentence case, which this file is pointed at and did not check ────");
+/* THE RULE THIS FILE IS CITED FOR WAS NOT IN IT.
+ *
+ * Every convention document in this repository says "keep every user-facing
+ * string sentence-case and pass naming.cjs", and naming.cjs read command titles
+ * only to check they did not say Kryptonite. A Title-Cased command shipped
+ * green, and the rule was enforced by review or not at all.
+ *
+ * Sentence case here means: first word capitalised, and no interior word
+ * capitalised unless it is a proper noun or an acronym this product actually
+ * uses. The allow-list is deliberately short and explicit - a permissive rule
+ * that lets anything through is the state this replaces.
+ */
+const PROPER = new Set([
+  // The product, its surfaces, and the things it talks to.
+  "Genesis", "Control", "Center", "VS", "Code", "Chromium", "Claude", "Desktop",
+  // Acronyms and protocol names, which are not Title Case even when they look it.
+  "MCP", "TLS", "SSL", "DNS", "TCP", "HTTP", "HTTPS", "JSON", "YAML", "URL",
+  "API", "CA", "SNI", "SSE", "CDP", "FIM", "IDE", "OS", "UI", "AI", "LLM",
+  "OpenAI", "Anthropic", "Azure", "OpenRouter", "NVIDIA", "Ollama", "Google",
+  "Brave", "Bing", "DuckDuckGo", "SecretStorage", "Marketplace", "GitHub",
+  "Markdown", "Chrome", "Edge", "Windows", "macOS", "Linux", "Node",
+  // Languages and ecosystems named in the settings, and the full product name
+  // of Google's search API. All genuinely proper nouns; none is Title Case.
+  "Python", "Go", "Rust", "Java", "Programmable", "Search",
+]);
+
+/** Words that may be capitalised mid-string, plus anything not alphabetic. */
+function offendingWords(text) {
+  // Strip markdown code spans, links and setting references: `#genesis.x#` and
+  // `capabilities.vision` are identifiers, not prose.
+  const prose = text
+    .replace(/`[^`]*`/g, " ")
+    .replace(/#[\w.]+#/g, " ")
+    .replace(/\$\{[^}]*\}/g, " ")
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/\b[\w.-]+\.(?:ts|js|json|md|ya?ml|pem|crt|cer)\b/g, " ");
+  const out = [];
+  // Sentence starts are exempt: the word after . ? ! : or a newline.
+  const sentences = prose.split(/(?:^|[.!?:\n]\s*)/);
+  for (const sentence of sentences) {
+    const words = sentence.trim().split(/\s+/).filter(Boolean);
+    for (let i = 1; i < words.length; i++) {
+      const w = words[i].replace(/^[^A-Za-z]+|[^A-Za-z]+$/g, "");
+      if (!w || !/^[A-Z]/.test(w)) continue;
+      if (PROPER.has(w)) continue;
+      // ALLCAPS is an acronym or emphasis, not Title Case.
+      if (w === w.toUpperCase()) continue;
+      // A hyphenated or possessive form of a proper noun.
+      if (PROPER.has(w.split(/[-']/)[0])) continue;
+      out.push(w);
+    }
+  }
+  return out;
+}
+
+{
+  const bad = [];
+  for (const c of cmds) {
+    const off = offendingWords(c.title);
+    if (off.length) bad.push(`${c.command}: "${c.title}" (${off.join(", ")})`);
+  }
+  ok("every command title is sentence case", bad.length === 0, bad.join(" · "));
+
+  // A title has to start with a capital too, or the palette reads as a typo.
+  const lower = cmds.filter((c) => /^[a-z]/.test(c.title));
+  ok("and starts with one", lower.length === 0, lower.map((c) => c.title).join(", "));
+
+  const props = pkg.contributes.configuration.properties;
+  const badDesc = [];
+  for (const [key, v] of Object.entries(props)) {
+    const text = String(v.description || v.markdownDescription || "");
+    const off = offendingWords(text);
+    if (off.length) badDesc.push(`${key} (${off.join(", ")})`);
+  }
+  ok("and so is every setting description", badDesc.length === 0, badDesc.join(" · "));
+
+  // Every setting says something. A property with no description is a switch
+  // in the settings UI with a name and no explanation.
+  const silent = Object.entries(props).filter(([, v]) => !v.description && !v.markdownDescription);
+  ok("no setting ships without a description", silent.length === 0,
+    silent.map(([k]) => k).join(", "));
+}
+
 console.log("──── the places the rename originally missed ────");
 const read = (p) => fs.readFileSync(path.join(ROOT, p), "utf8");
 ok("the editor tab", /createWebviewPanel\(\s*[\s\S]{0,80}?"Genesis"/.test(read("src/ui/controlCenter.ts")));

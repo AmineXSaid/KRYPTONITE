@@ -213,7 +213,7 @@
         "genesis.codeLens": {
           "type": "boolean",
           "default": true,
-          "description": "Show Explain / Document / Tests above functions and classes."
+          "markdownDescription": "Show the `Explain`, `Document` and `Tests` actions above functions and classes."
         },
         "genesis.codeActions": {
           "type": "boolean",

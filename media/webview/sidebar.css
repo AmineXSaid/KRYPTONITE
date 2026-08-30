@@ -113,6 +113,20 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 .sp { flex: 1; }
 .mono { font-family: var(--kx-mono); }
 .tnum { font-variant-numeric: tabular-nums; }
+/* ── the type scale ────────────────────────────────────────────────────────
+ * Eleven sizes, and each of the eleven does a job the one beside it does not.
+ *
+ * It was thirteen, and two of the extras were half-pixel neighbours of a size
+ * already in use: 9.5 sat beside 9 on the same uppercase micro-labels, and 10
+ * sat beside 10.5 on the same meta text. A half-pixel step is below what the
+ * eye resolves at those sizes, so the pair did not read as a hierarchy - it
+ * read as two elements that were supposed to match and did not, which is the
+ * one thing a type scale exists to prevent. They are folded into 9 and 10.5.
+ *
+ * The half-steps that STAY all earn it: 11.5 is the panel's body size against
+ * 11 for meta and 12 for a control's label, and 16 / 14.5 / 13.5 is the
+ * heading ramp, where three steps in two and a half pixels is the whole point.
+ * ───────────────────────────────────────────────────────────────────────── */
 .ell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* PRESENT TO A SCREEN READER, ABSENT TO THE EYE.
@@ -599,7 +613,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   font-family: var(--kx-ui); font-size: 11px; font-weight: 400;
   white-space: nowrap;
 }
-.u-att-chip .sz { font-family: var(--kx-mono); font-size: 10px; color: var(--kx-fg-4); }
+.u-att-chip .sz { font-family: var(--kx-mono); font-size: 10.5px; color: var(--kx-fg-4); }
 .msg-img { max-width: 100%; max-height: 200px; border-radius: 4px; margin-bottom: 6px; display: block; }
 
 /* â”€â”€ the answer: prose, with room to breathe â”€â”€
@@ -647,7 +661,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   background: color-mix(in srgb, var(--kx-line) 22%, transparent);
 }
 .cb-l {
-  font-family: var(--kx-mono); font-size: 9.5px; letter-spacing: .1em;
+  font-family: var(--kx-mono); font-size: 9px; letter-spacing: .1em;
   text-transform: uppercase; color: var(--kx-fg-2);
 }
 .cb pre { margin: 0; border-radius: 0; background: none; }
@@ -709,7 +723,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 .md-call-h {
   display: flex; align-items: center; gap: 5px; margin-bottom: 3px;
-  font-family: var(--kx-ui); font-size: 10px; font-weight: 600;
+  font-family: var(--kx-ui); font-size: 10.5px; font-weight: 600;
   letter-spacing: .09em; text-transform: uppercase;
   color: var(--kx-line-2);
 }
@@ -929,7 +943,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .io-row { display: flex; gap: 8px; align-items: flex-start; margin-top: 4px; }
 .io-tag {
   flex: none; width: 26px; padding-top: 5px;
-  font-family: var(--kx-mono); font-size: 9.5px; font-weight: 600;
+  font-family: var(--kx-mono); font-size: 9px; font-weight: 600;
   letter-spacing: .08em; color: var(--kx-fg-4); text-align: right;
 }
 .io-body { min-width: 0; flex: 1; }
@@ -1006,7 +1020,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 
 /* â”€â”€ buttons â”€â”€ */
 .btn {
-  font-family: var(--kx-mono); font-size: 9.5px; font-weight: 700;
+  font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
   letter-spacing: .12em; text-transform: uppercase;
   padding: 5px 11px; border-radius: 4px; text-align: center;
   background: transparent; border: 1px solid var(--kx-edge);
@@ -1088,7 +1102,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .todo-list .cbx {
   width: 9px; height: auto; flex: none; margin: 0; display: block;
   border: none; border-radius: 0; background: none;
-  font-family: var(--kx-mono); font-size: 10px; color: var(--kx-accent);
+  font-family: var(--kx-mono); font-size: 10.5px; color: var(--kx-accent);
 }
 .todo-list .tx { color: var(--kx-fg-3); }
 .todo-list li.doing .tx { color: var(--kx-fg); font-weight: 500; }
@@ -1142,7 +1156,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .plan-steps li { display: flex; gap: 8px; font-size: 12.5px; }
 .plan-steps .n {
   width: 16px; height: 16px; flex: none; border-radius: 4px; display: grid; place-items: center;
-  background: var(--kx-surface-2); font-family: var(--kx-mono); font-size: 10px;
+  background: var(--kx-surface-2); font-family: var(--kx-mono); font-size: 10.5px;
 }
 .plan-foot { display: flex; gap: 7px; }
 
@@ -1378,12 +1392,12 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .ag-live {
   flex: none; padding: 1px 6px; border-radius: 3px;
   background: var(--kx-agent); color: var(--kx-on-accent);
-  font-family: var(--kx-ui); font-size: 9.5px; font-weight: 700;
+  font-family: var(--kx-ui); font-size: 9px; font-weight: 700;
   letter-spacing: .05em; text-transform: uppercase;
 }
 .ag-desc { margin-top: 4px; font-family: var(--kx-ui); font-size: 11.5px; color: var(--kx-fg-2); line-height: 1.5; }
 .ag-scope { margin-top: 3px; font-family: var(--kx-mono); font-size: 10.5px; color: var(--kx-fg-3); overflow-wrap: anywhere; }
-.ag-file { margin-top: 2px; font-family: var(--kx-mono); font-size: 10px; color: var(--kx-fg-4); }
+.ag-file { margin-top: 2px; font-family: var(--kx-mono); font-size: 10.5px; color: var(--kx-fg-4); }
 
 /* Conversations to go back to, listed on the empty screen. Pressing New chat
    used to leave the way back two clicks deep in a header popover. */
@@ -1487,7 +1501,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    carry and a stack of identical rows does not. */
 .queue-row .pos {
   flex: none; min-width: 13px;
-  font-family: var(--kx-mono); font-size: 10px; color: var(--kx-fg-4);
+  font-family: var(--kx-mono); font-size: 10.5px; color: var(--kx-fg-4);
 }
 .queue-row .qt { flex: 1; min-width: 0; font-size: 11.5px; color: var(--kx-fg-2); }
 .queue-row .u-att { margin-top: 0; flex: none; }
@@ -1521,7 +1535,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .chg-row:hover { background: var(--kx-hover); color: var(--kx-fg); }
 .chg-kind {
   flex: none; width: 13px; text-align: center;
-  font-size: 10px; font-weight: 700;
+  font-size: 10.5px; font-weight: 700;
 }
 .chg-kind[data-kind="created"] { color: var(--kx-accent); }
 .chg-kind[data-kind="modified"] { color: var(--kx-fg-3); }
@@ -1581,13 +1595,13 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 /* Where a skill came from â€” workspace beats bundled when names collide, and
    that is worth seeing before you pick one. */
 .qp-src {
-  flex: none; font-family: var(--kx-mono); font-size: 9.5px;
+  flex: none; font-family: var(--kx-mono); font-size: 9px;
   letter-spacing: .04em; text-transform: uppercase;
   color: var(--kx-fg-3);
 }
 .qp-group {
   padding: 7px 9px 3px; font-family: var(--kx-mono);
-  font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+  font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase;
   color: var(--kx-fg-3);
 }
 .qp-check { width: 13px; flex: none; display: grid; place-items: center; color: var(--kx-link); }
@@ -1801,7 +1815,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 .ed-pill .nm { min-width: 0; }
 .ed-pill .prob {
-  flex: none; font-family: var(--kx-mono); font-size: 10px; padding: 0 5px;
+  flex: none; font-family: var(--kx-mono); font-size: 10.5px; padding: 0 5px;
   border-radius: 3px; background: var(--kx-surface-3); color: var(--kx-fg-2);
 }
 .ed-pill .prob[data-err="1"] { color: var(--kx-error); }
@@ -1878,7 +1892,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 .att-thumb { width: 18px; height: 18px; object-fit: cover; border-radius: 3px; flex: none; }
 .att-name { max-width: 110px; }
-.att-size { color: var(--kx-fg-2); font-size: 10px; flex: none; }
+.att-size { color: var(--kx-fg-2); font-size: 10.5px; flex: none; }
 .att-x {
   width: 16px; height: 16px; flex: none; display: grid; place-items: center;
   border-radius: 3px; color: var(--kx-fg-2);
@@ -1923,7 +1937,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .seg button:hover:not([data-on="1"]) { background: var(--kx-hover); color: var(--kx-fg); }
 
 
-.hint { font-size: 10px; flex: none; color: var(--kx-fg-3); }
+.hint { font-size: 10.5px; flex: none; color: var(--kx-fg-3); }
 #modelBtn {
   display: flex; align-items: center; gap: 5px; min-width: 0; height: 26px; padding: 0 6px;
   border-radius: 4px; font-size: 12px; color: var(--kx-fg-2); white-space: nowrap;
@@ -2051,7 +2065,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 /* The keycap-ish label. Amber, matching Ask: both mean "information, not
    action", and a third accent for one word would be a third thing to learn. */
 .tipbar .tip-k {
-  flex: none; font-size: 9.5px; font-weight: 700;
+  flex: none; font-size: 9px; font-weight: 700;
   letter-spacing: .1em; text-transform: uppercase;
   color: var(--kx-ask);
 }
@@ -2890,7 +2904,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 .skill .nm { font-size: 12px; font-weight: 600; }
 .skill .ds { font-size: 11.5px; color: var(--kx-fg-2); }
-.skill .src { font-size: 10px; flex: none; color: var(--kx-fg-2); }
+.skill .src { font-size: 10.5px; flex: none; color: var(--kx-fg-2); }
 .skill[data-src="bundled"] .src { opacity: .65; }
 .sk-foot {
   display: flex; align-items: center; gap: 8px; margin-top: 9px; flex-wrap: wrap;

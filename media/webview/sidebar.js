@@ -100,6 +100,12 @@ function _sbRun() {
     /* The approval control. A shield rather than a lock: a lock says "you
        cannot", and this says "something is standing between the agent and the
        workspace" - which is a guard, not a barrier. */
+    // KEPT, and it is the one symbol nothing draws. renderPerm's comment records
+    // why the shield left the mode button - it said nothing about which mode was
+    // in force and read as a security badge - and the sheet's rows take their
+    // glyphs from PERMS. It stays defined because the icon sheet is the panel's
+    // vocabulary rather than a list of current call sites, and deleting it would
+    // make the comment explaining its removal point at nothing.
     '<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7.5 3v6c0 4.2-3 7.6-7.5 9-4.5-1.4-7.5-4.8-7.5-9V6z" ' +
       S6 + ' stroke-width="1.5" stroke-linejoin="round"/></symbol>' +
     /* The `@` that references a file, DRAWN rather than typed.
@@ -1462,28 +1468,23 @@ function _sbRun() {
       segs[i].setAttribute("data-on", on ? "1" : "0");
       segs[i].setAttribute("aria-checked", on ? "true" : "false");
     }
+    /* One banner, two read-only phases. Both make the same promise - nothing in
+       the workspace changes - and saying it twice in two colours would be two
+       ways to read one fact.
+
+       This was written TWICE, from two `var banner` declarations in the same
+       function: once off PHASE_INFO and once off a pair of inline literals
+       saying the same thing. Two copies of one string is how they stop being
+       one string, so PHASE_INFO is the only one left. Ask's line carries a
+       promise Plan's does not - no plan either - which is the whole difference
+       between the two, and it lives in that table. */
     var info = PHASE_INFO[phase];
     var banner = $("phaseBanner");
     banner.hidden = !info;
     if (info) {
       banner.setAttribute("data-phase", phase);
-      banner.querySelector(".lbl").textContent = info.lbl;
-      banner.querySelector(".sub").textContent = info.sub;
-    }
-    // One banner, two read-only phases. Both make the same promise - nothing
-    // in the workspace changes - and saying it twice in two colours would be
-    // two ways to read one fact.
-    var banner = $("phaseBanner");
-    banner.hidden = phase === "act";
-    if (!banner.hidden) {
-      banner.setAttribute("data-phase", phase);
-      $("phaseBannerLbl").textContent = phase === "ask" ? "Ask phase" : "Plan phase";
-      // Ask's line carries one promise Plan's does not: no plan either. That is
-      // the whole difference between the two read-only phases, so the banner
-      // that announces the phase is where it has to be said.
-      $("phaseBannerSub").textContent = phase === "ask"
-        ? "reads and answers · no edits, no plan"
-        : "reads and plans · no edits applied";
+      $("phaseBannerLbl").textContent = info.lbl;
+      $("phaseBannerSub").textContent = info.sub;
     }
     syncComposer();
     if (!silent) post("setPhase", { phase: phase });
@@ -1539,6 +1540,9 @@ function _sbRun() {
     "Put standing rules in <b>.agent/instructions.md</b> and they join every prompt.",
     "<b>Esc</b> stops a running turn, and the conversation stays resumable.",
     "Every turn is snapshotted - <b>Restore checkpoint</b> undoes a whole turn, not one file.",
+    // The command list was documented in exactly one place - /help - reachable
+    // only by already knowing to type it.
+    "Type <b>/help</b> for every slash command, and every skill this workspace has.",
     "The <b>Diagnostics</b> tab walks eight rungs and stops at the first real failure.",
     "Drop a <b>SKILL.md</b> into .agent/skills and it appears under / straight away."
   ];
@@ -4738,7 +4742,11 @@ function _sbRun() {
       rows += '<div class="mcp-row" data-state="' + esc(sv.state) + '">' +
         
         '<span class="mid">' +
-          '<span class="top"><span class="nm">' + esc(sv.name) + "</span>" + mcpPill(sv.state) +
+          // The name ellipsises at a narrow width and had no title, so a long
+          // server name simply could not be read. The line under it has always
+          // carried one for the command.
+          '<span class="top"><span class="nm" title="' + esc(sv.name) + '">' +
+            esc(sv.name) + "</span>" + mcpPill(sv.state) +
             // The read-only claim, shown because it is the one thing that lets
             // this server's tools be used in Ask and Plan. A claim nobody can
             // see is a claim nobody can audit - and the title says plainly
@@ -6235,9 +6243,19 @@ function _sbRun() {
         break;
       }
 
+      case "bundleExported":
+        /* This was in the do-nothing list, so "Export offline bundle" wrote a
+           folder and the panel said nothing whatsoever - the command looked
+           like it had failed. Same treatment the chat export gets, for the same
+           reason: what the user needs afterwards is the path. */
+        addNotice("i-download",
+          "Offline bundle written to " + m.path +
+          " - it holds this workspace's .agent configuration, and no credentials.",
+          m.path);
+        break;
+
       case "checkpointsListed":
       case "checkpointRestored":
-      case "bundleExported":
       case "logLine":
       case "navigate":
         break;
