@@ -127,4 +127,25 @@ export class ShadowRepo {
       return "";
     }
   }
+
+  /**
+   * One file's contents as they were at `from`.
+   *
+   * Needed so the panel's "Diff view" can open a REAL diff. That button posted
+   * `openFile` and opened the plain file with nothing highlighted, which is the
+   * one thing a control called "Diff view" must not do; the pre-turn side of
+   * the comparison has always been sitting in the shadow repo and there was
+   * simply no way to read it out.
+   *
+   * Empty string for a path that did not exist at `from` - the agent created
+   * it - which is exactly what a diff against "nothing" should show.
+   */
+  async fileAt(from: string, relPath: string): Promise<string> {
+    await this.init();
+    try {
+      return await this.run(["show", `${from}:${relPath}`]);
+    } catch {
+      return "";
+    }
+  }
 }

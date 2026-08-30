@@ -1032,6 +1032,14 @@ function _sbRun() {
           // for a real one, so the strip never appears and disappears.
           '<div class="convo-title" id="convoTitle" hidden></div>' +
           '<div id="log"></div>' +
+          /* Once you scroll up mid-stream, autoscroll stops following the
+             answer - correctly, because fighting the user is worse. But nothing
+             offered a way back: the reply kept growing below the fold with no
+             signal it had, and the only route down was scrolling by hand.
+             Shown only when it is true, so it costs no chrome the rest of the
+             time. */
+          '<button class="to-latest" id="toLatest" hidden>' +
+            icon("i-caret", "ic-11") + "<span>Jump to latest</span></button>" +
           /* THE TRANSCRIPT IS NOT A LIVE REGION, AND USED TO BE ONE.
            *
            * `#log` carried aria-live="polite" - which sounds right and is the
@@ -1232,23 +1240,25 @@ function _sbRun() {
       '<div class="sec-body" id="' + bodyId + '"' + (open ? "" : " hidden") + '></div></div>';
   }
 
-  /* ──────────────────── what survives the view being hidden ────────────────
+  /* ──────────────────── what survives the webview being rebuilt ────────────
    *
-   * A view container that is collapsed, or switched away from, is TORN DOWN:
-   * VS Code disposes the webview unless retainContextWhenHidden is set, and
-   * setting it here would be wrong - it keeps a whole DOM alive for a panel
-   * nobody is looking at, which is why only the browser panel does it.
+   * NOT the hide/show case. `retainContextWhenHidden: true` is set where the
+   * view is registered (src/extension.ts), so collapsing the container or
+   * switching to Explorer keeps this whole DOM alive, draft and all. That flag
+   * is deliberate and stays.
    *
-   * So the panel came back a stranger. The transcript survived, because it
-   * re-hydrates from the host's replay buffer - but the tab you were on, the
-   * sections you had opened and, worst, the message you were in the middle of
-   * typing did not. Clicking Explorer to check a filename and coming back cost
-   * you the draft.
+   * What it does not survive is the webview being REBUILT: a window reload, an
+   * extension host restart, a reinstall, "Developer: Reload Webviews". Then the
+   * script runs again from scratch. The transcript comes back, because it
+   * re-hydrates from the host's replay buffer - but S is a fresh object, so the
+   * tab you were on, the sections you had opened and the message you were half
+   * way through typing were gone, with the draft the one that actually costs
+   * something.
    *
-   * `setState` is the mechanism VS Code provides for exactly this, and the API
-   * was already acquired and never used. It is per-webview and survives the
-   * teardown; nothing here is authoritative, so a stale value is only ever a
-   * worse guess than a fresh one, never a wrong fact.
+   * `setState` is the mechanism VS Code provides for exactly that, it survives
+   * the rebuild, and the API was already acquired and never called. Nothing
+   * here is authoritative: a stale value is a worse guess than a fresh one,
+   * never a wrong fact.
    */
   function saveUiState() {
     if (!api.setState) return;
@@ -1872,6 +1882,18 @@ function _sbRun() {
     return logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
   }
   function scroll() { logEl.scrollTop = logEl.scrollHeight; }
+
+  /**
+   * Show the way back down, but only while there is a down to go to.
+   *
+   * Called from the same places that decide whether to autoscroll, so the
+   * button and the anchoring can never disagree about where the log is.
+   */
+  function syncToLatest() {
+    var btn = $("toLatest");
+    if (!btn) return;
+    btn.hidden = atBottom();
+  }
   function add(el) {
     // Anything appended after a streaming answer must not appear before the
     // last unpainted deltas of it. Flushing here covers every insertion point -
@@ -1883,10 +1905,10 @@ function _sbRun() {
     if (welcome) welcome.remove();
     logEl.appendChild(el);
     if (stick) scroll();
+    syncToLatest();
     return el;
   }
   function clearTranscript() {
-    if (aiPaint) { clearTimeout(aiPaint); aiPaint = null; }
     if (aiFrame) { cancelAnimationFrame(aiFrame); aiFrame = 0; }
     logEl.innerHTML = "";
     aiEl = null; streamEl = null; pendingTool = null; todoEl = null; toolGroup = null;
@@ -2134,18 +2156,34 @@ function _sbRun() {
     userTurn(html, plain, att);
   }
 
-  /* Re-rendering the answer is throttled, because it costs the whole message.
+  /* THE THROTTLE THIS COMMENT DESCRIBED DID NOT EXIST.
    *
-   * `md()` parses from scratch and innerHTML replaces the subtree, so doing it
-   * per delta is O(n²) in the number of deltas. Measured in the harness at a
-   * constant payload: 50 deltas took 8ms, 100 took 436ms, 200 took 2.4s and 400
-   * took 10s - each doubling roughly quadrupling. Real streaming arrives token
-   * by token, so a long reply meant thousands of deltas and a locked panel.
+   * It said the paint was coalesced at 50ms - "twenty repaints a second, which
+   * reads as continuous" - and `aiPaint` was declared, cleared in two places
+   * and never once assigned a timer. What actually ran was `typeStep` below,
+   * on requestAnimationFrame, re-parsing the WHOLE message and replacing the
+   * whole subtree up to sixty times a second. Faster than the thing the
+   * comment was defending against, not slower.
    *
-   * Text still accumulates on every delta; only the paint is coalesced. At 50ms
-   * that is twenty repaints a second, which reads as continuous, and the cost
-   * becomes a function of elapsed time rather than of delta count. */
-  var aiPaint = null;
+   * The measurements it quotes are still right about md(): 0.72ms for a 4KB
+   * reply, 4.1ms at 41KB, and a token-paced arrival at that size spends about
+   * 1.6 seconds parsing across the turn before any DOM work at all.
+   *
+   * But the cost a user actually NOTICES is not the parse. Replacing innerHTML
+   * destroys the child nodes any selection is anchored in, so text could not be
+   * selected out of a reply while it was still arriving - the selection was
+   * wiped on every frame.
+   *
+   * `paintFrom` below is the fix, and it is not a throttle: the tail of a
+   * streaming reply is almost always plain prose, so while that holds only the
+   * last text node is updated and the parsed prefix is left alone. A full
+   * re-parse happens when the tail stops being plain - a fence opens, a table
+   * row lands, a heading appears - which is a handful of times per reply
+   * instead of a thousand. Selection inside everything above the tail survives.
+   *
+   * `aiPaint` is gone rather than wired up: it named a mechanism that never
+   * ran, and reinstating it would be reintroducing 50ms latency to solve a
+   * problem the incremental path does not have. */
 
   /*
    * Typing is paced from a buffer, not from arrival.
@@ -2165,6 +2203,74 @@ function _sbRun() {
   var TYPE_MIN = 2;      // chars per frame at the tail, so short replies still type
   var TYPE_DIVISOR = 9;  // larger backlog reveals proportionally faster
 
+  /**
+   * Everything after the last blank line, which is the part still being written.
+   *
+   * A markdown block cannot start in the middle of a paragraph, so the text
+   * after the final blank line is the only region a new character can change
+   * the STRUCTURE of. Everything before it is settled and does not need
+   * re-parsing.
+   */
+  function tailStart(text) {
+    var i = text.lastIndexOf("\n\n");
+    return i === -1 ? 0 : i + 2;
+  }
+
+  /**
+   * Is the growing tail still plain prose?
+   *
+   * If it is, appending to it can be a text-node write. If it is not - a fence
+   * is open, a list or table or heading is being built, a link or code span is
+   * half typed - the block's rendering depends on characters that have not
+   * arrived, and only a re-parse is right.
+   *
+   * Deliberately conservative: every uncertain case answers "no" and falls back
+   * to the correct-but-costly path. The optimisation is worth having only
+   * because ordinary prose is the common case, not because it is clever.
+   */
+  function tailIsPlain(text, from) {
+    // An odd number of fences anywhere means one is open right now.
+    var fences = text.split("```").length - 1;
+    if (fences % 2) return false;
+    var tail = text.slice(from);
+    return !/[`*_~\[\]<>|#>-]/.test(tail) && tail.indexOf("\n") === -1;
+  }
+
+  /**
+   * Reveal up to `next`, re-parsing as little as possible.
+   *
+   * Returns nothing; the shared caller owns the scroll decision.
+   */
+  function paintFrom(next) {
+    var full = aiEl._raw || "";
+    var text = full.slice(0, next);
+    var from = tailStart(text);
+    var tailNode = aiEl._tail;
+
+    if (tailNode && aiEl._tailFrom === from && tailIsPlain(text, from) &&
+        tailNode.parentNode) {
+      // The cheap path, and the one that matters: nothing above the tail is
+      // touched, so a selection anywhere in the finished part survives.
+      tailNode.nodeValue = text.slice(from);
+      aiEl._shown = next;
+      return;
+    }
+
+    aiEl.innerHTML = md(text);
+    aiEl._shown = next;
+    aiEl._tail = null;
+    aiEl._tailFrom = from;
+    // Arm the cheap path for the next frame, but only when the tail really did
+    // render as one plain text node - which is what makes writing into it safe.
+    if (tailIsPlain(text, from) && from < text.length) {
+      var last = aiEl.lastChild;
+      while (last && last.lastChild) last = last.lastChild;
+      if (last && last.nodeType === 3 && last.nodeValue === text.slice(from)) {
+        aiEl._tail = last;
+      }
+    }
+  }
+
   function paintAi() {
     if (!aiEl) return;
     var full = aiEl._raw || "";
@@ -2174,9 +2280,9 @@ function _sbRun() {
     // screenful at once, so checking afterwards always reads as "the user has
     // scrolled up" and autoscroll silently stops following the answer.
     var stick = atBottom();
-    aiEl._shown = full.length;
-    aiEl.innerHTML = md(full);
+    paintFrom(full.length);
     if (stick) scroll();
+    syncToLatest();
   }
 
   function typeStep() {
@@ -2191,16 +2297,15 @@ function _sbRun() {
     var next = Math.min(full.length, shown + step);
 
     var stick = atBottom();
-    aiEl._shown = next;
-    aiEl.innerHTML = md(full.slice(0, next));
+    paintFrom(next);
     if (stick) scroll();
+    syncToLatest();
 
     if (next < full.length) aiFrame = requestAnimationFrame(typeStep);
   }
 
   /** Reveal everything immediately. Used at turn end and before reordering. */
   function flushAi() {
-    if (aiPaint) { clearTimeout(aiPaint); aiPaint = null; }
     if (aiFrame) { cancelAnimationFrame(aiFrame); aiFrame = 0; }
     if (!aiEl) return;
     aiEl._done = true;
@@ -2222,6 +2327,7 @@ function _sbRun() {
     el._raw = text;
     el._shown = text.length;
     el._done = true;
+    el._tail = null;
     el.innerHTML = md(text);
     return el;
   }
@@ -2235,6 +2341,10 @@ function _sbRun() {
       aiEl._raw = "";
       aiEl._shown = 0;
       aiEl._done = false;
+      // The text node the cheap paint path writes into, and the offset it
+      // starts at. Null until a paint arms it; see paintFrom.
+      aiEl._tail = null;
+      aiEl._tailFrom = -1;
     }
     aiEl._raw += text;
     // `add()` flushes mid-stream to keep insertion order, which marks the
@@ -2337,6 +2447,8 @@ function _sbRun() {
       var stick = atBottom();
       logEl.insertBefore(box, prior);
       if (stick) scroll();
+      syncToLatest();
+    syncToLatest();
     } else {
       add(box);
     }
@@ -2827,7 +2939,11 @@ function _sbRun() {
       var b = e.target.closest("[data-diff]");
       if (!b) return;
       var action = b.getAttribute("data-diff");
-      if (action === "view") { post("openFile", { path: m.file }); return; }
+      /* "Diff view" used to post `openFile`, which opens the plain file with
+         nothing highlighted - the one thing a control called "Diff view" must
+         not do. The host has the pre-turn blob in the shadow repo and now
+         serves it to `vscode.diff`. */
+      if (action === "view") { post("openDiff", { turnId: m.turnId, file: m.file }); return; }
       post("resolveDiff", { turnId: m.turnId, file: m.file, decision: action });
     });
     add(card);
@@ -5325,6 +5441,14 @@ function _sbRun() {
     $("phaseSeg").addEventListener("click", function (e) {
       var b = e.target.closest("[data-phase]");
       if (b) applyPhase(b.getAttribute("data-phase"));
+    });
+
+    // The log's own scrolling is the only other thing that changes the answer.
+    logEl.addEventListener("scroll", syncToLatest);
+    $("toLatest").addEventListener("click", function () {
+      scroll();
+      syncToLatest();
+      $("draft").focus();
     });
 
     logEl.addEventListener("click", function (e) {

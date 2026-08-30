@@ -717,6 +717,28 @@ console.log("\n──── the send control ────");
   b.dom.window.close();
 }
 
+/* ── "Diff view" opens a diff ───────────────────────────────────────────── */
+{
+  /* It posted `openFile`, which opens the plain file with nothing highlighted -
+     the one thing a control called "Diff view" must not do. The pre-turn side
+     has been sitting in the shadow repo the whole time. */
+  const b = boot();
+  b.sync("ask");
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "diffPending", turnId: "t1", file: "src/a.ts", added: 1, removed: 1,
+    patch: "@@ -1,1 +1,1 @@\n-a\n+b", truncated: false,
+  } }));
+  b.sent.length = 0;
+  b.click('.diff-card [data-diff="view"]');
+  const opened = b.sent.filter((m) => m.type === "openDiff");
+  ok("the third button asks for a diff, not a file",
+    opened.length === 1 && opened[0].file === "src/a.ts" && opened[0].turnId === "t1",
+    JSON.stringify(b.sent));
+  ok("and nothing asks for the plain file any more",
+    !b.sent.some((m) => m.type === "openFile"));
+  b.dom.window.close();
+}
+
 /* ── what an edit looks like before you approve it ──────────────────────── */
 {
   /* It was `- old\n+ new` in a plain monospace block: no gutter, no line

@@ -28,6 +28,17 @@ import { unfence } from "../agent/oneShot";
 export class ProposedContent implements vscode.TextDocumentContentProvider {
   static readonly scheme = "genesis-proposed";
 
+  /**
+   * The scheme THIS instance serves.
+   *
+   * VS Code allows one provider per scheme and throws on a second registration,
+   * so the panel's turn-diff side - which wants the same mechanism for a
+   * different store - gets its own. The class is unchanged otherwise: it is a
+   * general "serve this text behind a scheme", and there is no reason for two
+   * copies of it.
+   */
+  constructor(readonly scheme: string = ProposedContent.scheme) {}
+
   private store = new Map<string, string>();
   private emitter = new vscode.EventEmitter<vscode.Uri>();
   readonly onDidChange = this.emitter.event;
@@ -43,7 +54,7 @@ export class ProposedContent implements vscode.TextDocumentContentProvider {
    */
   put(original: vscode.Uri, text: string): vscode.Uri {
     const uri = original.with({
-      scheme: ProposedContent.scheme,
+      scheme: this.scheme,
       query: `k=${Date.now().toString(36)}`,
     });
     this.store.set(uri.toString(), text);

@@ -1243,6 +1243,30 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 .err-box .ic { flex: none; margin-top: 1px; color: var(--kx-error); }
 .err-box > span { min-width: 0; }
+/* THE WAY BACK DOWN.
+ *
+ * Scroll up mid-stream and autoscroll correctly stops following the answer -
+ * but nothing offered a route back, so the reply kept growing below the fold
+ * with no sign that it had. Floated over the foot of the transcript rather than
+ * given a row of its own, because it is only true some of the time and a
+ * permanent strip to say "you are at the bottom" is chrome for a non-event. */
+.to-latest {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  bottom: 8px; z-index: 4;
+  display: flex; align-items: center; gap: 5px;
+  padding: 4px 10px; border-radius: 999px;
+  background: var(--kx-over); backdrop-filter: blur(6px);
+  border: 1px solid var(--kx-edge);
+  font-size: 11px; color: var(--kx-fg-2);
+  box-shadow: 0 2px 10px var(--kx-shadow);
+}
+.to-latest:hover { color: var(--kx-fg); border-color: var(--kx-raised); }
+.to-latest:focus-visible { outline: 1px solid var(--kx-link); outline-offset: 2px; }
+.to-latest .ic { transform: rotate(0deg); }
+/* The transcript's own view is what it is positioned against. Without this the
+   pill would anchor to the panel and sit over the composer. */
+#viewSession { position: relative; }
+
 /* A failure is four things stacked, not one paragraph: what happened, what to
    do, the evidence, and the way out. See addError. */
 .err-col { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }

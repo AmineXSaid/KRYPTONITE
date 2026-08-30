@@ -992,6 +992,19 @@ export class SessionController {
     void errored;
   }
 
+  /**
+   * The pre-turn side of one file's diff, for the editor's own diff view.
+   *
+   * Returns undefined when the turn is no longer tracked - every card in it was
+   * accepted or rejected, so `turnDiffs` dropped it - which the caller reports
+   * rather than opening a diff against nothing.
+   */
+  async fileBefore(turnId: string, file: string): Promise<string | undefined> {
+    const turn = this.turnDiffs.get(turnId);
+    if (!turn || !this.app.shadow) return undefined;
+    return this.app.shadow.fileAt(turn.preHash, file);
+  }
+
   /** One diff card per touched file, each independently resolvable. */
   private async emitDiffs(turnId: string, preHash: string, touched: Set<string>): Promise<void> {
     const shadow = this.app.shadow;

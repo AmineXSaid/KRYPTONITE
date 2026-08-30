@@ -42,6 +42,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     proposed,
     vscode.workspace.registerTextDocumentContentProvider(ProposedContent.scheme, proposed),
+    // The panel's "Diff view" serves its left-hand side the same way, out of
+    // the shadow repo. Same scheme, same provider class, its own store.
+    instance.beforeContent,
+    vscode.workspace.registerTextDocumentContentProvider(
+      instance.beforeContent.scheme, instance.beforeContent
+    ),
     ...registerEditorFeatures(instance, new QuickEdit(instance, proposed)),
     registerCommitMessage(instance),
     registerInlineCompletion(instance)

@@ -529,6 +529,15 @@ export interface OpenIssuesMsg { type: "openIssues" }
 export interface ListSessionsMsg { type: "listSessions" }
 export interface LoadSessionMsg { type: "loadSession"; id: string }
 export interface DeleteSessionMsg { type: "deleteSession"; id: string }
+/**
+ * Open one file's turn diff side by side in the editor.
+ *
+ * The diff card's third button was labelled "Diff view" and posted `openFile`,
+ * which opens the plain file with nothing highlighted - the one thing a control
+ * called "Diff view" must not do. The pre-turn side has always been in the
+ * shadow repo; nothing could read it out until now.
+ */
+export interface OpenDiffMsg { type: "openDiff"; turnId: string; file: string }
 /** Revoke one always-allow grant. `token` empty means all of them. */
 export interface ForgetAllowedCommandMsg { type: "forgetAllowedCommand"; token: string }
 export interface SearchFilesMsg { type: "searchFiles"; query: string }
@@ -577,7 +586,8 @@ export type InboundMessage =
   | SetAgentMsg | NewAgentMsg | OpenAgentMsg
   | RestoreCheckpointMsg | ExportBundleMsg | ExportChatMsg | OpenFileMsg | OpenSettingsMsg
   | OpenYamlMsg | OpenControlCenterMsg | EditorCommandMsg | OpenSkillsFolderMsg | OpenIssuesMsg
-  | ListSessionsMsg | LoadSessionMsg | DeleteSessionMsg | ForgetAllowedCommandMsg | SearchFilesMsg
+  | ListSessionsMsg | LoadSessionMsg | DeleteSessionMsg | ForgetAllowedCommandMsg
+  | OpenDiffMsg | SearchFilesMsg
   | CheckEndpointMsg | McpReconnectMsg | McpReloadMsg | ClearChangesMsg
   | DetectCapsMsg | SetCapabilityMsg | ApplyCapsMsg | McpLogMsg
   | CancelQueuedMsg | PromoteQueuedMsg;

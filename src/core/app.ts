@@ -27,6 +27,7 @@ import {
 } from "../agents/loader";
 import { McpRegistry, mcpConfigPath } from "../mcp/registry";
 import { ShadowRepo } from "../checkpoint/shadow";
+import { ProposedContent } from "../ui/quickEdit";
 import { DiagnosticsService, rungLabel } from "../diagnostics/service";
 import { SessionStore } from "./sessions";
 import { loadInstructions, ProjectInstructions, INSTRUCTIONS_CAP } from "./instructions";
@@ -252,6 +253,15 @@ export class App {
   readonly mcp = new McpRegistry((level, msg) => this.log(level, msg));
   readonly session: SessionController;
   shadow?: ShadowRepo;
+  /**
+   * The left-hand side of a turn diff, served behind a scheme.
+   *
+   * `vscode.diff` needs two URIs and the pre-turn contents are a blob in the
+   * shadow repo rather than a file on disk. Same mechanism quickEdit.ts has
+   * used for its proposal side since it shipped, and the same class - it is a
+   * general "serve this text behind a scheme" and there is no reason for two.
+   */
+  readonly beforeContent = new ProposedContent("genesis-before");
 
   profiles: EndpointProfile[] = [];
   profileErrors: ProfileError[] = [];
@@ -2072,6 +2082,39 @@ export class App {
       case "exportChat":
         await this.exportChat(msg.scope);
         return;
+
+      case "openDiff": {
+        /* A REAL DIFF, WHICH IS WHAT THE BUTTON SAYS.
+         *
+         * "Diff view" posted `openFile` and opened the plain file with nothing
+         * highlighted. Everything needed for the real thing was here already:
+         * quickEdit.ts has used `vscode.diff` against a custom scheme since it
+         * shipped, and the shadow repo has held the pre-turn blob all along. */
+        const root = this.requireRoot();
+        const before = await this.session.fileBefore(msg.turnId, msg.file);
+        const uri = vscode.Uri.file(path.join(root, msg.file));
+        if (before === undefined) {
+          // The turn's cards have all been resolved, so there is no snapshot to
+          // compare against any more. Say that rather than opening a diff of a
+          // file against itself, which looks like the change vanished.
+          this.postTo(source, {
+            type: "error",
+            message: `The snapshot for ${msg.file} is no longer held.`,
+            fix: "Every change in that turn has been accepted or rejected, so there is " +
+              "nothing left to compare against. Restore checkpoint still reaches the whole turn.",
+          });
+          return;
+        }
+        const left = this.beforeContent.put(uri, before);
+        await vscode.commands.executeCommand(
+          "vscode.diff",
+          left,
+          uri,
+          `${path.basename(msg.file)}: before this turn ↔ now`,
+          { preview: true }
+        );
+        return;
+      }
 
       case "openFile": {
         const root = this.requireRoot();

@@ -31,6 +31,10 @@
  * aria-live="polite" while the streaming answer replaced its own innerHTML on
  * every animation frame, so the whole reply was re-announced continuously.
  *
+ * (The panel's setState work landed alongside these and is not asserted here;
+ * it belongs to a different failure - a webview REBUILD, not a hide - and
+ * retainContextWhenHidden already covers the hide.)
+ *
  * Run: node test/a11y.cjs
  */
 const fs = require("node:fs");
@@ -239,6 +243,74 @@ function boot() {
 
   b.post({ type: "turnEnd" });
   ok("and so is the end of a turn", /finish|done|complet/i.test(said()), said());
+  b.dom.window.close();
+}
+
+/* ── the transcript keeps up without eating the selection ───────────────── */
+{
+  const b = boot();
+  b.sync();
+
+  /* A REPLY YOU CANNOT SELECT WHILE IT ARRIVES.
+   *
+   * typeStep replaced aiEl.innerHTML on every animation frame, which destroys
+   * the child nodes any selection is anchored in - so text could not be copied
+   * out of an answer until the turn had finished. The comment above it claimed
+   * a 50ms throttle that had never been wired up: `aiPaint` was declared,
+   * cleared twice and never assigned a timer.
+   *
+   * The tail of a streaming reply is almost always plain prose, so while that
+   * holds only the last text node is written and everything parsed above it is
+   * left in place.
+   *
+   * The reveal is paced on requestAnimationFrame, which is asynchronous. A
+   * steer note is appended through add(), and add() flushes the pending paint
+   * synchronously - so it is the lever this suite has for "paint now" without
+   * ending the turn. */
+  const flush = () => b.post({ type: "inputAccepted", mode: "steer", depth: 0 });
+
+  b.post({ type: "streamDelta", text: "The first paragraph is settled.\n\nThe second is still " });
+  flush();
+  const el = b.d.querySelector(".msg-ai");
+  ok("the answer is drawn", !!el && /first paragraph/i.test(el.textContent), el && el.textContent);
+  const settled = b.d.querySelector(".msg-ai p");
+  const before = settled && settled.firstChild;
+  ok("the settled paragraph is a real node", !!before);
+
+  b.post({ type: "streamDelta", text: "arriving" });
+  flush();
+  const after = b.d.querySelector(".msg-ai p");
+  ok("growing a plain tail does not rebuild the settled part",
+    !!before && !!after && after.firstChild === before);
+  ok("and the new text still lands",
+    /second is still arriving/.test(b.d.querySelector(".msg-ai").textContent),
+    b.d.querySelector(".msg-ai").textContent);
+
+  // A tail that is not plain prose has to be re-parsed: the block's rendering
+  // depends on characters that have not arrived yet.
+  b.post({ type: "streamDelta", text: "\n\n```js\nconst a = 1;\n" });
+  flush();
+  ok("an open fence still renders as code", !!b.d.querySelector(".msg-ai .cb"));
+  ok("and the prose above it survived that re-parse",
+    /first paragraph/i.test(b.d.querySelector(".msg-ai").textContent));
+
+  ok("the throttle that never existed is gone rather than reinstated",
+    !/var aiPaint = null/.test(SRC));
+  ok("and the frame step no longer writes the whole subtree itself",
+    !/aiEl\.innerHTML = md\(full\.slice/.test(SRC));
+  b.dom.window.close();
+}
+
+/* ── a way back to the bottom ───────────────────────────────────────────── */
+{
+  const b = boot();
+  b.sync();
+  const btn = b.d.getElementById("toLatest");
+  ok("there is one", !!btn);
+  ok("hidden while the log is already at the bottom", btn.hidden);
+  ok("and it says where it goes", /latest/i.test(btn.textContent), btn.textContent);
+  ok("it is positioned against the transcript, not the panel",
+    /#viewSession\s*\{[^}]*position:\s*relative/.test(CSS));
   b.dom.window.close();
 }
 
