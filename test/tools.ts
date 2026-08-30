@@ -768,6 +768,86 @@ const run = (name: string, args: any) => runTool(name, args, ctx);
     }
   }
 
+  /* ── the agent memory cap ────────────────────────────────────────── */
+  console.log("\n──── the memory cap refuses rather than truncates ────");
+  {
+    // The old behaviour capped on the read side and logged a warning the model
+    // never saw, so the tail of a memory file vanished silently and the agent
+    // went on writing into a void. These pin the refusal instead: the write
+    // does not land, the model is told the number, and consolidating works.
+    const cap = 200;
+    const memRel = ".agent/memory/scribe.md";
+    const memAbs = path.join(root, ".agent", "memory", "scribe.md");
+    fs.mkdirSync(path.dirname(memAbs), { recursive: true });
+    fs.writeFileSync(memAbs, "short\n", "utf8");
+    const capped: ToolContext = {
+      ...ctx,
+      memory: {
+        path: memAbs,
+        cap,
+        refusal: (size: number) =>
+          `Refused: nothing was written. That would make ${memRel} ${size} characters, ` +
+          `and the scribe agent's memory is capped at ${cap}.`,
+      },
+    };
+    const crun = (name: string, args: any) => runTool(name, args, capped);
+    const big = "x".repeat(cap + 50);
+
+    approvals = [];
+    const over = await crun("write_file", { path: memRel, content: big });
+    ck(Boolean(over.isError), "a write past the cap is an error");
+    ck(/capped at 200/.test(over.content), "and the message names the cap", over.content.slice(0, 80));
+    ck(/\b250\b/.test(over.content), "and the size the write would have produced");
+    ck(fs.readFileSync(memAbs, "utf8") === "short\n", "nothing reached the file");
+    // The refusal must not have cost the user an approval prompt for a write
+    // that was never going to land.
+    ck(approvals.length === 0, "and the user was never asked about it", approvals.join("|"));
+
+    // Under the cap is ordinary. The marker gives edit_file something unique to
+    // match on: a body of one repeated character would fail the ambiguity check
+    // first and never reach the cap.
+    const under = await crun("write_file", {
+      path: memRel,
+      content: "MARKER\n" + "x".repeat(cap - 40),
+    });
+    ck(!under.isError, "a write inside the cap goes through", under.content);
+
+    // edit_file is the other way in, and is checked on the result rather than
+    // on the replacement: a small edit to a nearly-full file is what bursts it.
+    const grow = await crun("edit_file", {
+      path: memRel,
+      old_text: "MARKER",
+      new_text: "y".repeat(60),
+    });
+    ck(Boolean(grow.isError), "an edit that would burst the cap is refused too");
+    ck(/capped at 200/.test(grow.content), "with the same message");
+
+    // The escape hatch. A file already over the cap has to stay editable, or
+    // the refusal is a trap: the only write that fixes it is one it forbids.
+    fs.writeFileSync(memAbs, "z".repeat(cap + 100), "utf8");
+    const shrinkAll = await crun("write_file", { path: memRel, content: "z".repeat(cap + 10) });
+    ck(!shrinkAll.isError, "an oversized file can still be made smaller", shrinkAll.content);
+    ck(
+      fs.readFileSync(memAbs, "utf8").length === cap + 10,
+      "and the smaller version landed"
+    );
+    const consolidate = await crun("edit_file", {
+      path: memRel,
+      old_text: "z".repeat(cap + 10),
+      new_text: "consolidated",
+    });
+    ck(!consolidate.isError, "and consolidating it back under the cap works", consolidate.content);
+    ck(fs.readFileSync(memAbs, "utf8") === "consolidated", "leaving the short version");
+
+    // The cap is that one file's, not the workspace's.
+    const other = await crun("write_file", { path: "src/huge.ts", content: big });
+    ck(!other.isError, "another file the same size is not the memory file", other.content);
+
+    // And with no agent active there is no budget at all.
+    const uncapped = await run("write_file", { path: memRel, content: big });
+    ck(!uncapped.isError, "with no agent selected the cap does not apply", uncapped.content);
+  }
+
   // Teardown must never decide the outcome. The junction created above cannot
   // be removed by a recursive delete on Windows, and a leftover temp directory
   // is not a test failure.

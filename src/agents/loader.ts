@@ -139,6 +139,33 @@ export function agentRefusal(agent: Agent, name: string): string {
   );
 }
 
+/**
+ * The refusal a memory write that would burst the cap comes back as.
+ *
+ * Capping on the read side instead - which is all that used to happen - loses
+ * the tail silently. The warning goes to a log the model never sees, so it
+ * writes on into a void, believes the file holds everything it put there, and
+ * never learns that memory is a budget it has to curate. An error at the write
+ * is the only version of this fact the model can act on.
+ *
+ * So this says what to do about it, in `agentRefusal`'s register: written for
+ * the model, naming the number, and ending in the action that clears it.
+ * Consolidation is the action - merging and deleting superseded entries - and
+ * the last sentence is the escape hatch that keeps an already-oversized file
+ * editable, because a cap that forbids every write to a file that is over it
+ * forbids the one write that would fix it.
+ */
+export function agentMemoryFull(agent: Agent, size: number): string {
+  return (
+    `Refused: nothing was written. That would make ${agent.memory} ${size} characters, ` +
+    `and the ${agent.name} agent's memory is capped at ${MAX_MEMORY_CHARS}. The cap is on ` +
+    `what fits in a prompt, not on what you may remember: read the file, merge or delete ` +
+    `the entries that later ones have superseded, and write the shorter version. A write ` +
+    `that leaves the file no larger than it already is will go through even while it is ` +
+    `over the cap, so consolidating is always possible.`
+  );
+}
+
 function asList(v: unknown): string[] {
   if (typeof v === "string") return v.split(",").map((s) => s.trim()).filter(Boolean);
   if (Array.isArray(v)) return v.map((s) => String(s).trim()).filter(Boolean);

@@ -18,8 +18,10 @@ import {
   agentAllowsMcp,
   agentAllowsTool,
   agentPrompt,
+  agentMemoryFull,
   agentRefusal,
   agentTemplate,
+  MAX_MEMORY_CHARS,
   matchesGlob,
   type Agent,
 } from "../src/agents/loader";
@@ -222,6 +224,19 @@ ck(/tls-triage/.test(refusal), "and the agent that refused it");
 ck(/filesystem/.test(refusal) && /memory/.test(refusal), "and what it can reach instead");
 ck(/switch to/i.test(refusal), "and tells the model what the user can do about it");
 ck(/no MCP servers/.test(agentRefusal(sealed, "mcp__x__y")), "a sealed agent says so plainly");
+
+// The memory cap's refusal is the same kind of message and has to read like
+// one: the model is being asked to do something about it, so it has to be told
+// the number and the action. The old behaviour truncated on read and logged a
+// warning nothing in the conversation could see.
+const full = agentMemoryFull(t, MAX_MEMORY_CHARS + 500);
+ck(/nothing was written/.test(full), "a burst cap says the write did not land");
+ck(full.includes(String(MAX_MEMORY_CHARS)), "and names the cap");
+ck(full.includes(String(MAX_MEMORY_CHARS + 500)), "and the size it would have been");
+ck(/\.agent\/memory\/tls\.md/.test(full), "and the file");
+ck(/merge or delete/.test(full), "and what to do about it");
+ck(/no larger than it already is/.test(full),
+  "and that shrinking an oversized file is always allowed");
 
 /* ── 5. the prompt ─────────────────────────────────────────────────────── */
 console.log("\n──── the system prompt ────");

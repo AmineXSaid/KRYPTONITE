@@ -1326,6 +1326,29 @@ export class App {
   }
 
   /**
+   * Where this agent's memory lives, once, for everyone who needs to know.
+   *
+   * The containment check is the reason this is a method rather than a
+   * `path.resolve` at each call site: a memory path pointing out of the
+   * workspace would read - or, now that writes are capped against it, name - a
+   * file the user never meant to hand over. Same rule the tools apply, stated
+   * in one place so the reader and the write guard cannot come to different
+   * conclusions about which file is the memory file.
+   */
+  agentMemoryPath(agent: Agent): string | undefined {
+    if (!agent.memory) return undefined;
+    const root = this.root;
+    if (!root) return undefined;
+    const abs = path.resolve(root, agent.memory);
+    const rel = path.relative(root, abs);
+    if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
+      this.log("warn", `Agent ${agent.name}: memory path is outside the workspace and was ignored.`);
+      return undefined;
+    }
+    return abs;
+  }
+
+  /**
    * The agent's memory file, capped.
    *
    * The uncached read. Every prompt-building path goes through
@@ -1334,24 +1357,22 @@ export class App {
    * memory file it has not written yet is the normal first run.
    */
   agentMemory(agent: Agent): string | undefined {
-    if (!agent.memory) return undefined;
-    const root = this.root;
-    if (!root) return undefined;
-    const abs = path.resolve(root, agent.memory);
-    // Same containment rule the tools use: a memory path pointing out of the
-    // workspace would read a file the user never meant to hand over.
-    const rel = path.relative(root, abs);
-    if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
-      this.log("warn", `Agent ${agent.name}: memory path is outside the workspace and was ignored.`);
-      return undefined;
-    }
+    const abs = this.agentMemoryPath(agent);
+    if (!abs) return undefined;
     try {
       const body = fs.readFileSync(abs, "utf8");
       if (body.length <= MAX_MEMORY_CHARS) return body;
+      // A backstop now, not the enforcement. The agent's own writes are
+      // refused at the tool before they can get here, so reaching this line
+      // means the file arrived oversized by some other route - written before
+      // the cap existed, edited by hand, or carried in from another checkout.
+      // Truncating is still the only thing to do about it at read time, but it
+      // is no longer the thing the agent learns the cap from.
       this.log(
         "warn",
         `Agent ${agent.name}: ${agent.memory} is ${Math.round(body.length / 1000)}k characters; ` +
-          `only the first ${MAX_MEMORY_CHARS / 1000}k is sent.`
+          `only the first ${MAX_MEMORY_CHARS / 1000}k is sent. The agent's own writes are ` +
+          `refused above this size, so this file grew some other way - trim it by hand.`
       );
       return body.slice(0, MAX_MEMORY_CHARS);
     } catch {

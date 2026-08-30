@@ -7,7 +7,7 @@ import { runAgent } from "../agent/loop";
 import { isUntitled, titleFrom, sanitizeTitle } from "../core/sessions";
 import type { FileChange, ToolContext, TodoItem, ToolImage } from "../agent/tools";
 import { mentionable } from "../agent/tools";
-import { agentAllowsMcp, agentRefusal } from "../agents/loader";
+import { agentAllowsMcp, agentMemoryFull, agentRefusal, MAX_MEMORY_CHARS } from "../agents/loader";
 import { parseQualified } from "../mcp/registry";
 import { fetchPage, normaliseUrl } from "../browser/fetchPage";
 import { CdpBrowser, findBrowser, listBrowsers } from "../browser/cdp";
@@ -698,6 +698,19 @@ export class SessionController {
           return this.app.mcp.call(name, args, profile.capabilities.vision === true);
         },
       },
+      // Present only while an agent with a memory file is active, because the
+      // cap is that agent's budget and there is nothing to guard without one.
+      // The path is resolved by App so the guard and the reader agree on which
+      // file is the memory file, containment check included.
+      memory: (() => {
+        const file = agent ? this.app.agentMemoryPath(agent) : undefined;
+        if (!agent || !file) return undefined;
+        return {
+          path: file,
+          cap: MAX_MEMORY_CHARS,
+          refusal: (size: number) => agentMemoryFull(agent, size),
+        };
+      })(),
       // Present only when the profile declares an image model. That absence is
       // what withholds the tool from the model entirely, rather than offering
       // one that could only ever answer "not configured".
