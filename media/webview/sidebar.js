@@ -1617,7 +1617,14 @@ function _sbRun() {
     // Manual, which is both unambiguous and what the sheet already called it.
     ["ask", "Manual", "Always ask before making changes", "Manual", "i-hand", "var(--kx-fg)"],
     ["edits-auto", "Accept edits", "File edits run automatically. Shell commands still ask.", "Edits", "i-code", "var(--kx-agent)"],
-    ["full-auto", "Auto", "The agent handles permission decisions itself", "Auto", "i-bolt", "var(--kx-error)"]
+    /* "The agent handles permission decisions itself" was the mechanism, and the
+       other two rows here name a consequence: "Always ask before making
+       changes", "File edits run automatically. Shell commands still ask." The
+       vaguest wording was on the only mode that gives everything away - and
+       package.json and the Control Center both said the honest thing ("never
+       ask") while the control people actually use did not. */
+    ["full-auto", "Auto", "Never asks. Runs shell commands and writes files without stopping.",
+      "Auto", "i-bolt", "var(--kx-error)"]
   ];
 
   function permLabel(mode, short) {
@@ -2758,10 +2765,15 @@ function _sbRun() {
     return rows;
   }
 
-  function addDiff(m) {
-    aiEl = null;
-    closeToolGroup();
-    var rows = pairWords(parsePatch(m.patch)), body = "";
+  /**
+   * A patch as diff rows.
+   *
+   * Lifted out of addDiff so the APPROVAL card can use it too. Before this the
+   * panel had one diff renderer and used it only after the write had happened,
+   * while the card that asks permission for the write showed a plain string.
+   */
+  function diffRows(patch) {
+    var rows = pairWords(parsePatch(patch)), body = "";
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i];
       if (r.kind === "hunk") {
@@ -2777,6 +2789,13 @@ function _sbRun() {
         // r.html is built by markWords, which escapes every token as it goes.
         '<span class="c">' + (r.html || esc(r.text)) + "</span></div>";
     }
+    return body;
+  }
+
+  function addDiff(m) {
+    aiEl = null;
+    closeToolGroup();
+    var body = diffRows(m.patch);
 
     var card = div("diff-card",
       '<div class="diff-head">' + icon("i-file", "ic-13") +
@@ -3149,7 +3168,20 @@ function _sbRun() {
       '<div class="perm-t">' + icon("i-warn", "ic-14") + "Permission required</div>" +
       '<div class="perm-b">Genesis wants to:</div>' +
       '<div class="perm-cmd">' + esc(m.summary) + "</div>" +
-      (m.detail ? '<div class="perm-cmd" style="margin-top:6px">' + esc(String(m.detail).slice(0, 4000)) + "</div>" : "") +
+      /* THE CHANGE, AS A DIFF, AT THE MOMENT OF THE DECISION.
+       *
+       * This was `esc(m.detail)` in a monospace block: no gutter, no line
+       * numbers, no add/del wash - and for an overwrite it was a truncated
+       * prefix of the NEW content with not one line of the old. So the default
+       * mode asked people to authorise an edit from a blob, while diffRows()
+       * eighty lines up rendered exactly this, properly, three seconds later
+       * on the diff card. Same information, same treatment, both moments.
+       *
+       * `detail` remains the fallback: a shell command and a fetch have a
+       * payload worth reading and no patch to make of it. */
+      (m.patch
+        ? '<div class="perm-diff diff-body">' + diffRows(m.patch) + "</div>"
+        : m.detail ? '<div class="perm-cmd" style="margin-top:6px">' + esc(String(m.detail).slice(0, 4000)) + "</div>" : "") +
       '<div class="perm-actions">' +
         '<button class="btn go" data-perm="allow">Allow once</button>' +
         '<button class="btn" data-perm="always" title="' + esc(alwaysTitle) + '">' + always + "</button>" +
@@ -5448,9 +5480,30 @@ function _sbRun() {
       }
       var b = e.target.closest("[data-perm]");
       if (!b) return;
+      var mode = b.getAttribute("data-perm");
+      /* ONE MORE PRESS FOR THE ONE THAT GIVES EVERYTHING AWAY.
+       *
+       * Full-auto was a single click on a row the same weight as the other
+       * two, so browsing the sheet to see what the modes were could hand the
+       * agent unattended shell access. The sheet's own comment calls this
+       * control "a decision worth stopping for"; it stopped for the decision
+       * and not for the one decision that matters.
+       *
+       * The row asks to be pressed again rather than opening a dialog: a
+       * confirmation on top of a sheet is two modals deep, and the row already
+       * carries the alarm hue that says which one this is. Any other row, or
+       * closing the sheet, cancels it. */
+      if (mode === "full-auto" && b.getAttribute("data-arm") !== "1") {
+        var armed = $("permList").querySelectorAll("[data-arm]");
+        for (var i = 0; i < armed.length; i++) armed[i].removeAttribute("data-arm");
+        b.setAttribute("data-arm", "1");
+        b.querySelector(".m").textContent =
+          "Press again to confirm. Nothing will ask you before it runs.";
+        return;
+      }
       // Straight to the host: approvalMode is a real setting, so the panel
       // shows what it is rather than keeping a second copy of the truth.
-      post("setConfig", { key: "approvalMode", value: b.getAttribute("data-perm") });
+      post("setConfig", { key: "approvalMode", value: mode });
       togglePerm(false);
     });
 

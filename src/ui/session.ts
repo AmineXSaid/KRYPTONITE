@@ -787,9 +787,9 @@ export class SessionController {
       // Every path that can change the workspace is gated on approval, so this
       // is where the deferred snapshot is joined. By the time any tool writes,
       // the checkpoint it would be restored to already exists.
-      approve: async (summary, detail) => {
+      approve: async (summary, detail, patch) => {
         await snapshot;
-        return this.requestApproval(summary, detail, turn);
+        return this.requestApproval(summary, detail, turn, patch);
       },
       onFileTouched: (abs: string, change?: FileChange) => {
         const rel = path.relative(root, abs).split(path.sep).join("/");
@@ -1068,7 +1068,7 @@ export class SessionController {
    * Decide whether a side effect may proceed, escalating to the user only when
    * the configured mode requires it.
    */
-  requestApproval(summary: string, detail?: string, turn?: LiveTurn): Promise<boolean> {
+  requestApproval(summary: string, detail?: string, turn?: LiveTurn, patch?: string): Promise<boolean> {
     const mode = this.app.approvalMode();
     const isCommand = summary.startsWith("Run:");
 
@@ -1083,7 +1083,7 @@ export class SessionController {
     const id = crypto.randomUUID();
     return new Promise<boolean>((resolve) => {
       this.pending.set(id, { resolve, summary });
-      const ev: ReplayableEvent = { type: "permissionRequest", id, summary, detail };
+      const ev: ReplayableEvent = { type: "permissionRequest", id, summary, detail, patch };
       // Through the turn when there is one, so a question asked by a
       // background turn is buffered rather than shown over a different
       // conversation. It reappears when the user comes back, and the promise

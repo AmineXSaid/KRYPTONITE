@@ -637,6 +637,17 @@ export interface PermissionRequestOut {
   id: string;
   summary: string;
   detail?: string;
+  /**
+   * A unified patch of the change being asked about, when there is one.
+   *
+   * `detail` was the whole answer, and it is a plain string: for an edit it was
+   * `- old\n+ new` in a monospace block with no gutter and no colour, and for
+   * an overwrite it was a truncated prefix of the NEW content with no sight of
+   * the old. The panel has rendered proper diffs since diff cards existed; it
+   * simply had nothing to render at the moment of the decision. `detail` stays
+   * as the fallback for the cases with no patch - a shell command, a fetch.
+   */
+  patch?: string;
 }
 export interface PermissionResolvedOut {
   type: "permissionResolved";

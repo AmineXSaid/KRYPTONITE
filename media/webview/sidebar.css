@@ -1108,7 +1108,21 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   font-family: var(--kx-mono); font-size: 11.5px; white-space: pre-wrap; overflow-x: auto;
   max-height: 160px; overflow-y: auto;
 }
+/* The approval card's diff, when there is one. Same rows the diff card draws -
+   see diffRows() - just bounded, because a card that asks a question should not
+   need scrolling past to reach its own buttons. */
+.perm-diff {
+  margin-top: 8px; max-height: 220px; overflow: auto;
+  background: var(--kx-bg-deep); border-radius: 4px; padding: 4px 0;
+}
 .perm-actions { display: flex; gap: 7px; margin-top: 10px; flex-wrap: wrap; }
+/* Armed, not yet chosen: full-auto asks to be pressed twice. The row already
+   carries the alarm hue; this is what says the first press registered. */
+.perm-row[data-arm="1"] {
+  background: var(--kx-error-wash);
+  box-shadow: inset 0 0 0 1px var(--kx-error);
+}
+.perm-row[data-arm="1"] .m { color: var(--kx-error-2); }
 .perm-done {
   display: flex; align-items: center; gap: 7px; margin-bottom: 14px;
   font-size: 11.5px; color: var(--kx-fg-2);

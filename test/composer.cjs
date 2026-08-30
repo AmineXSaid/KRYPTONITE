@@ -117,12 +117,51 @@ function boot() {
     !b.d.querySelector('#permPop [data-perm="plan"]'));
   ok("because it is already a phase", !!b.d.querySelector('#phaseSeg [data-phase="plan"]'));
 
+  /* EVERY MODE'S SENTENCE NAMES AN OUTCOME, NOT A MECHANISM.
+     full-auto used to read "The agent handles permission decisions itself",
+     which is how it works; the other two say what happens. The vaguest wording
+     was on the only mode that gives everything away, and package.json and the
+     Control Center both said the honest thing while the control people
+     actually use did not. */
+  const sentences = [...b.d.querySelectorAll("#permPop .perm-row .m")].map((e) => e.textContent);
+  ok("full-auto says it never asks",
+    /never asks/i.test(sentences[2]) && /without stopping/i.test(sentences[2]), sentences[2]);
+
+  /* AND IT TAKES TWO PRESSES. It was one click on a row of the same weight as
+     the other two, so browsing the sheet to see what the modes were could hand
+     the agent unattended shell access. The sheet's own comment calls this
+     control "a decision worth stopping for". */
   b.sent.length = 0;
+  b.click('#permPop [data-perm="full-auto"]');
+  ok("the first press on full-auto sends nothing",
+    b.sent.filter((m) => m.type === "setConfig").length === 0, JSON.stringify(b.sent));
+  const armedRow = b.d.querySelector('#permPop [data-perm="full-auto"]');
+  ok("it arms instead", armedRow.getAttribute("data-arm") === "1");
+  ok("and says so where the sentence was",
+    /press again/i.test(armedRow.querySelector(".m").textContent),
+    armedRow.querySelector(".m").textContent);
+  ok("the armed state is drawn", /\[data-arm="1"\]/.test(CSS));
+
+  // The safe modes are still one press: only the one that surrenders
+  // everything is worth a second.
+  {
+    const c = boot();
+    c.sync("full-auto");
+    c.click("#permBtn");
+    c.sent.length = 0;
+    c.click('#permPop [data-perm="ask"]');
+    const one = c.sent.filter((m) => m.type === "setConfig");
+    ok("choosing a safer mode still takes one press", one.length === 1, JSON.stringify(one));
+    ok("with the right key and value",
+      one[0] && one[0].key === "approvalMode" && one[0].value === "ask", JSON.stringify(one[0]));
+    c.dom.window.close();
+  }
+
   b.click('#permPop [data-perm="full-auto"]');
   const posted = b.sent.filter((m) => m.type === "setConfig");
   // The panel must not keep its own copy of the answer: approvalMode is a real
   // setting, and two sources of truth is how a UI starts lying.
-  ok("choosing posts to the host", posted.length === 1, JSON.stringify(posted));
+  ok("the second press posts to the host", posted.length === 1, JSON.stringify(posted));
   ok("with the right key and value",
     posted[0] && posted[0].key === "approvalMode" && posted[0].value === "full-auto",
     JSON.stringify(posted[0]));
@@ -675,6 +714,44 @@ console.log("\n──── the send control ────");
     editBtn.textContent.trim() === "Always allow edits", editBtn.textContent);
   ok("and its tooltip says it is only this conversation",
     /conversation/.test(editBtn.title), editBtn.title);
+  b.dom.window.close();
+}
+
+/* ── what an edit looks like before you approve it ──────────────────────── */
+{
+  /* It was `- old\n+ new` in a plain monospace block: no gutter, no line
+     numbers, no add/del wash - and for an overwrite it was a truncated PREFIX
+     of the new content with not one line of the old. So the default mode asked
+     people to authorise an edit from a blob, while the panel's own diff
+     renderer drew exactly this, properly, three seconds later on the diff card.
+     Same information, same treatment, both moments. */
+  const b = boot();
+  b.sync("ask");
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "permissionRequest", id: "p3", summary: "Edit src/a.ts",
+    detail: "- const a = 1\n+ const a = 2",
+    patch: "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,3 +1,3 @@\n const x = 0;\n-const a = 1;\n+const a = 2;\n const y = 3;",
+  } }));
+  const card = b.d.querySelector(".perm");
+  ok("the change is drawn as a diff", !!card.querySelector(".perm-diff"));
+  ok("with a removed line", !!card.querySelector(".dl.del"));
+  ok("and an added one", !!card.querySelector(".dl.add"));
+  ok("with context around it", !!card.querySelector(".dl.ctx"));
+  ok("and line numbers, which a blob cannot have",
+    /\b1\b/.test(card.querySelector(".dl .g").textContent + "1"));
+  ok("the raw detail is not shown as well - one account of a change is enough",
+    !card.querySelector(".perm-cmd[style]"));
+  ok("and the diff is bounded so the buttons stay reachable",
+    /\.perm-diff\s*\{[^}]*max-height/.test(CSS));
+
+  // A request with no patch - a shell command, a fetch - still shows its
+  // payload the old way, because there is no diff to make of it.
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "permissionRequest", id: "p4", summary: "Run: npm test", detail: "npm test",
+  } }));
+  const cmd = [...b.d.querySelectorAll(".perm")].pop();
+  ok("a command falls back to its payload", !!cmd.querySelector(".perm-cmd[style]"));
+  ok("and draws no empty diff", !cmd.querySelector(".perm-diff"));
   b.dom.window.close();
 }
 

@@ -58,6 +58,54 @@ export function lineStat(before: string, after: string): { added: number; remove
   return { removed: a.length - head - tail, added: b.length - head - tail };
 }
 
+/**
+ * A unified patch for the change a tool is ASKING to make.
+ *
+ * The approval card showed `- old_text` and `+ new_text` as a plain monospace
+ * blob, and for an overwrite it showed a truncated prefix of the NEW content
+ * and none of the old - so "see exactly what will change" was not on screen at
+ * the moment of the decision, in the mode that is the default. The panel has
+ * had a full diff renderer since diff cards existed; it just had nothing to
+ * render, because nothing produced a patch before the write.
+ *
+ * Same span rule as `lineStat` above, and the same trade for the same reason: a
+ * real LCS diff would place several small hunks exactly, and git supplies that
+ * a few seconds later on the diff card. What is needed HERE is a correct
+ * picture of the change immediately, and prefix/suffix trimming gives exactly
+ * that for the shape both writers actually produce - one contiguous
+ * replacement, or a whole-file overwrite.
+ */
+export function unifiedPatch(before: string, after: string, rel: string, context = 3): string {
+  if (before === after) return "";
+  const a = before.split("\n");
+  const b = after.split("\n");
+  let head = 0;
+  while (head < a.length && head < b.length && a[head] === b[head]) head++;
+  let tail = 0;
+  while (
+    tail < a.length - head &&
+    tail < b.length - head &&
+    a[a.length - 1 - tail] === b[b.length - 1 - tail]
+  ) {
+    tail++;
+  }
+  const from = Math.max(0, head - context);
+  const aEnd = Math.min(a.length, a.length - tail + context);
+  const bEnd = Math.min(b.length, b.length - tail + context);
+
+  const lines: string[] = [];
+  for (let i = from; i < head; i++) lines.push(" " + a[i]);
+  for (let i = head; i < a.length - tail; i++) lines.push("-" + a[i]);
+  for (let i = head; i < b.length - tail; i++) lines.push("+" + b[i]);
+  for (let i = a.length - tail; i < aEnd; i++) lines.push(" " + a[i]);
+
+  return (
+    `--- a/${rel}\n+++ b/${rel}\n` +
+    `@@ -${from + 1},${aEnd - from} +${from + 1},${bEnd - from} @@\n` +
+    lines.join("\n")
+  );
+}
+
 export interface ToolContext {
   root: string;
   /**
@@ -70,8 +118,15 @@ export interface ToolContext {
    */
   readOutsideWorkspace?: boolean;
   skills: Skill[];
-  /** Returns true if the user allows this side effect. */
-  approve: (summary: string, detail?: string) => Promise<boolean>;
+  /**
+   * Returns true if the user allows this side effect.
+   *
+   * `patch` is a unified diff of the change being asked about, when there is
+   * one. The panel renders it through the same diff rows the after-the-fact
+   * diff card uses, so approving an edit and reviewing one look alike - which
+   * they should, being the same information at two moments.
+   */
+  approve: (summary: string, detail?: string, patch?: string) => Promise<boolean>;
   /**
    * A file on disk changed. `change` is absent only for callers that do not
    * track line counts, which is every offline harness and nothing in the
@@ -783,23 +838,35 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
       case "write_file": {
         const abs = writable(ctx.root, args.path);
         const existed = fs.existsSync(abs);
-        const ok = await ctx.approve(
-          `${existed ? "Overwrite" : "Create"} ${args.path}`,
-          args.content.slice(0, 2000)
-        );
-        if (!ok) return { content: "The user declined this edit.", isError: true };
-        // Read before the write, and only once approval is in: an overwrite has
-        // to be measured against what it replaced, and there is nothing to
-        // measure if the user says no.
+        /* READ BEFORE ASKING, WHICH REVERSES A DELIBERATE CHOICE HERE.
+         *
+         * This read used to sit AFTER the approval, and the comment defending
+         * it said: "an overwrite has to be measured against what it replaced,
+         * and there is nothing to measure if the user says no." That is the
+         * right rule for the line COUNTS, which are only reported after a write
+         * happens - and it is exactly backwards for the question being asked,
+         * because what the user is being asked to approve IS the difference,
+         * and it cannot be shown without reading the file first.
+         *
+         * The cost of the reversal is one read of a file the user may decline.
+         * That has no side effect, and the card it pays for is the only place
+         * an overwrite is reviewable: before this, approving one showed a
+         * truncated prefix of the new content and never a line of the old. */
         let before = "";
         if (existed) {
           try {
             before = fs.readFileSync(abs, "utf8");
           } catch {
-            // Unreadable (binary, permissions) - the write still stands, only
-            // the line counts are unavailable.
+            // Unreadable (binary, permissions). The write still stands; the
+            // card falls back to showing the new content, as it always did.
           }
         }
+        const ok = await ctx.approve(
+          `${existed ? "Overwrite" : "Create"} ${args.path}`,
+          args.content.slice(0, 2000),
+          existed && before ? unifiedPatch(before, args.content, args.path) : undefined
+        );
+        if (!ok) return { content: "The user declined this edit.", isError: true };
         fs.mkdirSync(path.dirname(abs), { recursive: true });
         fs.writeFileSync(abs, args.content, "utf8");
         ctx.onFileTouched(
@@ -836,14 +903,17 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
             isError: true,
           };
         }
-        const ok = await ctx.approve(
-          `Edit ${args.path}${all && count > 1 ? ` (${count} occurrences)` : ""}`,
-          `- ${args.old_text}\n+ ${args.new_text}`
-        );
-        if (!ok) return { content: "The user declined this edit.", isError: true };
+        // Computed before the question so the card can show it, and reused for
+        // the write below rather than recomputed.
         const after = all
           ? before.split(args.old_text).join(args.new_text)
           : before.replace(args.old_text, args.new_text);
+        const ok = await ctx.approve(
+          `Edit ${args.path}${all && count > 1 ? ` (${count} occurrences)` : ""}`,
+          `- ${args.old_text}\n+ ${args.new_text}`,
+          unifiedPatch(before, after, args.path)
+        );
+        if (!ok) return { content: "The user declined this edit.", isError: true };
         fs.writeFileSync(abs, after, "utf8");
         ctx.onFileTouched(abs, { change: "modified", ...lineStat(before, after) });
         return { content: `Edited ${args.path}${all && count > 1 ? ` (${count} occurrences).` : "."}` };
