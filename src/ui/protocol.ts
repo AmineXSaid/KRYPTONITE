@@ -657,7 +657,24 @@ export interface FileTouchedOut { type: "fileTouched"; path: string; file: FileC
 /** The whole changed-file set, after a correction or a reset. */
 export interface ChangesUpdatedOut { type: "changesUpdated"; files: FileChangeDto[] }
 export interface TurnEndOut { type: "turnEnd" }
-export interface ErrorOut { type: "error"; message: string }
+/**
+ * Something failed, said in a way somebody can act on.
+ *
+ * `message` is one sentence naming the cause. `fix` is one sentence naming the
+ * action. `detail` is the raw evidence - a response body, a stack, a status
+ * line - which the panel keeps behind a disclosure rather than printing: a
+ * 502 from a re-signing proxy is two thousand characters of HTML and putting
+ * that in a 340px transcript is how a failure becomes unreadable as well as
+ * unexplained. `action` names a route the panel can offer as a button, so the
+ * remedy is a click rather than an instruction.
+ */
+export interface ErrorOut {
+  type: "error";
+  message: string;
+  fix?: string;
+  detail?: string;
+  action?: "diagnostics" | "endpoints";
+}
 export interface TraceStartedOut { type: "traceStarted" }
 export interface TraceUpdateOut { type: "traceUpdate"; rung: RungDto; index: number }
 export interface TraceDoneOut { type: "traceDone"; rungs: RungDto[]; ok: boolean }

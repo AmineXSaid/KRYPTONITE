@@ -1560,7 +1560,16 @@ export class App {
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       this.log("error", `${msg.type}: ${message}`);
-      this.postTo(source, { type: "error", message });
+      // A message handler that throws is a bug in Genesis rather than a fault
+      // in the endpoint, so this one does NOT offer the diagnostics route -
+      // sending someone to check their gateway over an internal failure wastes
+      // their time and hides ours. The output channel has the whole thing.
+      this.postTo(source, {
+        type: "error",
+        message,
+        fix: "This is a fault in Genesis rather than in your endpoint. " +
+          "The Output panel's Genesis channel has the detail worth attaching to a report.",
+      });
     }
   }
 
@@ -2292,7 +2301,12 @@ export class App {
     const profile = this.activeProfile();
     const root = this.root;
     if (!profile || !root) {
-      this.broadcast({ type: "error", message: "Select an endpoint profile first." });
+      this.broadcast({
+        type: "error",
+        message: "Select an endpoint profile first.",
+        fix: "Diagnostics walks one profile's connection, so there has to be one to walk.",
+        action: "endpoints",
+      });
       return;
     }
     if (this.tracing) return;

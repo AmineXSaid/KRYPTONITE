@@ -3864,8 +3864,22 @@ function _sbRun() {
   function sendText(text) {
     var trimmed = String(text).trim();
     if (!trimmed) return;
-    if (!S.workspace.open) { addError("Open a folder first."); return; }
-    if (!hasEndpoint()) { addError("Select an endpoint profile first."); return; }
+    if (!S.workspace.open) {
+      addError({
+        message: "Open a folder first.",
+        fix: "Genesis reads endpoint profiles and skills from the folder you have open, " +
+          "and confines every write to it.",
+      });
+      return;
+    }
+    if (!hasEndpoint()) {
+      addError({
+        message: "Select an endpoint profile first.",
+        fix: "Create one in .agent/endpoints/, or pick an existing profile.",
+        action: "endpoints",
+      });
+      return;
+    }
     if (S.running) {
       // Mid-turn: hand it to the host and stop there. None of the turn setup
       // below applies - no second aura, no second running flag, and the
@@ -3902,12 +3916,70 @@ function _sbRun() {
     renderAttachments();
   }
 
-  function addError(message) {
+  /**
+   * A failure, said in a way somebody can act on.
+   *
+   * This was one <span>. The host joined the message and the raw response body
+   * with a newline before it ever got here, so a 502 from a re-signing proxy
+   * printed a bare status code followed by up to two thousand characters of
+   * somebody's HTML error page, uncapped, in a 340px column - and offered
+   * nothing to do about it.
+   *
+   * Four parts now, and three of them are optional so a plain message stays a
+   * plain message:
+   *
+   *   message  the cause, in a sentence. Always.
+   *   fix      the action, in a sentence. Printed under it, quieter.
+   *   detail   the evidence - a response body, a stack. COLLAPSED, because it
+   *            is what you read second and only sometimes, and bounded by CSS
+   *            because a gateway decides its length and we do not.
+   *   action   one button to the surface that can answer "why", which for a
+   *            turn failure is always the ladder. Reaching it used to require
+   *            knowing the tab existed.
+   */
+  function addError(m) {
+    // Tolerates the old shape. Several callers still send a bare string, and a
+    // failure is the worst possible moment to throw on the failure renderer.
+    var e = typeof m === "string" ? { message: m } : (m || {});
+    var message = e.message || "Something went wrong.";
     aiEl = null;
     closeToolGroup();
     announce(message);
-    add(div("err-box", icon("i-warn", "ic-13") + "<span>" + esc(message) + "</span>"));
-    return;
+
+    var html = icon("i-warn", "ic-13") +
+      '<span class="err-col"><span class="err-msg">' + esc(message) + "</span>" +
+      (e.fix ? '<span class="err-fix">' + esc(e.fix) + "</span>" : "");
+
+    if (e.detail) {
+      html += '<button class="err-more" data-err-raw aria-expanded="false">' +
+        icon("i-chev", "ic-9 chev") + "<span>Show the response</span></button>" +
+        '<pre class="err-raw" hidden></pre>';
+    }
+    if (e.action) {
+      html += '<span class="err-acts">' +
+        (e.action === "endpoints"
+          ? '<button class="btn sm" data-act="ccEndpoints">Open Control Center</button>' +
+            '<button class="btn sm go" data-act="newEndpoint">Create endpoint profile</button>'
+          : '<button class="btn sm go" data-act="doctor">Run diagnostics</button>') +
+        "</span>";
+    }
+    html += "</span>";
+
+    var box = div("err-box", html);
+    // textContent, not innerHTML: the body is a gateway's, and a gateway that
+    // is misbehaving is exactly the one whose output should not be markup.
+    if (e.detail) box.querySelector(".err-raw").textContent = e.detail;
+    box.addEventListener("click", function (ev) {
+      var t = ev.target.closest("[data-err-raw]");
+      if (!t) return;
+      var pre = box.querySelector(".err-raw");
+      var open = !pre.hidden;
+      pre.hidden = open;
+      t.setAttribute("aria-expanded", open ? "false" : "true");
+      t.querySelector("span").textContent = open ? "Show the response" : "Hide the response";
+    });
+    add(box);
+    return box;
   }
 
   /**
@@ -5689,7 +5761,10 @@ function _sbRun() {
         break;
 
       case "error":
-        addError(m.message);
+        // The whole message, not just its text: the host sends the cause, the
+        // remedy, the raw evidence and the route out as four separate fields
+        // now. See ErrorOut in src/ui/protocol.ts.
+        addError(m);
         break;
 
       case "traceStarted":

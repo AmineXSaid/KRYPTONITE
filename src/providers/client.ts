@@ -67,11 +67,21 @@ export interface CompletionEvent {
    * the reply - and on an agentic turn every intermediate step produces
    * reasoning and no content, so it happened on every step.
    */
-  type: "text" | "reasoning" | "tool_call" | "done" | "usage";
+  type: "text" | "reasoning" | "tool_call" | "done" | "usage" | "stream_gap";
   text?: string;
   toolCall?: ToolCall;
   usage?: TokenUsage;
   stopReason?: string;
+  /**
+   * How many `data:` frames the gateway sent that would not parse.
+   *
+   * Carried on `stream_gap`, emitted once at the end of a stream and only when
+   * the count is non-zero. It is the difference between a reply that is missing
+   * a sentence and a reply that is missing a sentence and says so - the frames
+   * were always dropped, silently, because dropping them is correct for the
+   * keep-alives and comments vendors also send on `data:` lines.
+   */
+  gaps?: number;
 }
 
 export interface TokenUsage {
@@ -104,6 +114,13 @@ export interface TurnTimings {
 }
 
 export class EndpointError extends Error {
+  /**
+   * What to do about it, in one sentence, aimed at the user rather than the
+   * log. Set by `explainHttpError` and `explainNetworkError`; the panel prints
+   * it under the message, and it is the difference between a transcript that
+   * reports a failure and one that ends it.
+   */
+  fix?: string;
   constructor(message: string, readonly detail?: string, readonly status?: number) {
     super(message);
   }
@@ -345,11 +362,21 @@ export class EndpointClient {
     if (res.statusCode >= 400) {
       const text = await res.body.text();
       report();
-      throw new EndpointError(
-        `The endpoint returned ${res.statusCode}.`,
-        text.slice(0, 2000),
-        res.statusCode
-      );
+      /* A STATUS CODE IS NOT AN EXPLANATION.
+       *
+       * This threw `The endpoint returned 502.` with the raw body as the
+       * detail, and the agent loop joined the two with a newline - so a gateway
+       * failure put a bare number and forty lines of an nginx error page into
+       * the transcript, and nothing said what had happened or what to do.
+       *
+       * Everything needed to say it better was already in this repository and
+       * simply never reached this path: `explainNetworkError` below does
+       * exactly this job for socket-level codes, and every failing rung in
+       * diagnostics/ladder.ts carries a `fix`. `explainHttpError` is that
+       * knowledge, applied where a real turn actually fails. The raw body stays
+       * on `detail`, which the panel now shows behind a disclosure instead of
+       * dumping. */
+      throw explainHttpError(res.statusCode, text, this.profile);
     }
 
     if (!wantsStream) {
@@ -378,6 +405,20 @@ export class EndpointClient {
     // an emoji or CJK text corrupted at random points in the stream.
     const decoder = new TextDecoder("utf-8");
     let buf = "";
+    /* A DATA FRAME THAT WILL NOT PARSE IS DROPPED, AND USED TO BE DROPPED IN
+       SILENCE.
+       
+       The `continue` below is right - vendors send keep-alives, comments and
+       padding on `data:` lines and none of them is JSON - which is exactly why
+       genuine corruption was invisible: a gateway emitting one broken frame
+       produced a reply with a sentence missing from the middle, the turn ended
+       normally, and nothing anywhere said a chunk had been lost.
+       
+       Counting them separates the two cases without guessing between them. A
+       run with none is the normal case and says nothing; a run with some ends
+       in one line saying so, which is the difference between a mangled answer
+       and a mangled answer you know about. */
+    let undecodable = 0;
     try {
       for await (const chunk of res.body) {
         // Normalise only the newly arrived text: re-scanning the whole
@@ -396,6 +437,8 @@ export class EndpointClient {
             try {
               json = JSON.parse(payloadLine);
             } catch {
+              // Empty payloads are keep-alives by convention and are not a gap.
+              if (payloadLine) undecodable++;
               continue;
             }
             for (const ev of parser(post ? post(json, this.profile) : json)) {
@@ -408,6 +451,8 @@ export class EndpointClient {
           }
         }
       }
+      // Before `done`, so a consumer that stops at `done` has already seen it.
+      if (undecodable) yield { type: "stream_gap", gaps: undecodable };
       yield { type: "done" };
     } finally {
       report();
@@ -958,6 +1003,76 @@ function anthropicStream() {
 }
 
 /** Turn Node's terse network errors into something a person can act on. */
+/**
+ * An HTTP failure, said in a sentence, with the one thing to do about it.
+ *
+ * The wording is deliberately the same as the matching rung in
+ * `diagnostics/ladder.ts` - those texts were written against real gateways
+ * (NVIDIA NIM listing ids it will not serve, OpenRouter answering a bare model
+ * id with a 502 "Invalid URL") and there is no reason for a turn to explain the
+ * same failure worse than a diagnostic does.
+ *
+ * `fix` is what the panel prints under the message. It is always an action,
+ * never a restatement of the failure.
+ */
+export function explainHttpError(
+  status: number,
+  body: string,
+  profile: EndpointProfile
+): EndpointError {
+  const host = safeHost(profile.baseUrl);
+  const path = profile.chatPath ?? defaultChatPath(profile.baseUrl, profile.wire);
+  const where = `${host}${path}`;
+
+  let message: string;
+  let fix: string;
+
+  if (status === 401 || status === 403) {
+    message = `${host} rejected the credential (${status}).`;
+    fix =
+      "The token is missing, expired, or lacks the scope this route needs. Check the " +
+      "auth block in the profile, and whether the env var or secret it names is still set.";
+  } else if (status === 404) {
+    // A 404 from a chat route is more often the model than the path, and
+    // sending people to edit chatPath first costs real time. Same reasoning as
+    // the Completion rung.
+    message = `${where} returned 404.`;
+    fix =
+      `Either the model id "${profile.model}" is not one this gateway serves - an id can be ` +
+      "listed by /v1/models and still not be servable - or the route is different. Check the " +
+      "model first, then set chatPath explicitly.";
+  } else if (status === 413 || /context.{0,20}length|too many tokens|maximum context/i.test(body)) {
+    message = `${host} refused the request as too large.`;
+    fix =
+      "The conversation has outgrown the model's window. Start a new chat, or lower " +
+      "capabilities.contextWindow in the profile so older turns are dropped sooner.";
+  } else if (status === 429) {
+    message = `${host} is rate-limiting this token (429).`;
+    fix = "Wait and send again. If it persists, the quota is exhausted rather than busy.";
+  } else if (status === 400 || status === 422) {
+    message = `${where} rejected the request body (${status}).`;
+    fix = profile.model.includes("/")
+      ? "A transform module can reshape the body for a gateway that expects a different form."
+      : `The model id "${profile.model}" has no vendor prefix - gateways serving several ` +
+        'vendors expect "vendor/model". Check that before reshaping anything.';
+  } else if (status >= 500) {
+    // The one every corporate deployment meets first.
+    message = `${host} answered ${status} - the gateway itself failed, not the model.`;
+    fix =
+      "This is upstream of the model: a proxy, a load balancer, or a re-signing middlebox. " +
+      "Run diagnostics to see how far the connection gets, and try again - a 502 is often " +
+      "transient. If it is not, the model id can also produce one on gateways that resolve " +
+      "it late.";
+  } else {
+    message = `${host} returned ${status}.`;
+    fix = "Run diagnostics to see which step of the connection is failing.";
+  }
+
+  const err = new EndpointError(message, body.slice(0, 2000), status);
+  err.fix = fix;
+  return err;
+}
+
 export function explainNetworkError(e: any, profile: EndpointProfile): EndpointError {
   const code = e.code ?? e.cause?.code ?? "";
   const host = safeHost(profile.baseUrl);
@@ -973,7 +1088,16 @@ export function explainNetworkError(e: any, profile: EndpointProfile): EndpointE
     ERR_SSL_TLSV13_ALERT_CERTIFICATE_REQUIRED: `${host} requires a client certificate. Set tls.cert and tls.key in the profile.`,
     ERR_SSL_SSLV3_ALERT_HANDSHAKE_FAILURE: `${host} rejected the handshake. Usually a missing or wrong client certificate.`,
   };
-  return new EndpointError(map[code] ?? `Could not reach ${host}.`, `${code} ${e.message}`.trim());
+  /* The map's entries already END in the remedy, which is why they read well
+     on their own. Splitting them would rewrite fifteen strings that are
+     correct; instead the whole sentence is the message and `fix` names the
+     surface that can show its work. */
+  const err = new EndpointError(map[code] ?? `Could not reach ${host}.`, `${code} ${e.message}`.trim());
+  err.fix = map[code]
+    ? "Run diagnostics to confirm which step fails, then edit the profile."
+    : "Run diagnostics - it walks DNS, TCP, TLS, auth and the first completion in order " +
+      "and names the step that stops.";
+  return err;
 }
 
 function safeHost(u: string): string {

@@ -34,6 +34,17 @@ export interface AgentEvent {
   text?: string;
   tool?: { name: string; args: any; result?: string; isError?: boolean };
   error?: string;
+  /**
+   * What to do about the error, and the raw response that caused it.
+   *
+   * These used to be flattened into `error` with a newline between them, which
+   * is how a 502 put a bare status code and two thousand characters of an
+   * nginx page into the transcript as one undifferentiated string. Kept apart
+   * so the panel can print the sentence, offer the remedy, and put the body
+   * behind a disclosure.
+   */
+  errorFix?: string;
+  errorDetail?: string;
   /** `exact` is true only when the endpoint reported real token usage. */
   context?: { used: number; limit: number; exact: boolean };
 }
@@ -686,6 +697,8 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
     let decided = false;
     let holding = false;
     let pending = "";
+    /** `data:` frames this step's gateway sent that would not parse. */
+    let gaps = 0;
 
     try {
       for await (const ev of client.complete({
@@ -735,6 +748,14 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
           }
         }
         if (ev.type === "tool_call") calls.push(ev.toolCall!);
+        /* The gateway sent frames that would not parse, and their contents are
+           simply gone. Said once, at the end, as a note rather than a failure:
+           the turn did produce an answer, and what the user needs to know is
+           that it has a hole in it. Silence here was indistinguishable from a
+           model that just said less. */
+        if (ev.type === "stream_gap" && ev.gaps) {
+          gaps += ev.gaps;
+        }
         // Real counts from the gateway. These were being discarded: the client
         // has always decoded `usage` for both wires, nothing consumed it, and
         // the panel showed a character-count estimate instead of the number the
@@ -751,8 +772,26 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
         }
       }
     } catch (e: any) {
-      yield { type: "error", error: [e.message, e.detail].filter(Boolean).join("\n") };
+      yield {
+        type: "error",
+        error: e.message,
+        errorFix: e.fix,
+        errorDetail: e.detail,
+      };
       return;
+    }
+
+    if (gaps) {
+      yield {
+        type: "error",
+        error: gaps === 1
+          ? "One streamed frame from the gateway could not be decoded and was skipped."
+          : `${gaps} streamed frames from the gateway could not be decoded and were skipped.`,
+        errorFix:
+          "The reply above is missing whatever those frames carried. This is the gateway " +
+          "or something between it and here corrupting the stream, not the model - send " +
+          "again, and run diagnostics if it keeps happening.",
+      };
     }
 
     /* Release whatever the splitter was holding. An unterminated `<think>`
@@ -937,5 +976,9 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
     }
   }
 
-  yield { type: "error", error: `Stopped after ${maxIter} steps without finishing. Narrow the task and try again.` };
+  yield {
+    type: "error",
+    error: `Stopped after ${maxIter} steps without finishing.`,
+    errorFix: "Narrow the task and send it again - a smaller step finishes inside the cap.",
+  };
 }

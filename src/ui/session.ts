@@ -571,12 +571,22 @@ export class SessionController {
     }
     const root = this.app.root;
     if (!root) {
-      this.app.broadcast({ type: "error", message: "Open a folder first." });
+      this.app.broadcast({
+        type: "error",
+        message: "Open a folder first.",
+        fix: "Genesis reads endpoint profiles and skills from the folder you have open, " +
+          "and confines every write to it.",
+      });
       return;
     }
     const profile = this.app.activeProfile();
     if (!profile) {
-      this.app.broadcast({ type: "error", message: "Select an endpoint profile first." });
+      this.app.broadcast({
+        type: "error",
+        message: "Select an endpoint profile first.",
+        fix: "Create one in .agent/endpoints/, or pick an existing profile.",
+        action: "endpoints",
+      });
       this.app.broadcast({ type: "turnEnd" });
       return;
     }
@@ -585,7 +595,13 @@ export class SessionController {
     try {
       client = this.app.clientFor(profile);
     } catch (e) {
-      this.app.broadcast({ type: "error", message: messageOf(e) });
+      this.app.broadcast({
+        type: "error",
+        message: messageOf(e),
+        fix: fixOf(e) ?? "Check the profile's baseUrl, auth block and TLS paths.",
+        detail: detailOf(e),
+        action: "diagnostics",
+      });
       this.app.broadcast({ type: "turnEnd" });
       return;
     }
@@ -880,8 +896,20 @@ export class SessionController {
           }
           case "error": {
             errored = true;
-            this.app.log("error", ev.error ?? "Unknown agent error.");
-            this.show(turn, { type: "error", message: ev.error ?? "Unknown error." });
+            // The log still gets everything on one line - that is what a log is
+            // for. The panel gets the three parts separately; see ErrorOut.
+            this.app.log("error",
+              [ev.error, ev.errorDetail].filter(Boolean).join("\n") || "Unknown agent error.");
+            this.show(turn, {
+              type: "error",
+              message: ev.error ?? "Unknown error.",
+              fix: ev.errorFix,
+              detail: ev.errorDetail,
+              // Every turn failure is worth one click to the ladder: it is the
+              // only surface that can say which step of the connection stops,
+              // and reaching it used to mean knowing the tab existed.
+              action: "diagnostics",
+            });
             break;
           }
           case "steer": {
@@ -902,7 +930,13 @@ export class SessionController {
     } catch (e) {
       errored = true;
       this.app.log("error", messageOf(e));
-      this.app.broadcast({ type: "error", message: messageOf(e) });
+      this.app.broadcast({
+        type: "error",
+        message: messageOf(e),
+        fix: fixOf(e),
+        detail: detailOf(e),
+        action: "diagnostics",
+      });
     }
 
     if (phase === "plan" && planBuffer) {
@@ -1540,7 +1574,11 @@ export class SessionController {
   load(id: string): void {
     const doc = this.app.sessions.load(id);
     if (!doc) {
-      this.app.broadcast({ type: "error", message: "That session could not be read." });
+      this.app.broadcast({
+        type: "error",
+        message: "That session could not be read.",
+        fix: "Its transcript file is missing or malformed. Start a new chat; the others are unaffected.",
+      });
       return;
     }
     this.detach();
@@ -1649,6 +1687,19 @@ function firstToken(summary: string): string | undefined {
 function messageOf(e: unknown): string {
   if (e instanceof Error) return e.message;
   return String(e);
+}
+
+/* The two halves of an EndpointError that are not its message. Read off the
+   shape rather than the class, because the same thrown value crosses a bundle
+   boundary in the test stub and `instanceof` is not reliable across it. */
+function fixOf(e: unknown): string | undefined {
+  const f = (e as any)?.fix;
+  return typeof f === "string" && f ? f : undefined;
+}
+
+function detailOf(e: unknown): string | undefined {
+  const d = (e as any)?.detail;
+  return typeof d === "string" && d ? d : undefined;
 }
 
 /**

@@ -1229,6 +1229,37 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 .err-box .ic { flex: none; margin-top: 1px; color: var(--kx-error); }
 .err-box > span { min-width: 0; }
+/* A failure is four things stacked, not one paragraph: what happened, what to
+   do, the evidence, and the way out. See addError. */
+.err-col { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+.err-msg { color: var(--kx-fg); }
+/* The remedy is quieter than the cause on purpose: you read what broke first,
+   and the sentence under it is the answer, not a second problem. */
+.err-fix { font-size: 11.5px; color: var(--kx-fg-2); }
+.err-more {
+  display: flex; align-items: center; gap: 5px; align-self: flex-start;
+  padding: 0; font-family: var(--kx-mono); font-size: 10.5px;
+  letter-spacing: .06em; text-transform: uppercase; color: var(--kx-fg-3);
+}
+.err-more:hover { color: var(--kx-fg-2); }
+.err-more:focus-visible { outline: 1px solid var(--kx-link); outline-offset: 2px; }
+.err-more[aria-expanded="true"] .chev { transform: rotate(90deg); }
+/* BOUNDED, because a gateway decides how long its error page is and we do not.
+   This is the rule that stops a re-signing proxy putting forty lines of HTML
+   into a 340px transcript - which is what shipped, uncapped, inside the
+   sentence rather than under it. */
+.err-raw {
+  max-height: 180px; overflow: auto;
+  background: var(--kx-bg-deep); border-radius: 4px; padding: 7px 9px;
+  font-family: var(--kx-mono); font-size: 10.5px; line-height: 1.5;
+  /* --kx-fg-3, not the --kx-fg-4 a code pane uses. This is EVIDENCE somebody
+     opened deliberately in order to read it - a status line, a stack, the one
+     JSON field naming the real cause - not ambient syntax to skim past.
+     fg-4 measures 3.99:1 on this ground, which contrast.cjs rejects for a rule
+     setting both an ink and a fill, and it was right to. */
+  color: var(--kx-fg-3); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.err-acts { display: flex; gap: 6px; flex-wrap: wrap; }
 .note-box {
   font-size: 11.5px; color: var(--kx-fg-2);
   margin-bottom: 14px; white-space: pre-wrap;
