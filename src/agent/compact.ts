@@ -279,6 +279,17 @@ export class MicroCompactor {
   private ineffective = 0;
   private cooldownUntil = 0;
   private turns = 0;
+  /**
+   * A pass is already running.
+   *
+   * One controller holds one compactor and background turns share it, so two
+   * turns can be in `beginTurn` at once. Without this they both plan against
+   * the same transcript, both pick the oldest pending exchange, and both pay
+   * for a summary of it - two requests for one result. The second caller does
+   * not wait: it applies what is already decided and gets on with its turn,
+   * because a turn should never block on an optimisation.
+   */
+  private running = false;
 
   constructor(cfg: Partial<MicroCompactConfig> = {}, aux?: Summariser) {
     this.cfg = { ...MICRO_COMPACT_DEFAULTS, ...cfg };
@@ -361,6 +372,8 @@ export class MicroCompactor {
     }
     if (now < this.cooldownUntil) return this.apply(messages);
     if (this.ineffective >= MAX_INEFFECTIVE) return this.apply(messages);
+    if (this.running) return this.apply(messages);
+    if (signal?.aborted) return this.apply(messages);
 
     const pending = compactable(messages, this.cfg).filter(
       (e) => !this.absorbed.has(messages[e.start])
@@ -374,6 +387,7 @@ export class MicroCompactor {
     const target = pending[0];
     const before = exchangeTokens(messages, target);
     let text: string;
+    this.running = true;
     try {
       text = await this.aux!.summarise(
         renderExchange(messages, target),
@@ -381,12 +395,23 @@ export class MicroCompactor {
         signal
       );
     } catch {
-      // A broken aux endpoint degrades rather than hammers: one failure buys a
-      // minute of silence, so a gateway that is down does not get a request per
-      // step of every turn on top of whatever is already wrong with it.
-      this.cooldownUntil = now + COOLDOWN_MS;
+      // The user pressing stop is not a broken endpoint, and charging them a
+      // minute of no compaction for it would be punishing the one action they
+      // are always allowed to take. Only a real failure earns the cooldown.
+      if (!signal?.aborted) {
+        // A broken aux endpoint degrades rather than hammers: one failure buys
+        // a minute of silence, so a gateway that is down does not also get a
+        // request at the top of every turn on top of whatever is wrong with it.
+        this.cooldownUntil = now + COOLDOWN_MS;
+      }
       return this.apply(messages);
+    } finally {
+      this.running = false;
     }
+    // Aborted while the summary was in flight: the answer arrived, but the turn
+    // it was for is over. Keeping it would rewrite the prefix of whatever runs
+    // next for a decision nobody is waiting on any more.
+    if (signal?.aborted) return this.apply(messages);
 
     const summary = summaryMessage(text);
     const after = messageTokens(summary);

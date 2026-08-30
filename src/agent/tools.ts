@@ -278,6 +278,32 @@ export interface ToolResult {
  * edited by hand, carried in from another checkout - could never be edited
  * back under it, and the refusal would be a trap rather than an instruction.
  */
+/**
+ * Are these two paths the same file?
+ *
+ * A lexical comparison is not enough, and the gap was reachable: `writable()`
+ * hands back a lexically resolved path, so a symlink inside the workspace
+ * pointing at the memory file compared unequal to it and the cap did not
+ * apply. Writing through the alias grew a 100-character budget to 500. Nothing
+ * about it is an escape - the write was always inside the workspace and always
+ * allowed - but the cap exists to make an agent curate, and one it can step
+ * around by writing through another name is not a cap.
+ *
+ * `realpathSync` is what closes it, and it throws on anything that does not
+ * exist yet - which is the ordinary case for a memory file on a first run - so
+ * each side falls back to its lexical form independently.
+ */
+function sameFile(a: string, b: string): boolean {
+  const real = (p: string) => {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  return real(a) === real(b);
+}
+
 function memoryCapRefusal(
   ctx: ToolContext,
   abs: string,
@@ -285,7 +311,7 @@ function memoryCapRefusal(
   after: string
 ): string | undefined {
   const mem = ctx.memory;
-  if (!mem || path.resolve(abs) !== path.resolve(mem.path)) return undefined;
+  if (!mem || !sameFile(abs, mem.path)) return undefined;
   if (after.length <= mem.cap || after.length <= before.length) return undefined;
   return mem.refusal(after.length);
 }

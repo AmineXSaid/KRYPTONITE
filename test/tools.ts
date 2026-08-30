@@ -843,6 +843,30 @@ const run = (name: string, args: any) => runTool(name, args, ctx);
     const other = await crun("write_file", { path: "src/huge.ts", content: big });
     ck(!other.isError, "another file the same size is not the memory file", other.content);
 
+    // A second name for the same file. `writable()` resolves lexically, so a
+    // symlink inside the workspace compared unequal to the memory path and the
+    // cap simply did not apply - writing through the alias grew a 200-character
+    // budget past 500. Nothing about it is an escape; the write was always
+    // inside the workspace and always allowed. But a cap an agent can step
+    // around by using another name is not a cap.
+    fs.writeFileSync(memAbs, "small", "utf8");
+    let linked = true;
+    try {
+      fs.symlinkSync(memAbs, path.join(root, "mem-alias.md"));
+    } catch {
+      linked = false; // Windows without developer mode; not a test failure.
+    }
+    if (linked) {
+      const viaLink = await crun("write_file", { path: "mem-alias.md", content: big });
+      ck(Boolean(viaLink.isError), "a write through a symlink to the memory file is refused too");
+      ck(
+        fs.readFileSync(memAbs, "utf8") === "small",
+        "and the file behind it is untouched",
+        String(fs.readFileSync(memAbs, "utf8").length)
+      );
+      fs.unlinkSync(path.join(root, "mem-alias.md"));
+    }
+
     // And with no agent active there is no budget at all.
     const uncapped = await run("write_file", { path: memRel, content: big });
     ck(!uncapped.isError, "with no agent selected the cap does not apply", uncapped.content);

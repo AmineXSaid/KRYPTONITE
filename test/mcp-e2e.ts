@@ -15,6 +15,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { McpRegistry, loadMcpConfig, qualify, parseQualified } from "../src/mcp/registry";
 import { agentAllowsMcp, type Agent } from "../src/agents/loader";
+import { toolAllowedIn } from "../src/agent/loop";
 
 const ROOT = path.join(os.tmpdir(), "kx-mcp-test-" + Date.now());
 let pass = 0;
@@ -196,6 +197,112 @@ async function main() {
     const res = await reg.call(readTool.name, { path: path.join(ROOT, "hello.txt") });
     check(!res.isError && /genesis mcp works/.test(res.content), "read returned the file body",
       res.content.trim().slice(0, 60));
+  }
+
+  /* ── agents and MCP, all three gates, against the real server ── */
+  //
+  // Everything above proves the registry. This proves the thing a user actually
+  // relies on: that an agent's picker row saying "reads only, through fs" is
+  // true of the runtime and not just of the list of tools the model was handed.
+  //
+  // Three gates decide whether an MCP call happens, and they are independent:
+  // the agent's scope, the phase, and approval. Each is enforced at the CALL and
+  // not only in the advertised list, because the advertised list is a request to
+  // the model rather than a guarantee about it - a gateway that drops the array,
+  // a small model echoing a name from earlier in the transcript, or an injected
+  // instruction in a file the model just read all produce a call for something
+  // that was never offered. Driven here against real tool names from a real
+  // server, because the names are the server's to choose and a fixture cannot
+  // tell you what it will actually say.
+  {
+    const reader = {
+      name: "fs-reader",
+      description: "Reads through the filesystem server.",
+      persona: "",
+      model: "",
+      memory: "",
+      tools: [],
+      skills: [],
+      allMcp: false,
+      mcp: [{ server: "fs", include: ["read_*", "list_*"], exclude: ["list_allowed_directories"] }],
+      file: "",
+    } as unknown as Agent;
+
+    const real = defs.map((d) => d.name);
+    const offered = reg
+      .toolDefs((server, tool) => agentAllowsMcp(reader, server, tool))
+      .map((d) => d.name);
+
+    // 1. Scope, at the advertisement boundary.
+    check(offered.length > 0 && offered.length < real.length,
+      "the agent is offered a strict subset of the server's tools",
+      `${offered.length} of ${real.length}`);
+    check(offered.every((n) => /^mcp__fs__(read_|list_)/.test(n)),
+      "only what its include patterns name", offered.join(", ").slice(0, 90));
+    check(!offered.includes("mcp__fs__list_allowed_directories"),
+      "with exclude subtracting from include, as Genesis documents it deviating from Hermes");
+    check(!offered.some((n) => /write_file|edit_file|move_file|create_directory/.test(n)),
+      "and nothing that can change the filesystem");
+
+    // 2. Scope, at the execution boundary - the one that matters. A name the
+    //    model produced from memory never passed through the filter above.
+    const parsed = parseQualified("mcp__fs__write_file");
+    check(!!parsed && !agentAllowsMcp(reader, parsed.server, parsed.tool),
+      "a write the model asks for anyway is refused by the same predicate");
+    const excluded = parseQualified("mcp__fs__list_allowed_directories");
+    check(!!excluded && !agentAllowsMcp(reader, excluded.server, excluded.tool),
+      "and so is the one the exclude list removed");
+    const allowed = parseQualified("mcp__fs__read_text_file");
+    check(!!allowed && agentAllowsMcp(reader, allowed.server, allowed.tool),
+      "while what it is scoped to still runs");
+
+    // 3. Phase. This server is not marked readOnly, so Ask and Plan withhold
+    //    every one of its tools even from an agent scoped to read-only ones -
+    //    the two rules are independent and both have to pass.
+    for (const name of offered.slice(0, 3)) {
+      check(!toolAllowedIn("ask", name, (n) => reg.isReadOnly(n)),
+        `ask withholds ${name} from an unvouched server`);
+      check(!toolAllowedIn("plan", name, (n) => reg.isReadOnly(n)),
+        `plan withholds ${name} too`);
+      check(toolAllowedIn("act", name, (n) => reg.isReadOnly(n)),
+        `act allows ${name}`);
+    }
+
+    // 4. And the gates compose the right way round: being allowed by one is
+    //    never enough. A tool the agent may call, in a phase that withholds it,
+    //    is refused; a tool the phase allows, that the agent may not call, is
+    //    refused. Only both together let it through.
+    const both = (phase: "ask" | "plan" | "act", name: string) => {
+      const q = parseQualified(name);
+      return (
+        toolAllowedIn(phase, name, (n) => reg.isReadOnly(n)) &&
+        !!q &&
+        agentAllowsMcp(reader, q.server, q.tool)
+      );
+    };
+    check(!both("ask", "mcp__fs__read_text_file"), "scoped-in but phase-out is refused");
+    check(!both("act", "mcp__fs__write_file"), "phase-in but scoped-out is refused");
+    check(both("act", "mcp__fs__read_text_file"), "and only both together allow the call");
+
+    // 5. An unscoped agent reaches everything, so the narrowing above is the
+    //    agent's doing and not something the registry was going to do anyway.
+    const wide = { name: "wide", allMcp: true, mcp: [], tools: [], skills: [] } as unknown as Agent;
+    const wideOffered = reg.toolDefs((sv, t) => agentAllowsMcp(wide, sv, t));
+    check(wideOffered.length === real.length,
+      "an unscoped agent still sees every tool", `${wideOffered.length} of ${real.length}`);
+    check(reg.toolDefs().length === real.length, "and so does no agent at all");
+
+    // 6. A scoped agent's call still really works. A filter that let nothing
+    //    through would pass every check above and be useless.
+    const live = offered.find((n) => /read_text_file$/.test(n));
+    if (live) {
+      const res = await reg.call(live, { path: path.join(ROOT, "hello.txt") });
+      check(!res.isError && /genesis mcp works/.test(res.content),
+        "and a call the scope permits returns real content",
+        res.content.trim().slice(0, 40));
+    } else {
+      check(false, "a readable tool survived the scope", offered.join(","));
+    }
   }
 
   /* error paths against a live server */

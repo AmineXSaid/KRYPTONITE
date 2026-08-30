@@ -296,6 +296,63 @@ function ck(ok: boolean, label: string, detail = "") {
     ck(calls() === 2, "every_n_turns paces it, in turns", String(calls()));
   }
 
+  /* ── 4b. stopping, and two turns at once ─────────────────────────────── */
+  console.log("\n──── an abort is not a failure ────");
+  {
+    // Pressing stop used to buy the same sixty-second cooldown a broken
+    // gateway does, so the one action a user is always allowed to take
+    // silently disabled compaction for the next minute.
+    let tries = 0;
+    const aux: Summariser = {
+      name: "aux",
+      contextWindow: AUX_WINDOW_FLOOR,
+      summarise: (_t, _c, signal) => {
+        tries++;
+        return new Promise<string>((res, rej) => {
+          const to = setTimeout(() => res("summary"), 50);
+          signal?.addEventListener("abort", () => {
+            clearTimeout(to);
+            rej(new Error("aborted"));
+          });
+        });
+      },
+    };
+    const c = new MicroCompactor({ micro_compact: true }, aux);
+    const t = heavy();
+    const ac = new AbortController();
+    const p = c.beginTurn(t, ac.signal);
+    ac.abort();
+    const during = await p;
+    ck(during === t || during.length === t.length, "an aborted pass absorbs nothing");
+    const after = await c.beginTurn(t, undefined, Date.now());
+    ck(tries === 2, "and the next turn is free to try again immediately", String(tries));
+    ck(after.length < t.length, "and does compact", `${after.length} of ${t.length}`);
+  }
+  {
+    // One controller holds one compactor and background turns share it. Two
+    // turns landing in beginTurn together used to plan against the same
+    // transcript, pick the same exchange, and pay for two summaries of it.
+    let tries = 0;
+    const aux: Summariser = {
+      name: "aux",
+      contextWindow: AUX_WINDOW_FLOOR,
+      summarise: async () => {
+        tries++;
+        await new Promise((r) => setTimeout(r, 20));
+        return "S";
+      },
+    };
+    const c = new MicroCompactor({ micro_compact: true }, aux);
+    const t = heavy();
+    await Promise.all([c.beginTurn(t), c.beginTurn(t)]);
+    ck(tries === 1, "two concurrent turns pay for one summary, not two", String(tries));
+    // And the second caller must not have waited: a turn never blocks on an
+    // optimisation, it just uses whatever has been decided so far.
+    const started = Date.now();
+    await c.beginTurn(t);
+    ck(Date.now() - started < 400, "and a later turn is not left waiting on one");
+  }
+
   /* ── 5. the feasibility probe ────────────────────────────────────────── */
   console.log("\n──── feasibility ────");
   {
