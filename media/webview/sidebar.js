@@ -3117,14 +3117,42 @@ function _sbRun() {
     // The one interruption that is genuinely an interruption: the turn has
     // stopped and is waiting on an answer nobody has been told is wanted.
     announce("Permission required: " + m.summary);
+    /* WHAT "ALWAYS" MEANS, ON THE BUTTON THAT MEANS IT.
+     *
+     * The label was "Always allow" for both kinds of request, and the two are
+     * not the same grant at all. For an edit it sets a flag for this session.
+     * For a command it appends the command's FIRST TOKEN to a workspace-level
+     * list that survives restarts - so "always allow" on `git status`
+     * permanently authorises `git push --force`, and the only place that was
+     * ever said was the card's replacement text, after the click.
+     *
+     * The scope goes on the control. `git` rather than `git status`, because
+     * the token is what is actually being granted and printing the full command
+     * would promise a precision the grant does not have. */
+    var isCmd = String(m.summary || "").indexOf("Run:") === 0;
+    var token = isCmd
+      ? String(m.summary).replace(/^Run:\s*/, "").trim().split(/\s+/)[0]
+      : "";
+    var always = isCmd
+      ? "Always allow " + esc(token)
+      : "Always allow edits";
+    /* Built raw and escaped ONCE, at the point of use. Escaping the token and
+       then dropping the result into a double-quoted attribute alongside a
+       literal quote character closed the attribute early and swallowed the rest
+       of the sentence - the tooltip read "Every command starting with " and
+       stopped. Typographic quotes would have hidden that rather than fixed it. */
+    var alwaysTitle = isCmd
+      ? 'Every command starting with "' + token + '" runs without asking, in this ' +
+        "workspace, until you revoke it in the Control Center."
+      : "Every file edit runs without asking for the rest of this conversation.";
     var el = add(div("perm",
       '<div class="perm-t">' + icon("i-warn", "ic-14") + "Permission required</div>" +
       '<div class="perm-b">Genesis wants to:</div>' +
       '<div class="perm-cmd">' + esc(m.summary) + "</div>" +
       (m.detail ? '<div class="perm-cmd" style="margin-top:6px">' + esc(String(m.detail).slice(0, 4000)) + "</div>" : "") +
       '<div class="perm-actions">' +
-        '<button class="btn go" data-perm="allow">Allow</button>' +
-        '<button class="btn" data-perm="always">Always allow</button>' +
+        '<button class="btn go" data-perm="allow">Allow once</button>' +
+        '<button class="btn" data-perm="always" title="' + esc(alwaysTitle) + '">' + always + "</button>" +
         '<button class="btn" data-perm="deny">Deny</button></div>'));
     el.dataset.perm = m.id;
     el.dataset.summary = m.summary;

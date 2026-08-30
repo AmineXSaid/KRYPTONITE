@@ -1157,6 +1157,31 @@ export class App {
       this.alwaysAllowedCommands
     );
     this.log("info", `Always allowing shell command: ${token}`);
+    // So the Control Center's list is right without waiting for a reload. A
+    // grant nobody can see is a grant nobody can take back.
+    this.broadcast({ type: "configChanged", config: this.configDto() });
+  }
+
+  /**
+   * Take a grant back. An empty token clears all of them.
+   *
+   * The grant is keyed on the command's FIRST TOKEN, which is what makes this
+   * necessary rather than tidy: saying yes to `git status` once authorised
+   * every `git` invocation in the workspace, permanently, and until now there
+   * was no surface on which to discover that or undo it.
+   */
+  async forgetAllowedCommand(token: string): Promise<void> {
+    const before = this.alwaysAllowedCommands.length;
+    this.alwaysAllowedCommands = token
+      ? this.alwaysAllowedCommands.filter((t) => t !== token)
+      : [];
+    if (this.alwaysAllowedCommands.length === before && token) return;
+    await this.context.workspaceState.update(
+      "genesis.alwaysAllowedCommands",
+      this.alwaysAllowedCommands
+    );
+    this.log("info", token ? `No longer always allowing: ${token}` : "Cleared every always-allow grant.");
+    this.broadcast({ type: "configChanged", config: this.configDto() });
   }
 
   refreshSessions(): void {
@@ -1439,6 +1464,7 @@ export class App {
       editorContext: this.cfg().get<boolean>("editorContext", true),
       readOutsideWorkspace: this.cfg().get<boolean>("readOutsideWorkspace", true),
       extensionVersion: String(this.context.extension.packageJSON.version ?? "0.0.0"),
+      alwaysAllowedCommands: [...this.alwaysAllowedCommands],
       ui: { ...this.uiConfig },
     };
   }
@@ -1970,6 +1996,21 @@ export class App {
       }
 
       case "deleteEndpoint": {
+        /* Same reasoning as deleteSession above, and a wider blast radius: this
+           removes the YAML AND the API key out of SecretStorage, so a mis-click
+           costs a credential somebody has to go and find again. The bin sits in
+           a row of two icon buttons beside a pencil. */
+        const gone = await vscode.window.showWarningMessage(
+          `Delete the endpoint profile "${msg.id}"?`,
+          {
+            modal: true,
+            detail:
+              "Its YAML file is deleted and its stored API key is removed from " +
+              "SecretStorage. Neither can be recovered from here.",
+          },
+          "Delete"
+        );
+        if (gone !== "Delete") return;
         const removed = deleteEndpointFile(this.profiles, msg.id);
         if (removed) this.log("info", `Deleted endpoint ${msg.id}.`);
         // Leaving the credential behind would silently re-arm a later profile
@@ -2123,8 +2164,37 @@ export class App {
         this.session.load(msg.id);
         return;
 
-      case "deleteSession":
+      case "deleteSession": {
+        /* A CONVERSATION IS WORK, AND THIS DELETED IT ON ONE CLICK.
+         *
+         * `SessionStore.delete` calls fsp.rm on the transcript file. There is
+         * no trash, no undo and no second copy. The control that reaches it is
+         * a bin icon about thirty pixels from the row's own title, which is the
+         * button you press to OPEN the conversation - so the failure mode is
+         * missing by half a centimetre and losing a thread permanently.
+         *
+         * Modal, because a dismissible toast is not a confirmation: the delete
+         * has to not have happened while the question is on screen. */
+        const meta = this.sessionMetas().find((s) => s.id === msg.id);
+        const what = meta ? `"${meta.title}"` : "this conversation";
+        const answer = await vscode.window.showWarningMessage(
+          `Delete ${what}?`,
+          {
+            modal: true,
+            detail: meta
+              ? `${meta.count} message${meta.count === 1 ? "" : "s"}, last active ${meta.when}. ` +
+                "The transcript is removed from disk and cannot be recovered."
+              : "The transcript is removed from disk and cannot be recovered.",
+          },
+          "Delete"
+        );
+        if (answer !== "Delete") return;
         this.session.deleteSession(msg.id);
+        return;
+      }
+
+      case "forgetAllowedCommand":
+        await this.forgetAllowedCommand(msg.token);
         return;
 
       case "searchFiles": {

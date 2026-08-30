@@ -219,6 +219,17 @@ export interface ConfigDto {
    * is which build it came from.
    */
   extensionVersion: string;
+  /**
+   * Shell commands the user has said "always allow" to, by first token.
+   *
+   * A grant made in the transcript was permanent, workspace-wide, keyed on the
+   * command's FIRST WORD, and reachable from nowhere: it lived in
+   * workspaceState and appeared in no surface, no protocol message and no
+   * setting. So saying yes once to `git status` authorised `git push --force`
+   * for good, and there was no screen on which to discover that or take it
+   * back. Carried here so the Control Center can list it and revoke it.
+   */
+  alwaysAllowedCommands: string[];
   ui: UiConfigDto;
 }
 
@@ -518,6 +529,8 @@ export interface OpenIssuesMsg { type: "openIssues" }
 export interface ListSessionsMsg { type: "listSessions" }
 export interface LoadSessionMsg { type: "loadSession"; id: string }
 export interface DeleteSessionMsg { type: "deleteSession"; id: string }
+/** Revoke one always-allow grant. `token` empty means all of them. */
+export interface ForgetAllowedCommandMsg { type: "forgetAllowedCommand"; token: string }
 export interface SearchFilesMsg { type: "searchFiles"; query: string }
 /**
  * Probe an endpoint the user has typed but not saved. Carries `apiKey` in the
@@ -564,7 +577,7 @@ export type InboundMessage =
   | SetAgentMsg | NewAgentMsg | OpenAgentMsg
   | RestoreCheckpointMsg | ExportBundleMsg | ExportChatMsg | OpenFileMsg | OpenSettingsMsg
   | OpenYamlMsg | OpenControlCenterMsg | EditorCommandMsg | OpenSkillsFolderMsg | OpenIssuesMsg
-  | ListSessionsMsg | LoadSessionMsg | DeleteSessionMsg | SearchFilesMsg
+  | ListSessionsMsg | LoadSessionMsg | DeleteSessionMsg | ForgetAllowedCommandMsg | SearchFilesMsg
   | CheckEndpointMsg | McpReconnectMsg | McpReloadMsg | ClearChangesMsg
   | DetectCapsMsg | SetCapabilityMsg | ApplyCapsMsg | McpLogMsg
   | CancelQueuedMsg | PromoteQueuedMsg;

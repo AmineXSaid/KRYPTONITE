@@ -386,7 +386,8 @@ function _run() {
     skillWarnings: [],
     config: {
       approvalMode: "ask", activeProfile: "", caBundlePath: "",
-      profileDirectory: ".agent/endpoints", skillsDirectory: ".agent/skills", ui: {}
+      profileDirectory: ".agent/endpoints", skillsDirectory: ".agent/skills",
+      alwaysAllowedCommands: [], ui: {}
     },
     tlsError: null,
     rungs: [],
@@ -448,6 +449,37 @@ function _run() {
     }
     return html + "</div>";
   }
+  /**
+   * The persisted always-allow grants, with a way to take each one back.
+   *
+   * Deliberately blunt about scope: the row shows the TOKEN and says what it
+   * covers, because "git" and "git status" are different promises and the one
+   * that was made is the first.
+   */
+  function allowList() {
+    var list = (S.config && S.config.alwaysAllowedCommands) || [];
+    if (!list.length) {
+      return '<div class="hint muted" style="font-size:11px">' +
+        "None. Pressing “Always allow ⟨command⟩” on a permission request adds the " +
+        "command’s first word here, for this workspace, until you remove it.</div>";
+    }
+    var rows = "";
+    for (var i = 0; i < list.length; i++) {
+      rows += '<div class="tr2" style="grid-template-columns:minmax(0,1fr) auto">' +
+        '<span class="v mono ell" title="Every command starting with ' + esc(list[i]) + '">' +
+          esc(list[i]) + " …</span>" +
+        '<button class="mini" data-forget="' + esc(list[i]) +
+          '" title="Stop always allowing ' + esc(list[i]) + '" ' +
+          'aria-label="Stop always allowing ' + esc(list[i]) + '">' + icon("i-x", "ic-13") + "</button>" +
+        "</div>";
+    }
+    return '<div class="tbl">' + rows + "</div>" +
+      '<div class="hint muted" style="font-size:11px;margin-top:8px">' +
+      "Each of these runs without asking, in this workspace, whatever follows the word. " +
+      "</div>" +
+      '<div style="margin-top:8px"><button class="btn" data-forget="">Revoke all</button></div>';
+  }
+
   function card(title, inner) {
     return '<div class="card"><div class="t">' + esc(title) + "</div>" + inner + "</div>";
   }
@@ -1373,12 +1405,32 @@ function _run() {
         ["Tool result limit", "60,000 characters to the model"],
         ["Context fitting", "oldest-first, call/result paired"]
       ])) +
+      /* ONE SETTING, ONE VOCABULARY.
+       *
+       * These options were labelled with their raw setting values - ask,
+       * edits-auto, full-auto - while the sidebar's own picker calls the same
+       * three Manual, Accept edits and Auto. The sidebar renamed "Ask" to
+       * "Manual" deliberately, so it would stop colliding with the ASK phase a
+       * centimetre away in the same row; that rename never reached here, so
+       * someone who set the mode in the panel and came to check it found three
+       * words they had never seen. The labels are the panel's now, and the
+       * sentences under them are the panel's sentences. */
       card("Approval mode",
         optGroup("approvalMode", [
-          ["ask", "ask"], ["edits-auto", "edits-auto"], ["full-auto", "full-auto"]
+          ["ask", "Manual"], ["edits-auto", "Accept edits"], ["full-auto", "Auto"]
         ], S.config.approvalMode, true) +
         '<div class="hint muted" style="font-size:11px;margin-top:6px">' +
-        "ask: every side effect · edits-auto: file edits run, commands ask · full-auto: never ask</div>") +
+        "Manual: always ask before making changes · Accept edits: file edits run " +
+        "automatically, shell commands still ask · Auto: never asks, and runs shell " +
+        "commands and writes files without stopping</div>") +
+      /* WHAT "ALWAYS ALLOW" ACTUALLY GRANTED, AND THE ONLY WAY BACK.
+       *
+       * Pressing "Always allow" on a shell command appends its FIRST TOKEN to a
+       * workspace-level list that survives restarts. So one yes to `git status`
+       * authorises `git push --force` for good - and until this card the list
+       * existed only in workspaceState: no screen, no setting, no protocol
+       * message. A grant nobody can see is a grant nobody can revoke. */
+      card("Always-allowed commands", allowList()) +
       /* The browser the agent drives is a real Chromium, and by default you
          cannot see it. Headless is still right most of the time - a window
          opening over the editor on every lookup is worse than not watching -
@@ -1908,6 +1960,12 @@ function _run() {
 
     if ((t = e.target.closest("[data-opt]"))) {
       post("setConfig", { key: t.getAttribute("data-opt"), value: t.getAttribute("data-value") });
+      return;
+    }
+
+    if ((t = e.target.closest("[data-forget]"))) {
+      // An empty token clears every grant; the host treats it that way too.
+      post("forgetAllowedCommand", { token: t.getAttribute("data-forget") });
       return;
     }
 

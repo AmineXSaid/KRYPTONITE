@@ -640,6 +640,66 @@ const sync = (b, over) => b.send({ type: "stateSync", state: state(over) });
 }
 
 
+/* ── the approval mode, and what "always allow" left behind ─────────────── */
+{
+  const b = boot();
+  sync(b, {
+    config: {
+      approvalMode: "ask", activeProfile: "gateway", caBundlePath: "",
+      profileDirectory: ".agent/endpoints", skillsDirectory: ".agent/skills",
+      extensionVersion: "0.8.0", alwaysAllowedCommands: ["git", "npm"], ui: {},
+    },
+  });
+  b.click('[data-section="agent"]');
+  const text = b.pane().textContent;
+
+  /* ONE SETTING, ONE VOCABULARY. These options were labelled with their raw
+     setting values while the sidebar's picker calls the same three Manual,
+     Accept edits and Auto - so someone who set the mode in the panel and came
+     here to check it found three words they had never seen. */
+  const opts = [...b.d.querySelectorAll('[data-opt="approvalMode"]')].map((o) => o.textContent.trim());
+  ok("the modes are named the way the panel names them",
+    opts.join(",") === "Manual,Accept edits,Auto", opts.join(","));
+  ok("and the values underneath are still the real setting values",
+    [...b.d.querySelectorAll('[data-opt="approvalMode"]')]
+      .map((o) => o.getAttribute("data-value")).join(",") === "ask,edits-auto,full-auto");
+  ok("Auto says what it does rather than how it works",
+    /never asks/i.test(text) && /without stopping/i.test(text));
+
+  /* A grant nobody can see is a grant nobody can revoke. This list existed
+     only in workspaceState until now: no screen, no setting, no message. */
+  // Read off the rows rather than the pane's flattened text: textContent joins
+  // adjacent nodes with no separator, so "commands" + "git" is one word to a
+  // regex and an assertion on it would be testing the wrong thing.
+  const granted = [...b.d.querySelectorAll("[data-forget]")]
+    .map((x) => x.getAttribute("data-forget")).filter(Boolean);
+  ok("the persisted grants are listed", granted.join(",") === "git,npm", granted.join(","));
+  ok("and the row says the grant covers more than the command that earned it",
+    /whatever follows the word/i.test(text));
+  b.sent.length = 0;
+  b.click('[data-forget="git"]');
+  const forget = b.sent.filter((m) => m.type === "forgetAllowedCommand");
+  ok("one can be revoked", forget.length === 1 && forget[0].token === "git",
+    JSON.stringify(forget));
+  b.sent.length = 0;
+  b.click('[data-forget=""]');
+  ok("and all of them at once",
+    b.sent.some((m) => m.type === "forgetAllowedCommand" && m.token === ""));
+  ok("rendering the list throws nothing", b.errors.length === 0, b.errors.join(" | "));
+  b.dom.window.close();
+}
+
+/* With no grants the card says what would put one there, rather than "None". */
+{
+  const b = boot();
+  sync(b);
+  b.click('[data-section="agent"]');
+  ok("an empty grant list explains how one is made",
+    /Always allow/.test(b.pane().textContent) && /first word/.test(b.pane().textContent));
+  ok("and offers nothing to revoke", !b.d.querySelector("[data-forget]"));
+  b.dom.window.close();
+}
+
 if (failures.length) {
   for (const f of failures) console.log("FAIL  " + f);
 }

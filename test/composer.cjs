@@ -641,6 +641,43 @@ console.log("\n──── the send control ────");
   b.dom.window.close();
 }
 
+/* ── the permission card, and what "always" costs ───────────────────────── */
+{
+  /* THE SAME LABEL FOR TWO DIFFERENT PROMISES.
+   *
+   * "Always allow" on an EDIT sets a flag for this conversation. "Always
+   * allow" on a COMMAND appends the command's first token to a workspace-level
+   * list that survives restarts - so one yes to `git status` authorises
+   * `git push --force` for good. Both buttons read "Always allow", and the
+   * distinction appeared only in the card's replacement text, after the click.
+   *
+   * The scope belongs on the control. The TOKEN, not the whole command:
+   * printing "Always allow git status" would promise a precision the grant
+   * does not have. */
+  const b = boot();
+  b.sync("ask");
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "permissionRequest", id: "p1", summary: "Run: git status --porcelain",
+  } }));
+  const cmdBtn = b.d.querySelector('.perm [data-perm="always"]');
+  ok("a command grant names the token it actually grants",
+    cmdBtn.textContent.trim() === "Always allow git", cmdBtn.textContent);
+  ok("and its tooltip says the grant outlives the turn",
+    /workspace/.test(cmdBtn.title) && /revoke/i.test(cmdBtn.title), cmdBtn.title);
+  ok("allow-once says it is once",
+    /once/i.test(b.d.querySelector('.perm [data-perm="allow"]').textContent));
+
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "permissionRequest", id: "p2", summary: "Overwrite src/index.ts",
+  } }));
+  const editBtn = [...b.d.querySelectorAll('.perm [data-perm="always"]')].pop();
+  ok("an edit grant is named as an edit grant",
+    editBtn.textContent.trim() === "Always allow edits", editBtn.textContent);
+  ok("and its tooltip says it is only this conversation",
+    /conversation/.test(editBtn.title), editBtn.title);
+  b.dom.window.close();
+}
+
 if (failures.length) for (const f of failures) console.log("FAIL  " + f);
 console.log(`\n──── ${pass} passed, ${failures.length} failed ────`);
 process.exitCode = failures.length ? 1 : 0;
