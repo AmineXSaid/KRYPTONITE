@@ -115,6 +115,22 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 .tnum { font-variant-numeric: tabular-nums; }
 .ell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* PRESENT TO A SCREEN READER, ABSENT TO THE EYE.
+ *
+ * Not `display: none` and not `visibility: hidden` - both remove the element
+ * from the accessibility tree as well, which is the opposite of the job. The
+ * clip-path pair is the treatment that leaves it readable to assistive tech
+ * while occupying no space.
+ *
+ * Two things use it, and both are cases where the panel had a fact and only
+ * expressed it as a colour: the diagnostics ladder's status word, and the
+ * announcer that replaced the aria-live on the whole transcript. */
+.vh {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; white-space: nowrap; border: 0;
+  clip: rect(0 0 0 0); clip-path: inset(50%);
+}
+
 /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .kx-header {
@@ -2638,14 +2654,31 @@ ul.md-l li.md-task, ol.md-l li.md-task {
     var(--kx-fg-4) 0 2px, transparent 2px 5px);
 }
 .node { width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; position: relative; z-index: 1; }
-.rung[data-s="pass"] .node { background: var(--kx-accent); }
-.rung[data-s="fail"] .node { background: var(--kx-error); }
-.rung[data-s="pending"] .node, .rung[data-s="skipped"] .node, .rung[data-s="warn"] .node {
-  /* A hollow ring. It used to fill with the ground to fake the hole; letting
-     the ground actually show through is both simpler and exact. */
+/* Only `pending` still draws a bare dot, because a running rung has no outcome
+   to name yet and the spinner in the ms column already says what it is doing.
+   Every other state carries a GLYPH - see RUNG_STATE in sidebar.js.
+
+   The dot it replaces was the defect: pass and fail were the same 8px circle
+   in the same place at the same size, differing only by --kx-accent against
+   --kx-error, so the ladder said "this failed" in a hue and nothing else. The
+   hues stay - they are the fast read for everyone they work for - but they are
+   no longer the only thing carrying the answer. */
+.rung[data-s="pending"] .node {
   background: transparent;
   border: 1px solid var(--kx-fg-4);
 }
+.node-ic {
+  margin-top: 3px; position: relative; z-index: 1; flex: none;
+  /* The rail is 10px and paints a line down its centre; the glyph has to cover
+     that line rather than sit on it, so it takes the panel's own ground back
+     with a ring of padding. Background-clip keeps the ring circular. */
+  background: var(--kx-bg); border-radius: 50%; padding: 1px;
+  box-sizing: content-box;
+}
+.rung[data-s="pass"] .node-ic { color: var(--kx-accent); }
+.rung[data-s="fail"] .node-ic { color: var(--kx-error); }
+.rung[data-s="warn"] .node-ic { color: var(--kx-warn); }
+.rung[data-s="skipped"] .node-ic { color: var(--kx-fg-4); }
 .rung .nm { width: 56px; flex: none; padding-top: 1px; }
 .rung[data-s="fail"] .nm { color: var(--kx-error); }
 .rung[data-s="pending"] .nm, .rung[data-s="skipped"] .nm { color: var(--kx-fg-3); }

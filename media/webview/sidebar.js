@@ -56,6 +56,11 @@ function _sbRun() {
     '<symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5" ' + S6 + ' stroke-width="1.6"/><path d="M16 16l4.5 4.5" ' + S6 + ' stroke-width="1.6"/></symbol>' +
     '<symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5.5c3-1.2 5.5-1.2 8 .5v13c-2.5-1.7-5-1.7-8-.5zM20 5.5c-3-1.2-5.5-1.2-8 .5v13c2.5-1.7 5-1.7 8-.5z" ' + S6 + ' stroke-width="1.5"/></symbol>' +
     '<symbol id="i-check" viewBox="0 0 24 24"><path d="M4.5 12.5l5 5 10-11" ' + S6 + ' stroke-width="2"/></symbol>' +
+    // A skipped rung. Not a hyphen in text - the ladder's states are glyphs on
+    // a rail now, and "nothing happened here" needs a shape of its own or it
+    // falls back to being the absence of one, which is where pass and fail
+    // started.
+    '<symbol id="i-minus" viewBox="0 0 24 24"><path d="M6 12h12" ' + S6 + ' stroke-width="2"/></symbol>' +
     '<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" ' + S6 + ' stroke-width="2"/></symbol>' +
     '<symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 3l9.5 17H2.5z" ' + S6 + ' stroke-width="1.5"/><path d="M12 9.5v5M12 17v.5" ' + S6 + ' stroke-width="1.6"/></symbol>' +
     '<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" ' + S6 + ' stroke-width="1.5"/><path d="M12 11v5.5M12 7.5v.5" ' + S6 + ' stroke-width="1.7"/></symbol>' +
@@ -335,6 +340,10 @@ function _sbRun() {
     changesOpen: false,
     agentOpen: false,
     tab: "session",
+    /* The host's StatusDto. Held because renderFooter reads its `state` for the
+       endpoint health dot - a 502 is a failing endpoint with no TLS error in
+       sight, and the dot used to know only about TLS. */
+    status: null,
     qp: null,
     qpIndex: 0,
     modelOpen: false,
@@ -990,17 +999,17 @@ function _sbRun() {
         // tree, so the name read "· Session". That treatment is gone; the
         // badge reason is the one that remains, and it is enough on its own.
         '<nav class="kx-tabs" role="tablist">' +
-          '<button class="kx-tab" id="tabSession" role="tab" aria-selected="true" aria-label="Session" aria-controls="viewSession">Session</button>' +
+          '<button class="kx-tab" id="tabSession" role="tab" aria-selected="true" tabindex="0" aria-label="Session" aria-controls="viewSession">Session</button>' +
           // MCP earns a tab now that it is real. 1a had a "SOON" placeholder,
           // which the review deleted; 1b replaces it with the live surface.
-          '<button class="kx-tab" id="tabMcp" role="tab" aria-selected="false" aria-label="MCP" aria-controls="viewMcp">MCP<span class="tab-count" id="mcpCount" hidden></span></button>' +
+          '<button class="kx-tab" id="tabMcp" role="tab" aria-selected="false" tabindex="-1" aria-label="MCP" aria-controls="viewMcp">MCP<span class="tab-count" id="mcpCount" hidden></span></button>' +
           // Agents sit after MCP because that is the order they are chosen in:
           // a server has to be configured before an agent can be scoped to it.
           // This was a collapsed section inside Diagnostics, which is where a
           // thing goes when it is being inspected rather than used - and an
           // agent is picked before a turn, not diagnosed after one.
-          '<button class="kx-tab" id="tabAgents" role="tab" aria-selected="false" aria-label="Agents" aria-controls="viewAgents">Agents<span class="tab-count" id="agentCount" hidden></span></button>' +
-          '<button class="kx-tab" id="tabDiag" role="tab" aria-selected="false" aria-label="Diagnostics" aria-controls="viewDiag">Diagnostics<span class="tab-count" id="tabCount" hidden></span></button>' +
+          '<button class="kx-tab" id="tabAgents" role="tab" aria-selected="false" tabindex="-1" aria-label="Agents" aria-controls="viewAgents">Agents<span class="tab-count" id="agentCount" hidden></span></button>' +
+          '<button class="kx-tab" id="tabDiag" role="tab" aria-selected="false" tabindex="-1" aria-label="Diagnostics" aria-controls="viewDiag">Diagnostics<span class="tab-count" id="tabCount" hidden></span></button>' +
         '</nav>' +
         '<div class="phase-banner" id="phaseBanner" data-phase="plan" hidden>' +
           '<span class="dot"></span><span class="lbl" id="phaseBannerLbl">Plan phase</span>' +
@@ -1022,7 +1031,24 @@ function _sbRun() {
           // The conversation's name. Placeholder until the model has been asked
           // for a real one, so the strip never appears and disappears.
           '<div class="convo-title" id="convoTitle" hidden></div>' +
-          '<div id="log" aria-live="polite"></div>' +
+          '<div id="log"></div>' +
+          /* THE TRANSCRIPT IS NOT A LIVE REGION, AND USED TO BE ONE.
+           *
+           * `#log` carried aria-live="polite" - which sounds right and is the
+           * opposite of it. The streamed answer rewrites its OWN innerHTML as
+           * it grows (see typeStep), and a polite region re-announces changed
+           * content, so a screen reader was handed the whole reply again from
+           * the top on every repaint, for the length of the turn. Every tool
+           * card, diff card and permission card is appended into the same
+           * region, so those were read out too, in full, as they arrived.
+           *
+           * The fix is not to announce less carefully - it is to announce the
+           * few things worth interrupting someone for, and nothing else. This
+           * element is that: one short sentence at a time, off-screen, spoken
+           * when a turn ends, when a permission is wanted, and when something
+           * fails. The transcript stays navigable exactly as before; it just
+           * stops shouting. */
+          '<div id="announcer" class="vh" role="status" aria-live="polite" aria-atomic="true"></div>' +
           /* What this conversation has done to the workspace, live.
              It sits directly above the composer rather than in the transcript
              because it is state, not history: one row per file no matter how
@@ -1112,7 +1138,12 @@ function _sbRun() {
                   // the endpoint's model. It was a pill of its own in the
                   // removed footer; as a dot here it costs no space at all and
                   // still turns red when the gateway is failing.
-                  '<span class="ep-dot" id="epDot" data-err="0"></span>' +
+                  /* Named, because five pixels of hue is not a state.
+                   * renderFooter keeps the label in step with data-err; the
+                   * dot is the glance and the name is the answer for anyone
+                   * the glance does not reach. */
+                  '<span class="ep-dot" id="epDot" data-err="0" role="img" ' +
+                    'aria-label="Endpoint healthy" title="Endpoint healthy"></span>' +
                   '<span class="nm ell" id="modelName">No model</span>' + icon("i-caret", "ic-9") +
                 '</button>' +
                 // Approval mode belongs here, beside the phase and the model.
@@ -1201,6 +1232,52 @@ function _sbRun() {
       '<div class="sec-body" id="' + bodyId + '"' + (open ? "" : " hidden") + '></div></div>';
   }
 
+  /* ──────────────────── what survives the view being hidden ────────────────
+   *
+   * A view container that is collapsed, or switched away from, is TORN DOWN:
+   * VS Code disposes the webview unless retainContextWhenHidden is set, and
+   * setting it here would be wrong - it keeps a whole DOM alive for a panel
+   * nobody is looking at, which is why only the browser panel does it.
+   *
+   * So the panel came back a stranger. The transcript survived, because it
+   * re-hydrates from the host's replay buffer - but the tab you were on, the
+   * sections you had opened and, worst, the message you were in the middle of
+   * typing did not. Clicking Explorer to check a filename and coming back cost
+   * you the draft.
+   *
+   * `setState` is the mechanism VS Code provides for exactly this, and the API
+   * was already acquired and never used. It is per-webview and survives the
+   * teardown; nothing here is authoritative, so a stale value is only ever a
+   * worse guess than a fresh one, never a wrong fact.
+   */
+  function saveUiState() {
+    if (!api.setState) return;
+    var draft = $("draft");
+    var open = [];
+    var secs = document.querySelectorAll(".sec[data-open='1']");
+    for (var i = 0; i < secs.length; i++) open.push(secs[i].id);
+    try {
+      api.setState({ tab: S.tab, draft: draft ? draft.value : "", sections: open });
+    } catch (e) { /* a webview with no state store is not a failure */ }
+  }
+
+  function restoreUiState() {
+    var st = null;
+    try { st = api.getState && api.getState(); } catch (e) { st = null; }
+    if (!st) return;
+    if (st.draft) {
+      var draft = $("draft");
+      // syncComposer is what sizes the box and repaints the mirror, so the
+      // restored draft is a full draft rather than a string in a one-row field.
+      if (draft && !draft.value) { draft.value = st.draft; syncComposer(); }
+    }
+    for (var i = 0; st.sections && i < st.sections.length; i++) {
+      if ($(st.sections[i])) openSection(st.sections[i]);
+    }
+    // Last, because setTab renders the tab it lands on and saves again.
+    if (st.tab) setTab(st.tab);
+  }
+
   /* ─────────────────────────── popovers ─────────────────────────── */
 
   function closePops() {
@@ -1273,15 +1350,69 @@ function _sbRun() {
     ["diagnostics", "tabDiag", "viewDiag"]
   ];
 
-  function setTab(tab) {
+  function setTab(tab, focus) {
     S.tab = tab;
     for (var i = 0; i < TABS.length; i++) {
       var on = TABS[i][0] === tab;
-      $(TABS[i][1]).setAttribute("aria-selected", on ? "true" : "false");
+      var btn = $(TABS[i][1]);
+      btn.setAttribute("aria-selected", on ? "true" : "false");
+      /* ONE TAB STOP, NOT FOUR.
+       *
+       * role="tablist" was declared and the keyboard contract that comes with
+       * it was not implemented: all four tabs were plain buttons, so crossing
+       * the strip cost four presses of Tab and the arrow keys a screen reader
+       * had just promised did nothing at all. A roving tabindex plus the
+       * handler in wire() is the whole of that pattern. */
+      btn.setAttribute("tabindex", on ? "0" : "-1");
+      if (on && focus) btn.focus();
       $(TABS[i][2]).hidden = !on;
     }
     if (tab === "mcp") renderMcp();
     if (tab === "agents") renderAgents();
+    // The panel remembers which room you were in - see saveUiState.
+    saveUiState();
+  }
+
+  /**
+   * Arrow keys across the tab strip, per the WAI-ARIA tabs pattern.
+   *
+   * Wrapping rather than stopping at the ends, because four tabs in a 340px
+   * strip is a ring, not a list - and Home/End are there for anyone who wants
+   * the ends specifically.
+   */
+  function onTabKey(e) {
+    var i = -1;
+    for (var k = 0; k < TABS.length; k++) if (TABS[k][0] === S.tab) i = k;
+    if (i === -1) return;
+    var to = null;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") to = (i + 1) % TABS.length;
+    else if (e.key === "ArrowLeft" || e.key === "ArrowUp") to = (i - 1 + TABS.length) % TABS.length;
+    else if (e.key === "Home") to = 0;
+    else if (e.key === "End") to = TABS.length - 1;
+    if (to === null) return;
+    e.preventDefault();
+    setTab(TABS[to][0], true);
+  }
+
+  /**
+   * The name a tab answers to, count included.
+   *
+   * The badge is a child of the tab and the tab carries an aria-label, which
+   * OVERRIDES its content - so the count was in the accessible tree for
+   * exactly as long as it took someone to add the label that stopped
+   * "Diagnostics2" being read. That fixed the stutter by deleting the
+   * information. The count belongs in the name; it just has to be a sentence
+   * rather than a digit glued to a word.
+   */
+  function setTabCount(tabId, badgeId, plain, n, what) {
+    var el = $(badgeId);
+    var tab = $(tabId);
+    if (!el || !tab) return;
+    el.textContent = n ? String(n) : "";
+    el.hidden = !n;
+    var said = n === 1 ? what.replace(/s$/, "") : what;
+    el.title = n ? n + " " + said : "";
+    tab.setAttribute("aria-label", n ? plain + ", " + n + " " + said : plain);
   }
 
   function openSection(secId) {
@@ -1706,6 +1837,29 @@ function _sbRun() {
 
 
   /* ─────────────────────── transcript primitives ─────────────────────── */
+
+  /**
+   * Say one thing, once, to whoever is listening rather than looking.
+   *
+   * Replaces the aria-live that used to sit on the whole transcript. The
+   * region is emptied first: assigning the same string twice is a no-op to a
+   * screen reader, and two consecutive turns both ending "Finished" would
+   * announce only the first.
+   */
+  var lastSaid = "";
+  function announce(text) {
+    var say = $("announcer");
+    if (!say) return;
+    /* A region that has not CHANGED is not announced, and two turns in a row
+       both ending "Finished." are two events with one string. The usual fix is
+       to empty the region and refill it a frame later; a trailing space does
+       the same job synchronously, is not spoken, and cannot be lost to a
+       teardown between the two halves. It alternates, so any run of repeats
+       keeps changing. */
+    if (text === lastSaid) text += " ";
+    lastSaid = text;
+    say.textContent = text;
+  }
 
   function atBottom() {
     return logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
@@ -2778,11 +2932,8 @@ function _sbRun() {
    * MCP and Diagnostics tabs follow.
    */
   function renderAgentCount() {
-    var el = $("agentCount");
-    if (!el) return;
-    var n = S.agentWarnings.length;
-    el.textContent = n ? String(n) : "";
-    el.hidden = !n;
+    setTabCount("tabAgents", "agentCount", "Agents", S.agentWarnings.length,
+      "agent files could not be read");
   }
 
   function onAgentClick(e) {
@@ -2963,6 +3114,9 @@ function _sbRun() {
   function addPermission(m) {
     aiEl = null;
     closeToolGroup();
+    // The one interruption that is genuinely an interruption: the turn has
+    // stopped and is waiting on an answer nobody has been told is wanted.
+    announce("Permission required: " + m.summary);
     var el = add(div("perm",
       '<div class="perm-t">' + icon("i-warn", "ic-14") + "Permission required</div>" +
       '<div class="perm-b">Genesis wants to:</div>' +
@@ -3751,6 +3905,7 @@ function _sbRun() {
   function addError(message) {
     aiEl = null;
     closeToolGroup();
+    announce(message);
     add(div("err-box", icon("i-warn", "ic-13") + "<span>" + esc(message) + "</span>"));
     return;
   }
@@ -3866,7 +4021,25 @@ function _sbRun() {
     // it, and without the declaration `name` silently resolves to
     // `window.name` - an empty string, and a tooltip that lost its endpoint.
     var name = active ? active.id : "No endpoint";
-    $("epDot").setAttribute("data-err", S.tlsError ? "1" : "0");
+    /* THE DOT READS THE STATUS, NOT ONLY THE TLS ERROR.
+     *
+     * It was `S.tlsError ? 1 : 0`, so a gateway answering 502 - no TLS problem
+     * anywhere - left the health dot green while every turn failed. The host
+     * has always broadcast a real StatusDto with an `error` state; the webview
+     * dropped `statusChanged` on the floor (the case was an empty `break`).
+     *
+     * And it is NAMED. Five pixels of hue is not a state: a red/green
+     * colour-blind reader cannot tell the two apart, and the dot sits inside a
+     * button whose accessible name is the model, so a screen reader was never
+     * told the endpoint's health at all. */
+    var bad = !!S.tlsError || (S.status && S.status.state === "error");
+    var dot = $("epDot");
+    dot.setAttribute("data-err", bad ? "1" : "0");
+    var health = bad
+      ? (S.tlsError ? "Endpoint failing - TLS error" : "Endpoint failing")
+      : active ? "Endpoint healthy" : "No endpoint";
+    dot.setAttribute("aria-label", health);
+    dot.title = health;
     // "Auto" when no profile is pinned and there is more than one to
     // choose from: the label has to say the choice is being made for you.
     var pinnedTo = (S.config && S.config.activeProfile) || "";
@@ -3885,6 +4058,10 @@ function _sbRun() {
     $("modelBtn").title =
       (active ? active.model + " · " + name : name) +
       (S.tlsError ? " - TLS error" : "");
+    // The button's own name carries the health too, because the dot inside it
+    // is decoration to anything that reads names rather than pixels.
+    $("modelBtn").setAttribute("aria-label",
+      "Model: " + (active ? active.model + " on " + name : "none") + " - " + health);
   }
 
   /* ─────────────────────── diagnostics: TLS ─────────────────────── */
@@ -3900,9 +4077,7 @@ function _sbRun() {
     var failing = 0;
     for (var i = 0; i < S.rungs.length; i++) if (S.rungs[i].status === "fail") failing++;
     if (!failing && e) failing = 1;
-    var tc = $("tabCount");
-    tc.textContent = failing ? String(failing) : "";
-    tc.hidden = !failing;
+    setTabCount("tabDiag", "tabCount", "Diagnostics", failing, "checks failing");
 
     var html = "";
     if (!e) {
@@ -3967,9 +4142,37 @@ function _sbRun() {
     $("tlsBody").innerHTML = html;
   }
 
+  /* What each rung state looks like and what it is called.
+   *
+   * PASS AND FAIL USED TO DIFFER ONLY IN HUE. Both were an 8px filled circle
+   * in the same place at the same size - --kx-accent against --kx-error - and
+   * the markup carried no status word at all. So the one surface whose entire
+   * job is saying what is broken said nothing to a deuteranope (red text on a
+   * dark panel reads as a muddy grey barely distinct from --kx-fg-2) and
+   * nothing at all to a screen reader.
+   *
+   * The MCP tab had already solved this: mcpPill pairs every state with a word
+   * AND a glyph, and 9px check and cross glyphs read fine there. This is the
+   * same treatment, so the two lists of health now speak one language.
+   *
+   * The word is hidden from sight rather than printed: the rung's name column
+   * is 56px in a 340px panel and there is nowhere to put it, and the glyph is
+   * the sighted carrier. */
+  var RUNG_STATE = {
+    pass:    ["i-check", "passed"],
+    fail:    ["i-x", "failed"],
+    warn:    ["i-warn", "warning"],
+    skipped: ["i-minus", "skipped"],
+    pending: ["", "running"]
+  };
+
   function rungRow(name, status, detail, fix, ms) {
+    var st = RUNG_STATE[status] || RUNG_STATE.pending;
     return '<div class="rung" data-s="' + esc(status) + '">' +
-      '<span class="rail"><span class="node"></span></span>' +
+      '<span class="rail">' +
+        (st[0] ? icon(st[0], "ic-11 node-ic") : '<span class="node"></span>') +
+      "</span>" +
+      '<span class="rung-state vh">' + st[1] + "</span>" +
       '<span class="nm">' + esc(RUNG_LABELS[name] || name || "") + "</span>" +
       '<span class="body"><span class="dt">' + esc(detail) + "</span>" +
       (fix ? '<div class="fx">' + esc(fix) + "</div>" : "") + "</span>" +
@@ -4353,14 +4556,11 @@ function _sbRun() {
   }
 
   function renderMcpCount() {
-    var el = $("mcpCount");
-    if (!el) return;
     var servers = (S.mcp && S.mcp.servers) || [];
     var down = 0;
     for (var i = 0; i < servers.length; i++) if (servers[i].state === "failed") down++;
     // Same rule as Diagnostics: a count, and only when something is wrong.
-    el.textContent = down ? String(down) : "";
-    el.hidden = !down;
+    setTabCount("tabMcp", "mcpCount", "MCP", down, "servers unavailable");
   }
 
   function onMcpClick(e) {
@@ -4970,6 +5170,10 @@ function _sbRun() {
 
     $("tabSession").addEventListener("click", function () { setTab("session"); });
     $("tabDiag").addEventListener("click", function () { setTab("diagnostics"); });
+    // One listener on the strip rather than four on the tabs: the handler works
+    // off S.tab, not off the element the key landed on, so it behaves the same
+    // whichever tab has focus.
+    document.querySelector(".kx-tabs").addEventListener("keydown", onTabKey);
     $("ccBtn").addEventListener("click", function () { post("openControlCenter", {}); });
 
     document.addEventListener("click", function (e) {
@@ -4980,6 +5184,7 @@ function _sbRun() {
       sec.setAttribute("data-open", open ? "0" : "1");
       head.setAttribute("aria-expanded", open ? "false" : "true");
       sec.querySelector(".sec-body").hidden = open;
+      saveUiState();
     });
 
     $("phaseSeg").addEventListener("click", function (e) {
@@ -5049,6 +5254,9 @@ function _sbRun() {
       syncComposer();
       detectQuickPick();
       renderDraftMirror();
+      // Cheap, synchronous, and the whole reason a draft survives the view
+      // being collapsed. See saveUiState.
+      saveUiState();
     });
     // A long draft scrolls inside a fixed-height box; the mirror has to follow
     // or the colouring slides off the text it belongs to.
@@ -5474,6 +5682,10 @@ function _sbRun() {
         aiEl = null;
         pendingTool = null;
         syncComposer();
+        // The one announcement a turn earns. The reply itself is navigable in
+        // the transcript; what someone not watching the screen needs is to
+        // know it has stopped arriving.
+        announce("Finished.");
         break;
 
       case "error":
@@ -5712,6 +5924,10 @@ function _sbRun() {
         break;
 
       case "statusChanged":
+        // Was an empty break, which is why the health dot only ever knew about
+        // TLS. See renderFooter.
+        S.status = m.status;
+        renderFooter();
         break;
 
       case "caBundlePicked":
@@ -5749,6 +5965,9 @@ function _sbRun() {
 
   mount();
   wire();
+  // After wire() so the listeners that keep it saved are already attached, and
+  // before the first render so nothing paints twice.
+  restoreUiState();
   renderWelcome();
   renderFooter();
   renderTls();

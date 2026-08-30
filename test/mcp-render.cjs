@@ -46,6 +46,11 @@ const code = [
   grab("  function mcpPill(state) {"),
   grab("  function renderMcp() {"),
   grab("  function renderMcpCount() {"),
+  // The count now goes through the shared helper that also names the tab, so
+  // the badge and the tab's accessible name cannot drift apart. Lifted with
+  // it, because a stub would let this suite pass on a badge whose name was
+  // wrong.
+  grab("  function setTabCount(tabId, badgeId, plain, n, what) {"),
   "  var MCP_CHIP_CAP = 5;",
 ].join("\n");
 
@@ -64,9 +69,14 @@ function render(servers, warnings = []) {
   scope.S.mcp = { servers, warnings };
   els.mcpBody = { id: "mcpBody", innerHTML: "", textContent: "", hidden: false };
   els.mcpCount = { id: "mcpCount", innerHTML: "", textContent: "", hidden: false };
+  els.tabMcp = {
+    id: "tabMcp", attrs: {},
+    setAttribute(k, v) { this.attrs[k] = v; },
+    getAttribute(k) { return this.attrs[k] ?? null; },
+  };
   scope.renderMcp();
   scope.renderMcpCount();
-  return { html: el("mcpBody").innerHTML, count: el("mcpCount") };
+  return { html: el("mcpBody").innerHTML, count: el("mcpCount"), tab: els.tabMcp };
 }
 
 const ready = (over = {}) => ({
