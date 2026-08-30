@@ -271,6 +271,15 @@ export class App {
   agentWarnings: string[] = [];
 
   phase: Phase = "act";
+
+  /**
+   * The memory block this session is sending, and whose it is.
+   *
+   * One entry, not a map: only the active agent's memory reaches a prompt, and
+   * keying on the name means an agent switch is caught even if the explicit
+   * invalidation below were ever missed.
+   */
+  private memorySnapshot?: { agent: string; memory: string | undefined };
   running = false;
   tracing = false;
   rungs: RungDto[] = [];
@@ -937,7 +946,11 @@ export class App {
     await Promise.allSettled([
       client.warmConnection(),
       client.warmAuth(),
-      client.warmCache(this.systemPrompt()),
+      // The same identity the real request will carry. Without it the warmed
+      // prefix diverges from the second line onwards and the entry is never hit.
+      client.warmCache(
+        this.systemPrompt(this.phase, { model: profile.model, endpoint: profile.name })
+      ),
     ]);
   }
 
@@ -966,14 +979,39 @@ export class App {
    * Shared with the agent loop so the pre-warmed cache entry and the real
    * request are byte-identical - a prefix that differs by one character caches
    * nothing.
+   *
+   * "Byte-identical" is a claim about five arguments, and it held for four of
+   * them. `identity` was simply not passed here, and since it is the second
+   * element of the joined array every character after SYSTEM differed - so
+   * every pre-warm on a profile with a model name was warming a prefix no
+   * request would ever send. The audit, so the next reader does not have to
+   * repeat it:
+   *
+   *   skills        `enabledSkills(agent)` here, and `ctx.skills` there, which
+   *                 session.ts fills from this same method.
+   *   instructions  `this.instructions?.block` here; session.ts reads the same
+   *                 field off this same App.
+   *   agent/memory  `agentMemorySnapshot(agent)` in both, which is the point of
+   *                 the snapshot: `agentMemory` returned whatever was on disk
+   *                 at the moment of the call, so the two sites agreed only
+   *                 until the agent wrote to its own memory file.
+   *   identity      passed by both now. The caller supplies it because App
+   *                 must not assume the profile the turn will actually use.
+   *   phase         defaults to `this.phase` here; session.ts reads `app.phase`
+   *                 and runAgent applies `?? "act"` to a value that is never
+   *                 undefined. Same string.
    */
-  systemPrompt(phase: Phase = this.phase): string {
+  systemPrompt(
+    phase: Phase = this.phase,
+    identity?: { model: string; endpoint: string }
+  ): string {
     const agent = this.activeAgent();
     return systemPromptFor(
       this.enabledSkills(agent),
       phase,
-      agent ? { agent, memory: this.agentMemory(agent) } : undefined,
-      this.instructions?.block
+      agent ? { agent, memory: this.agentMemorySnapshot(agent) } : undefined,
+      this.instructions?.block,
+      identity
     );
   }
 
@@ -1205,6 +1243,9 @@ export class App {
 
   async rememberSession(id: string): Promise<void> {
     if (this.lastSessionId() === id) return;
+    // Past the early return, so this fires on a real move between
+    // conversations and not on the same id being persisted every turn.
+    this.invalidateMemorySnapshot();
     await this.context.workspaceState.update("genesis.activeSessionId", id);
   }
 
@@ -1233,6 +1274,7 @@ export class App {
 
   async setActiveAgent(name: string): Promise<void> {
     const next = this.agents.some((a) => a.name === name) ? name : "";
+    this.invalidateMemorySnapshot();
     await this.context.workspaceState.update("genesis.activeAgent", next);
     this.broadcast({ type: "agentChanged", agent: next ? this.agentDto(this.activeAgent()!) : null });
     this.updateStatus();
@@ -1241,12 +1283,55 @@ export class App {
   }
 
   /**
+   * The agent's memory as this session will send it, decided once.
+   *
+   * This used to be read fresh at the top of every turn, and the comment
+   * defending that read said the obvious thing: the agent writes to its memory
+   * file with its own tools, so a cached copy goes stale the moment the
+   * feature does its job. True, and it was the wrong trade.
+   *
+   * Memory feeds the system prefix, and the system prefix is the prompt-cache
+   * key. A memory file that changes mid-session changes the prefix, and every
+   * turn after that write is billed cold - so the better an agent was at
+   * remembering things, the more each of its remaining turns cost. That is a
+   * feature that punishes its own use.
+   *
+   * So the snapshot is taken once and held for the life of the session: a
+   * memory entry that arrives one session late is cheaper than a prefix that
+   * changes mid-session, and "late" here means "the next time you open this
+   * conversation". The write still lands on disk immediately; only its arrival
+   * in the prompt is deferred.
+   *
+   * Invalidated on the two events that end a prefix's usefulness anyway - a
+   * different conversation, or a different agent - and deliberately not on a
+   * write. `agentMemory` stays underneath as the uncached reader, because this
+   * needs it and one-shot paths have no session to snapshot against.
+   */
+  agentMemorySnapshot(agent: Agent): string | undefined {
+    if (this.memorySnapshot?.agent === agent.name) return this.memorySnapshot.memory;
+    const memory = this.agentMemory(agent);
+    this.memorySnapshot = { agent: agent.name, memory };
+    return memory;
+  }
+
+  /**
+   * Drop the held snapshot so the next prompt build re-reads the file.
+   *
+   * Called on a session change and an agent switch, and from nowhere else. A
+   * caller reaching for this after a memory write would be undoing the whole
+   * point of the snapshot.
+   */
+  private invalidateMemorySnapshot(): void {
+    this.memorySnapshot = undefined;
+  }
+
+  /**
    * The agent's memory file, capped.
    *
-   * Read at the top of each turn rather than cached: the agent writes to it
-   * with its own tools, so a cached copy would go stale the moment the feature
-   * did its job. Missing is not an error - an agent with a memory file it has
-   * not written yet is the normal first run.
+   * The uncached read. Every prompt-building path goes through
+   * `agentMemorySnapshot` instead; this is for callers that genuinely want
+   * what is on disk right now. Missing is not an error - an agent with a
+   * memory file it has not written yet is the normal first run.
    */
   agentMemory(agent: Agent): string | undefined {
     if (!agent.memory) return undefined;
