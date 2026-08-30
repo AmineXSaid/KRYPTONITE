@@ -1225,6 +1225,14 @@ function _sbRun() {
             '<div class="ag-body" id="agBody"></div>' +
           '</div>' +
         '</section>' +
+        /* The transcript's context menu.
+         *
+         * Outside the header on purpose: the document-level closer exempts
+         * `.kx-header` so a click inside the history popover does not shut it,
+         * and this menu wants the opposite - a click on one of its rows should
+         * run the action and then close it. Position is fixed and set at open
+         * time, so where it sits in the tree costs nothing. */
+        '<div class="ctx-menu" id="msgMenu" role="menu" hidden></div>' +
         '<section class="view" id="viewDiag" role="tabpanel" aria-labelledby="tabDiag" hidden>' +
           '<button class="cc-card" id="ccBtn">' + crystal(19) +
             '<span class="col"><span class="t">Control Center</span>' +
@@ -1299,8 +1307,116 @@ function _sbRun() {
   function closePops() {
     $("historyPop").hidden = true;
     $("morePop").hidden = true;
+    // The message menu closes with the rest. Two menus open at once is the bug
+    // a second closer would have introduced.
+    if ($("msgMenu")) $("msgMenu").hidden = true;
     $("histBtn").setAttribute("aria-expanded", "false");
     $("moreBtn").setAttribute("aria-expanded", "false");
+  }
+
+  /* ───────────────────── the message context menu ─────────────────────
+   *
+   * The transcript was the one surface here with no per-message actions at all.
+   * `turn-foot` is per TURN, sits at the end of it, and its Copy only ever took
+   * the assistant's answer - so there was no way to copy a question, and no way
+   * to reach an earlier turn's answer except by selecting it by hand in a 340px
+   * column.
+   *
+   * RIGHT-CLICK COSTS SOMETHING, AND COPY IS THE PRICE. A webview's right-click
+   * shows VS Code's own menu, which is where Copy lives; opening ours means
+   * preventDefault(), which takes that away. So Copy is a row here - not scope
+   * creep, but restoring the one capability the trigger removes. For the same
+   * reason a fenced code block is left alone entirely: it has its own copy
+   * button two pixels away, and selecting half a snippet is worth more there
+   * than any message-level action.
+   *
+   * `role` is which messages a row belongs on. Edit and Resend are meaningless
+   * on an answer - there is nothing to re-ask - so an answer offers the two
+   * that mean something and no more.
+   */
+  var MSG_ACTIONS = [
+    ["edit",   "user", "i-compose", "Edit"],
+    ["resend", "user", "i-up",      "Resend"],
+    ["attach", "both", "i-clip",    "Attach to composer"],
+    ["copy",   "both", "i-copy",    "Copy"]
+  ];
+
+  /** The string a message was built from, never the string its DOM holds. */
+  function msgText(el) {
+    if (el && typeof el._raw === "string") return el._raw;
+    // A message from a build before `_raw` existed on this side. Better than
+    // nothing, and wrong only about the newlines between multimodal blocks.
+    var t = el && el.querySelector(".u-text");
+    return (t || el || {}).textContent || "";
+  }
+
+  /** Where this message sits in the conversation, for naming an attachment. */
+  function msgIndex(el) {
+    var all = logEl.querySelectorAll(".msg-user, .msg-ai");
+    for (var i = 0; i < all.length; i++) if (all[i] === el) return i + 1;
+    return all.length + 1;
+  }
+
+  function openMsgMenu(el, x, y) {
+    // One closer owns every menu; opening this one shuts whatever else is up.
+    closePops();
+    var menu = $("msgMenu");
+    if (!menu) return;
+    var isUser = el.classList.contains("msg-user");
+    var drafting = ($("draft").value || "").trim().length > 0;
+    var html = "";
+    for (var i = 0; i < MSG_ACTIONS.length; i++) {
+      var a = MSG_ACTIONS[i];
+      if (a[1] === "user" && !isUser) continue;
+      /* REPLACING A HALF-WRITTEN DRAFT IS DESTROYING WORK, so the row says so
+         before the click rather than after it. Same rule the mode sheet and the
+         delete confirmations follow: the cost goes on the control. */
+      var label = a[0] === "edit" && drafting ? "Replace draft and edit" : a[3];
+      html += '<button class="pop-row" role="menuitem" data-mm="' + a[0] + '">' +
+        icon(a[2], "ic-13") + '<span class="t">' + esc(label) + "</span></button>";
+    }
+    menu.innerHTML = html;
+    menu._target = el;
+    // Where the transcript stood when this menu was anchored. The scroll
+    // closer measures against it rather than trusting the event itself.
+    menu._scrollAt = logEl.scrollTop;
+    menu.hidden = false;
+
+    /* Clamped to the panel, which at its narrowest is about 200px - narrower
+       than the menu itself is wide. Measured after unhiding, because a hidden
+       element has no size to measure. */
+    var w = menu.offsetWidth;
+    var h = menu.offsetHeight;
+    var maxX = window.innerWidth;
+    var maxY = window.innerHeight;
+    var left = x + w > maxX ? Math.max(0, maxX - w - 4) : x;
+    var top = y + h > maxY ? Math.max(0, maxY - h - 4) : y;
+    menu.style.left = left + "px";
+    menu.style.top = top + "px";
+  }
+
+  function onMsgAction(action, el) {
+    var text = msgText(el);
+    if (action === "copy") { post("copyText", { text: text }); return; }
+    if (action === "resend") { sendText(text); return; }
+    if (action === "edit") {
+      var draft = $("draft");
+      draft.value = text;
+      syncComposer();
+      draft.focus();
+      // The caret at the END, because this is a message to amend rather than
+      // one to retype from the top.
+      if (draft.setSelectionRange) draft.setSelectionRange(text.length, text.length);
+      return;
+    }
+    if (action === "attach") {
+      var isUser = el.classList.contains("msg-user");
+      var name = (isUser ? "question-" : "answer-") + msgIndex(el) + ".md";
+      if (addAttachment(textAttachment(name, text))) {
+        renderAttachments();
+        syncComposer();
+      }
+    }
   }
 
   /* Each row is one stored conversation. The message count and the active dot
@@ -2098,6 +2214,15 @@ function _sbRun() {
    */
   function userTurn(html, plain, att) {
     var msg = div("msg-user");
+    /* The text this turn was BUILT from, kept on the element.
+     *
+     * `.msg-ai` has carried `_raw` since streaming existed; this side threw
+     * `plain` away and nothing could get it back. Scraping the DOM is not the
+     * same string: a multimodal question joins its text blocks with newlines
+     * and drops its images, so textContent runs the blocks together and loses
+     * the breaks. Everything the context menu does - copy, resend, attach -
+     * wants the string the model was actually sent. */
+    msg._raw = plain;
     var body = div("u-body");
     var text = div("u-text", html);
     body.appendChild(text);
@@ -5103,6 +5228,29 @@ function _sbRun() {
     return "pasted-" + ++pasteSeq + "." + ext;
   }
 
+  /**
+   * A string as an attachment, in the shape the composer and the wire use.
+   *
+   * Lifted out of `onPaste`, which has turned a large text paste into a
+   * `text/plain` attachment since it shipped. Attaching a transcript message is
+   * that same operation with the message's text instead of the clipboard's, and
+   * two copies of a base64 encoder is how they stop agreeing.
+   *
+   * The host decodes it in `decodeTextAttachment` and inlines it as
+   * ``Attached file `name`:`` with its own 60,000-character cap, so nothing
+   * downstream needs to know where the text came from.
+   */
+  function textAttachment(name, text) {
+    var bytes = new TextEncoder().encode(text);
+    var b64 = "";
+    // Chunked, because String.fromCharCode.apply on a large array overflows
+    // the argument list.
+    for (var k = 0; k < bytes.length; k += 8192) {
+      b64 += String.fromCharCode.apply(null, bytes.subarray(k, k + 8192));
+    }
+    return { name: name, mediaType: "text/plain", data: btoa(b64), size: bytes.length };
+  }
+
   function addAttachment(a) {
     if (!S.attachments) S.attachments = [];
     if (S.attachments.length >= ATTACH_COUNT_MAX) {
@@ -5331,19 +5479,7 @@ function _sbRun() {
     var text = cd.getData("text/plain") || "";
     if (text.length > PASTE_AS_FILE) {
       e.preventDefault();
-      var bytes = new TextEncoder().encode(text);
-      var b64 = "";
-      // Chunked, because String.fromCharCode.apply on a large array overflows
-      // the argument list.
-      for (var k = 0; k < bytes.length; k += 8192) {
-        b64 += String.fromCharCode.apply(null, bytes.subarray(k, k + 8192));
-      }
-      var ok = addAttachment({
-        name: pasteName("text/plain"),
-        mediaType: "text/plain",
-        data: btoa(b64),
-        size: bytes.length,
-      });
+      var ok = addAttachment(textAttachment(pasteName("text/plain"), text));
       if (ok) {
         renderAttachments();
         syncComposer();
@@ -5451,8 +5587,55 @@ function _sbRun() {
       if (b) applyPhase(b.getAttribute("data-phase"));
     });
 
+    /* RIGHT-CLICK ON A MESSAGE, AND ONLY ON A MESSAGE.
+     *
+     * Tool cards, diff cards, the error box and the welcome screen keep VS
+     * Code's own menu - and so does a fenced code block, checked first because
+     * it sits INSIDE `.msg-ai` and would otherwise be caught by it. */
+    logEl.addEventListener("contextmenu", function (e) {
+      if (e.target.closest(".cb")) return;
+      var el = e.target.closest(".msg-user, .msg-ai");
+      if (!el) return;
+      e.preventDefault();
+      /* The Menu key and Shift+F10 raise this event too, with clientX and
+         clientY both 0 - so a keyboard user would get the menu pinned to the
+         panel's top-left corner rather than to the message they are on. */
+      var x = e.clientX;
+      var y = e.clientY;
+      if (!x && !y && el.getBoundingClientRect) {
+        var r = el.getBoundingClientRect();
+        x = r.left + 8;
+        y = r.top + 8;
+      }
+      openMsgMenu(el, x, y);
+    });
+
+    $("msgMenu").addEventListener("click", function (e) {
+      var row = e.target.closest("[data-mm]");
+      if (!row) return;
+      var el = $("msgMenu")._target;
+      if (el) onMsgAction(row.getAttribute("data-mm"), el);
+      // The document-level closer hides it a moment later, on the same click.
+    });
+
     // The log's own scrolling is the only other thing that changes the answer.
     logEl.addEventListener("scroll", syncToLatest);
+    /* A menu anchored to a pointer position is wrong the instant the content
+       under it moves, and the transcript scrolls on its own while a turn
+       streams.
+       
+       MEASURED, NOT MERELY OBSERVED. Closing on the bare event was wrong and
+       the browser suite caught it: a scroll event queued just BEFORE the menu
+       opened - by the click's own scroll-into-view, or by a delta landing
+       mid-stream - is delivered at the next rendering opportunity, which is
+       after the contextmenu handler has run. The menu opened and vanished on
+       the same gesture. So this compares against the offset the menu was
+       anchored at and ignores anything that did not actually move. */
+    logEl.addEventListener("scroll", function () {
+      var menu = $("msgMenu");
+      if (!menu || menu.hidden) return;
+      if (Math.abs(logEl.scrollTop - (menu._scrollAt || 0)) > 4) menu.hidden = true;
+    });
     $("toLatest").addEventListener("click", function () {
       scroll();
       syncToLatest();
@@ -5660,6 +5843,12 @@ function _sbRun() {
     });
 
     document.addEventListener("keydown", function (e) {
+      /* Escape shuts the menu FIRST. Interrupting a turn because the user
+         wanted to dismiss a menu is the wrong reading of one keystroke. */
+      if (e.key === "Escape" && $("msgMenu") && !$("msgMenu").hidden) {
+        $("msgMenu").hidden = true;
+        return;
+      }
       if (e.key === "Escape" && S.running && $("qp").hidden) post("interrupt");
     });
 

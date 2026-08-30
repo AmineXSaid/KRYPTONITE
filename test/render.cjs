@@ -1041,6 +1041,62 @@ function contrast(a, b) {
     await ctx.close();
   }
 
+  /* ── 5j. the message menu stays inside a narrow panel ──────────────── */
+  {
+    /* jsdom asserts the clamp arithmetic with a supplied width, because it has
+       no layout. This is the case that arithmetic exists for, measured: the
+       menu is `position: fixed`, it is wider than the panel at its narrowest,
+       and a right-click near the right edge is where it would hang off the
+       side of the workbench with nothing to stop it. 200px is roughly the
+       floor VS Code allows a side bar to be dragged to. */
+    const { ctx, page } = await open(200, {});
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", {
+      data: { type: "steerAccepted", text: "a question worth right-clicking", files: [] },
+    })));
+    await page.waitForTimeout(120);
+
+    const box = await page.locator(".msg-user").first().boundingBox();
+    ok("there is a message to right-click", !!box);
+    // As far right and as far down inside the message as it goes.
+    await page.locator(".msg-user").first().click({
+      button: "right",
+      position: { x: Math.max(1, box.width - 2), y: Math.max(1, box.height - 2) },
+    });
+    await page.waitForTimeout(200);
+
+    const menu = page.locator("#msgMenu");
+    ok("the menu opened", (await menu.count()) === 1 && await menu.isVisible());
+    const m = await menu.boundingBox();
+    ok("its right edge is inside the panel", m && m.x + m.width <= 200 + 0.5,
+      m && `x ${m.x.toFixed(1)} + w ${m.width.toFixed(1)}`);
+    ok("its left edge is too", m && m.x >= -0.5, m && `x ${m.x.toFixed(1)}`);
+    ok("and it is not taller than the panel it sits in", m && m.height <= 640);
+    ok("the bottom stays on screen", m && m.y + m.height <= 640 + 0.5,
+      m && `y ${m.y.toFixed(1)} + h ${m.height.toFixed(1)}`);
+
+    // Four rows on a question, and the one that costs a draft says nothing yet
+    // because the composer is empty.
+    const rows = await page.locator("#msgMenu [data-mm]").allTextContents();
+    ok("a question offers four actions", rows.length === 4, JSON.stringify(rows));
+    ok("and Edit is not yet warning about a draft",
+      /^Edit$/.test((rows[0] || "").trim()), rows[0]);
+
+    // A code block keeps VS Code's own menu: nothing of ours may open there.
+    await page.keyboard.press("Escape");
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", {
+      data: { type: "streamDelta", text: "\n\n```js\nconst a = 1;\n```\n" },
+    })));
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { data: { type: "turnEnd" } })));
+    await page.waitForTimeout(200);
+    if (await page.locator(".msg-ai .cb").count()) {
+      await page.locator(".msg-ai .cb").first().click({ button: "right" });
+      await page.waitForTimeout(150);
+      ok("right-clicking a code block opens nothing of ours",
+        !(await page.locator("#msgMenu").isVisible()));
+    }
+    await ctx.close();
+  }
+
   /* ── 5i. every header glyph actually paints ────────────────────────── */
   {
     // A glyph is drawn as <use href="#i-foo">. If the symbol is missing - a
