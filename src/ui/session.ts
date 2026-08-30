@@ -3,7 +3,7 @@ import * as path from "node:path";
 import * as crypto from "node:crypto";
 import { request } from "undici";
 import type { Msg } from "../providers/client";
-import { runAgent } from "../agent/loop";
+import { runAgent, type ExitReason } from "../agent/loop";
 import { isUntitled, titleFrom, sanitizeTitle } from "../core/sessions";
 import type { FileChange, ToolContext, TodoItem, ToolImage } from "../agent/tools";
 import { mentionable } from "../agent/tools";
@@ -91,6 +91,22 @@ interface LiveTurn {
 }
 
 const PATCH_LIMIT = 30_000;
+
+/**
+ * Exit reasons as a person would say them.
+ *
+ * The enum is for code and reads like one; this is what goes in the log, where
+ * the audience is someone wondering why their turn stopped. `done` is absent
+ * deliberately - it is never printed.
+ */
+const EXIT_REASONS: Partial<Record<ExitReason, string>> = {
+  aborted: "you stopped it between steps",
+  interrupted: "you stopped it while tools were running",
+  budget_exhausted: "it used the whole token budget for one turn",
+  max_iterations: "it hit the step cap without finishing",
+  failing: "too many steps in a row got nothing done",
+  error: "the endpoint returned an error",
+};
 
 export class SessionController {
   history: Msg[] = [];
@@ -939,6 +955,17 @@ export class SessionController {
             this.emit(turn, out);
             break;
           }
+          case "exit":
+            // Why the turn stopped, said once, for the ones that need saying.
+            // Before this a turn that hit the step cap, spent its budget or
+            // was aborted between steps all looked the same from outside the
+            // loop: the model was talking, and then it was not. "done" stays
+            // silent - it is what a turn is supposed to do, and a line on
+            // every turn would bury the handful that mean something.
+            if (ev.exit && ev.exit !== "done") {
+              this.app.log("info", `Turn ended: ${EXIT_REASONS[ev.exit] ?? ev.exit}.`);
+            }
+            break;
           case "turn_end":
             break;
         }

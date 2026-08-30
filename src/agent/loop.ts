@@ -20,6 +20,74 @@ import { TOOL_DEFS, runTool, ToolContext, ToolResult } from "./tools";
 import { skillIndex, Skill } from "../skills/loader";
 import { agentAllowsTool, agentPrompt, agentRefusal, type Agent } from "../agents/loader";
 
+/**
+ * Why a run ended.
+ *
+ * `aborted` and `interrupted` are both the user pressing stop, and they are
+ * kept apart because the transcripts differ: `aborted` is a clean stop at the
+ * boundary between two model calls, while `interrupted` stopped with tool
+ * calls already on the wire and had to answer each of them with
+ * INTERRUPTED_RESULT to keep the conversation resumable.
+ */
+export type ExitReason =
+  | "done"
+  | "aborted"
+  | "interrupted"
+  | "budget_exhausted"
+  | "max_iterations"
+  | "failing"
+  | "error";
+
+/**
+ * Consecutive failing steps before the loop stops trying.
+ *
+ * Hermes's `_MAX_OUTER_LOOP_ERRORS`, and their note on why it exists is the
+ * whole argument for having one: a permanent failure spun at roughly sixty-four
+ * retries a second and overwrote the rotated log history, destroying the
+ * evidence needed to diagnose it. The failure that costs you the most is the
+ * one that also erases its own cause.
+ *
+ * Genesis cannot spin that fast - a stream error ends the turn outright here -
+ * but it has the slower version of the same shape: a model that keeps calling
+ * a tool which keeps failing burns every remaining step and the tokens of a
+ * growing transcript, and today only the step cap stops it, with a message
+ * blaming the size of the task. A step counts as failing when it made tool
+ * calls and every one came back an error, or when the gateway sent frames that
+ * would not decode. Any step that gets real work done resets the count, so a
+ * tool that fails once in the middle of a working turn is not a failure run.
+ */
+const MAX_CONSECUTIVE_ERRORS = 8;
+
+/**
+ * How many context windows a single turn may spend before it is stopped.
+ *
+ * The step cap alone is a poor proxy for cost, which is what anybody actually
+ * wants bounded: twenty-five steps against a 200k window and twenty-five short
+ * ones differ by three orders of magnitude and the loop could not tell them
+ * apart. Expressed as a multiple of the window rather than an absolute number
+ * so it scales with the endpoint instead of needing a different value per
+ * profile, and set so it bites before the step cap only on turns that are
+ * genuinely expensive: at ten windows, a run that fills the context every step
+ * stops around step ten, while a run of short steps reaches twenty-five and is
+ * stopped by the step cap, as it always was.
+ */
+const TOKEN_BUDGET_WINDOWS = 10;
+
+/**
+ * What the model is told when the budget runs out, as one last user turn.
+ *
+ * The grace call this introduces is worth the one extra request. Stopping dead
+ * on the step after a tool result leaves the work unreported: the model has
+ * read six files and formed an answer, and the transcript ends with the sixth
+ * file. Asking for the summary costs one call with no tools attached and turns
+ * a truncated run into a short one.
+ */
+export const BUDGET_EXHAUSTED_NOTICE =
+  "You have used the whole token budget for this turn, so this is your last " +
+  "message and no more tools will run. Do not start anything new. Say what you " +
+  "found, what you changed, and what is left to do, so the user can carry on " +
+  "from here or send you back in with a narrower task.";
+
 export interface AgentEvent {
   /**
    * `text_reset` says that everything streamed so far in this turn was the
@@ -30,8 +98,19 @@ export interface AgentEvent {
    */
   type:
     | "text" | "reasoning" | "text_reset" | "tool_start" | "tool_end"
-    | "turn_end" | "error" | "context" | "steer";
+    | "turn_end" | "error" | "context" | "steer" | "exit";
   text?: string;
+  /**
+   * Why the turn stopped. Emitted exactly once, as the last event of every
+   * run - including the ones that used to end by falling off the bottom of the
+   * loop and saying nothing at all.
+   *
+   * A turn that stops is not self-explanatory from the outside. An abort, an
+   * exhausted budget, a step cap and a run of failing tools all look identical
+   * in a transcript: the model was talking, and then it was not. Naming the
+   * reason is the difference between "it broke" and "it hit the cap you set".
+   */
+  exit?: ExitReason;
   tool?: { name: string; args: any; result?: string; isError?: boolean };
   error?: string;
   /**
@@ -488,6 +567,13 @@ export interface AgentRunOptions {
   history: Msg[];
   userMessage: string;
   maxIterations?: number;
+  /**
+   * Tokens this turn may spend across all of its model calls, counting both
+   * directions. Defaults to `TOKEN_BUDGET_WINDOWS` times the endpoint's
+   * context window; pass a number to bound a turn tighter, or `Infinity` to
+   * bound it only by the step cap.
+   */
+  tokenBudget?: number;
   signal?: AbortSignal;
   /**
    * The workspace's own standing instructions, already formatted.
@@ -633,8 +719,35 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
   let reported = 0;
 
   const maxIter = opts.maxIterations ?? 25;
-  for (let i = 0; i < maxIter; i++) {
-    if (opts.signal?.aborted) return;
+  const budget = opts.tokenBudget ?? caps.contextWindow * TOKEN_BUDGET_WINDOWS;
+  /** Every token this turn has been billed for, across all of its calls. */
+  let spent = 0;
+  /** Steps in a row that got nothing done. Reset by any step that did. */
+  let failing = 0;
+  /**
+   * The budget ran out and this is the model's last word.
+   *
+   * A grace step is offered no tools and is not counted against the step cap:
+   * it exists to turn a run that was cut off into one that reported itself, and
+   * refusing it because the step cap happened to land on the same step would
+   * defeat the point of having it.
+   */
+  let grace = false;
+
+  for (let i = 0; ; i++) {
+    if (!grace && i >= maxIter) {
+      yield {
+        type: "error",
+        error: `Stopped after ${maxIter} steps without finishing.`,
+        errorFix: "Narrow the task and send it again - a smaller step finishes inside the cap.",
+      };
+      yield { type: "exit", exit: "max_iterations" };
+      return;
+    }
+    if (opts.signal?.aborted) {
+      yield { type: "exit", exit: "aborted" };
+      return;
+    }
 
     // Anything typed while this turn was running joins the conversation here,
     // at the boundary between two model calls.
@@ -699,11 +812,16 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
     let pending = "";
     /** `data:` frames this step's gateway sent that would not parse. */
     let gaps = 0;
+    /** Did the endpoint report real usage for this step? */
+    let billed = false;
 
     try {
       for await (const ev of client.complete({
         messages: fitted,
-        tools: caps.tools ? availableTools : undefined,
+        // No tools on a grace step. The budget is spent, so anything the model
+        // asked for could not be run - and offering a tool it is not allowed
+        // to use invites it to spend its last message calling one.
+        tools: !grace && caps.tools ? availableTools : undefined,
         // Aborts the HTTP request itself, so an interrupt during a long pause
         // before the first token takes effect immediately instead of waiting
         // for the next chunk to arrive.
@@ -763,6 +881,14 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
         if (ev.type === "usage" && ev.usage) {
           const total = (ev.usage.input ?? 0) + (ev.usage.output ?? 0);
           if (total > 0) {
+            // Added rather than assigned: `reported` is what this one call
+            // weighed and is what the meter shows, while `spent` is the bill
+            // for the whole turn, which is the thing the budget bounds. Each
+            // step re-sends the transcript, so a long run costs far more than
+            // its final context size suggests - which is exactly why counting
+            // steps was never a stand-in for counting cost.
+            spent += total;
+            billed = true;
             reported = total;
             yield {
               type: "context",
@@ -778,6 +904,7 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
         errorFix: e.fix,
         errorDetail: e.detail,
       };
+      yield { type: "exit", exit: "error" };
       return;
     }
 
@@ -869,11 +996,25 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
       yield { type: "text", text };
     }
 
-    if (!calls.length) {
+    /* An endpoint that reports no usage still costs money, and a budget that
+       only bounds the endpoints honest enough to say so is not a budget. The
+       estimate is the same chars/3.6 the meter falls back to: wrong, but wrong
+       in a stable direction, and a turn stopped slightly early is a far
+       cheaper mistake than one that is never stopped at all. */
+    if (!billed) {
+      spent += fitted.reduce((n, m) => n + messageTokens(m), 0) + estimateTokens(text);
+    }
+
+    /* A step that made no tool calls is the end of the turn either way: the
+       model answered. `grace` only changes what the answer is called, because
+       a turn that ended by spending its budget did not finish the work and a
+       transcript that says "done" about it is a lie. */
+    if (!calls.length || grace) {
       const reply: Msg = { role: "assistant", content: text };
       messages.push(reply);
       opts.onMessage?.(reply);
       yield { type: "turn_end" };
+      yield { type: "exit", exit: grace ? "budget_exhausted" : "done" };
       return;
     }
 
@@ -891,6 +1032,9 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
     // asked for and a write racing a read is a bug nobody would find.
     const canParallel =
       caps.parallelToolExecution && calls.length > 1 && calls.every((c) => READ_ONLY.has(c.name));
+
+    /** Did anything in this step succeed? One clean result is enough. */
+    let worked = false;
 
     // The phase gate, applied to the name the model actually sent rather than
     // to the list it was offered. Everything above this line is advisory; this
@@ -945,10 +1089,12 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
           messages.push(missed);
           opts.onMessage?.(missed);
         }
+        yield { type: "exit", exit: "interrupted" };
         return;
       }
       yield { type: "tool_start", tool: { name: call.name, args: call.arguments } };
       const result = running ? await running[ci] : await invoke(call);
+      if (!result.isError) worked = true;
       yield {
         type: "tool_end",
         tool: { name: call.name, args: call.arguments, result: result.content, isError: result.isError },
@@ -974,11 +1120,37 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
       messages.push(toolMsg);
       opts.onMessage?.(toolMsg);
     }
-  }
 
-  yield {
-    type: "error",
-    error: `Stopped after ${maxIter} steps without finishing.`,
-    errorFix: "Narrow the task and send it again - a smaller step finishes inside the cap.",
-  };
+    /* Nothing in this step worked. Counted rather than acted on immediately,
+       because one failed step is ordinary - a path guessed wrong, a command
+       that needed a flag - and the model recovering from it is the loop doing
+       its job. A run of them is not recovery, it is a model retrying something
+       that is never going to work, and every retry re-sends a transcript that
+       is longer than the last. `gaps` counts here too: a gateway corrupting
+       the stream is a failure the model cannot see and therefore cannot learn
+       from, so it will keep going indefinitely. */
+    failing = worked && !gaps ? 0 : failing + 1;
+    if (failing >= MAX_CONSECUTIVE_ERRORS) {
+      yield {
+        type: "error",
+        error: `Stopped after ${failing} steps in a row that got nothing done.`,
+        errorFix:
+          "The last few tool results say why. This is usually a wrong path, a missing " +
+          "dependency, or an endpoint corrupting the stream - fix that and send again, " +
+          "rather than asking for the same thing.",
+      };
+      yield { type: "exit", exit: "failing" };
+      return;
+    }
+
+    /* The budget is spent. One more call, with no tools and a plain
+       instruction to report, rather than stopping on top of a tool result and
+       leaving the work the model has already done unreported. */
+    if (spent >= budget) {
+      const notice: Msg = { role: "user", content: BUDGET_EXHAUSTED_NOTICE };
+      messages.push(notice);
+      opts.onMessage?.(notice);
+      grace = true;
+    }
+  }
 }
