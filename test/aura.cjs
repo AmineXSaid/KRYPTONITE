@@ -1,28 +1,31 @@
 /**
- * The composer's aura: the one animated gradient in the product.
+ * The composer's two states, and the rotating rim that used to draw them.
  *
- * Half of this is a CSS-text test, which is unusual and deliberate. jsdom does
- * not implement `@property`, does not interpolate registered custom
- * properties, and does not run animations, so there is no DOM assertion that
- * can tell a working aura from a broken one. What *can* be pinned is the set
- * of decisions the thing depends on, each of which is a silent failure if
- * removed:
+ * THE AURA IS GONE. It was a conic gradient on the composer's border, turning
+ * on focus and faster while streaming. It was removed at the owner's request,
+ * and it deserved removing on its own terms: the sweep was clipped to the
+ * BORDER box, which contains the padding box, and the layer meant to cover it
+ * was `--kx-surface` - 4% white. So it never drew the 1px rim it was written
+ * for; it washed the whole box you type into in a blue-to-green gradient.
  *
- *   - Without the `@property` registration the browser cannot interpolate
- *     between two angles. The animation still "runs", the rim never turns,
- *     and nothing anywhere reports an error.
- *   - Without the reduced-motion block a user who asked the OS to stop
- *     animating gets a spinning border anyway.
- *   - Without the focus ring the aura becomes the focus indicator, and a
- *     gradient is not a 3:1 affordance - parts of any sweep are low-contrast
- *     against the surface behind it.
- *   - Without `overflow: hidden` the pills and the toolbar stop being clipped
- *     to the composer's rounded corners.
+ * This file used to assert that machinery existed. It now asserts the
+ * opposite, and that is not a test weakened to pass a change - the invariants
+ * it protected are all still here, carried by something quieter:
  *
- * The real interpolation was verified in a browser by driving the animation's
- * currentTime to 600ms of its 2400ms cycle and reading --kx-angle back as
- * 90deg, which is exactly a quarter turn. That cannot be automated here
- * without shipping a headless browser to run the stylesheet in.
+ *   - Focus must be a 3:1 affordance. The comment on the old rule already
+ *     admitted the gradient could not be one and leaned on the wash ring - but
+ *     the ring alone is 1.17:1 on the real ground, so it could not be one
+ *     either. Focus now sets a SOLID border, and test/contrast.cjs measures it
+ *     against both grounds and against the composer's own floor.
+ *   - A running turn must still be visible where the user is looking, or
+ *     `data-streaming` becomes an attribute nobody styles.
+ *   - Neither state may change the border WIDTH, or the layout moves every
+ *     time the model starts talking.
+ *   - `overflow: hidden` must survive, or the pills and toolbar stop being
+ *     clipped to the composer's corners.
+ *   - The floor must survive every environment. That section is unchanged and
+ *     is the most important thing in this file: it is the regression that
+ *     reached a user's screen.
  *
  * Run: node test/aura.cjs
  */
@@ -41,78 +44,59 @@ const ROOT = path.join(__dirname, "..");
 const CSS = fs.readFileSync(path.join(ROOT, "media/webview/sidebar.css"), "utf8");
 
 /* ── the stylesheet ─────────────────────────────────────────────────────── */
-console.log("──── the rules the aura depends on ────");
+console.log("──── the rotating rim is gone, and stays gone ────");
 {
-  const prop = CSS.match(/@property\s+--kx-angle\s*\{[^}]*\}/);
-  ok("the angle is a registered custom property", !!prop);
-  ok("declared as an <angle>, so the browser can interpolate it",
-    !!prop && /syntax:\s*"<angle>"/.test(prop[0]), prop ? prop[0].replace(/\s+/g, " ") : "");
-  ok("with an initial value, so the first frame is not invalid",
-    !!prop && /initial-value:\s*0deg/.test(prop[0]));
+  // Every piece of the machinery, named individually. A partial removal is
+  // worse than none: an @property with no animation, or keyframes driving an
+  // unregistered variable, is dead weight that reads as a live feature.
+  ok("no @property --kx-angle registration", !/@property\s+--kx-angle/.test(CSS));
+  ok("no kx-aura-spin keyframes", !/@keyframes\s+kx-aura-spin/.test(CSS));
+  ok("no --kx-angle referenced anywhere", !/--kx-angle/.test(CSS));
 
-  const frames = CSS.match(/@keyframes\s+kx-aura-spin\s*\{[^}]*\}[^}]*\}/);
-  ok("there is a keyframe animation", !!frames);
-  ok("and it drives the registered angle a full turn",
-    !!frames && /--kx-angle:\s*360deg/.test(frames[0]));
+  const focusRule = /\.composer:focus-within\s*\{([^}]*)\}/.exec(CSS);
+  const streamRule = /\.composer\[data-streaming="1"\]\s*\{([^}]*)\}/.exec(CSS);
+  ok("the composer still has a focus rule", !!focusRule);
+  ok("and a streaming rule", !!streamRule);
+  ok("neither paints a conic sweep",
+    !!focusRule && !!streamRule &&
+    !/conic-gradient/.test(focusRule[1]) && !/conic-gradient/.test(streamRule[1]),
+    (focusRule ? focusRule[1] : "") + " | " + (streamRule ? streamRule[1] : ""));
+  ok("and neither animates",
+    !!focusRule && !!streamRule &&
+    !/animation/.test(focusRule[1]) && !/animation/.test(streamRule[1]));
 }
-{
-  // Both triggers. Focus alone would leave the streaming case dead, and the
-  // streaming case is the one the feature is for.
-  ok("focus lights the aura", /\.composer:focus-within[^{]*\{[\s\S]{0,400}?conic-gradient/.test(CSS));
-  ok("and so does streaming", /\[data-streaming="1"\]/.test(CSS));
-  ok("streaming runs faster than idle focus",
-    /\[data-streaming="1"\]\s*\{\s*animation-duration:\s*2\.4s/.test(CSS));
 
-  // Painted through a transparent border rather than over the content: the
-  // technique is what lets `overflow: hidden` survive.
-  //
-  // The boxes are now set by the `background-clip` / `background-origin`
-  // longhands rather than by per-layer keywords inside a `background`
-  // shorthand - see the floor test at the bottom of this file for why the
-  // shorthand had to go. The invariant is unchanged and is what is asserted:
-  // layer one (the surface) is clipped to the padding box, layer two (the
-  // sweep) to the border box, IN THAT ORDER. Reverse them and the gradient
-  // is painted over the content instead of showing through the border.
-  ok("the surface layer is declared before the sweep", (() => {
-    const img = /background-image:\s*([\s\S]*?);/.exec(CSS);
-    if (!img) return false;
-    const lin = img[1].indexOf("linear-gradient");
-    const con = img[1].indexOf("conic-gradient");
-    return lin !== -1 && con !== -1 && lin < con;
-  })());
-  ok("the surface is clipped to the padding box and the sweep to the border box",
-    /background-clip:\s*padding-box,\s*border-box/.test(CSS));
-  ok("and both layers originate from the matching boxes",
-    /background-origin:\s*padding-box,\s*border-box/.test(CSS));
+console.log("\n──── both states are still drawn, as solid borders ────");
+{
+  const focusRule = /\.composer:focus-within\s*\{([^}]*)\}/.exec(CSS);
+  const streamRule = /\.composer\[data-streaming="1"\]\s*\{([^}]*)\}/.exec(CSS);
+  const fc = focusRule && /border-color:\s*var\((--[\w-]+)\)/.exec(focusRule[1]);
+  const sc = streamRule && /border-color:\s*var\((--[\w-]+)\)/.exec(streamRule[1]);
+
+  // Focus needs a border because the wash ring cannot carry 3:1 on its own -
+  // test/contrast.cjs does the measuring; this asserts the rule exists to be
+  // measured.
+  ok("focus sets a border colour", !!fc, focusRule ? focusRule[1].trim() : "no rule");
+  ok("and keeps its halo ring",
+    !!focusRule && /box-shadow:/.test(focusRule[1]), focusRule ? focusRule[1].trim() : "");
+  ok("streaming sets a border colour", !!sc, streamRule ? streamRule[1].trim() : "no rule");
+
+  // Different colours, because the two facts are independent and can both be
+  // true: focus is where the keyboard is, streaming is what the model is doing.
+  ok("the two states are told apart by colour",
+    !!fc && !!sc && fc[1] !== sc[1], `${fc && fc[1]} vs ${sc && sc[1]}`);
+
+  // Width, not colour, is what moves a layout.
+  ok("neither state changes the border WIDTH",
+    !!focusRule && !!streamRule &&
+    !/border(-width)?:\s*\d/.test(focusRule[1]) && !/border(-width)?:\s*\d/.test(streamRule[1]));
 }
 {
   const composer = CSS.match(/\n\.composer\s*\{[^}]*\}/);
   ok("the composer still clips its children", !!composer && /overflow:\s*hidden/.test(composer[0]),
     composer ? composer[0].replace(/\s+/g, " ") : "not found");
-  // A border that changes width between states would move the layout every
-  // time the model started talking.
-  ok("and keeps a 1px border, so nothing moves when the aura lights",
+  ok("and keeps a 1px border, so nothing moves between states",
     !!composer && /border:\s*1px/.test(composer[0]));
-}
-{
-  const focus = CSS.match(/\.composer:focus-within\s*\{\s*box-shadow:[^}]*\}/);
-  ok("the focus ring survives alongside the aura", !!focus,
-    "a gradient is not a 3:1 focus indicator on its own");
-
-  const reduced = CSS.split("@media (prefers-reduced-motion: reduce)")
-    .find((b) => /data-streaming/.test(b));
-  ok("reduced motion is honoured", !!reduced);
-  ok("by stopping the animation rather than hiding the rim",
-    !!reduced && /animation:\s*none/.test(reduced));
-}
-{
-  // The palette, not a rainbow. Three accents this panel already owns.
-  const conic = CSS.match(/conic-gradient\(([\s\S]*?)\n\s*\);/);
-  ok("the sweep uses the product's own accents", !!conic &&
-    ["--kx-accent", "--kx-link", "--kx-under"].every((t) => conic[1].includes(t)),
-    conic ? conic[1].replace(/\s+/g, " ").slice(0, 90) : "not found");
-  ok("and closes the loop, so there is no seam at 360deg",
-    !!conic && (conic[1].match(/--kx-accent/g) || []).length >= 2);
 }
 
 /* ── the attribute the CSS reads ────────────────────────────────────────── */
@@ -184,26 +168,51 @@ console.log("\n──── the host tells the composer it is streaming ──�
       /background-color:\s*var\(--kx-surface,\s*#[0-9a-f]{3,8}\)/i.test(body), body.trim());
   }
 
-  const auraRule = /\.composer:focus-within,\s*\n\.composer\[data-streaming="1"\] \{([^}]*)\}/.exec(css);
-  ok("the aura rule is present", !!auraRule);
-  if (auraRule) {
-    const body = auraRule[1];
-    // The whole point. `background:` here is what made the composer vanish.
-    ok("the aura never uses the background shorthand",
-      !/(^|[;{\s])background:/.test(body), body.trim().slice(0, 120));
-    ok("it paints with background-image", /background-image:/.test(body));
-    ok("and sets clip and origin as longhands",
-      /background-clip:\s*padding-box,\s*border-box/.test(body) &&
-      /background-origin:\s*padding-box,\s*border-box/.test(body));
-    // Without a fallback the unregistered-property case invalidates the whole
-    // declaration, which is how this broke in the first place.
-    ok("the angle carries a fallback, so no @property still draws a rim",
-      /var\(--kx-angle,\s*0deg\)/.test(body), body.trim().slice(0, 120));
-    const vars = body.match(/var\(--[a-z0-9-]+(?:,[^)]*)?\)/g) || [];
-    const bare = vars.filter((v) => !v.includes(","));
-    ok("every var() in the aura has a fallback", bare.length === 0, bare.join(" "));
+  // The aura rule this used to inspect is gone. The invariant it protected is
+  // NOT about the aura, though - it is that nothing may reset the composer's
+  // background-color out from under it, and `background:` is the shorthand
+  // that does exactly that when its value turns out to be invalid.
+  //
+  // So the check generalises, and gets stricter: NO rule targeting .composer
+  // may use the shorthand, not merely the one rule that once did. That covers
+  // whatever gets added next, which is the failure mode - the aura was itself
+  // "whatever got added next" the first time this broke.
+  {
+    const offenders = [];
+    for (const m of css.matchAll(/(^|\n)([^\n{}]*\.composer[^\n{}]*)\{([^}]*)\}/g)) {
+      const selector = m[2].trim();
+      const body = m[3];
+      // Pseudo-elements are overlays drawn ON the composer, not the composer's
+      // own background - the drop veil is a literal rgba() by design and has
+      // no floor to lose. Only the element's own rules are under this rule.
+      if (/::(before|after)/.test(selector)) continue;
+      if (/(^|[;{\s])background:/.test(body)) offenders.push(selector);
+    }
+    ok("no rule on the composer uses the background shorthand",
+      offenders.length === 0, offenders.join(" | "));
+  }
+
+  // Every var() on a composer rule still needs a literal fallback: a token
+  // that fails to resolve makes the declaration invalid at computed-value
+  // time, and an invalid background takes the floor with it. This was the
+  // aura's rule alone; it is every composer rule now, for the same reason.
+  {
+    const bare = [];
+    for (const m of css.matchAll(/(^|\n)([^\n{}]*\.composer[^\n{}]*)\{([^}]*)\}/g)) {
+      const selector = m[2].trim();
+      if (/::(before|after)/.test(selector)) continue;
+      for (const decl of m[3].split(";")) {
+        if (!/background/.test(decl)) continue;
+        for (const v of decl.match(/var\(--[a-z0-9-]+(?:,[^)]*)?\)/g) || []) {
+          if (!v.includes(",")) bare.push(`${selector}: ${v}`);
+        }
+      }
+    }
+    ok("every background var() on the composer carries a fallback",
+      bare.length === 0, bare.join(" | "));
   }
 }
+
 
 if (failures.length) for (const f of failures) console.log("FAIL  " + f);
 console.log(`\n──── ${pass} passed, ${failures.length} failed ────`);

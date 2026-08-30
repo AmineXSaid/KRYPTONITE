@@ -275,6 +275,44 @@ console.log("\n──── every token reference resolves ────");
   if (!missing) pass++;
 }
 
+console.log("\n──── the composer's focus indicator stands on its own ────");
+{
+  // Focus used to be carried JOINTLY: a rotating conic rim on the border plus
+  // a wash ring. The rim is gone - it washed the whole composer in a gradient
+  // instead of drawing the 1px border it was written for - which left the ring
+  // alone, and the ring is --kx-info-wash at 16% blue: 1.17:1 on the real
+  // ground. That is not a focus indicator, it is a tint.
+  //
+  // So the BORDER goes solid on focus, and this measures the border, not the
+  // ring. Read from the stylesheet rather than named here, so pointing the
+  // rule at a different token moves this check with it.
+  const SIDE = fs.readFileSync(path.join(__dirname, "..", "media", "webview", "sidebar.css"), "utf8");
+  const rule = /\.composer:focus-within\s*\{([^}]*)\}/.exec(SIDE);
+  if (!rule) {
+    fails.push("the composer declares no :focus-within rule at all");
+  } else {
+    const m = /border-color:\s*var\((--[\w-]+)/.exec(rule[1]);
+    if (!m) {
+      fails.push("the composer's focus rule sets no border-color - a 16% wash ring is not a 3:1 affordance");
+    } else {
+      const name = m[1].replace(/^--/, "");
+      const NEAR_BLACK = "#010409";
+      for (const [where, ground] of [["the assumed ground", BG], ["a near-black container", NEAR_BLACK]]) {
+        const r = ratio(over(rawToken(name), ground), ground);
+        console.log(`  ${r >= 3 ? "PASS" : "FAIL"}  focus border on ${where.padEnd(24)} ${r.toFixed(2)}:1  (min 3)`);
+        ck(`the focus border is visible on ${where}`, r, 3);
+      }
+      // And against the composer's own floor, which is what it actually
+      // borders - composited by hand for the reason kx-edge is, above.
+      const rs = ratio(over(rawToken(name), SURF), SURF);
+      console.log(`  ${rs >= 3 ? "PASS" : "FAIL"}  focus border on the composer floor ${rs.toFixed(2)}:1  (min 3)`);
+      ck("the focus border holds against the composer's own floor", rs, 3);
+    }
+    // The rim must not come back: it is decoration that swallowed the box.
+    if (/conic-gradient/.test(rule[1])) fails.push("the rotating conic rim is back on the composer");
+  }
+}
+
 console.log(`\n──── ${pass} passed, ${fails.length} failed ────`);
 for (const f of fails) console.log("  FAIL  " + f);
 process.exit(fails.length ? 1 : 0);
