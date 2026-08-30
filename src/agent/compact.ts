@@ -308,7 +308,14 @@ export class MicroCompactor {
     return { ok: true, why: `summarising with "${this.aux.name}"` };
   }
 
-  /** What has been absorbed so far, applied to a transcript. */
+  /**
+   * What has been absorbed so far, applied to a transcript.
+   *
+   * Pure, and the only thing the agent loop calls per step. That split is what
+   * keeps a turn's prefix stable: the decision about what to absorb is taken
+   * once at the top of the turn, and every request inside the turn then applies
+   * the same decision to a transcript that has only grown at the end.
+   */
   apply(messages: Msg[]): Msg[] {
     const ranges = exchanges(messages).filter((e) => this.absorbed.has(messages[e.start]));
     if (!ranges.length) return messages;
@@ -324,14 +331,29 @@ export class MicroCompactor {
   }
 
   /**
-   * Absorb at most one exchange, then hand back the request to send.
+   * Absorb at most one exchange. Called ONCE per user turn, never per step.
+   *
+   * Where this is called from is not a detail, it is most of the correctness.
+   * It used to run inside the agent loop, on every iteration, and measuring one
+   * ordinary turn showed what that costs: twelve model calls produced eight
+   * summarisation calls and rewrote the cacheable prefix seven times *within
+   * the turn*. Every one of those rewrites throws away the prompt cache for the
+   * rest of that same turn - so the feature added to save room was quietly
+   * paying for it in exactly the currency this whole change set exists to
+   * protect, and doing it at the worst possible moment.
+   *
+   * Hermes runs it from `turn_finalizer`, once, after a turn completes and only
+   * if the turn neither failed nor was interrupted. This runs at the top of a
+   * turn instead, which reaches the same state by the time the next request
+   * goes out and needs no separate hook - and it means an interrupted turn
+   * simply never gets here.
    *
    * Every path returns a usable array. A compactor that is off, infeasible,
    * cooling down, out of patience or simply not needed yet returns the
    * transcript with whatever it absorbed earlier applied, and `fitToWindow`
    * behind it does what it always did.
    */
-  async fit(messages: Msg[], signal?: AbortSignal, now = Date.now()): Promise<Msg[]> {
+  async beginTurn(messages: Msg[], signal?: AbortSignal, now = Date.now()): Promise<Msg[]> {
     if (!this.feasible().ok) return this.apply(messages);
     this.turns++;
     if (this.turns % Math.max(1, this.cfg.micro_compact_every_n_turns) !== 0) {

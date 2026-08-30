@@ -459,6 +459,15 @@ export const INTERRUPTED_RESULT =
   "The user interrupted this turn before this tool ran. It did not execute and " +
   "nothing changed. Do not assume it succeeded or retry it without being asked.";
 
+/**
+ * Stands in for a reply that turned out to be nothing at all.
+ *
+ * Written as the model's own words rather than as a bracketed note, because it
+ * is going into the assistant channel and a later turn reads it as something it
+ * said. Short and honest beats an empty string, which no wire accepts.
+ */
+export const EMPTY_REPLY = "(No answer was produced for that step.)";
+
 export const IMAGE_EVICTED =
   "[An earlier image was dropped here to keep this request inside the endpoint's " +
   "image budget. Take another screenshot if you still need to see that page.]";
@@ -683,11 +692,28 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
     { role: "user", content: opts.userMessage },
   ];
 
+  // Once per turn, before the first request, and never again inside the loop.
+  // This is where at most one exchange is absorbed; every step below simply
+  // applies whatever it decided. See MicroCompactor.beginTurn for why the
+  // placement is the correctness.
+  if (opts.compactor) await opts.compactor.beginTurn(messages, opts.signal);
+
   /** Last real figure the endpoint reported, so later turns keep using it. */
   let reported = 0;
 
   const maxIter = opts.maxIterations ?? 25;
-  const budget = opts.tokenBudget ?? caps.contextWindow * TOKEN_BUDGET_WINDOWS;
+  /* A window that is not a positive number gives no usable budget, and the
+     arithmetic fails in the worst direction: `contextWindow: 0` in a
+     hand-written profile made the budget zero, so the very first step was over
+     it and every turn ended in a grace call with nothing to report. A budget
+     derived from a nonsense number is worse than no budget, so the step cap
+     governs alone until the profile is fixed. */
+  const window = Number.isFinite(caps.contextWindow) && caps.contextWindow > 0
+    ? caps.contextWindow
+    : 0;
+  const budget =
+    opts.tokenBudget ??
+    (window ? window * TOKEN_BUDGET_WINDOWS : Number.POSITIVE_INFINITY);
   /** Every token this turn has been billed for, across all of its calls. */
   let spent = 0;
   /** Steps in a row that got nothing done. Reset by any step that did. */
@@ -743,16 +769,17 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
       };
     }
 
-    // Images, then compaction, then the window, and the order is the whole of
-    // the reasoning. An evicted picture becomes one short line, so everything
-    // after it sees the sizes actually going out. Compaction runs next because
-    // it is the lossless-ish step: an exchange it absorbs is still represented,
-    // where one `fitToWindow` drops is simply gone. `fitToWindow` stays last
-    // and unchanged, as the backstop for the case compaction could not fix -
-    // a compactor that is off, has no aux model, is cooling down or has given
-    // up leaves this line exactly as it was.
+    // Images, then the summaries already decided, then the window. An evicted
+    // picture becomes one short line, so everything after it sees the sizes
+    // actually going out. `apply` is pure - what to absorb was decided once, at
+    // the top of this turn, and applying the same decision to a transcript that
+    // has only grown at the end leaves the prefix where it was. Deciding here
+    // instead, per step, is what the placement bug did, and it rewrote the
+    // cached prefix seven times inside a single twelve-call turn.
+    // `fitToWindow` stays last and unchanged, the backstop for what compaction
+    // could not fix - off, no aux model, cooling down, or out of patience.
     const compacted = opts.compactor
-      ? await opts.compactor.fit(fitImages(messages, caps.maxImageBytes), opts.signal)
+      ? opts.compactor.apply(fitImages(messages, caps.maxImageBytes))
       : fitImages(messages, caps.maxImageBytes);
     const fitted = fitToWindow(
       compacted,
@@ -925,7 +952,12 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
        it and drop the JSON from the transcript entirely - the tool card that
        follows is the honest rendering of what happened. Otherwise release the
        buffered text unchanged. */
-    const known = new Set(availableTools.map((t) => t.name));
+    /* What this step was actually offered, not what the turn has available.
+       On a grace step that is nothing, and the difference matters: a model
+       answering the grace call with a JSON tool call as prose used to have it
+       "recovered", which set `text` to "" on the way to a step that cannot run
+       tools - and then pushed an assistant turn with empty content. */
+    const known = new Set(grace ? [] : availableTools.map((t) => t.name));
     const adopt = (r: { name: string; arguments: any }) => {
       calls.push({
         id: `text_${i}_${Date.now().toString(36)}`,
@@ -986,7 +1018,13 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
        a turn that ended by spending its budget did not finish the work and a
        transcript that says "done" about it is a lie. */
     if (!calls.length || grace) {
-      const reply: Msg = { role: "assistant", content: text };
+      /* An assistant turn carrying neither text nor a tool call is not merely
+         untidy: both wires reject an empty content block, so one saved into the
+         transcript fails the NEXT request rather than this one, which is the
+         same delayed-failure shape as an orphaned tool result. A model can
+         produce it by spending a whole reply inside <think>, or by answering a
+         grace call with something the splitter consumed entirely. */
+      const reply: Msg = { role: "assistant", content: text.trim() ? text : EMPTY_REPLY };
       messages.push(reply);
       opts.onMessage?.(reply);
       yield { type: "turn_end" };

@@ -188,6 +188,115 @@ let toolsSeen: Array<number | undefined> = [];
     ck(said.length === 1, "and it reaches the transcript through onMessage", String(said.length));
   }
 
+  /* ── 4b. the grace step cannot leave an unsendable transcript ────────── */
+  console.log("\n──── the grace step's reply is always sendable ────");
+  {
+    // Two independent ways the grace step could produce an assistant turn with
+    // neither text nor a tool call. Both wires reject that shape, so it fails
+    // the NEXT request rather than this one - the same delayed failure as an
+    // orphaned tool result, and just as hard to trace back. They are tested
+    // apart because either guard alone hides the other.
+
+    /** Drive to the grace step, then answer it with `graceReply`. */
+    async function toGrace(graceReply: typeof reply) {
+      reply = { call: { name: "list_files", args: { path: "." } } };
+      usage = { input: 300, output: 100 };
+      const saved: any[] = [];
+      served = 0;
+      const client = new EndpointClient(loadProfile(file), () => undefined, tmp);
+      for await (const _ev of runAgent({
+        client, ctx, history: [], userMessage: "go",
+        maxIterations: 25, tokenBudget: 1000,
+        onMessage: (m: any) => {
+          saved.push(m);
+          // The notice is the last thing pushed before the grace request.
+          if (m.role === "user" && /last message/.test(String(m.content))) reply = graceReply;
+        },
+      })) { /* driven for the transcript */ }
+      await client.close();
+      return saved;
+    }
+    const unsendable = (saved: any[]) =>
+      saved.filter(
+        (m) =>
+          m.role === "assistant" &&
+          !(m.toolCalls ?? []).length &&
+          (m.content === "" || (Array.isArray(m.content) && !m.content.length))
+      );
+
+    // (i) The model answers the grace call with nothing at all.
+    const empty = await toGrace({ text: "" });
+    ck(
+      unsendable(empty).length === 0,
+      "a grace step that returns nothing still leaves a sendable turn",
+      `${unsendable(empty).length} of ${empty.length}`
+    );
+    const lastEmpty = empty[empty.length - 1];
+    ck(
+      lastEmpty.role === "assistant" && String(lastEmpty.content).trim().length > 0,
+      "with something in it a later turn can read",
+      JSON.stringify(lastEmpty.content).slice(0, 50)
+    );
+
+    // (ii) The model answers it with a tool call written as prose. No tools
+    // were offered on this step, so nothing may be adopted from it - adopting
+    // used to clear the text on the way to a step that cannot run tools.
+    const prose = await toGrace({
+      text: '{"name":"read_file","arguments":{"path":"ok.txt"}}',
+    });
+    ck(
+      unsendable(prose).length === 0,
+      "and so does one that writes a tool call as prose",
+      `${unsendable(prose).length} of ${prose.length}`
+    );
+    const lastProse = prose[prose.length - 1];
+    ck(
+      String(lastProse.content).includes("read_file"),
+      "the words survive rather than being swallowed by a call that cannot run",
+      JSON.stringify(lastProse.content).slice(0, 50)
+    );
+
+    // Ordinary tool-calling turns are untouched: an assistant turn with empty
+    // content and tool_use blocks is what every tool call looks like.
+    const withCalls = prose.filter((m) => m.role === "assistant" && (m.toolCalls ?? []).length);
+    ck(withCalls.length > 0, "while ordinary tool-calling turns are untouched", String(withCalls.length));
+  }
+
+  /* ── 4c. a nonsense context window must not become a zero budget ─────── */
+  console.log("\n──── a profile with a broken window ────");
+  {
+    // `contextWindow: 0` in a hand-written profile made the budget zero, so the
+    // first step was already over it: the turn ended in a grace call with
+    // nothing to report and no error saying why. A budget computed from a
+    // nonsense number is worse than no budget, so the step cap governs alone.
+    //
+    // The reply has to make tool calls: the budget is checked at the bottom of
+    // a step, which a turn that answers immediately never reaches.
+    const zero = path.join(tmp, "zero.yaml");
+    fs.writeFileSync(
+      zero,
+      `name: zero\nwire: anthropic\nbaseUrl: http://127.0.0.1:${port}\nmodel: m\n` +
+        `auth:\n  kind: bearer\n  value: t\ncapabilities:\n  streaming: false\n  tools: true\n` +
+        `  parallelToolExecution: false\n  contextWindow: 0\n`,
+      "utf8"
+    );
+    reply = { call: { name: "list_files", args: { path: "." } } };
+    usage = { input: 10, output: 5 };
+    served = 0;
+    const client = new EndpointClient(loadProfile(zero), () => undefined, tmp);
+    const evs: AgentEvent[] = [];
+    for await (const ev of runAgent({ client, ctx, history: [], userMessage: "go", maxIterations: 4 })) {
+      evs.push(ev);
+    }
+    await client.close();
+    ck(
+      exitOf(evs) === "max_iterations",
+      "a zero window leaves the step cap governing, not an instant grace call",
+      String(exitOf(evs))
+    );
+    ck(served === 4, "so the turn runs its steps", String(served));
+  }
+
   /* ── 5. a run of failing steps ───────────────────────────────────────── */
   console.log("\n──── steps that get nothing done ────");
   {

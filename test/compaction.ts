@@ -212,7 +212,7 @@ function ck(ok: boolean, label: string, detail = "") {
     const { s, calls } = shrinker();
     const c = new MicroCompactor({ micro_compact: true }, s);
     const t = heavy();
-    const out = await c.fit(t);
+    const out = await c.beginTurn(t);
     ck(calls() === 1, "one exchange is absorbed per turn, not all of them", String(calls()));
     ck(out.length < t.length, "the request is shorter than the transcript", `${out.length} vs ${t.length}`);
     ck(t.length === heavy().length, "and the transcript itself is untouched");
@@ -222,10 +222,10 @@ function ck(ok: boolean, label: string, detail = "") {
     );
     // The property that makes this safe to put in a cached prefix: asking again
     // must not re-summarise or re-shape what was already decided.
-    const again = await c.fit(t);
+    const again = await c.beginTurn(t);
     ck(calls() === 2, "a later turn absorbs the next one", String(calls()));
     ck(
-      JSON.stringify(await c.fit(t)) !== undefined && calls() === 3,
+      JSON.stringify(await c.beginTurn(t)) !== undefined && calls() === 3,
       "and so on, one at a time"
     );
     // Every user turn survives every round of it.
@@ -237,7 +237,7 @@ function ck(ok: boolean, label: string, detail = "") {
     const { s, calls } = shrinker();
     const c = new MicroCompactor({ micro_compact: true }, s);
     const t: Msg[] = [sys(), usr("hi"), asst("hello"), usr("bye")];
-    const out = await c.fit(t);
+    const out = await c.beginTurn(t);
     ck(calls() === 0, "a conversation under the threshold is left alone", String(calls()));
     ck(out === t, "and handed back untouched");
   }
@@ -260,9 +260,9 @@ function ck(ok: boolean, label: string, detail = "") {
     };
     const c = new MicroCompactor({ micro_compact: true }, s);
     const t = heavy();
-    for (let i = 0; i < 6; i++) await c.fit(t);
+    for (let i = 0; i < 6; i++) await c.beginTurn(t);
     ck(tries === 3, "three useless attempts and it stops trying", String(tries));
-    ck((await c.fit(t)) === t, "and returns the transcript unchanged");
+    ck((await c.beginTurn(t)) === t, "and returns the transcript unchanged");
   }
   {
     // A broken aux endpoint degrades instead of being hammered once per step.
@@ -278,19 +278,22 @@ function ck(ok: boolean, label: string, detail = "") {
     const c = new MicroCompactor({ micro_compact: true }, s);
     const t = heavy();
     const t0 = 1_000_000;
-    await c.fit(t, undefined, t0);
-    await c.fit(t, undefined, t0 + 1000);
-    await c.fit(t, undefined, t0 + 30_000);
+    await c.beginTurn(t, undefined, t0);
+    await c.beginTurn(t, undefined, t0 + 1000);
+    await c.beginTurn(t, undefined, t0 + 30_000);
     ck(attempts === 1, "one failure buys silence rather than a retry per step", String(attempts));
-    await c.fit(t, undefined, t0 + 120_000);
+    await c.beginTurn(t, undefined, t0 + 120_000);
     ck(attempts === 2, "and it tries again once the cooldown is over", String(attempts));
   }
   {
     const { s, calls } = shrinker();
     const c = new MicroCompactor({ micro_compact: true, micro_compact_every_n_turns: 3 }, s);
     const t = heavy();
-    for (let i = 0; i < 6; i++) await c.fit(t);
-    ck(calls() === 2, "every_n_turns paces it", String(calls()));
+    for (let i = 0; i < 6; i++) await c.beginTurn(t);
+    // Six turns, every third: two passes. The unit is turns because beginTurn
+    // is called once per turn - when this was wired per step, the same knob
+    // silently meant "every third model call".
+    ck(calls() === 2, "every_n_turns paces it, in turns", String(calls()));
   }
 
   /* ── 5. the feasibility probe ────────────────────────────────────────── */
@@ -321,7 +324,7 @@ function ck(ok: boolean, label: string, detail = "") {
     // The degradation that matters: infeasible is not an error, it is the old
     // behaviour. The transcript comes back whole and fitToWindow does its job.
     const t = heavy();
-    ck((await small.fit(t)) === t, "and an infeasible compactor is a no-op, not a failure");
+    ck((await small.beginTurn(t)) === t, "and an infeasible compactor is a no-op, not a failure");
   }
 
   /* ── 6. rendering an exchange for the summariser ─────────────────────── */
@@ -449,6 +452,31 @@ function ck(ok: boolean, label: string, detail = "") {
     server.close();
 
     ck(summarised > 0, "the loop actually compacted something", String(summarised));
+    // The regression that matters most in this file. Compaction used to run
+    // inside the loop, once per model call: one ordinary twelve-call turn
+    // produced eight summarisation calls and rewrote the cacheable prefix seven
+    // times *within the turn*, throwing away the prompt cache each time. Which
+    // means the feature added to win back window space was paying for it in the
+    // currency Steps 1 and 2 exist to protect. Hermes runs it once per turn
+    // from turn_finalizer; this runs it once at the top of a turn.
+    ck(summarised === 1, "exactly once per turn, not once per step", String(summarised));
+
+    // And the shape that proves it to a cache: across the turn the request must
+    // only ever GROW at the end. A prefix that is rewritten mid-turn shares no
+    // cache entry with the request before it.
+    let rewrites = 0;
+    for (let i = 1; i < bodies.length; i++) {
+      const prev = JSON.stringify((bodies[i - 1]?.messages ?? []).slice(0, -2));
+      const here = JSON.stringify((bodies[i]?.messages ?? []).slice(0, -2));
+      if (!here.startsWith(prev.slice(0, -1))) rewrites++;
+    }
+    ck(rewrites === 0, "and the prefix is never rewritten mid-turn", `${rewrites} rewrites`);
+    const counts = bodies.map((b) => (b?.messages ?? []).length);
+    ck(
+      counts.every((n, i) => i === 0 || n >= counts[i - 1]),
+      "so the request only grows across a turn",
+      counts.join(",")
+    );
 
     // Every request, not just the last: a body that went out malformed has
     // already failed, whatever the ones after it look like.
