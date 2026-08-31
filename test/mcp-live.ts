@@ -147,7 +147,9 @@ const cfg = mcpConfigPath(root);
       tools: [],
       skills: [],
       allMcp: false,
-      mcp: [{ server: "filesystem", include: ["read_text_file", "list_directory"], exclude: [] }],
+      mcp: [
+        { server: "filesystem", include: ["read_text_file", "list_directory"], exclude: [], includeActive: true },
+      ],
       file: "",
     };
 

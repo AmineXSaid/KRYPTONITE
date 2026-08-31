@@ -270,6 +270,18 @@ export function renderExchange(messages: Msg[], e: Exchange): string {
  * about what to send, not about what happened. It also means the same exchange
  * is summarised once and the resulting request is stable across the iterations
  * of a single turn, instead of being rebuilt - and re-billed - every step.
+ *
+ * A consequence, decided rather than overlooked: because the keys are message
+ * identities, nothing here survives a transcript being saved and loaded. A
+ * reopened conversation starts absorbing again from the beginning, at one
+ * summary per turn until it catches up.
+ *
+ * Persisting the summaries into the session format would avoid that, and it is
+ * the wrong trade. It would make the condensation permanent - reopen a
+ * conversation and it is already condensed, with the full history gone for
+ * good - to save a handful of auxiliary calls on a feature that is off by
+ * default. Today a reload hands back everything that was said. That is worth
+ * more than the calls, and it should not be given up quietly.
  */
 export class MicroCompactor {
   private readonly cfg: MicroCompactConfig;

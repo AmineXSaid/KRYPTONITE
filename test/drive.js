@@ -1307,10 +1307,24 @@ function composer(over) {
 const AGENTS = [
   { name: "reader", description: "Reads only.", model: "", memory: ".agent/memory/reader.md",
     tools: ["read_file", "search"], skills: [], allMcp: false,
-    mcp: [{ server: "filesystem", include: ["read_text_file"], exclude: [] }],
+    mcp: [{ server: "filesystem", include: ["read_text_file"], exclude: [], includeActive: true }],
     file: ".agent/agents/reader.md", active: false },
   { name: "wide", description: "Everything.", model: "gpt-4o", memory: "", tools: [], skills: [],
     allMcp: true, mcp: [], file: ".agent/agents/wide.md", active: false },
+  // A server named with an include list written and left empty: no tools at
+  // all. The row has to say so - it is the state the label used to get wrong.
+  { name: "sealed", description: "Names a server and no tools on it.", model: "", memory: "",
+    tools: [], skills: [], allMcp: false,
+    mcp: [{ server: "filesystem", include: [], exclude: [], includeActive: true }],
+    file: ".agent/agents/sealed.md", active: false },
+  // And the other empty case, which must NOT read the same: `filesystem: true`
+  // writes no include at all, so every tool is in scope and the row says only
+  // the server's name. Without a fixture for this the "(none)" branch could
+  // swallow it and no test would notice.
+  { name: "whole", description: "Names a server and every tool on it.", model: "", memory: "",
+    tools: [], skills: [], allMcp: false,
+    mcp: [{ server: "filesystem", include: [], exclude: [], includeActive: false }],
+    file: ".agent/agents/whole.md", active: false },
 ];
 {
   const { d, sent, inbound } = boot();
@@ -1335,13 +1349,30 @@ const AGENTS = [
   ok("AG the header offers New agent with the list still empty of rows",
     !!d.querySelector(".ag-top [data-ag=\"new\"]"));
   const rows = d.querySelectorAll(".ag-row");
-  ok("AG both agents are listed", rows.length === 2);
-  ok("AG the badge counts them", d.getElementById("agBadge").textContent === "2");
+  ok("AG every agent is listed", rows.length === 4);
+  ok("AG the badge counts them", d.getElementById("agBadge").textContent === "4");
   const readerRow = d.querySelector('[data-name="reader"]').closest(".ag-row");
   ok("AG a row names the agent", /reader/.test(readerRow.textContent));
   ok("AG and describes it", /Reads only/.test(readerRow.textContent));
   ok("AG and states its built-in scope", /2 built-in tools/.test(readerRow.textContent));
   ok("AG and which MCP servers it can reach", /MCP: filesystem \(1\)/.test(readerRow.textContent));
+  // Three states, and the third is the one that used to be drawn wrong. A bare
+  // server name means every tool; a count means those tools; "(none)" means an
+  // include list was written and left empty, which withholds all of them.
+  // Reading include.length alone drew that as unrestricted - the row telling
+  // the user the opposite of what their own file says.
+  {
+    const sealedRow = d.querySelector('[data-name="sealed"]').closest(".ag-row");
+    ok("AG an empty include is drawn as none, not as unrestricted",
+      /MCP: filesystem \(none\)/.test(sealedRow.textContent), sealedRow.textContent);
+    const wideRow = d.querySelector('[data-name="wide"]').closest(".ag-row");
+    ok("AG while an unscoped agent still says all MCP servers",
+      /all MCP servers/.test(wideRow.textContent), wideRow.textContent);
+    const wholeRow = d.querySelector('[data-name="whole"]').closest(".ag-row");
+    ok("AG and a server with no include written is drawn as just the server",
+      /MCP: filesystem(?!\s*\()/.test(wholeRow.textContent), wholeRow.textContent);
+    ok("AG not as none", !/filesystem \(none\)/.test(wholeRow.textContent), wholeRow.textContent);
+  }
   ok("AG and that it keeps a memory", /memory/.test(readerRow.textContent));
   ok("AG and names its file", /\.agent\/agents\/reader\.md/.test(readerRow.textContent));
   const wideRow = d.querySelector('[data-name="wide"]').closest(".ag-row");
@@ -1388,7 +1419,8 @@ const AGENTS = [
   ok("AG /agent is offered in the slash palette", !!qpRow);
   qpRow.click();
   const rows = d.querySelectorAll("#qp .qp-row");
-  ok("AG choosing it opens the agent list", rows.length === 3, String(rows.length));
+  // Every agent plus the "none" row.
+  ok("AG choosing it opens the agent list", rows.length === 5, String(rows.length));
   ok("AG with None first, so leaving is one click", /None/.test(rows[0].textContent));
   ok("AG the active one is ticked",
     !!d.querySelectorAll("#qp .qp-row")[2].querySelector(".qp-check svg"));

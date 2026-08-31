@@ -167,7 +167,9 @@ async function main() {
     const reader = {
       name: "reader",
       allMcp: false,
-      mcp: [{ server: "fs", include: ["list_*", "read-*", "fs.*"], exclude: [] }],
+      mcp: [
+        { server: "fs", include: ["list_*", "read-*", "fs.*"], exclude: [], includeActive: true },
+      ],
       tools: [],
       skills: [],
     } as unknown as Agent;
@@ -224,7 +226,18 @@ async function main() {
       tools: [],
       skills: [],
       allMcp: false,
-      mcp: [{ server: "fs", include: ["read_*", "list_*"], exclude: ["list_allowed_directories"] }],
+      mcp: [
+        {
+          server: "fs",
+          include: ["read_*", "list_*"],
+          // Load-bearing: without it the include list is read as absent and the
+          // agent gets every tool on the server. That is the inversion this
+          // field exists to stop, and these fixtures are cast rather than typed,
+          // so the compiler will not catch a missing one - only this suite will.
+          includeActive: true,
+          exclude: ["list_allowed_directories"],
+        },
+      ],
       file: "",
     } as unknown as Agent;
 
@@ -287,6 +300,8 @@ async function main() {
     // 5. An unscoped agent reaches everything, so the narrowing above is the
     //    agent's doing and not something the registry was going to do anyway.
     const wide = { name: "wide", allMcp: true, mcp: [], tools: [], skills: [] } as unknown as Agent;
+    // allMcp short-circuits before any scope is consulted, so includeActive
+    // never comes into it for an unscoped agent.
     const wideOffered = reg.toolDefs((sv, t) => agentAllowsMcp(wide, sv, t));
     check(wideOffered.length === real.length,
       "an unscoped agent still sees every tool", `${wideOffered.length} of ${real.length}`);
@@ -303,6 +318,99 @@ async function main() {
     } else {
       check(false, "a readable tool survived the scope", offered.join(","));
     }
+  }
+
+  /* ── the server's own read-only hints, and a mis-vouch ── */
+  //
+  // Genesis used to claim in four places that MCP has no way for a server to
+  // declare a tool read-only. It does - `annotations.readOnlyHint` - and the
+  // claim being false was the dangerous part: a future reader who discovers the
+  // annotation would reasonably assume the code had merely not caught up, and
+  // wire it into the gate. It must not be wired into the gate. It is the server
+  // describing itself, and Ask and Plan exist precisely so that a server's own
+  // word is not what decides.
+  //
+  // Asserted against whatever this server really reports rather than a fixture,
+  // because the annotations are the server's to send.
+  {
+    const hinted = defs.length;
+    const withHint = st.tools.length;
+    check(hinted > 0 && withHint > 0, "the server reported tools to inspect");
+
+    // Whatever arrived, it is either exactly true or absent. Nothing is
+    // invented, and a malformed annotation must read as write-capable.
+    const captured = reg.find("mcp__fs__read_text_file");
+    check(!!captured, "a tool can be looked up for its annotation");
+    if (captured) {
+      const h = captured.tool.readOnlyHint;
+      check(h === true || h === undefined,
+        "a captured hint is exactly true or absent, never coerced", String(h));
+    }
+    // Not merely "true or absent" - this server does annotate, and accepting
+    // absence would make the whole assertion pass with the capture deleted.
+    // (It did: a mutant that dropped the annotation survived until this line.)
+    const annotated = defs
+      .map((d) => reg.find(d.name)?.tool)
+      .filter((t) => t?.readOnlyHint === true);
+    check(annotated.length > 0,
+      "the server's readOnlyHint annotations are actually captured, not dropped",
+      `${annotated.length} of ${defs.length} tools carry one`);
+    // And the write-capable ones do not claim to be, which is what makes the
+    // mis-vouch comparison below meaningful rather than vacuous.
+    check(reg.find("mcp__fs__write_file")?.tool.readOnlyHint !== true,
+      "while a write tool does not claim to be read-only");
+
+    // The gate has not moved: this server is NOT marked readOnly, so every one
+    // of its tools stays withheld from Ask and Plan no matter what it annotates.
+    check(reg.isReadOnly("mcp__fs__read_text_file") === false,
+      "an unvouched server is not read-only however it annotates itself");
+    check(!toolAllowedIn("ask", "mcp__fs__read_text_file", (n) => reg.isReadOnly(n)),
+      "so Ask still withholds it");
+
+    // Nothing to warn about while no server is vouched for.
+    check(reg.readOnlyWarnings().length === 0,
+      "and an unvouched server produces no warning", reg.readOnlyWarnings().join(" | "));
+  }
+
+  /* the mis-vouch itself, on a second registry that marks the server readOnly */
+  {
+    const vouchedDir = path.join(ROOT, ".agent-vouched");
+    const vouched = writeConfig(vouchedDir, {
+      mcpServers: {
+        fs: {
+          command: process.execPath,
+          args: [entry, ROOT],
+          approval: "auto",
+          readOnly: true,
+          timeoutMs: 120000,
+        },
+      },
+    });
+    const reg2 = new McpRegistry(() => {});
+    await reg2.reload(vouched, ROOT);
+    const st2 = reg2.statuses().find((s) => s.name === "fs");
+    if (st2?.state !== "ready") {
+      check(false, "the vouched server started", `${st2?.state}: ${st2?.error}`);
+    } else {
+      check(reg2.isReadOnly("mcp__fs__write_file") === true,
+        "the user's claim still decides, unchanged");
+      check(toolAllowedIn("ask", "mcp__fs__read_text_file", (n) => reg2.isReadOnly(n)),
+        "and it is what opens Ask");
+
+      // This server annotates and exposes writes - asserted above rather than
+      // assumed - so the two claims disagree and the user has to be told: Ask
+      // and Plan are now open to a write, and nothing else would ever say so.
+      const warned = reg2.readOnlyWarnings();
+      check(warned.length === 1, "a vouched server exposing write-capable tools warns once",
+        String(warned.length));
+      check(/write_file/.test(warned.join(" ")), "and names them", warned.join(" ").slice(0, 110));
+      check(/readOnly/.test(warned.join(" ")), "and says which mark it is about");
+      // Either way the warning can never grant: it is a string, and isReadOnly
+      // is still the user's claim.
+      check(reg2.isReadOnly("mcp__fs__write_file") === true,
+        "and warning about it changes no gate");
+    }
+    await reg2.stopAll();
   }
 
   /* error paths against a live server */

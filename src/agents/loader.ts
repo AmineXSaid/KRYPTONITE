@@ -47,8 +47,25 @@ import { parse as parseYaml } from "yaml";
 export interface McpScope {
   /** Server id, as it appears in `.agent/mcp.json`. */
   server: string;
-  /** Tool names or `prefix_*` globs. Empty means every tool on the server. */
+  /** Tool names or `prefix_*` globs. Meaningful only when `includeActive`. */
   include: string[];
+  /**
+   * Was an include list written at all?
+   *
+   * The list alone cannot answer that, and the difference is not academic: an
+   * absent include means "every tool on this server", while an include written
+   * as `[]` means "none of them". Both arrive here as an empty array, so
+   * without this flag the second was read as the first and an agent scoped to
+   * nothing was handed everything - the inversion, in the direction that grants
+   * rather than withholds.
+   *
+   * `include_active` is what Hermes calls it, and it resolves the same case the
+   * same way: an explicit empty whitelist registers no tools. Their comment
+   * names the path that writes one - the install checklist's "uncheck
+   * everything" - so this is a block a real user produces and then lifts across
+   * on the strength of the compatibility `readMcp` advertises.
+   */
+  includeActive: boolean;
   /** Applied after include, same syntax. */
   exclude: string[];
 }
@@ -190,7 +207,7 @@ export function agentAllowsMcp(agent: Agent | undefined, server: string, tool: s
   //
   // So the deviation is real and the comment on `readMcp` below says so
   // instead of claiming a parity that is not there.
-  if (scope.include.length && !scope.include.some((p) => matchesGlob(p, tool))) return false;
+  if (scope.includeActive && !scope.include.some((p) => matchesGlob(p, tool))) return false;
   if (scope.exclude.some((p) => matchesGlob(p, tool))) return false;
   return true;
 }
@@ -287,33 +304,64 @@ function readMcp(
     const t = raw.trim();
     if (t === "*" || t.toLowerCase() === "all") return { mcp: [], allMcp: true };
     if (!t || t.toLowerCase() === "none") return { mcp: [], allMcp: false };
-    return { mcp: [{ server: t, include: [], exclude: [] }], allMcp: false };
+    return {
+      mcp: [{ server: t, include: [], exclude: [], includeActive: false }],
+      allMcp: false,
+    };
   }
   if (Array.isArray(raw)) {
     const list = asList(raw);
     if (list.includes("*")) return { mcp: [], allMcp: true };
-    return { mcp: list.map((s) => ({ server: s, include: [], exclude: [] })), allMcp: false };
+    // A bare list of server names says nothing about their tools, so every
+    // tool on each is in scope.
+    return {
+      mcp: list.map((s) => ({ server: s, include: [], exclude: [], includeActive: false })),
+      allMcp: false,
+    };
   }
   if (typeof raw === "object") {
     const out: McpScope[] = [];
     for (const [server, value] of Object.entries(raw as Record<string, unknown>)) {
       if (value === false) continue; // declared and switched off
       if (value === true || value === null || value === undefined) {
-        out.push({ server, include: [], exclude: [] });
+        // `server: true` is the whole server. No include was written.
+        out.push({ server, include: [], exclude: [], includeActive: false });
         continue;
       }
       if (typeof value === "string" || Array.isArray(value)) {
-        out.push({ server, include: asList(value), exclude: [] });
+        // The shorthand IS an include list, so writing an empty one is writing
+        // an empty include - which withholds rather than grants.
+        if (asList(value).length === 0) {
+          warnings.push(
+            `${name}: mcp.${server} is an empty list, so this agent may call no tools on ` +
+              `"${server}". Write \`${server}: true\` to allow all of them.`
+          );
+        }
+        out.push({ server, include: asList(value), exclude: [], includeActive: true });
         continue;
       }
       const obj = value as Record<string, unknown>;
       // `tools:` is Hermes's nesting; the flat form is accepted because it is
       // what people write first and there is nothing else the keys could mean.
       const t = (obj.tools ?? obj) as Record<string, unknown>;
+      // Present, not merely non-empty. `include: []` is a filter; a missing
+      // `include` is the absence of one, and they mean opposite things.
+      const includeActive = t.include !== undefined && t.include !== null;
+      // A real and useful setting - "this server, none of its tools" - and also
+      // exactly what a typo looks like. Said out loud either way, because the
+      // consequence is an agent that silently cannot call anything on a server
+      // its own file names.
+      if (includeActive && asList(t.include).length === 0) {
+        warnings.push(
+          `${name}: mcp.${server} declares an empty tools.include, so this agent may call ` +
+            `no tools on "${server}". Remove the include key to allow all of them.`
+        );
+      }
       out.push({
         server,
         include: asList(t.include),
         exclude: asList(t.exclude),
+        includeActive,
       });
     }
     return { mcp: out, allMcp: false };
@@ -408,6 +456,20 @@ export function loadAgents(dir: string): { agents: Agent[]; warnings: string[] }
       warnings.push(
         `${name}'s body is ${Math.round(persona.length / 1000)}k characters and is sent on every ` +
           `request. Move the detail into a skill and reference it.`
+      );
+    }
+
+    // `tools: []` reads as "no built-ins" and means the opposite - the empty
+    // allowlist is how an agent says it wants all of them, which is what
+    // `agentAllowsTool` implements and what the field's own doc records. The
+    // behaviour stays (an agent that could not read a file would be useless,
+    // so an empty list is far more likely a slip than an intent) but it is no
+    // longer silent, because a scope that means the reverse of how it reads is
+    // worth one line at load.
+    if (Array.isArray(meta.tools) && asList(meta.tools).length === 0) {
+      warnings.push(
+        `${name}: an empty tools list means EVERY built-in tool, not none. ` +
+          `Remove the key for the same effect, or name the tools this agent should have.`
       );
     }
 

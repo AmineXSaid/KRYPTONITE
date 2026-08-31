@@ -206,6 +206,31 @@ ck(!agentAllowsTool(t, "write_file"), "an unlisted built-in is refused");
 ck(agentAllowsTool(g, "read_file") && agentAllowsTool(g, "list_files"), "globs work here too");
 ck(!agentAllowsTool(g, "run_command"), "and still refuse what they do not match");
 
+// `tools: []` means every built-in, which is the reverse of how it reads. The
+// behaviour stays - an agent that cannot read a file is useless, so an empty
+// list is a slip rather than an intent - but it is no longer silent.
+{
+  write(
+    "empty-tools.md",
+    `---
+name: empty-tools
+description: Writes an empty built-in allowlist.
+tools: []
+---
+
+Everything, as it turns out.
+`
+  );
+  const et = loadAgents(dir);
+  const a = et.agents.find((x) => x.name === "empty-tools")!;
+  ck(agentAllowsTool(a, "write_file"), "an empty tools list still means every built-in");
+  ck(
+    et.warnings.some((w) => /empty-tools/.test(w) && /EVERY built-in/.test(w)),
+    "and the load says so rather than leaving it to be discovered",
+    et.warnings.filter((w) => /empty-tools/.test(w)).join(" | ")
+  );
+}
+
 console.log("\n──── the glob itself ────");
 ck(matchesGlob("read_file", "read_file"), "an exact name matches itself");
 ck(!matchesGlob("read_file", "read_files"), "and nothing else");
@@ -274,6 +299,86 @@ ck(matchesGlob("read[", "read["), "and still matches itself literally");
 ck(!matchesGlob("x[z-a]y", "xay"), "a reversed range matches nothing, as fnmatch has it");
 ck(!matchesGlob("x[z-a]y", "anything"), "and is emphatically not a wildcard");
 ck(matchesGlob("x[z-a]y", "x[z-a]y"), "though it still matches itself literally");
+
+/* ── 3a. an empty include withholds, it does not grant ─────────────────── */
+console.log("\n──── an empty include list ────");
+{
+  // The inversion. `asList([])` and `asList(undefined)` both produce an empty
+  // array, so the predicate's old `include.length &&` guard could not tell an
+  // include that was written and left empty from one that was never written -
+  // and read the first as the second, handing an agent scoped to NOTHING every
+  // tool on the server. Hermes resolves it the other way (include_active), and
+  // names the path that writes such a block: the install checklist's "uncheck
+  // everything". So it is a real config, lifted across on the strength of the
+  // compatibility readMcp advertises, that got the reverse of what it asked for.
+  write(
+    "sealed-server.md",
+    `---
+name: sealed-server
+description: Declares a server and then no tools on it.
+mcp:
+  filesystem:
+    tools:
+      include: []
+---
+
+Nothing here.
+`
+  );
+  const loaded = loadAgents(dir);
+  const sealedFs = loaded.agents.find((a) => a.name === "sealed-server")!;
+  ck(!!sealedFs, "the block loads");
+  ck(sealedFs.mcp[0].includeActive === true, "an empty include is still an include");
+  ck(!agentAllowsMcp(sealedFs, "filesystem", "read_text_file"), "and admits nothing");
+  ck(!agentAllowsMcp(sealedFs, "filesystem", "write_file"), "not even by accident");
+  ck(!agentAllowsMcp(sealedFs, "filesystem", "anything_at_all"), "whatever the tool is called");
+  // Said out loud: it is a real setting and also what a typo looks like.
+  ck(
+    loaded.warnings.some((w) => /sealed-server/.test(w) && /no tools/.test(w)),
+    "and the load warns about it",
+    loaded.warnings.filter((w) => /sealed-server/.test(w)).join(" | ")
+  );
+
+  // The shorthand is an include list too, so an empty one means the same.
+  write(
+    "sealed-short.md",
+    `---
+name: sealed-short
+description: Empty shorthand list.
+mcp:
+  filesystem: []
+---
+
+Nothing here either.
+`
+  );
+  const short = loadAgents(dir).agents.find((a) => a.name === "sealed-short")!;
+  ck(!agentAllowsMcp(short, "filesystem", "read_text_file"), "an empty shorthand list admits nothing");
+
+  // And the cases that must NOT have moved. `server: true` and an exclude-only
+  // block both leave the include absent, which still means every tool.
+  write(
+    "unfiltered.md",
+    `---
+name: unfiltered
+description: Declares servers without an include.
+mcp:
+  filesystem: true
+  memory:
+    tools:
+      exclude: [create_entities]
+---
+
+Everything but the one.
+`
+  );
+  const u = loadAgents(dir).agents.find((a) => a.name === "unfiltered")!;
+  ck(u.mcp.every((m) => m.includeActive === false), "no include written means none is active");
+  ck(agentAllowsMcp(u, "filesystem", "read_text_file"), "`server: true` still grants every tool");
+  ck(agentAllowsMcp(u, "filesystem", "write_file"), "including the ones that write");
+  ck(agentAllowsMcp(u, "memory", "search_nodes"), "an exclude-only block still grants the rest");
+  ck(!agentAllowsMcp(u, "memory", "create_entities"), "minus what it excludes");
+}
 
 /* ── 3b. include and exclude together ──────────────────────────────────── */
 console.log("\n──── include and exclude together ────");

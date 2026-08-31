@@ -3108,7 +3108,15 @@ function _sbRun() {
     if (a.allMcp) parts.push("all MCP servers");
     else if (a.mcp && a.mcp.length) {
       parts.push("MCP: " + a.mcp.map(function (m) {
-        return m.include && m.include.length ? m.server + " (" + m.include.length + ")" : m.server;
+        // Three states. A count is "these tools"; a bare name is "all of them";
+        // "(none)" is an include list written and left empty, which withholds
+        // every tool on the server. Reading include.length alone drew that last
+        // case as unrestricted, which is the label agreeing with a bug rather
+        // than with the user's file.
+        if (!m.includeActive) return m.server;
+        return m.include && m.include.length
+          ? m.server + " (" + m.include.length + ")"
+          : m.server + " (none)";
       }).join(", "));
     } else parts.push("no MCP");
     if (a.skills && a.skills.length) parts.push(a.skills.length + " skills");

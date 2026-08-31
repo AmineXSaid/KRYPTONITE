@@ -104,12 +104,25 @@ interface ChatExportSession {
  * persona and different tool lists are different agents - so it belongs in the
  * row rather than one level down.
  */
+/**
+ * One server's entry in the scope line.
+ *
+ * Three states, not two. A count means "these tools"; a bare server name means
+ * "all of them"; and `(none)` means an include list was written and left empty,
+ * which withholds every tool. Reading `include.length` alone drew that last
+ * case as unrestricted - the label agreeing with the bug rather than the user.
+ */
+function mcpScopeLabel(m: { server: string; include: string[]; includeActive: boolean }): string {
+  if (!m.includeActive) return m.server;
+  return m.include.length ? `${m.server} (${m.include.length})` : `${m.server} (none)`;
+}
+
 export function agentScopeLine(a: Agent): string {
   const tools = a.tools.length ? `${a.tools.length} built-in tool(s)` : "all built-in tools";
   const mcp = a.allMcp
     ? "all MCP servers"
     : a.mcp.length
-      ? `MCP: ${a.mcp.map((m) => (m.include.length ? `${m.server} (${m.include.length})` : m.server)).join(", ")}`
+      ? `MCP: ${a.mcp.map(mcpScopeLabel).join(", ")}`
       : "no MCP";
   const extras = [a.model ? a.model : "", a.memory ? "memory" : ""].filter(Boolean);
   return [tools, mcp, ...extras].join(" · ");
@@ -1619,7 +1632,12 @@ export class App {
       tools: a.tools,
       skills: a.skills,
       allMcp: a.allMcp,
-      mcp: a.mcp.map((m) => ({ server: m.server, include: m.include, exclude: m.exclude })),
+      mcp: a.mcp.map((m) => ({
+        server: m.server,
+        include: m.include,
+        includeActive: m.includeActive,
+        exclude: m.exclude,
+      })),
       file: this.root ? path.relative(this.root, a.file).split(path.sep).join("/") : a.file,
       active: a.name === this.activeAgentName,
     };

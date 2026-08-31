@@ -185,10 +185,17 @@ export type Phase = (typeof PHASES)[number];
  * promise held only as long as the model chose to honour it.
  *
  * MCP tools are refused outside Act unless the user vouched for their server.
- * The protocol has no way for a server to declare a tool read-only, so there is
- * nothing this code can check - but the person who wrote `.agent/mcp.json` can
- * check, and `readOnly: true` is them saying they did. That claim is the only
- * thing that opens Ask and Plan to an MCP tool.
+ *
+ * This used to say the protocol has no way for a server to declare a tool
+ * read-only, which is simply not true: MCP tools carry an
+ * `annotations.readOnlyHint`, and it is captured at discovery. What is true is
+ * that the hint is the server's own word about itself, and a server that means
+ * harm can set it. So it cannot be the thing that opens Ask and Plan - it would
+ * let any server talk its way into the two modes whose whole promise is that
+ * nothing changes. `readOnly: true` in `.agent/mcp.json` is a different claim
+ * with a different author: the person running the workspace, who can look. That
+ * claim is the only one that opens Ask and Plan to an MCP tool, and the hint is
+ * used only to warn when the two disagree.
  *
  * `mcpReadOnly` is optional, and its absence means "no server is vouched for".
  * A caller that does not pass it gets the old blanket refusal, which is the
@@ -664,11 +671,13 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
   // the narrower ASK_ONLY; plan additionally gets update_todos.
   //
   // MCP tools are withheld in both UNLESS the user marked their server
-  // `readOnly: true` in .agent/mcp.json. MCP has no way to declare a tool
-  // read-only, so this code cannot check - but the person who configured the
-  // server can, and that claim is the only thing that opens Ask and Plan. An
-  // unmarked server stays withheld: a plan (or an answer) that quietly filed a
-  // GitHub issue would break the one promise each mode makes.
+  // `readOnly: true` in .agent/mcp.json. A tool's own `readOnlyHint` annotation
+  // is read at discovery but deliberately does not open anything - it is the
+  // server vouching for itself, and these two modes exist precisely so that a
+  // server's word is not what decides. The person who configured it can look;
+  // that claim is the only thing that opens Ask and Plan. An unmarked server
+  // stays withheld: a plan (or an answer) that quietly filed a GitHub issue
+  // would break the one promise each mode makes.
   // generate_image is offered only when the active profile declares an image
   // model. Advertising a tool that can only ever answer "not configured" costs
   // tokens on every request and invites the model to reach for it.
