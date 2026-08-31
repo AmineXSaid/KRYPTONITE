@@ -28,6 +28,7 @@ import {
 import { McpRegistry, mcpConfigPath } from "../mcp/registry";
 import { ShadowRepo } from "../checkpoint/shadow";
 import { ProposedContent } from "../ui/quickEdit";
+import { redactSecretsUnder, type SecretHit } from "./secretScan";
 import { DiagnosticsService, rungLabel } from "../diagnostics/service";
 import { SessionStore } from "./sessions";
 import { loadInstructions, ProjectInstructions, INSTRUCTIONS_CAP } from "./instructions";
@@ -2625,10 +2626,21 @@ export class App {
    * folder to an air-gapped box and found no agents, no MCP servers, no
    * standing instructions and no note explaining what to do with any of it.
    *
-   * What it deliberately does NOT carry is a credential. Endpoint YAML holds
-   * `${secret:…}` references rather than keys, which is what makes a profile
-   * safe to hand over - and the README says so, because a receiving user who
-   * does not know that reads a working profile and a failing connection.
+   * WHETHER IT CARRIES A CREDENTIAL IS CHECKED, NOT ASSUMED.
+   *
+   * It used to copy `.agent/` verbatim and then write a README beside it
+   * saying "no credential is in it". That was a claim about a CONVENTION -
+   * profiles are supposed to reference secrets as `${secret:…}` - stated as a
+   * fact about the bytes, and nothing enforced the convention: `loadProfile`
+   * accepts a literal key in `auth.value` and it works, which is exactly what
+   * someone does while getting a gateway to answer for the first time.
+   * `.agent/mcp.json` is worse, because the documented way to give an MCP
+   * server its credentials is an `env` block with the token written into it.
+   *
+   * So the copy is scanned. Anything that looks like a credential is REDACTED
+   * IN THE BUNDLE - the file still ships, with the value replaced, so the
+   * shape of the config survives for the person receiving it - and the README
+   * lists every redaction by file and line. What it says is what was found.
    */
   async exportBundle(): Promise<void> {
     const root = this.requireRoot();
@@ -2656,6 +2668,12 @@ export class App {
     copyIfPresent(".agent/transforms");
     copyIfPresent(instructions);
 
+    // Now look at what was actually copied, and redact in place.
+    const redactions = redactSecretsUnder(agentOut, out);
+    for (const r of redactions) {
+      this.log("warn", `Bundle: redacted ${r.what} in ${r.file} line ${r.line}.`);
+    }
+
     // The extension itself, when a .vsix has been built beside the workspace.
     // A bundle for an air-gapped machine that assumes the Marketplace is
     // reachable is a bundle for a machine that is not air-gapped.
@@ -2681,21 +2699,75 @@ export class App {
       mcpServers: this.mcp.statuses().map((m) => m.name),
       carried,
       vsix,
+      // In the manifest as well as the README, so a script checking a bundle
+      // before it is sent anywhere has something to read.
+      redactions: redactions.map((r) => ({ file: r.file, line: r.line, what: r.what })),
     };
     fs.writeFileSync(path.join(out, "manifest.json"), JSON.stringify(manifest, null, 2), "utf8");
-    fs.writeFileSync(path.join(out, "README.md"), this.bundleReadme(version, carried, vsix), "utf8");
+    fs.writeFileSync(
+      path.join(out, "README.md"),
+      this.bundleReadme(version, carried, vsix, redactions),
+      "utf8"
+    );
 
-    this.broadcast({ type: "bundleExported", path: out });
-    this.log("info", `Exported offline bundle to ${out}.`);
+    this.broadcast({ type: "bundleExported", path: out, redactions: redactions.length });
+    this.log(
+      "info",
+      `Exported offline bundle to ${out}.` +
+        (redactions.length ? ` ${redactions.length} credential(s) were redacted.` : "")
+    );
+    if (redactions.length) {
+      this.broadcast({
+        type: "error",
+        message:
+          `${redactions.length} credential(s) were found in this workspace's configuration ` +
+          `and redacted from the bundle.`,
+        fix:
+          "The bundle is safe to send - the values were replaced. But they are still in your " +
+          "own .agent/ files in plain text. Move each one into SecretStorage and reference it " +
+          "as ${secret:NAME}. The bundle's README lists every file and line.",
+        action: "endpoints",
+      });
+    }
   }
 
-  /** What to do with the folder, for the person who receives it. */
-  private bundleReadme(version: string, carried: string[], vsix: string | null): string {
+  /**
+   * What to do with the folder, for the person who receives it.
+   *
+   * The opening line reports what the scan found rather than asserting the
+   * convention. "No credential is in it" was written as a fact and was only
+   * ever a hope: nothing stopped a key being typed straight into the YAML, and
+   * this sentence sat next to it saying otherwise.
+   */
+  private bundleReadme(
+    version: string,
+    carried: string[],
+    vsix: string | null,
+    redactions: SecretHit[]
+  ): string {
     return [
       `# Genesis offline bundle`,
       "",
-      `Genesis ${version}. Everything below is configuration this workspace was using;`,
-      "no credential is in it.",
+      `Genesis ${version}. Everything below is configuration this workspace was using.`,
+      "",
+      ...(redactions.length
+        ? [
+            `**${redactions.length} credential${redactions.length === 1 ? " was" : "s were"} found ` +
+              `in that configuration and replaced with \`REDACTED\` in this copy.**`,
+            "",
+            "The bundle is safe to send. The original files on the machine that made it still",
+            "contain the real values in plain text, and should be moved into SecretStorage.",
+            "",
+            ...redactions.map((r) => `- \`${r.file}\` line ${r.line}: ${r.what}`),
+            "",
+            "Each redacted line needs a real value on the machine this is installed on. Use a",
+            "`${secret:NAME}` reference and enter the value under Diagnostics › Endpoints,",
+            "or `${env:NAME}` if your environment already provides it.",
+          ]
+        : [
+            "Every file in it was scanned for credentials and none was found. Endpoint profiles",
+            "here reference their credential as `${secret:…}` rather than carrying it.",
+          ]),
       "",
       "## Install",
       "",
@@ -2714,12 +2786,14 @@ export class App {
       "",
       "## What is deliberately NOT here",
       "",
-      "**API keys.** Endpoint profiles reference their credential as `${secret:…}`, which",
-      "resolves out of VS Code's SecretStorage on the machine that holds it. That is what",
-      "makes a profile safe to hand to someone else - and it means the connection will fail",
-      "on this machine until the key is entered: open the Genesis panel, go to Diagnostics ›",
-      "Endpoints, edit the profile, and paste the key. It is stored in SecretStorage, never",
-      "in the YAML.",
+      "**API keys.** A profile references its credential as `${secret:…}`, which resolves out",
+      "of VS Code's SecretStorage on the machine that holds it - so a key is never in the YAML",
+      "and never in this folder. It also means the connection will fail on this machine until",
+      "the key is entered: open the Genesis panel, go to Diagnostics › Endpoints, edit the",
+      "profile, and paste it in.",
+      "",
+      "Anything that was written into the config directly rather than referenced this way has",
+      "been redacted, and is listed at the top of this file.",
       "",
       "`genesis.caBundlePath` is not here either. It is an absolute path on the machine that",
       "made this bundle; set your own under Settings › Genesis if your gateway needs one.",

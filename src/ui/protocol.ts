@@ -834,7 +834,17 @@ export interface CheckpointsListedOut {
   checkpoints: CheckpointDto[];
 }
 export interface CheckpointRestoredOut { type: "checkpointRestored"; hash: string }
-export interface BundleExportedOut { type: "bundleExported"; path: string }
+export interface BundleExportedOut {
+  type: "bundleExported";
+  path: string;
+  /**
+   * How many credentials the export found in the workspace's own config and
+   * replaced in the copy. Zero is the ordinary case and the panel says nothing
+   * about it; anything else is worth a line, because the values are still in
+   * plain text in the files the bundle was made FROM.
+   */
+  redactions: number;
+}
 /** Confirmation that `exportChat` wrote a file, and what went into it. */
 export interface ChatExportedOut {
   type: "chatExported";
