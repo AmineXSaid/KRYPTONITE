@@ -30,7 +30,7 @@ import * as http from "node:http";
 import * as os from "node:os";
 import * as path from "node:path";
 import { App } from "../src/core/app";
-import { reset, makeContext } from "./vscode-stub";
+import { reset, makeContext, __cfg } from "./vscode-stub";
 
 let pass = 0;
 let fail = 0;
@@ -263,6 +263,98 @@ const seen: Seen[] = [];
   await app.session.send("and again");
   const settled = seen.slice(at).filter((s) => s.kind === "turn")[1];
   ck(settled.cacheRead > 0, "and reads from then on", `read ${settled.cacheRead}`);
+
+  /* ── 5. compaction never picks an endpoint for the user ──────────────── */
+  //
+  // The summariser used to be chosen automatically: the first profile that was
+  // `kind: chat`, was not the active one and cleared the window floor. Turning
+  // micro-compaction on therefore sent parts of the conversation - file
+  // contents and command output the agent had read - to an endpoint the user
+  // had configured for something else. This asserts on the thing that matters,
+  // which is not a return value but whether a request arrives: a second
+  // gateway is stood up, and the question is whether anything ever reaches it.
+  console.log("\n──── the summariser is named, never guessed ────");
+  {
+    let auxRequests = 0;
+    const auxServer = http.createServer((req, res) => {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        auxRequests++;
+        res.writeHead(200, { "content-type": "application/json" }).end(
+          JSON.stringify({
+            content: [{ type: "text", text: "condensed" }],
+            stop_reason: "end_turn",
+            usage: { input_tokens: 10, output_tokens: 5 },
+          })
+        );
+      });
+    });
+    await new Promise<void>((r) => auxServer.listen(0, "127.0.0.1", r));
+    const auxPort = (auxServer.address() as any).port;
+    fs.writeFileSync(
+      path.join(root, ".agent", "endpoints", "cheap.yaml"),
+      `name: cheap\nwire: anthropic\nbaseUrl: http://127.0.0.1:${auxPort}\nmodel: cheap-model\n` +
+        `kind: chat\nauth:\n  kind: bearer\n  value: t\n` +
+        `capabilities:\n  streaming: false\n  contextWindow: 200000\n`,
+      "utf8"
+    );
+    __cfg.set("microCompact", true);
+    __cfg.set("microCompactProfile", "");
+    // Pinned, because it has to be. `activeProfile()` falls back to
+    // `profiles[0]` when the setting is unset, and profiles arrive in directory
+    // order - so simply ADDING a profile that sorts before the current one
+    // moves the active endpoint. That is worth knowing in its own right; here
+    // it would quietly send the conversation to the second gateway and make
+    // this case look like a compaction leak when it is nothing of the kind.
+    __cfg.set("activeProfile", "gw");
+    await app.reload("a second profile appeared");
+    ck(app.activeProfile()?.name === "gw", "the turn still goes to the main endpoint",
+      app.activeProfile()?.name);
+
+    // A qualifying profile now exists and compaction is ON. Under the old rule
+    // this is exactly the shape that would have started using it unasked.
+    ck(
+      app.profiles.some((p) => p.name === "cheap"),
+      "a second, cheaper profile is configured and would qualify",
+      app.profiles.map((p) => p.name).join(", ")
+    );
+    ck(app.auxSummariser() === undefined, "but with nothing named there is no summariser");
+    const c = app.newCompactor();
+    ck(!c.feasible().ok, "so compaction is not feasible", c.feasible().why);
+    ck(/named/.test(c.feasible().why), "and the reason says it has to be named", c.feasible().why);
+
+    app.session.newChat();
+    await app.session.send("say something long enough to matter");
+    await app.session.send("and again");
+    ck(auxRequests === 0, "and nothing whatsoever reaches the second endpoint", String(auxRequests));
+
+    // Named, and it is used - so the guard is a gate rather than a wall.
+    __cfg.set("microCompactProfile", "cheap");
+    const named = app.auxSummariser();
+    ck(!!named && named.name === "cheap", "naming it produces a summariser", named?.name);
+    ck(app.newCompactor().feasible().ok, "and compaction becomes feasible");
+
+    // A name that does not resolve, or resolves to something too small, is
+    // refused rather than silently falling back to the old automatic pick.
+    __cfg.set("microCompactProfile", "no-such-profile");
+    ck(app.auxSummariser() === undefined, "an unknown name gets no summariser, not a fallback");
+    __cfg.set("microCompactProfile", "gw");
+    fs.writeFileSync(
+      path.join(root, ".agent", "endpoints", "small.yaml"),
+      `name: small\nwire: anthropic\nbaseUrl: http://127.0.0.1:${auxPort}\nmodel: m\n` +
+        `kind: chat\nauth:\n  kind: bearer\n  value: t\n` +
+        `capabilities:\n  streaming: false\n  contextWindow: 8000\n`,
+      "utf8"
+    );
+    await app.reload("an undersized profile appeared");
+    __cfg.set("microCompactProfile", "small");
+    ck(app.auxSummariser() === undefined, "and so does one whose window is too small");
+
+    __cfg.set("microCompact", false);
+    __cfg.set("microCompactProfile", "");
+    auxServer.close();
+  }
 
   /* ── the bill ─────────────────────────────────────────────────────────── */
   const t = turns();

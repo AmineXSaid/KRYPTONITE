@@ -354,7 +354,10 @@ export class MicroCompactor {
   feasible(): { ok: boolean; why: string } {
     if (!this.cfg.micro_compact) return { ok: false, why: "micro-compaction is off" };
     if (!this.aux) {
-      return { ok: false, why: "no auxiliary model is configured to summarise with" };
+      // "named" rather than "configured": the caller is expected to have been
+      // told which endpoint to use, not to have one inferred for it. The site
+      // that supplies the summariser adds the setting to reach for.
+      return { ok: false, why: "no auxiliary model is named to summarise with" };
     }
     if (this.aux.contextWindow < AUX_WINDOW_FLOOR) {
       return {

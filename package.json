@@ -191,7 +191,12 @@
         "genesis.microCompact": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Condense old exchanges into a short summary instead of dropping them when the context window fills.\n\nWithout this, a long run silently loses its own beginning: the oldest turns are shifted off and replaced by a note telling the model to ask if it needs them, which it cannot - they are gone. With it, an exchange is summarised by a second, cheaper model and the summary stays in the conversation.\n\n**Off by default, and that is a real trade rather than caution**. Absorbing an exchange rewrites the middle of the prompt, and the middle of the prompt is inside the cached prefix - so this buys window headroom by giving up prompt-cache hits. Worth it when the alternative is losing the turns; not worth it on a conversation that was never going to fill the window.\n\nNeeds a second endpoint profile marked `kind: chat` with a context window of at least 65,536 tokens. Without one it stays off and says so in the log; nothing fails."
+          "markdownDescription": "Condense old exchanges into a short summary instead of dropping them when the context window fills.\n\nWithout this, a long run silently loses its own beginning: the oldest turns are shifted off and replaced by a note telling the model to ask if it needs them, which it cannot - they are gone. With it, an exchange is summarised by a second, cheaper model and the summary stays in the conversation.\n\n**Off by default, and that is a real trade rather than caution**. Absorbing an exchange rewrites the middle of the prompt, and the middle of the prompt is inside the cached prefix - so this buys window headroom by giving up prompt-cache hits. Worth it when the alternative is losing the turns; not worth it on a conversation that was never going to fill the window.\n\nName the summariser with `#genesis.microCompactProfile#`; it is never chosen for you, and it needs a context window of at least 64,000 tokens. Without one this stays off and says so in the log; nothing fails."
+        },
+        "genesis.microCompactProfile": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Which endpoint profile condenses old exchanges when `#genesis.microCompact#` is on. Name it by its `name:` field.\n\n**Micro-compaction does not run until this is set**, and there is deliberately no automatic choice. Condensing means sending part of the conversation - including file contents and command output the agent read - to a second endpoint, and which endpoint that is should be a decision rather than a guess. Picking one automatically would quietly route a local-only workspace's code to whatever cloud profile happened to be configured beside it.\n\nThe profile needs a context window of at least 64,000 tokens; a smaller one is refused and the log says so. A cheap `kind: chat` model is the right choice: condensing is the least demanding thing a model can be asked to do, and pointing it at a reasoning profile spends a thinking budget on paraphrase."
         },
         "genesis.microCompactEveryNTurns": {
           "type": "number",
@@ -336,7 +341,7 @@
     "verify": "npm run typecheck && npm test",
     "vscode:prepublish": "npm run build",
     "package": "vsce package --no-dependencies && node test/vsix.cjs && node test/render.cjs && node test/mentions.cjs && npm run test:artifact",
-    "test:artifact": "esbuild test/activate-vsix.ts test/webview-render.ts --bundle --outdir=dist --out-extension:.js=.cjs --format=cjs --platform=node --target=node20 --external:playwright-core --alias:vscode=./test/vscode-stub.ts && node dist/activate-vsix.cjs && node dist/webview-render.cjs",
+    "test:artifact": "esbuild test/activate-vsix.ts --bundle --outdir=dist --out-extension:.js=.cjs --format=cjs --platform=node --target=node20 --alias:vscode=./test/vscode-stub.ts && node dist/activate-vsix.cjs",
     "test:vsix": "node test/vsix.cjs",
     "test:render": "node test/render.cjs"
   },

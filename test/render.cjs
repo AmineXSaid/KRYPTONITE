@@ -143,6 +143,28 @@ const HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 const HTML_PATH = path.join(MEDIA, "__render.html");
 fs.writeFileSync(HTML_PATH, HTML);
 
+// The same panel in a LIGHT workbench, which is a different document and was
+// never rendered anywhere.
+//
+// `body` paints no ground on purpose, so a docked view takes the colour of the
+// container beside it - and in a light workbench that container is light, which
+// would put the panel's near-white foregrounds onto near-white. sidebar.css:51
+// is the answer: `body.vscode-light` makes the sheet paint --kx-bg itself. That
+// rule is load-bearing and nothing exercised it, so a change that dropped it
+// would ship an unreadable panel to every user on a light theme and no suite
+// here would have noticed.
+//
+// So this document does what the editor does: stamps the class, and leaves the
+// container light instead of supplying GROUND.
+const LIGHT_HTML = HTML
+  .replace(`html { background: ${GROUND}; color-scheme: dark; }`,
+           "html { background: #ffffff; color-scheme: light; }")
+  .replace(`:root { --vscode-sideBar-background: ${GROUND}; }`,
+           ":root { --vscode-sideBar-background: #ffffff; }")
+  .replace("<body>", '<body class="vscode-light">');
+const LIGHT_PATH = path.join(MEDIA, "__render-light.html");
+fs.writeFileSync(LIGHT_PATH, LIGHT_HTML);
+
 // The other surface. Same shell, different stylesheet and script - mirrors
 // shell() in src/ui/shell.ts, which builds both from one template.
 const CC_HTML = HTML
@@ -198,7 +220,7 @@ function contrast(a, b) {
     const ctx = await browser.newContext({
       viewport: { width, height: 640 },
       deviceScaleFactor: 2, // 200%, the reference the owner gave
-      colorScheme: "dark",
+      colorScheme: opts.light ? "light" : "dark",
       // Only the menu-entrance suite passes this. Every other caller runs at
       // the default, so the panel is measured the way it is normally seen.
       ...(opts.reducedMotion ? { reducedMotion: "reduce" } : {}),
@@ -207,7 +229,7 @@ function contrast(a, b) {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
-    await page.goto("file://" + HTML_PATH);
+    await page.goto("file://" + (opts.light ? LIGHT_PATH : HTML_PATH));
     await page.evaluate(
       (s) => window.dispatchEvent(new MessageEvent("message", { data: { type: "stateSync", state: s } })),
       { ...BASE, ...state }
@@ -260,6 +282,43 @@ function contrast(a, b) {
     const flat = tabs.join(" ").toUpperCase();
     for (const t of ["SESSION", "MCP", "AGENTS", "DIAGNOSTICS"]) {
       ok(`the ${t} tab is present`, flat.includes(t), flat.trim());
+    }
+    await ctx.close();
+  }
+
+  /* ── 1b. and it is readable in a LIGHT workbench ───────────────────── */
+  //
+  // The panel is drawn in near-white foregrounds and paints no ground of its
+  // own, because a docked view is supposed to take the colour of the container
+  // beside it. In a dark workbench that is what makes it look native. In a
+  // light one it would be white on white, and the single rule that prevents
+  // that - `body.vscode-light { background: var(--kx-bg) }` - had no test.
+  // Deleting it breaks nothing anywhere else in this suite.
+  {
+    const { ctx, page, errors } = await open(400, {}, { light: true });
+    ok("the panel boots in a light workbench too", errors.length === 0, errors.slice(0, 2).join(" | "));
+
+    // The ground it actually paints, which is the whole rule.
+    const bodyBg = rgb(await page.locator("body").evaluate((e) => getComputedStyle(e).backgroundColor));
+    ok("body paints its own ground rather than staying transparent",
+      !!bodyBg && bodyBg.a > 0, JSON.stringify(bodyBg));
+
+    // And it is dark, not the light container. A rule that painted the
+    // container's own colour would satisfy the check above and still be
+    // white on white.
+    const painted = bodyBg ? over(bodyBg, { r: 255, g: 255, b: 255, a: 1 }) : null;
+    ok("and that ground is dark, not the light container showing through",
+      !!painted && lum(painted) < 0.2,
+      painted ? `luminance ${lum(painted).toFixed(3)}` : "none");
+
+    // Then the thing a user would actually report: can you read it.
+    for (const [label, sel] of [["the wordmark", ".kx-wordmark"], ["a tab", ".kx-tab"]]) {
+      const el = page.locator(sel).first();
+      if (!(await el.count())) { ok(`${label} renders in light`, false); continue; }
+      const fg = rgb(await el.evaluate((e) => getComputedStyle(e).color));
+      const ratio = fg && painted ? contrast(over(fg, painted), painted) : 0;
+      ok(`${label} clears 4.5:1 against the panel's own ground`, ratio >= 4.5,
+        `${ratio.toFixed(2)}:1`);
     }
     await ctx.close();
   }

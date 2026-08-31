@@ -1007,11 +1007,23 @@ export class App {
    * loop keeps trimming as it always did.
    */
   auxSummariser(): Summariser | undefined {
-    const active = this.activeProfile();
-    const aux = this.profiles.find(
-      (p) => p.name !== active?.name && p.kind === "chat" && p.capabilities.contextWindow >= AUX_WINDOW_FLOOR
-    );
-    if (!aux) return undefined;
+    // Named by the user, never chosen for them. This used to pick the first
+    // profile that was `kind: chat`, was not the active one and cleared the
+    // window floor - which meant switching micro-compaction on quietly sent
+    // conversation content, including file contents and command output the
+    // agent had read, to an endpoint the user configured for something else
+    // entirely. With one user and a line in the log that is survivable. With a
+    // hundred it is a privacy incident waiting for the first person who has a
+    // cloud profile sitting beside a local one.
+    //
+    // So there is no fallback. An unset, unknown or undersized profile means no
+    // summariser, `feasible()` says which and why, and the loop trims with
+    // `fitToWindow` exactly as it did before. The feature not running is a much
+    // smaller cost than the feature running somewhere unexpected.
+    const named = this.cfg().get<string>("microCompactProfile", "").trim();
+    if (!named) return undefined;
+    const aux = this.profiles.find((p) => p.name === named);
+    if (!aux || aux.capabilities.contextWindow < AUX_WINDOW_FLOOR) return undefined;
     return {
       name: aux.name,
       contextWindow: aux.capabilities.contextWindow,
@@ -1043,7 +1055,19 @@ export class App {
     if (!this.compactionReported) {
       this.compactionReported = true;
       const f = c.feasible();
-      this.log("info", `Micro-compaction: ${f.ok ? "on" : "not running"} - ${f.why}.`);
+      // Both directions are worth a line, and the "on" one says what leaves the
+      // machine. Someone switching this on is agreeing to send parts of their
+      // conversation - file contents and command output included - to a second
+      // endpoint, and that should be stated once where they can see it rather
+      // than inferred from a setting called "micro compact".
+      const hint =
+        !f.ok && this.cfg().get<boolean>("microCompact", false) === true && !this.auxSummariser()
+          ? " Name one with genesis.microCompactProfile."
+          : "";
+      const sends = f.ok
+        ? " Parts of this conversation, including file contents the agent read, will be sent there to be condensed."
+        : "";
+      this.log("info", `Micro-compaction: ${f.ok ? "on" : "not running"} - ${f.why}.${hint}${sends}`);
     }
     return c;
   }

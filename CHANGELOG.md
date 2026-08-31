@@ -81,7 +81,8 @@ agents on upgrade.
   (`genesis.microCompact`), because absorbing an exchange rewrites the middle of
   the prompt and the middle of the prompt is inside the cached prefix: it buys
   window headroom by giving up cache hits, which is worth it only when the
-  alternative is losing the turns. Needs a second `kind: chat` profile with a
+  alternative is losing the turns. The summariser is named with
+  `genesis.microCompactProfile` and is never chosen for you — it needs a
   64,000-token window; without one it says so once in the log and the old
   trimming carries on unchanged.
 
@@ -151,6 +152,20 @@ agents on upgrade.
   that never arrives, or a script that throws only in V8. Nothing overflows at
   320px, both bundled faces load, and every measured label holds 4.5:1 as
   composited — 6.34:1 at worst.
+
+- **Micro-compaction will not choose an endpoint for you.** It used to pick the
+  summariser automatically — the first profile that was `kind: chat`, was not the
+  active one, and had a large enough window. Switching the feature on therefore
+  sent parts of the conversation, including file contents and command output the
+  agent had read, to an endpoint configured for something else entirely. That is
+  survivable for one person watching a log line and is not survivable across a
+  team, where it only takes one workspace with a cloud profile sitting beside a
+  local one.
+
+  `genesis.microCompactProfile` now names the summariser and there is no
+  fallback: unset, unknown, or too small a window all mean compaction does not
+  run, the log says which, and the loop trims as it always did. The line that
+  reports it being on now also says what will be sent there.
 
 - **The prompt-cache counters are reported.** The client decoded
   `cache_read_input_tokens` and `cache_creation_input_tokens` and then dropped

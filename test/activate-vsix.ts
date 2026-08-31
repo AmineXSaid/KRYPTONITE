@@ -42,10 +42,13 @@ const MAIN = String(pkg.main).replace(/^\.\//, "");
 
 (async () => {
   console.log("──── the shipped bundle, activated ────");
+  // SKIPs rather than fails, matching test/vsix.cjs and test/render.cjs: this
+  // runs inside `npm run package`, where the archive always exists, and a
+  // developer who ran it on its own should be told what to do rather than
+  // handed a red suite. A gate that fails for the wrong reason gets ignored.
   if (!fs.existsSync(VSIX)) {
-    ck(false, "the packaged vsix exists", `run npm run package first (${path.basename(VSIX)})`);
-    console.log(`\n──── ${pass} passed, ${fail} failed ────`);
-    process.exit(1);
+    console.log(`SKIP  ${path.basename(VSIX)} not built. Run: npm run package`);
+    process.exit(0);
   }
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "kx-act-"));
