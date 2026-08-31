@@ -133,6 +133,25 @@ agents on upgrade.
   behaviour stays — an agent that cannot read a file is a slip, not an intent —
   and the load now says what it means.
 
+- **The packaged artifact is activated and painted before it ships.**
+  `npm run package` unpacked the vsix and confirmed the entry point exported
+  `activate` — with `vscode` bound to an empty object, so calling it would have
+  thrown on the first API it touched. The one thing every user does first was
+  never done to the file they install. It is now called, on a cold workspace,
+  and checked for what it leaves behind: all twenty commands the manifest
+  declares are registered at runtime, the editor providers are registered,
+  disposables reach the context, nothing is surfaced as an error, and it shuts
+  down without throwing.
+
+  The panel is rendered too, in real Chromium rather than jsdom, from the same
+  html the extension serves with the same Content-Security-Policy — in both a
+  dark and a light workbench, since `body` is transparent on purpose and only a
+  light one makes the sheet paint its own ground. jsdom computes no boxes, so
+  it cannot see a stylesheet the engine rejects, a grid that collapses, a font
+  that never arrives, or a script that throws only in V8. Nothing overflows at
+  320px, both bundled faces load, and every measured label holds 4.5:1 as
+  composited — 6.34:1 at worst.
+
 - **The prompt-cache counters are reported.** The client decoded
   `cache_read_input_tokens` and `cache_creation_input_tokens` and then dropped
   them, so for a build whose headline is that prompt caching now works there was

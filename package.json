@@ -335,7 +335,8 @@
     "test:mcp": "npm install --no-save @modelcontextprotocol/server-filesystem @modelcontextprotocol/server-memory && esbuild test/mcp-e2e.ts --bundle --outdir=dist --out-extension:.js=.cjs --format=cjs --platform=node --target=node20 && node dist/mcp-e2e.cjs",
     "verify": "npm run typecheck && npm test",
     "vscode:prepublish": "npm run build",
-    "package": "vsce package --no-dependencies && node test/vsix.cjs && node test/render.cjs && node test/mentions.cjs",
+    "package": "vsce package --no-dependencies && node test/vsix.cjs && node test/render.cjs && node test/mentions.cjs && npm run test:artifact",
+    "test:artifact": "esbuild test/activate-vsix.ts test/webview-render.ts --bundle --outdir=dist --out-extension:.js=.cjs --format=cjs --platform=node --target=node20 --external:playwright-core --alias:vscode=./test/vscode-stub.ts && node dist/activate-vsix.cjs && node dist/webview-render.cjs",
     "test:vsix": "node test/vsix.cjs",
     "test:render": "node test/render.cjs"
   },
