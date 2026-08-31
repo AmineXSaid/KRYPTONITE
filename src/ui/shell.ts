@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -31,11 +32,24 @@ function csp(webview: vscode.Webview, nonce: string): string {
   ].join("; ");
 }
 
+/**
+ * The nonce is the only script permission the CSP grants, so it has to be
+ * unguessable.
+ *
+ * This drew from `Math.random()`, which is a fast PRNG and not a random source:
+ * its state is recoverable from a handful of outputs. That matters because the
+ * nonce is the whole of `script-src` - there is no `unsafe-inline` to fall back
+ * on and no allowed origin - so a predictable one is the difference between
+ * "an injected `<script>` cannot run" and "an injected `<script>` runs if the
+ * attacker can guess a number". Nothing in this panel is known to be
+ * injectable, and the markdown renderer escapes before it parses; this is the
+ * layer that has to hold when something else does not.
+ *
+ * `crypto.randomBytes` was already used elsewhere in this codebase, so this was
+ * an oversight rather than a constraint.
+ */
 function makeNonce(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let out = "";
-  for (let i = 0; i < 32; i++) out += chars[Math.floor(Math.random() * chars.length)];
-  return out;
+  return crypto.randomBytes(24).toString("base64");
 }
 
 /**

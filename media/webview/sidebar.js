@@ -5537,10 +5537,28 @@ function _sbRun() {
     });
 
     var draft = $("draft");
+    var warmed = false;
     draft.addEventListener("input", function () {
       syncComposer();
       detectQuickPick();
       renderDraftMirror();
+      /* Pay the connection, credential and prompt-cache costs of the next turn
+         while the user is still typing, rather than after they press Enter.
+
+         ON THE FIRST KEYSTROKE, NOT ON FOCUS. Warming builds the endpoint
+         client, and building one runs the profile's transform module and
+         spawns its `exec` credential helper - both of them programs named by
+         files in the open folder. Hanging that off `focus` meant clicking into
+         the text box was enough to run them, before the user had asked for
+         anything at all. Typing a character is a deliberate act; putting the
+         cursor somewhere is not.
+
+         Once per composer, because the host debounces but a message per
+         keystroke is still a message per keystroke. */
+      if (!warmed && draft.value.trim()) {
+        warmed = true;
+        post("warm");
+      }
       // Cheap, synchronous, and the whole reason a draft survives the view
       // being collapsed. See saveUiState.
       saveUiState();
@@ -5551,10 +5569,6 @@ function _sbRun() {
       $("draftMirror").scrollTop = draft.scrollTop;
     });
     draft.addEventListener("keydown", onDraftKey);
-    // Pay the connection, credential, and prompt-cache costs of the next turn
-    // while the user is still typing, instead of after they press Enter. The
-    // host debounces this and ignores it while a turn is running.
-    draft.addEventListener("focus", function () { post("warm"); });
 
     $("qp").addEventListener("click", function (e) {
       var b = e.target.closest("[data-i]");

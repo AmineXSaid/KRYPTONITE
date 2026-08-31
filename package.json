@@ -29,6 +29,16 @@
   "activationEvents": [
     "onStartupFinished"
   ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Genesis executes what is in the open folder. An endpoint profile can name a transform module (arbitrary JavaScript, run before the first request) or an `exec` credential helper (a command, spawned to fetch a token), and .agent/mcp.json names programs to launch. None of that is safe to run from a repository you have not read, so Genesis stays off in Restricted Mode."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "Genesis reads profiles, skills and agents from disk and confines the agent's writes to a real workspace folder, so it needs a filesystem rather than a virtual one."
+    }
+  },
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {

@@ -404,6 +404,75 @@ function readable(ctx: { root: string; readOutsideWorkspace?: boolean }, p: stri
   return real;
 }
 
+/**
+ * How long a single `search` may spend before it gives up and says so.
+ *
+ * Generous, because a legitimate search of a large tree is worth waiting for,
+ * and short enough that nobody concludes the editor has hung.
+ */
+const SEARCH_BUDGET_MS = 10_000;
+
+/**
+ * Is this pattern shaped like one that backtracks exponentially?
+ *
+ * Returns the reason it was refused, or undefined.
+ *
+ * The dangerous shape is a repetition wrapped around another repetition over
+ * an overlapping character set - `(a+)+`, `(\s*\w+)+`, `(\w|\d)*$` - where
+ * the engine has exponentially many ways to divide the same input between the
+ * two. Against a non-matching line of a few hundred characters that is enough
+ * to hang the process for longer than anyone will wait.
+ *
+ * This is a shape check, not a proof: it cannot catch every catastrophic
+ * pattern and it will refuse a handful of harmless ones. That trade is right
+ * here because the cost of a false positive is a rewritten pattern, and the
+ * cost of a false negative is a frozen extension host - which takes every
+ * other extension in the window with it, and takes Stop with it too, because
+ * Stop is a message a frozen host cannot process.
+ */
+export function catastrophicShape(pattern: string): string | undefined {
+  if (typeof pattern !== "string") return undefined;
+  // A quantified group whose body itself contains an unbounded quantifier.
+  // The body match is deliberately non-greedy and bounded so this check
+  // cannot itself be the slow thing.
+  if (/\((?![?]:)?[^()]{0,200}?[*+][^()]{0,200}?\)\s*[*+]/.test(pattern)) {
+    return "it repeats a group that already repeats.";
+  }
+  if (/\((?![?]:)?[^()]{0,200}?[*+][^()]{0,200}?\)\s*\{\d+,\s*\}/.test(pattern)) {
+    return "it repeats a group that already repeats.";
+  }
+  /* `(a|a)*`, `(a|ab)+`: a repeated alternation whose branches can match the
+   * same text, so the engine has more than one way to divide the input.
+   *
+   * Branches that cannot overlap - `(foo|bar)+`, `(?:get|set)\s+\w+` - are
+   * common and perfectly safe, so the test is whether two branches could start
+   * with the same character rather than merely that an alternation is there. */
+  const alt = /\((?:\?:)?([^()]{1,200})\)\s*[*+]/.exec(pattern);
+  if (alt && alt[1].includes("|") && branchesOverlap(alt[1].split("|"))) {
+    return "it repeats an alternation whose branches can match the same text.";
+  }
+  return undefined;
+}
+
+/**
+ * Could two of these alternation branches begin with the same character?
+ *
+ * A class or escape (`\w`, `\d`, `.`, `[a-z]`) is treated as matching
+ * anything, which is the conservative direction: it means `(\w|\d)+` is
+ * flagged, and it is - `\d` is a subset of `\w`, so every digit run has
+ * exponentially many splits.
+ */
+function branchesOverlap(branches: string[]): boolean {
+  const firsts = branches.map((b) => {
+    const t = b.replace(/^\^+/, "");
+    if (!t) return "*";              // an empty branch matches everywhere
+    if (t[0] === "\\" || t[0] === "[" || t[0] === ".") return "*";
+    return t[0];
+  });
+  if (firsts.some((f) => f === "*")) return true;
+  return new Set(firsts).size !== firsts.length;
+}
+
 /** Skip anything that is not plausibly text, so a search never scans a binary. */
 const BINARY_EXT = new Set([
   ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".bmp", ".pdf", ".zip", ".gz",
@@ -986,10 +1055,40 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
           let flags = "g";
           if (args.case_insensitive) flags += "i";
           if (args.multiline) flags += "s";
+          /* A PATTERN THE MODEL WROTE, RUN ON THE EXTENSION HOST THREAD.
+           *
+           * `re.exec` is synchronous and uncancellable, and JavaScript's
+           * engine backtracks: a pattern like `(\s*\w+)+$` against a long line
+           * takes exponential time. Nothing here could stop it, so the host
+           * froze - taking every other extension in the window with it, and
+           * taking Stop with it too, because Stop is a message a frozen host
+           * cannot process.
+           *
+           * Node has no regex timeout, so the shape is rejected before it
+           * runs. This is a guard against the accident, which is what actually
+           * happens: a model reaching for a "words" pattern and writing a
+           * nested quantifier. */
+          const risk = catastrophicShape(args.pattern);
+          if (risk) {
+            return {
+              content:
+                `That pattern is refused: ${risk} Patterns of this shape can take exponential ` +
+                `time on an ordinary file, and the search runs in the editor's own process. ` +
+                `Rewrite it without the nested repetition - "(\\s*\\w+)+" is almost always ` +
+                `meant as "[\\s\\w]+".`,
+              isError: true,
+            };
+          }
           re = new RegExp(args.pattern, flags);
         } catch (e: any) {
           return { content: `Invalid pattern: ${e.message}`, isError: true };
         }
+        /* And a wall-clock budget for everything else. A pattern that is not
+         * catastrophic can still be slow across a large tree, and a search
+         * that returns "I looked at 8,000 files and ran out of time" is worth
+         * far more than one that never returns. */
+        const deadline = Date.now() + SEARCH_BUDGET_MS;
+        let outOfTime = false;
 
         const from = readable(ctx, args.path ?? ".");
         const globRe = args.glob ? globToRe(args.glob) : undefined;
@@ -1005,6 +1104,9 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
         let truncated = false;
 
         const scan = (abs: string, rel: string) => {
+          // Checked per file rather than per match: a single `exec` cannot be
+          // interrupted, so this bounds how many of them are started.
+          if (Date.now() > deadline) { outOfTime = true; return; }
           if (BINARY_EXT.has(path.extname(abs).toLowerCase())) return;
           let buf: Buffer;
           try { buf = fs.readFileSync(abs); } catch { return; }
@@ -1075,33 +1177,39 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
               if (!globRe.test(globBare ? name : rel)) return;
             }
             scan(abs, rel);
+            if (outOfTime) return false;
             return files.length < limit || mode === "content";
           });
         }
 
+        const timeNote = outOfTime
+          ? `\n\n[Stopped after ${Math.round(SEARCH_BUDGET_MS / 1000)}s; not every file was ` +
+            `searched. Narrow the pattern or pass a glob.]`
+          : "";
+
         if (mode === "files_with_matches") {
           const shown = files.slice(0, limit);
           return {
-            content: shown.join("\n") ||
-              "No matches." + (files.length > limit ? `\n\n[${files.length} files; showing ${limit}.]` : ""),
+            content: (shown.join("\n") ||
+              "No matches.") + (files.length > limit ? `\n\n[${files.length} files; showing ${limit}.]` : "") + timeNote,
           };
         }
         if (mode === "count") {
-          if (!counts.length) return { content: "No matches." };
+          if (!counts.length) return { content: "No matches." + timeNote };
           const total = counts.reduce((s, c) => s + c[1], 0);
           return {
             content:
               counts.slice(0, limit).map(([f, c]) => `${c}\t${f}`).join("\n") +
-              `\n\n[${total} matches across ${counts.length} file(s).]`,
+              `\n\n[${total} matches across ${counts.length} file(s).]` + timeNote,
           };
         }
-        if (!lines.length) return { content: "No matches." };
+        if (!lines.length) return { content: "No matches." + timeNote };
         return {
           content:
             lines.join("\n") +
             (truncated || lines.length >= limit
               ? `\n\n[Truncated at ${limit} lines. Narrow the pattern, pass a glob, or raise head_limit.]`
-              : ""),
+              : "") + timeNote,
         };
       }
 
