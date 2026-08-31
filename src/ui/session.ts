@@ -89,6 +89,14 @@ interface LiveTurn {
   replay: ReplayableEvent[];
   /** Captured so a background turn can be saved under its own name. */
   title: string;
+  /**
+   * Has this turn already reported its prompt-cache figures?
+   *
+   * Usage arrives once per model call, and a turn is many calls. One line per
+   * turn is a fact worth having in the log; one per step is a wall of numbers
+   * that stops being read, which is the same as not logging it.
+   */
+  cacheLogged?: boolean;
 }
 
 const PATCH_LIMIT = 30_000;
@@ -940,6 +948,27 @@ export class SessionController {
             this.app.lastContext = { used, limit, exact };
             const out: ReplayableEvent = { type: "contextUsage", used, limit, exact };
             this.emit(turn, out);
+            // The prompt-cache counters, said once per turn and only when the
+            // gateway reports them. They are the only honest confirmation that
+            // caching is working - a read of zero, turn after turn in one
+            // conversation, means something in the prefix is moving - and until
+            // now they were decoded and discarded, so nobody could tell. A
+            // regression of that is silent and expensive, which is the worst
+            // pair of properties a bug can have.
+            const cr = ev.context!.cacheRead;
+            const cw = ev.context!.cacheWrite;
+            if ((cr ?? 0) > 0 || (cw ?? 0) > 0) {
+              if (turn.id === this.sessionId && !turn.cacheLogged) {
+                turn.cacheLogged = true;
+                this.app.log(
+                  "info",
+                  `Prompt cache: ${cr ?? 0} token(s) read, ${cw ?? 0} written` +
+                    ((cr ?? 0) === 0
+                      ? " - nothing was reused, so the stable head of the prompt changed since the last turn."
+                      : ".")
+                );
+              }
+            }
             break;
           }
           case "error": {

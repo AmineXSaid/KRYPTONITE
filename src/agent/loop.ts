@@ -129,8 +129,16 @@ export interface AgentEvent {
    */
   errorFix?: string;
   errorDetail?: string;
-  /** `exact` is true only when the endpoint reported real token usage. */
-  context?: { used: number; limit: number; exact: boolean };
+  /**
+   * `exact` is true only when the endpoint reported real token usage.
+   *
+   * `cacheRead` and `cacheWrite` are the prompt-cache counters, present only
+   * when the gateway reports them. They were decoded by the client and then
+   * dropped on the floor, which for a build whose headline is that prompt
+   * caching now works is the one number nobody could see - and the reason a
+   * regression of it could run for months unnoticed.
+   */
+  context?: { used: number; limit: number; exact: boolean; cacheRead?: number; cacheWrite?: number };
 }
 
 const SYSTEM = `You are a coding agent working inside a VS Code workspace.
@@ -904,7 +912,13 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
             reported = total;
             yield {
               type: "context",
-              context: { used: total, limit: caps.contextWindow, exact: true },
+              context: {
+                used: total,
+                limit: caps.contextWindow,
+                exact: true,
+                cacheRead: ev.usage.cacheRead,
+                cacheWrite: ev.usage.cacheWrite,
+              },
             };
           }
         }

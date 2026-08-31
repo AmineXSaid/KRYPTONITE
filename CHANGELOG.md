@@ -11,6 +11,15 @@ against a harness solving the same problem at daemon scale and then against
 themselves: every fix here was mutation-tested, and four of the tests written
 for them turned out to prove nothing until they were.
 
+The caching claims are measured rather than asserted. `test/live-e2e.ts` runs
+the extension against a gateway on a real socket that implements prefix caching
+honestly — it hashes the cacheable head and answers `cache_read` only when it
+has stored that exact head before — so the numbers below come off a wire.
+Five of seven conversation requests hit the cache, the two misses being
+deliberate prefix changes. With the pre-warm bug put back it is four of seven
+and 9,066 tokens written instead of 5,992; with the memory bug put back the
+prefix splits mid-conversation and a turn reads nothing at all.
+
 Three of the entries below change what an existing config is allowed to do.
 They are under **Security** for that reason, and the second one will narrow some
 agents on upgrade.
@@ -123,6 +132,14 @@ agents on upgrade.
   none, which is how it has always worked and how it reads backwards. The
   behaviour stays — an agent that cannot read a file is a slip, not an intent —
   and the load now says what it means.
+
+- **The prompt-cache counters are reported.** The client decoded
+  `cache_read_input_tokens` and `cache_creation_input_tokens` and then dropped
+  them, so for a build whose headline is that prompt caching now works there was
+  no way to see whether it did. A read of zero, turn after turn inside one
+  conversation, means something in the stable head of the prompt is moving — the
+  exact shape of the two bugs below. It is now one line per turn in the log,
+  and it says so when the read is zero.
 
 ### Fixed
 
