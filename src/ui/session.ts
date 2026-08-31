@@ -827,10 +827,11 @@ export class SessionController {
         // a watcher, and an edit made mid-conversation should reach the very
         // next turn rather than the next window.
         instructions: this.app.instructions?.block,
-        // Read here rather than at load time: the agent writes to its memory
-        // file with its own tools, so the copy that goes into the prompt has
-        // to be the one on disk when the turn starts.
-        agent: agent ? { agent, memory: this.app.agentMemory(agent) } : undefined,
+        // Frozen for the session, not read per turn. Memory sits in the system
+        // prompt, so re-reading it after the agent wrote to it changed the
+        // cache prefix mid-conversation and made every later turn full price.
+        // A write reaches the prompt when the next session starts.
+        agent: agent ? { agent, memory: this.app.agentMemorySnapshot(agent) } : undefined,
         // Assistant replies and tool results land in the transcript as the loop
         // produces them, so tool calls survive into the next turn's context and
         // into a restored session.

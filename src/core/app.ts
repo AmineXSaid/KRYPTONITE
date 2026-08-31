@@ -966,14 +966,27 @@ export class App {
    * Shared with the agent loop so the pre-warmed cache entry and the real
    * request are byte-identical - a prefix that differs by one character caches
    * nothing.
+   *
+   * Every argument `runAgent` hands `systemPromptFor` has to be matched here,
+   * and `identity` was silently missed: the loop passed it, this did not, and
+   * because the identity line renders second in the head the two strings
+   * shared only the engine block. The pre-warm was warming a prefix no request
+   * ever sent.
+   *
+   * So the profile is read here rather than accepted from a caller. `runAgent`
+   * builds identity from `client.profile`, and the client is always
+   * `clientFor(activeProfile())`, so the two cannot drift apart again by
+   * someone adding an argument in one place and forgetting the other.
    */
   systemPrompt(phase: Phase = this.phase): string {
     const agent = this.activeAgent();
+    const profile = this.activeProfile();
     return systemPromptFor(
       this.enabledSkills(agent),
       phase,
-      agent ? { agent, memory: this.agentMemory(agent) } : undefined,
-      this.instructions?.block
+      agent ? { agent, memory: this.agentMemorySnapshot(agent) } : undefined,
+      this.instructions?.block,
+      profile ? { model: profile.model, endpoint: profile.name } : undefined
     );
   }
 
@@ -1206,6 +1219,10 @@ export class App {
   async rememberSession(id: string): Promise<void> {
     if (this.lastSessionId() === id) return;
     await this.context.workspaceState.update("genesis.activeSessionId", id);
+    // A different conversation is a different prefix anyway, so this is where
+    // anything the agent wrote to its memory during the last one becomes
+    // visible.
+    this.forgetMemorySnapshot();
   }
 
   /* ───────────────────────────── agents ───────────────────────────── */
@@ -1234,6 +1251,9 @@ export class App {
   async setActiveAgent(name: string): Promise<void> {
     const next = this.agents.some((a) => a.name === name) ? name : "";
     await this.context.workspaceState.update("genesis.activeAgent", next);
+    // Switching agents rebuilds the head regardless, so re-read memory too:
+    // going away and coming back should not show a stale file.
+    this.forgetMemorySnapshot();
     this.broadcast({ type: "agentChanged", agent: next ? this.agentDto(this.activeAgent()!) : null });
     this.updateStatus();
     if (next) this.log("info", `Agent: ${next}.`);
@@ -1241,12 +1261,44 @@ export class App {
   }
 
   /**
-   * The agent's memory file, capped.
+   * The agent's memory as this session first saw it.
    *
-   * Read at the top of each turn rather than cached: the agent writes to it
-   * with its own tools, so a cached copy would go stale the moment the feature
-   * did its job. Missing is not an error - an agent with a memory file it has
-   * not written yet is the normal first run.
+   * Memory renders into the system prompt, and the system prompt is the cache
+   * prefix. This used to read the file on every turn, on the reasoning that a
+   * cached copy goes stale the moment the agent writes to it - true, but it
+   * meant the first write changed the prefix and every later turn in the
+   * session paid full price. The better the feature worked, the more it cost.
+   *
+   * So the read is frozen for the life of the session. A write still lands on
+   * disk immediately; it reaches the prompt when the next session starts. That
+   * one-session delay is the price, and it is far below the price of a cache
+   * that never warms.
+   */
+  agentMemorySnapshot(agent: Agent): string | undefined {
+    if (!agent.memory) return undefined;
+    if (this.memorySnapshot.has(agent.name)) return this.memorySnapshot.get(agent.name);
+    const body = this.agentMemory(agent);
+    this.memorySnapshot.set(agent.name, body);
+    return body;
+  }
+
+  /**
+   * Frozen memory, per agent name. Cleared when the session or the agent
+   * changes - never on write, which is the whole point of freezing it.
+   */
+  private memorySnapshot = new Map<string, string | undefined>();
+
+  /** Let the next turn re-read memory from disk. */
+  forgetMemorySnapshot(): void {
+    this.memorySnapshot.clear();
+  }
+
+  /**
+   * The agent's memory file, capped, straight off disk.
+   *
+   * Callers building a prompt want `agentMemorySnapshot`; this is the uncached
+   * reader underneath it. Missing is not an error - an agent with a memory
+   * file it has not written yet is the normal first run.
    */
   agentMemory(agent: Agent): string | undefined {
     if (!agent.memory) return undefined;

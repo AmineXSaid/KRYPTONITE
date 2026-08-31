@@ -383,11 +383,27 @@ async function main() {
     ck(withAgent !== base, "so the prompt is genuinely different from the unscoped one");
     ck(/does not exist yet/.test(withAgent), "an unwritten memory file says so");
 
-    // The loop closing: the agent writes its memory, and the next prompt has it.
+    // The loop closing: the agent writes its memory, and the next SESSION has
+    // it. Within a session the read is frozen - memory renders into the system
+    // prompt, which is the cache prefix, so re-reading it after a write would
+    // move the prefix mid-conversation and cost every later turn its cache.
     fs.mkdirSync(path.join(root, ".agent", "memory"), { recursive: true });
     fs.writeFileSync(path.join(root, ".agent", "memory", "reader.md"), "Prefers tabs.\n", "utf8");
+    ck(!/Prefers tabs\./.test(app.systemPrompt("act")),
+      "a write does not move the prefix under the session that made it");
+    await app.rememberSession("session-after-the-write");
     ck(/Prefers tabs\./.test(app.systemPrompt("act")),
-      "and once written, it is read back into the next turn");
+      "and the next session reads it back");
+
+    // The pre-warm and the real request build the head from one function, so
+    // every argument has to be matched at both call sites. `identity` was not:
+    // runAgent passed it and App.systemPrompt did not, and because it renders
+    // second the warmed entry shared only the engine block with the request it
+    // existed to warm.
+    const head = app.systemPrompt("act");
+    ck(/You are the model `test-model`/.test(head),
+      "the warmed head carries the identity line the loop also sends");
+    ck(/endpoint "gw"/.test(head), "naming the active profile's endpoint");
 
     // A memory file outside the workspace must not be read.
     const outside = path.join(TMP, "outside.md");
