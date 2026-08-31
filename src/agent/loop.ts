@@ -699,6 +699,10 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
     let pending = "";
     /** `data:` frames this step's gateway sent that would not parse. */
     let gaps = 0;
+    /** An error frame delivered inside the 200, if one arrived. */
+    let streamError = "";
+    /** `length` or `content_filter` - the endings that mean this is not the whole answer. */
+    let stopReason = "";
 
     try {
       for await (const ev of client.complete({
@@ -744,7 +748,17 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
               }
             }
           } else if (!holding) {
-            yield { type: "text", text: ev.text };
+            // `split.visible`, NOT `ev.text`. This was the raw chunk, which
+            // meant that from the second visible frame onward the panel was
+            // fed the unfiltered stream while `text` - the transcript, and
+            // what the next turn is billed for - kept the filtered one. A
+            // `<think>` block that opens after the first word therefore
+            // rendered verbatim in the answer bubble, tags and all, and at
+            // small frame sizes left tag shrapnel ("<ink>") spliced into the
+            // prose instead. Which of the two you got depended on where the
+            // gateway split its frames, so it was non-deterministic and could
+            // not be reproduced from the saved session.
+            yield { type: "text", text: split.visible };
           }
         }
         if (ev.type === "tool_call") calls.push(ev.toolCall!);
@@ -755,6 +769,23 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
            model that just said less. */
         if (ev.type === "stream_gap" && ev.gaps) {
           gaps += ev.gaps;
+        }
+        /* An error the gateway delivered inside a 200 stream. Recorded rather
+           than thrown: the text that already arrived is real and belongs in
+           the transcript, and a half answer that says why it is half is worth
+           more than an empty bubble. Reported once, after the stream, next to
+           the gap note. */
+        if (ev.type === "stream_error" && ev.streamError) {
+          streamError = ev.streamError;
+        }
+        /* Why the model stopped. Only the reasons that mean the answer is
+           INCOMPLETE are kept; `stop` and `tool_calls` are the ordinary
+           endings and saying anything about them would be noise on every
+           single turn. */
+        if (ev.type === "stop" && ev.stopReason) {
+          if (ev.stopReason === "length" || ev.stopReason === "content_filter") {
+            stopReason = ev.stopReason;
+          }
         }
         // Real counts from the gateway. These were being discarded: the client
         // has always decoded `usage` for both wires, nothing consumed it, and
@@ -791,6 +822,44 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
           "The reply above is missing whatever those frames carried. This is the gateway " +
           "or something between it and here corrupting the stream, not the model - send " +
           "again, and run diagnostics if it keeps happening.",
+      };
+    }
+
+    if (streamError) {
+      yield {
+        type: "error",
+        error: "The gateway reported an error part-way through the reply.",
+        errorFix:
+          "Whatever is above stopped there. The connection itself worked - this came back " +
+          "inside a successful response - so it is the gateway or the model behind it " +
+          "failing mid-generation. Send again; run diagnostics if it repeats.",
+        errorDetail: streamError,
+      };
+    }
+
+    /* THE ANSWER IS NOT THE WHOLE ANSWER.
+     *
+     * Both wires have always said this and nothing read it, so a reply
+     * truncated at the output cap ended mid-word and looked finished. Said as
+     * an error rather than a note because acting on half an answer is the
+     * actual harm, and because `maxOutputTokens` defaults to 4096 - this is
+     * the most common way a turn ends badly, not an edge case. */
+    if (stopReason === "length") {
+      yield {
+        type: "error",
+        error: "The model hit its output limit and the reply above is cut off.",
+        errorFix:
+          `Raise capabilities.maxOutputTokens in the "${client.profile.name}" profile - it is ` +
+          `currently ${caps.maxOutputTokens} - or ask for the rest in a follow-up message.`,
+      };
+    } else if (stopReason === "content_filter") {
+      yield {
+        type: "error",
+        error: "The gateway's content filter stopped the reply before it finished.",
+        errorFix:
+          "This is a policy layer in front of the model, not the model refusing. Rephrasing " +
+          "the request usually clears it; if it does not, the filter is on the gateway and " +
+          "whoever runs it has to change the rule.",
       };
     }
 
