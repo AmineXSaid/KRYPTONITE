@@ -2,7 +2,7 @@
   "name": "genesis",
   "displayName": "Genesis",
   "description": "A coding agent for endpoints that don't behave. mTLS, corporate CAs, token exchange, air-gapped.",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "publisher": "MohamedAmineSaid",
   "author": {
     "name": "Mohamed Amine Said",
@@ -25,6 +25,20 @@
     "AI",
     "Programming Languages",
     "Other"
+  ],
+  "keywords": [
+    "ai",
+    "agent",
+    "llm",
+    "mcp",
+    "openai",
+    "anthropic",
+    "ollama",
+    "self-hosted",
+    "air-gapped",
+    "mtls",
+    "proxy",
+    "local-llm"
   ],
   "activationEvents": [
     "onStartupFinished"
