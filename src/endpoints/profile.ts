@@ -263,34 +263,118 @@ export function loadProfile(file: string): EndpointProfile {
 
   const kind = isLlmKind(doc.kind) ? doc.kind : DEFAULT_LLM_KIND;
 
+  // Three layers, weakest first: the global defaults, what the kind implies,
+  // then whatever the file actually says. The kind seeds; it never overrides,
+  // so a hand-written `vision: false` on a multimodal profile still wins.
+  const capabilities: Capabilities = {
+    ...DEFAULT_CAPS,
+    ...capabilitiesFor(kind),
+    ...(doc.capabilities ?? {}),
+  };
+  validateCapabilities(capabilities, file);
+
   return {
     ...doc,
     kind,
     auth: doc.auth ?? { kind: "none" },
-    // Three layers, weakest first: the global defaults, what the kind implies,
-    // then whatever the file actually says. The kind seeds; it never overrides,
-    // so a hand-written `vision: false` on a multimodal profile still wins.
-    capabilities: {
-      ...DEFAULT_CAPS,
-      ...capabilitiesFor(kind),
-      ...(doc.capabilities ?? {}),
-    },
-    timeoutMs: doc.timeoutMs ?? 120_000,
-    retries: doc.retries ?? 2,
+    capabilities,
+    timeoutMs: positiveInt(doc.timeoutMs, 120_000, "timeoutMs", file),
+    retries: Math.min(10, Math.max(0, positiveInt(doc.retries, 2, "retries", file))),
     sourceFile: file,
   } as EndpointProfile;
+}
+
+/**
+ * Numbers that have to be numbers, checked where the file is still nameable.
+ *
+ * `capabilities` was spread in unvalidated, and the one place that matters is
+ * the window: `fitToWindow` computes `limit - reserve`, and `"128k"` - which
+ * is what YAML makes of an unquoted `128k` - turns that into NaN. Every
+ * comparison against NaN is false, so the early return is skipped AND the drop
+ * loop never runs, and the function goes on to insert "Earlier turns were
+ * dropped to stay within the context window" on every single request, having
+ * dropped nothing. The meter reads `x / NaN` beside it.
+ *
+ * `fitImages` guards its own budget explicitly, with a comment about why a
+ * typo must not mean total eviction. This is the same argument applied to the
+ * field where the consequence is worse, and it is made at parse time rather
+ * than at use time so it names the file.
+ */
+function validateCapabilities(caps: Capabilities, file: string): void {
+  const numeric: Array<keyof Capabilities> = [
+    "contextWindow", "maxOutputTokens", "maxImageBytes",
+  ];
+  for (const key of numeric) {
+    const v = caps[key] as unknown;
+    if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) {
+      throw new ProfileError(
+        `capabilities.${key} must be a positive number of ${key === "maxImageBytes" ? "bytes" : "tokens"} - ` +
+          `got ${JSON.stringify(v)}. Write it in full (128000, not 128k) and leave it unquoted.`,
+        file
+      );
+    }
+  }
+  /* A REPLY CANNOT BE LONGER THAN THE CONVERSATION IT IS PART OF.
+   *
+   * These two sit next to each other in every example profile, so copying one
+   * and editing the wrong line is the ordinary mistake. The result was silent
+   * and looked like the model's fault: `fitToWindow`'s budget goes negative,
+   * history is cut to the last two messages on EVERY turn, and the model
+   * appears to forget the conversation it is having. */
+  if (caps.maxOutputTokens >= caps.contextWindow) {
+    throw new ProfileError(
+      `capabilities.maxOutputTokens (${caps.maxOutputTokens}) must be smaller than ` +
+        `capabilities.contextWindow (${caps.contextWindow}) - the reply has to fit inside the ` +
+        `window along with the conversation. Leave room for the prompt as well as the answer.`,
+      file
+    );
+  }
+}
+
+/** A whole positive number, or the default. Rejects a string that is not one. */
+function positiveInt(v: unknown, fallback: number, field: string, file: string): number {
+  if (v === undefined || v === null) return fallback;
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n) || n < 0) {
+    throw new ProfileError(`${field} must be a number - got ${JSON.stringify(v)}.`, file);
+  }
+  return Math.round(n);
 }
 
 export function loadAllProfiles(dir: string): { profiles: EndpointProfile[]; errors: ProfileError[] } {
   const profiles: EndpointProfile[] = [];
   const errors: ProfileError[] = [];
   if (!fs.existsSync(dir)) return { profiles, errors };
-  for (const entry of fs.readdirSync(dir)) {
+  // Sorted, so which of two same-named profiles wins does not depend on the
+  // order the filesystem happened to hand them back.
+  for (const entry of fs.readdirSync(dir).sort()) {
     if (!/\.(ya?ml)$/i.test(entry)) continue;
+    const at = path.join(dir, entry);
     try {
-      profiles.push(loadProfile(path.join(dir, entry)));
+      const p = loadProfile(at);
+      /* A NAME IS A KEY, so two files claiming one is an error and not a
+       * preference.
+       *
+       * `name` is what `activeProfile` looks up, what the client pool is keyed
+       * on, and what the auth cache is keyed on - so a duplicate does not
+       * merely shadow a profile in a list, it serves one profile's cached
+       * token over the other's transport. Copying a working profile to start
+       * a second one and forgetting to rename it is the obvious way in. */
+      const clash = profiles.find((q) => q.name === p.name);
+      if (clash) {
+        errors.push(
+          new ProfileError(
+            `Two profiles are called "${p.name}": ${path.basename(clash.sourceFile ?? "?")} and ` +
+              `${entry}. A name identifies an endpoint everywhere - in the picker, in the ` +
+              `connection pool, and in the token cache - so rename one of them.`,
+            at
+          )
+        );
+        continue;
+      }
+      profiles.push(p);
     } catch (e) {
-      errors.push(e instanceof ProfileError ? e : new ProfileError(String(e), entry));
+      errors.push(e instanceof ProfileError ? e : new ProfileError(String(e), at));
     }
   }
   return { profiles, errors };

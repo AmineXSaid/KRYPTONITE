@@ -896,9 +896,66 @@ export class App {
 
   /* ───────────────────────────── accessors ───────────────────────────── */
 
+  /**
+   * The profile the next turn will use, or nothing.
+   *
+   * THE FALLBACK ONLY APPLIES WHEN NOTHING IS SELECTED.
+   *
+   * `?? this.profiles[0]` used to be unconditional, so a configured name that
+   * stopped resolving - a YAML typo, a rename, a moved file - silently moved
+   * the conversation to whatever `readdirSync` returned first. Someone with an
+   * internal gateway and a hosted profile who broke the internal one's YAML
+   * had their next message, and everything in it, sent to the other endpoint.
+   * Nothing on screen said the selection had changed.
+   *
+   * Picking the first profile when NONE is selected is different and still
+   * right: that is a fresh install with one profile in the folder, and asking
+   * someone to choose from a list of one is a step for nothing.
+   */
   activeProfile(): EndpointProfile | undefined {
-    const name = this.cfg().get<string>("activeProfile", "");
-    return this.profiles.find((p) => p.name === name) ?? this.profiles[0];
+    const name = this.cfg().get<string>("activeProfile", "").trim();
+    if (!name) return this.profiles[0];
+    return this.profiles.find((p) => p.name === name);
+  }
+
+  /**
+   * Why `activeProfile()` came back empty, in a sentence for the user.
+   *
+   * Two different failures reach the same empty result and need different
+   * answers: nothing configured at all, versus a selection that no longer
+   * names anything.
+   */
+  activeProfileProblem(): { message: string; fix: string } | undefined {
+    if (this.activeProfile()) return undefined;
+    const name = this.cfg().get<string>("activeProfile", "").trim();
+    if (!name) {
+      return {
+        message: "No endpoint profile is set up yet.",
+        fix:
+          `Genesis reads them from \`${this.cfg().get<string>("profileDirectory", ".agent/endpoints")}\` ` +
+          `in the folder you have open. Create one from the Control Center, or open a folder that ` +
+          `already has one.`,
+      };
+    }
+    const dir = this.cfg().get<string>("profileDirectory", ".agent/endpoints");
+    /* A profile's NAME is inside its file, so a file that failed to parse
+     * cannot be matched to the name that is missing - the parse is exactly
+     * what would have told us. So when anything failed to load, that is
+     * reported as the likely cause rather than guessed at from filenames. */
+    const broken = this.profileErrors;
+    const available = this.profiles.map((p) => p.name);
+    return {
+      message: `The selected profile "${name}" is not available.`,
+      fix: broken.length
+        ? `${broken.length} file(s) in ${dir} did not load, and one of them is probably it: ` +
+          broken.map((e) => `${e.file ? path.basename(e.file) : "?"} (${e.message})`).join("; ") +
+          `. Fix that, or pick another profile` +
+          (available.length ? ` - ${available.join(", ")} did load` : "") +
+          `. Genesis will not quietly send this conversation somewhere else.`
+        : available.length
+          ? `No profile in ${dir} is called that any more. Pick one of: ${available.join(", ")}.`
+          : `No profiles loaded at all. Check ${dir}.`,
+    };
   }
 
   /** What to do with a message typed while a turn is running. */

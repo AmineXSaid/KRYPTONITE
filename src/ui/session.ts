@@ -716,10 +716,14 @@ export class SessionController {
     }
     const profile = this.app.activeProfile();
     if (!profile) {
+      // Two different failures used to share one sentence: nothing configured,
+      // and a selection that no longer names anything. The second used to not
+      // be a failure at all - it silently fell through to `profiles[0]`.
+      const why = this.app.activeProfileProblem();
       this.app.broadcast({
         type: "error",
-        message: "Select an endpoint profile first.",
-        fix: "Create one in .agent/endpoints/, or pick an existing profile.",
+        message: why?.message ?? "Select an endpoint profile first.",
+        fix: why?.fix ?? "Create one in .agent/endpoints/, or pick an existing profile.",
         action: "endpoints",
       });
       this.app.broadcast({ type: "turnEnd" });

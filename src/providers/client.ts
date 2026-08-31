@@ -6,7 +6,9 @@
 import { performance } from "node:perf_hooks";
 import { request, Dispatcher } from "undici";
 import type { EndpointProfile, Wire } from "../endpoints/profile";
-import { buildTransport, isStaleSocketError, TransportStats } from "../endpoints/transport";
+import {
+  buildTransport, isStaleSocketError, isRetriableNetworkError, TransportStats,
+} from "../endpoints/transport";
 import { applyAuth } from "../endpoints/auth";
 import { loadTransform, Transform } from "../endpoints/transform";
 
@@ -309,13 +311,30 @@ export class EndpointClient {
   }
 
   /**
-   * Issue the request, replaying it once onto a fresh socket if the pooled one
-   * turned out to be dead.
+   * Issue the request, retrying only what is safe to retry.
    *
-   * Holding sockets open for a minute means occasionally picking one a
-   * middlebox has already reaped. That failure happens on the first write,
-   * before the request reaches the server, so the replay cannot produce a
-   * second completion. Every other error is surfaced as-is.
+   * TWO DIFFERENT REASONS TO SEND AGAIN, and the distinction is the whole of
+   * the design.
+   *
+   * The first is a dead pooled socket. Holding sockets open for a minute means
+   * occasionally picking one a middlebox has already reaped; that failure
+   * happens on the first write, before the request reaches the server, so a
+   * replay cannot produce a second completion. It is always retried once and
+   * costs nothing.
+   *
+   * The second is `profile.retries`, which until now was parsed, defaulted,
+   * shown in the Control Center, and read by nothing at all - so the people
+   * this extension is for, who are fighting gateways that fail one request in
+   * twenty, set it and concluded the gateway was worse than it is. It applies
+   * ONLY to failures that happened before any part of a reply arrived: a
+   * connect error, or a 5xx with the body still unread. Retrying after a token
+   * has streamed would bill the prompt twice and splice two answers together,
+   * which is why this lives here, around the request, and not around
+   * `complete()`.
+   *
+   * A 4xx is never retried: the request is wrong and sending it again is a
+   * slower way to be told so. 429 is left alone too - the remedy there is to
+   * wait longer than a retry loop should, and the error already says so.
    */
   private async send(
     url: string,
@@ -323,26 +342,73 @@ export class EndpointClient {
     payload: string,
     signal?: AbortSignal
   ) {
-    for (let attempt = 0; ; attempt++) {
+    const budget = Math.max(0, Math.min(this.profile.retries ?? 0, 10));
+    let attempt = 0;
+    let staleReplayed = false;
+    let sent = 0;
+
+    for (;;) {
       try {
-        return {
-          res: await request(url, {
-            method: "POST",
-            dispatcher: this.dispatcher,
-            headers,
-            body: payload,
-            signal,
-            headersTimeout: this.profile.timeoutMs,
-            bodyTimeout: this.profile.timeoutMs,
-          }),
-          retried: attempt > 0,
-        };
+        const res = await request(url, {
+          method: "POST",
+          dispatcher: this.dispatcher,
+          headers,
+          body: payload,
+          signal,
+          headersTimeout: this.profile.timeoutMs,
+          bodyTimeout: this.profile.timeoutMs,
+        });
+        // A gateway 5xx before a single byte of the reply has been read is the
+        // transient this setting exists for. The body is drained rather than
+        // leaked, and the last attempt's response is handed back so the caller
+        // reports the real status instead of a retry count.
+        if (res.statusCode >= 500 && res.statusCode !== 501 && attempt < budget) {
+          await res.body.dump().catch(() => { /* already gone */ });
+          attempt++;
+          await this.backoff(attempt, signal);
+          continue;
+        }
+        return { res, retried: sent > 0 };
       } catch (e: any) {
         if (signal?.aborted) throw e;
-        if (attempt === 0 && isStaleSocketError(e)) continue;
+        if (!staleReplayed && isStaleSocketError(e)) {
+          staleReplayed = true;
+          sent++;
+          continue;
+        }
+        if (attempt < budget && isRetriableNetworkError(e)) {
+          attempt++;
+          sent++;
+          await this.backoff(attempt, signal);
+          continue;
+        }
         throw explainNetworkError(e, this.profile);
       }
     }
+  }
+
+  /**
+   * Wait before trying again, and stop waiting if the user gives up.
+   *
+   * Exponential with a cap and a jitter. The jitter matters more than it looks
+   * on a corporate gateway: a hundred editors that all retry on the same
+   * schedule turn one blip into a synchronised second wave.
+   */
+  private backoff(attempt: number, signal?: AbortSignal): Promise<void> {
+    const ms = Math.min(250 * 2 ** (attempt - 1), 4000) * (0.5 + Math.random());
+    return new Promise((resolve, reject) => {
+      const t = setTimeout(done, ms);
+      function done() {
+        clearTimeout(t);
+        signal?.removeEventListener("abort", onAbort);
+        resolve();
+      }
+      function onAbort() {
+        clearTimeout(t);
+        reject(new DOMException("Aborted", "AbortError"));
+      }
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
   }
 
   async *complete(req: CompletionRequest): AsyncGenerator<CompletionEvent> {
