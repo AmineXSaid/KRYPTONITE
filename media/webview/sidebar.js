@@ -1348,6 +1348,17 @@ function _sbRun() {
           '<span class="ell"><span class="t ell">' + esc(s.title) + '</span>' +
           '<span class="m">' + esc(s.when) + ' · ' + n + '</span></span>' +
         '</button>' +
+        // Stop, for a conversation that is working but is not the one on
+        // screen. The composer's Stop deliberately reaches only the visible
+        // turn, which left a backgrounded turn - one blocked on an approval
+        // nobody saw asked, or inside a long command - with no control
+        // anywhere that could reach it. This list is where those conversations
+        // are, so this is where the control belongs.
+        (s.running
+          ? '<button class="hist-stop" data-stop="' + esc(s.id) + '" title="Stop this turn" ' +
+              'aria-label="Stop the turn running in ' + esc(s.title) + '">' +
+              icon("i-stop", "ic-13") + "</button>"
+          : "") +
         '<button class="hist-del" data-del="' + esc(s.id) + '" title="Delete session" ' +
           'aria-label="Delete session">' + icon("i-trash", "ic-13") + '</button>' +
         '</div>';
@@ -5400,6 +5411,15 @@ function _sbRun() {
       else if (a === "issue") post("openControlCenter", { section: "about" });
     });
     $("historyPop").addEventListener("click", function (e) {
+      var stop = e.target.closest("[data-stop]");
+      if (stop) {
+        // Nested inside the row like Delete is, so the load handler must not
+        // also fire on the way up and switch you into the chat you just
+        // stopped.
+        e.stopPropagation();
+        post("stopSession", { id: stop.getAttribute("data-stop") });
+        return;
+      }
       var del = e.target.closest("[data-del]");
       if (del) {
         /* Delete is nested inside the row, so the load handler must not also

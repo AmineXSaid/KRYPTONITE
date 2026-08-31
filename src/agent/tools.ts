@@ -109,6 +109,19 @@ export function unifiedPatch(before: string, after: string, rel: string, context
 export interface ToolContext {
   root: string;
   /**
+   * Aborted when the user stops the turn.
+   *
+   * Nothing here took a signal, so Stop reached the model request and stopped
+   * there: a `run_command` already running carried on to its own timeout - up
+   * to ten minutes - holding the loop inside `await invoke(call)` the whole
+   * time. The install kept going, its output was thrown away, and it was still
+   * holding the lockfile when the user retried.
+   *
+   * Optional, so every offline harness and every caller that predates it keeps
+   * working; absent means "nothing will interrupt this".
+   */
+  signal?: AbortSignal;
+  /**
    * Whether READS may leave the workspace root. Writes never may, whatever
    * this says. See `readable()` for what "may" costs.
    *
@@ -1099,27 +1112,56 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
         const ok = await ctx.approve(`Run: ${args.command}`, args.reason);
         if (!ok) return { content: "The user declined to run that command.", isError: true };
         const timeout = Math.max(1_000, Math.min(args.timeout_ms ?? 120_000, 600_000));
+        const MAX_BUFFER = 4 * 1024 * 1024;
         try {
           const { stdout, stderr } = await pexec(args.command, {
             cwd: ctx.root,
             shell: true,
             timeout,
-            maxBuffer: 4 * 1024 * 1024,
+            maxBuffer: MAX_BUFFER,
+            // Stop now actually stops the process, rather than releasing the
+            // composer and leaving it running for another nine minutes.
+            signal: ctx.signal,
+            killSignal: "SIGTERM",
           } as any);
           return { content: (stdout + (stderr ? "\n" + stderr : "")).slice(0, 30_000) || "(no output)" };
         } catch (e: any) {
+          const partial = `${(e.stdout ?? "") + (e.stderr ?? "")}`.slice(0, 30_000);
+          // The user pressed Stop. Said as its own outcome so the model does
+          // not read it as the command having failed on its own merits and
+          // helpfully try again.
+          if (ctx.signal?.aborted || e?.name === "AbortError") {
+            return {
+              content: `The user stopped this command before it finished.\n${partial}`,
+              isError: true,
+            };
+          }
+          /* THREE WAYS A CHILD DIES, AND THEY USED TO READ AS ONE.
+           *
+           * Node sets `killed: true` when `maxBuffer` is exceeded as well as
+           * when the timeout fires, so a verbose build producing more than
+           * 4 MB was reported to both the model and the user as "Command timed
+           * out after 120000ms and was killed" - which sent both of them off
+           * to raise a timeout that had nothing to do with it. */
+          if (e?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
+            return {
+              content:
+                `The command produced more than ${Math.round(MAX_BUFFER / 1024 / 1024)} MB of ` +
+                `output and was killed. It did not time out. Re-run it writing to a file, or ` +
+                `narrow what it prints.\n${partial}`,
+              isError: true,
+            };
+          }
           // A timeout kill arrives as a signal with no exit code, and reporting
           // it as "Exit undefined" tells the model nothing it can act on.
           if (e?.killed || e?.signal) {
             return {
-              content:
-                `Command timed out after ${timeout}ms and was killed.\n` +
-                `${(e.stdout ?? "") + (e.stderr ?? "")}`.slice(0, 30_000),
+              content: `Command timed out after ${timeout}ms and was killed.\n${partial}`,
               isError: true,
             };
           }
           return {
-            content: `Exit ${e.code}\n${(e.stdout ?? "") + (e.stderr ?? "")}`.slice(0, 30_000),
+            content: `Exit ${e.code}\n${partial}`,
             isError: true,
           };
         }

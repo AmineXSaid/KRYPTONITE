@@ -96,11 +96,28 @@ async function main() {
   console.log("\n──── §2.11 send while a turn is already running ────");
   {
     const { app, out } = await boot(workspace({ "gw.yaml": GOOD }));
-    // Simulate a turn in flight without touching the network.
-    // Refusing was the old behaviour and it made the composer feel broken: a
-    // thought had to be held until the model happened to stop. It is taken
-    // now, and what happens to it is the inputWhileRunning preference.
+    /* Simulate a turn in flight without touching the network.
+     *
+     * A REGISTERED TURN, not just the flag. Steering and the queue used to
+     * read controller-wide arrays, so setting `running` was a complete
+     * simulation; they belong to the turn now - one array per turn, so two
+     * live turns cannot swallow each other's messages - and a bare flag with
+     * nothing in `live` no longer describes anything the controller can
+     * happen. */
     app.session.running = true;
+    (app.session as any).live.set(app.session.sessionId, {
+      id: app.session.sessionId,
+      abort: new AbortController(),
+      history: app.session.history,
+      replay: [],
+      title: app.session.title,
+      steer: [],
+      steerFiles: [],
+      steerFilesInFlight: [],
+      estimate: new Map(),
+      finished: false,
+      discarded: false,
+    });
 
     let before = out.length;
     app.uiConfig = { ...app.uiConfig, inputWhileRunning: "queue" };
@@ -154,6 +171,7 @@ async function main() {
       "promote: and is steered into the running turn instead");
 
     app.session.running = false;
+    (app.session as any).live.clear();
     await app.dispose();
   }
 
@@ -182,7 +200,23 @@ async function main() {
     const root = workspace({ "gw.yaml": VISION });
     const { app, out } = await boot(root);
     app.uiConfig = { ...app.uiConfig, inputWhileRunning: "steer" };
+    // A registered turn, because steering now lands on the turn rather than on
+    // a controller-wide array. See §2.11.
     app.session.running = true;
+    const inFlight: any = {
+      id: app.session.sessionId,
+      abort: new AbortController(),
+      history: app.session.history,
+      replay: [],
+      title: app.session.title,
+      steer: [],
+      steerFiles: [],
+      steerFilesInFlight: [],
+      estimate: new Map(),
+      finished: false,
+      discarded: false,
+    };
+    (app.session as any).live.set(app.session.sessionId, inFlight);
 
     const png = Buffer.from("fake png bytes").toString("base64");
     const txt = Buffer.from("hello from a log file").toString("base64");
@@ -191,7 +225,7 @@ async function main() {
       { name: "run.log", mediaType: "text/plain", data: txt },
     ]);
 
-    const steered: any = (app.session as any).steer[0];
+    const steered: any = inFlight.steer[0];
     ck(!!steered, "the message is queued for steering");
     ck(Array.isArray(steered.content), "it is a block message, not a bare string",
       typeof steered.content);
@@ -213,6 +247,7 @@ async function main() {
       String(accepted.files.find((f: any) => f.name === "run.log").size));
 
     app.session.running = false;
+    (app.session as any).live.clear();
     await app.dispose();
   }
 
@@ -223,7 +258,7 @@ async function main() {
     app.session.running = true;
     const png = Buffer.from("another png").toString("base64");
     await app.session.send("and this", [{ name: "b.png", mediaType: "image/png", data: png }]);
-    const queued: any = (app.session as any).queued[0];
+    const queued: any = (app.session as any).convo().queued[0];
     ck(queued?.attachments?.length === 1, "the queue holds the attachment, not just the text");
     ck(queued.attachments[0].data === png, "byte for byte");
     const accepted: any = out.find((m) => m.type === "queueChanged");

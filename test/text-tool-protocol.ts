@@ -120,11 +120,11 @@ console.log("\n──── reasoning_content ────");
     delta({}, "length"),
   ];
   ck(
-    drainThinking(__openAiStreamForTest(), thinkingOnly) === "weighing the options",
+    drainThinking(__openAiStreamForTest().push, thinkingOnly) === "weighing the options",
     "a reasoning-only turn still reports its working"
   );
   ck(
-    drain(__openAiStreamForTest(), thinkingOnly) === "",
+    drain(__openAiStreamForTest().push, thinkingOnly) === "",
     "but never as the answer"
   );
 
@@ -136,17 +136,17 @@ console.log("\n──── reasoning_content ────");
     delta({}, "stop"),
   ];
   ck(
-    drain(__openAiStreamForTest(), answered) === "42",
+    drain(__openAiStreamForTest().push, answered) === "42",
     "an answered turn keeps only its answer"
   );
   ck(
-    drainThinking(__openAiStreamForTest(), answered) === "hmm",
+    drainThinking(__openAiStreamForTest().push, answered) === "hmm",
     "and its working is still available, separately"
   );
 
   // Ordinary models are untouched.
   ck(
-    drain(__openAiStreamForTest(), [delta({ content: "hello" }), delta({}, "stop")]) === "hello",
+    drain(__openAiStreamForTest().push, [delta({ content: "hello" }), delta({}, "stop")]) === "hello",
     "a model with no reasoning field behaves exactly as before"
   );
 }

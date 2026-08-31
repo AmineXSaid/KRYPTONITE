@@ -58,6 +58,14 @@ function chipsFor(
 interface PendingApproval {
   resolve: (allowed: boolean) => void;
   summary: string;
+  /**
+   * The turn that asked. Without it, `interrupt()` - which is careful to abort
+   * exactly one turn - resolved EVERY outstanding approval as denied, so
+   * pressing Stop in one conversation silently declined an edit a backgrounded
+   * turn in another conversation was still waiting on, and the user was never
+   * shown the question that had been answered for them.
+   */
+  turnId: string;
 }
 
 interface TurnDiffs {
@@ -88,6 +96,103 @@ interface LiveTurn {
   replay: ReplayableEvent[];
   /** Captured so a background turn can be saved under its own name. */
   title: string;
+
+  /* ── everything below was on the controller, and had to move ──────────
+   *
+   * `live` was already a Map, so two turns could run at once - but the state
+   * those turns read and wrote was single-valued, so they wrote over each
+   * other. The `emit()` gate stops a background turn PAINTING to the wrong
+   * panel; it never stopped one MUTATING state the visible turn then read.
+   */
+
+  /**
+   * Messages typed while this turn runs, to be injected at the next boundary
+   * between model calls.
+   *
+   * One array per turn, not one per controller. `takeSteer` used to be a
+   * single closure over a single array handed to every `runAgent`, so with two
+   * turns live whichever loop reached its boundary first swallowed a steering
+   * message meant for the other - and it landed in that conversation's
+   * transcript, and was billed there.
+   */
+  steer: Msg[];
+  /**
+   * File chips for each pending steer, in the same order.
+   *
+   * Kept beside the messages rather than inside them because a `Msg` has
+   * nowhere to put a file name: an image is a content block with base64 in it
+   * and a text attachment has already been folded into the prose. The
+   * transcript still has to show the chip, so the names travel separately.
+   */
+  steerFiles: AttachmentChipDto[][];
+  /** Drained with the messages, consumed one per `steer` event from the loop. */
+  steerFilesInFlight: AttachmentChipDto[][];
+
+  /**
+   * What this turn has contributed to the change totals, by its own estimate.
+   * Held so the exact numbers from git can be swapped in for it when the turn
+   * ends, instead of being added on top of it.
+   */
+  estimate: Map<string, { added: number; removed: number }>;
+
+  /**
+   * Set the moment the turn stops writing.
+   *
+   * `interrupt()` used to delete the turn from `live` synchronously while the
+   * generator it aborted was still parked inside a tool call - `runTool` took
+   * no signal, so a `run_command` could hold it for ten minutes. That released
+   * the composer, so a second turn started in the same conversation and took
+   * the same key in `live`; when the first turn finally unwound it deleted the
+   * SECOND turn's entry, cleared `running`, and broadcast a turnEnd over a
+   * turn that was still streaming. Both turns were appending to one `history`,
+   * which produced an assistant message holding tool calls with another turn's
+   * user message in between - rejected by the Anthropic wire on the NEXT send,
+   * by which point nothing connected the failure to the Stop press.
+   */
+  finished: boolean;
+
+  /**
+   * The conversation was deleted out from under this turn.
+   *
+   * Aborting it is not enough: the turn still runs its tail, and the tail
+   * calls `persistTurn`, which wrote the transcript straight back to disk. The
+   * chat vanished from the history list and reappeared a minute later holding
+   * more messages than it had when it was deleted.
+   */
+  discarded: boolean;
+}
+
+/**
+ * State that belongs to one conversation rather than to the controller.
+ *
+ * The controller shows one conversation at a time but may be RUNNING several,
+ * so anything a background turn writes has to be filed under the conversation
+ * it belongs to. Before this, a turn left running in conversation A recorded
+ * its file changes and its todo list into whatever conversation was on screen.
+ *
+ * Created lazily and dropped with the conversation. A conversation with
+ * nothing in any of these fields is indistinguishable from one that has no
+ * record at all, which is why `convo()` can mint one on demand.
+ */
+interface Conversation {
+  /**
+   * Every file this conversation has changed, keyed by workspace-relative path.
+   *
+   * Conversation-scoped on purpose: the question the panel answers is "what has
+   * this chat done to my workspace", and a list that emptied at every turn
+   * boundary could not answer it.
+   */
+  changes: Map<string, FileChangeDto>;
+  /** Messages typed into this conversation's composer while it was busy. */
+  queued: Array<{
+    id: string;
+    text: string;
+    attachments?: Array<{ name: string; mediaType: string; data: string }>;
+  }>;
+  /** Set by "Always allow" on a write or edit. Conversation-scoped by design. */
+  alwaysAllowEdits: boolean;
+  /** The checklist this conversation's turns have published. */
+  todos: TodoDto[];
 }
 
 const PATCH_LIMIT = 30_000;
@@ -97,8 +202,24 @@ export class SessionController {
   sessionId: string;
   running = false;
 
-  /** Set by "Always allow" on a write or edit. Session-scoped by design. */
-  private alwaysAllowEdits = false;
+  /**
+   * Per-conversation state, keyed by session id.
+   *
+   * Minted on demand so nothing has to remember to create one, and dropped
+   * only when the conversation is deleted - a conversation switched away from
+   * keeps its change list and its queue, which is the whole point.
+   */
+  private convos = new Map<string, Conversation>();
+
+  /** The record for a conversation, created if this is the first time it is asked for. */
+  private convo(id: string = this.sessionId): Conversation {
+    let c = this.convos.get(id);
+    if (!c) {
+      c = { changes: new Map(), queued: [], alwaysAllowEdits: false, todos: [] };
+      this.convos.set(id, c);
+    }
+    return c;
+  }
 
   /**
    * Every turn currently running, keyed by the conversation it belongs to.
@@ -120,7 +241,17 @@ export class SessionController {
     return new Set(this.live.keys());
   }
   /**
-   * One browser per session, launched on first use.
+   * ONE BROWSER PER WINDOW, launched on first use.
+   *
+   * Per WINDOW and not per conversation, which is what this comment used to
+   * claim while the field sat here on the controller. Stated accurately rather
+   * than made per-conversation: a Chrome per chat is several hundred megabytes
+   * each and loses the login every time you start a new chat, and the panel's
+   * own browser controls address "the" browser. The cost of the shared one is
+   * that two turns running at once drive the same pages; the loop serialises
+   * tool calls within a turn, so that only bites with a backgrounded turn, and
+   * it is a limitation rather than the silent corruption it was when
+   * `newChat()` closed this out from under a turn still using it.
    *
    * Launching costs a second or two, so it is not done until the model asks
    * for it, and it is kept alive between tool calls - a browser that closed
@@ -132,23 +263,6 @@ export class SessionController {
   private browserUrl = "";
   private pending = new Map<string, PendingApproval>();
   private turnDiffs = new Map<string, TurnDiffs>();
-
-  /**
-   * Every file this conversation has changed, keyed by workspace-relative path.
-   *
-   * Conversation-scoped rather than turn-scoped on purpose: the question the
-   * panel answers is "what has this chat done to my workspace", and a list
-   * that emptied at every turn boundary could not answer it. Cleared with the
-   * conversation, and by the user.
-   */
-  private changes = new Map<string, FileChangeDto>();
-
-  /**
-   * What the running turn has contributed to those totals, by its own
-   * estimate. Held so the exact numbers from git can be swapped in for it
-   * when the turn ends, instead of being added on top of it.
-   */
-  private turnEstimate = new Map<string, { added: number; removed: number }>();
 
   /**
    * The conversation's name.
@@ -171,14 +285,18 @@ export class SessionController {
   }
 
   /** Files this conversation has changed, most recently written first. */
-  changedFiles(): FileChangeDto[] {
-    return [...this.changes.values()].sort((a, b) => b.at - a.at);
+  changedFiles(id: string = this.sessionId): FileChangeDto[] {
+    return [...this.convo(id).changes.values()].sort((a, b) => b.at - a.at);
   }
 
   /** The user has seen them. Only the list is dropped; the files are untouched. */
   clearChanges(): void {
-    this.changes.clear();
-    this.turnEstimate.clear();
+    this.convo().changes.clear();
+    // Only the turns writing into THIS conversation lose their estimates. A
+    // background turn elsewhere is still going to reconcile against git.
+    for (const turn of this.live.values()) {
+      if (turn.id === this.sessionId) turn.estimate.clear();
+    }
     this.app.broadcast({ type: "changesUpdated", files: [] });
   }
 
@@ -189,8 +307,13 @@ export class SessionController {
    * happened to it over the conversation: reporting the last write's kind would
    * describe a file that did not exist ten seconds ago as merely modified.
    */
-  private recordChange(rel: string, info?: FileChange): FileChangeDto {
-    const prev = this.changes.get(rel);
+  private recordChange(turn: LiveTurn, rel: string, info?: FileChange): FileChangeDto {
+    // Filed under the turn's OWN conversation, not whichever one is on screen.
+    // A background turn used to record its writes into the visible chat's
+    // change list, so switching away from a working conversation and back
+    // showed you files a different conversation had touched.
+    const changes = this.convo(turn.id).changes;
+    const prev = changes.get(rel);
     const next: FileChangeDto = {
       path: rel,
       change: prev?.change === "created" ? "created" : info?.change ?? prev?.change ?? "modified",
@@ -199,13 +322,13 @@ export class SessionController {
       at: Date.now(),
       exact: false,
     };
-    this.changes.set(rel, next);
+    changes.set(rel, next);
 
     if (info) {
-      const run = this.turnEstimate.get(rel) ?? { added: 0, removed: 0 };
+      const run = turn.estimate.get(rel) ?? { added: 0, removed: 0 };
       run.added += info.added;
       run.removed += info.removed;
-      this.turnEstimate.set(rel, run);
+      turn.estimate.set(rel, run);
     }
     return next;
   }
@@ -218,10 +341,14 @@ export class SessionController {
    * subtracted rather than the total being overwritten, and why a file changed
    * in an earlier turn keeps the count it earned there.
    */
-  private reconcileChanges(stats: { file: string; added: number; removed: number }[]): void {
+  private reconcileChanges(
+    turn: LiveTurn,
+    stats: { file: string; added: number; removed: number }[]
+  ): void {
+    const changes = this.convo(turn.id).changes;
     const exact = new Map(stats.map((r) => [r.file, r]));
-    for (const [rel, est] of this.turnEstimate) {
-      const row = this.changes.get(rel);
+    for (const [rel, est] of turn.estimate) {
+      const row = changes.get(rel);
       if (!row) continue;
       const real = exact.get(rel);
       if (!real) {
@@ -230,21 +357,21 @@ export class SessionController {
         // no longer on disk.
         row.added -= est.added;
         row.removed -= est.removed;
-        if (row.added <= 0 && row.removed <= 0) this.changes.delete(rel);
+        if (row.added <= 0 && row.removed <= 0) changes.delete(rel);
         continue;
       }
       row.added = Math.max(0, row.added - est.added) + real.added;
       row.removed = Math.max(0, row.removed - est.removed) + real.removed;
       row.exact = true;
     }
-    this.turnEstimate.clear();
-    const ev: ReplayableEvent = { type: "changesUpdated", files: this.changedFiles() };
-    // Reconciliation lands after the turn's own events, so it buffers into
-    // whichever turn is still live here rather than through emit, which
-    // needs a turn this caller does not hold.
-    const live = this.activeTurn();
-    if (live) SessionController.bufferInto(live.replay, ev);
-    this.app.broadcast(ev);
+    turn.estimate.clear();
+    // Through `emit`, so the reconciliation follows its own turn: it buffers
+    // into that turn's replay and reaches the panel only when that turn's
+    // conversation is the one on screen. It used to buffer into whatever turn
+    // happened to be live in the visible conversation and broadcast
+    // unconditionally, which painted one conversation's file counts over
+    // another's.
+    this.emit(turn, { type: "changesUpdated", files: this.changedFiles(turn.id) });
   }
 
 
@@ -306,34 +433,27 @@ export class SessionController {
    * the difference is real: queuing never disturbs work in progress, steering
    * can change its direction but spends the tokens to do it.
    */
-  private queued: Array<{
-    id: string;
-    text: string;
-    attachments?: Array<{ name: string; mediaType: string; data: string }>;
-  }> = [];
   private queueSeq = 0;
-  private steer: Msg[] = [];
-  /**
-   * File chips for each pending steer, in the same order.
-   *
-   * Kept beside the messages rather than inside them because a `Msg` has
-   * nowhere to put a file name: an image is a content block with base64 in it
-   * and a text attachment has already been folded into the prose. The
-   * transcript still has to show the chip, so the names travel separately.
-   */
-  private steerFiles: AttachmentChipDto[][] = [];
-  /** Drained with the messages, consumed one per `steer` event from the loop. */
-  private steerFilesInFlight: AttachmentChipDto[][] = [];
 
-  /** Drained by the agent loop between model calls. */
-  private takeSteer = (): Msg[] => {
-    if (!this.steer.length) return [];
-    const out = this.steer;
-    this.steer = [];
-    this.steerFilesInFlight.push(...this.steerFiles);
-    this.steerFiles = [];
-    return out;
-  };
+  /**
+   * Drained by the agent loop between model calls.
+   *
+   * Bound to ONE turn. This used to be a single arrow function closing over a
+   * single array, and the same closure was handed to every `runAgent` - so
+   * with two turns live, whichever loop reached its boundary first took a
+   * steering message meant for the other and appended it to that
+   * conversation's history.
+   */
+  private takeSteerFor(turn: LiveTurn): () => Msg[] {
+    return () => {
+      if (!turn.steer.length) return [];
+      const out = turn.steer;
+      turn.steer = [];
+      turn.steerFilesInFlight.push(...turn.steerFiles);
+      turn.steerFiles = [];
+      return out;
+    };
+  }
 
   /**
    * One user turn, built from the text and whatever was attached.
@@ -539,11 +659,26 @@ export class SessionController {
     text: string,
     attachments?: Array<{ name: string; mediaType: string; data: string }>,
   ): Promise<void> {
-    if (this.running) {
+    // The turn running in the conversation the composer is pointed at, which
+    // is the only one a message typed into it can be talking to.
+    // An ABORTED turn is not a busy one. It keeps its `live` entry while it
+    // winds down - that is what stops its tail from clobbering whatever
+    // replaces it - but it will never read another message, so routing one
+    // into its steer list or its queue would drop it silently.
+    //
+    // `this.running` is kept as the fallback for the case where the flag is
+    // set but no turn is registered. Starting a second turn there would be the
+    // worse guess of the two: the queue holds the message until whatever is
+    // running lets go, and nothing is lost.
+    const busy = this.activeTurn();
+    const inFlight = busy ? !busy.finished && !busy.abort.signal.aborted : this.running;
+    if (inFlight) {
       // Refusing was the old behaviour and it made the composer feel broken:
       // a thought had to be held until the model happened to stop.
       if (!text.trim() && !(attachments ?? []).length) return;
-      if (this.app.inputWhileRunning() === "steer") {
+      // Steering needs a turn to steer. Without one the message falls through
+      // to the queue rather than being dropped into a list nothing drains.
+      if (busy && this.app.inputWhileRunning() === "steer") {
         // Composed the same way a normal turn is, so steering with a screenshot
         // or a log file attached sends the file rather than the sentence about
         // it. Without a profile there is nothing to compose against and nothing
@@ -554,17 +689,17 @@ export class SessionController {
           ? this.composeUserMessage(text, attachments, profile)
           : { role: "user", content: text };
         const chips = chipsFor(attachments);
-        this.steer.push(msg);
-        this.steerFiles.push(chips);
+        busy.steer.push(msg);
+        busy.steerFiles.push(chips);
         this.app.broadcast({
           type: "inputAccepted",
           mode: "steer",
           text,
-          depth: this.steer.length,
+          depth: busy.steer.length,
           files: chips,
         });
       } else {
-        this.queued.push({ id: `q${++this.queueSeq}`, text, attachments });
+        this.convo().queued.push({ id: `q${++this.queueSeq}`, text, attachments });
         this.broadcastQueue();
       }
       return;
@@ -616,7 +751,19 @@ export class SessionController {
       history: this.history,
       replay: [],
       title: this.title,
+      steer: [],
+      steerFiles: [],
+      steerFilesInFlight: [],
+      estimate: new Map(),
+      finished: false,
+      discarded: false,
     };
+    // A turn that is still winding down after an interrupt keeps its entry
+    // until it says it is finished, so this cannot displace one - but if a
+    // previous turn for this conversation is somehow still registered, it must
+    // be stopped rather than orphaned in the map with nothing able to reach it.
+    const stale = this.live.get(turn.id);
+    if (stale && stale !== turn) stale.abort.abort();
     this.live.set(turn.id, turn);
     // The history list marks a working conversation, so it is now stale.
     this.app.refreshSessions();
@@ -657,6 +804,8 @@ export class SessionController {
 
     const ctx: ToolContext = {
       root,
+      // So a tool already running when Stop is pressed is actually stopped.
+      signal: turn.abort.signal,
       // Reads may leave the workspace; writes never do, whatever this says.
       // Read through configDto rather than vscode.workspace directly: this
       // module has no vscode import on purpose, so the offline harness can
@@ -800,14 +949,22 @@ export class SessionController {
         // emit rather than broadcast: a webview that reloads mid-turn has to
         // come back with the same change list it had before, and a turn running
         // in a conversation the user has switched away from must not paint.
-        this.emit(turn, { type: "fileTouched", path: rel, file: this.recordChange(rel, change) });
-        if (this.app.uiConfig.openTouched !== false) void this.app.openPreview(abs);
+        this.emit(turn, { type: "fileTouched", path: rel, file: this.recordChange(turn, rel, change) });
+        // Only for the conversation on screen. A background turn opening a
+        // preview steals the editor for work the user is not watching.
+        if (turn.id === this.sessionId && this.app.uiConfig.openTouched !== false) {
+          void this.app.openPreview(abs);
+        }
       },
       onTodos: (todos: TodoItem[]) => {
         const dto: TodoDto[] = todos.map((t) => ({ content: t.content, status: t.status }));
-        this.app.todos = dto;
-        const ev: ReplayableEvent = { type: "todosUpdated", todos: dto };
-        this.emit(turn, ev);
+        // Filed under the turn's own conversation. `app.todos` is a single
+        // field the panel reads on `stateSync`, so a background turn writing
+        // straight to it replaced the visible conversation's checklist with
+        // one belonging to a chat the user was not looking at.
+        this.convo(turn.id).todos = dto;
+        if (turn.id === this.sessionId) this.app.todos = dto;
+        this.emit(turn, { type: "todosUpdated", todos: dto });
       },
     };
 
@@ -835,7 +992,7 @@ export class SessionController {
         // produces them, so tool calls survive into the next turn's context and
         // into a restored session.
         onMessage: (m) => turn.history.push(m),
-        takeSteer: this.takeSteer,
+        takeSteer: this.takeSteerFor(turn),
       })) {
         switch (ev.type) {
           case "text": {
@@ -918,7 +1075,7 @@ export class SessionController {
             const out: ReplayableEvent = {
               type: "steerAccepted",
               text: ev.text ?? "",
-              files: this.steerFilesInFlight.shift() ?? [],
+              files: turn.steerFilesInFlight.shift() ?? [],
             };
             this.emit(turn, out);
             break;
@@ -953,11 +1110,35 @@ export class SessionController {
       }
     }
 
+    /* THE TURN IS OVER HERE, AND NOT BEFORE.
+     *
+     * `interrupt()` used to declare it over the moment Stop was pressed - it
+     * deleted the entry from `live`, cleared `running` and broadcast a
+     * turnEnd - while this generator was still parked inside a tool call.
+     * `runTool` took no signal, so a `run_command` could hold it for the full
+     * ten-minute cap. The composer came back, a second turn started in the
+     * same conversation, and then this code ran and deleted THAT turn's entry
+     * and ended THAT turn's UI, leaving a stream nobody could stop writing
+     * into the same `history` array as its predecessor.
+     *
+     * Marking the turn finished here, and gating every release below on the
+     * map still pointing at THIS turn, is what makes the two orderings safe. */
+    turn.finished = true;
+
     this.persistTurn(turn);
 
     if (touched.size) {
       const preHash = await snapshot;
-      if (preHash) await this.emitDiffs(turnId, preHash, touched);
+      if (preHash) await this.emitDiffs(turn, turnId, preHash, touched);
+    }
+
+    // Only if nothing has taken this conversation's slot since. If a newer
+    // turn is registered here, it owns the composer and the `live` entry, and
+    // everything below belongs to it rather than to this turn.
+    const superseded = this.live.get(turn.id) !== turn;
+    if (superseded) {
+      this.app.refreshSessions();
+      return;
     }
 
     this.live.delete(turn.id);
@@ -978,9 +1159,10 @@ export class SessionController {
     // between them still lands.
     //
     // Only when the user is still looking at this conversation. Queued text was
-    // typed into the composer of the chat they have since left, and sending it
-    // now would start a turn in a conversation they are not in.
-    const next = turn.id === this.sessionId ? this.queued.shift() : undefined;
+    // typed into the composer of the chat they have since left; it stays in
+    // that conversation's own queue and is sent when they come back to it,
+    // rather than being fired into whichever chat is open now.
+    const next = turn.id === this.sessionId ? this.convo(turn.id).queued.shift() : undefined;
     if (next) {
       // The tray loses the row before the turn starts, so the message is in
       // exactly one place at a time - queued, or in the transcript. It used to
@@ -1006,7 +1188,12 @@ export class SessionController {
   }
 
   /** One diff card per touched file, each independently resolvable. */
-  private async emitDiffs(turnId: string, preHash: string, touched: Set<string>): Promise<void> {
+  private async emitDiffs(
+    turn: LiveTurn,
+    turnId: string,
+    preHash: string,
+    touched: Set<string>
+  ): Promise<void> {
     const shadow = this.app.shadow;
     if (!shadow) return;
 
@@ -1032,7 +1219,10 @@ export class SessionController {
       }
       const truncated = patch.length > PATCH_LIMIT;
       files.set(rel, "pending");
-      this.app.broadcast({
+      // Through the turn: a background turn's diff cards belong to its own
+      // conversation, and appearing over a different one is how a user ends up
+      // accepting a change they did not watch being made.
+      this.emit(turn, {
         type: "diffPending",
         turnId,
         file: rel,
@@ -1047,7 +1237,7 @@ export class SessionController {
     // Every path out of emitDiffs that got this far has real numbers; the two
     // early returns above leave the estimates standing, which is the honest
     // outcome when there is no shadow repository to check them against.
-    this.reconcileChanges(stats);
+    this.reconcileChanges(turn, stats);
   }
 
   async resolveDiff(turnId: string, file: string, decision: DiffDecision): Promise<void> {
@@ -1087,15 +1277,18 @@ export class SessionController {
 
     if (mode === "full-auto") return Promise.resolve(true);
     if (mode === "edits-auto" && !isCommand) return Promise.resolve(true);
-    if (!isCommand && this.alwaysAllowEdits) return Promise.resolve(true);
-    if (isCommand) {
-      const token = firstToken(summary);
-      if (token && this.app.alwaysAllowedCommands.includes(token)) return Promise.resolve(true);
+    // Scoped to the asking turn's conversation. "Always allow" is a decision
+    // about the chat you are in, and a background turn should not inherit one
+    // taken in a conversation it knows nothing about.
+    const convoId = turn?.id ?? this.sessionId;
+    if (!isCommand && this.convo(convoId).alwaysAllowEdits) return Promise.resolve(true);
+    if (isCommand && this.app.commandIsAlwaysAllowed(commandOf(summary))) {
+      return Promise.resolve(true);
     }
 
     const id = crypto.randomUUID();
     return new Promise<boolean>((resolve) => {
-      this.pending.set(id, { resolve, summary });
+      this.pending.set(id, { resolve, summary, turnId: convoId });
       const ev: ReplayableEvent = { type: "permissionRequest", id, summary, detail, patch };
       // Through the turn when there is one, so a question asked by a
       // background turn is buffered rather than shown over a different
@@ -1113,18 +1306,15 @@ export class SessionController {
 
     if (decision === "always") {
       if (entry.summary.startsWith("Run:")) {
-        const token = firstToken(entry.summary);
-        if (token) await this.app.rememberAllowedCommand(token);
+        await this.app.rememberAllowedCommand(commandOf(entry.summary));
       } else {
-        this.alwaysAllowEdits = true;
+        this.convo(entry.turnId).alwaysAllowEdits = true;
       }
     }
 
     entry.resolve(decision !== "deny");
     this.app.broadcast({ type: "permissionResolved", id, decision });
   }
-
-  /** Abort the run and deny everything waiting on the user. */
 
   /**
    * The browser this session drives, launched on first use.
@@ -1288,17 +1478,58 @@ export class SessionController {
    * "stop this", not "stop everything I have running elsewhere".
    */
   interrupt(): void {
-    const turn = this.activeTurn();
-    turn?.abort.abort();
-    if (turn) this.live.delete(turn.id);
-    for (const [id, entry] of this.pending) {
-      entry.resolve(false);
-      this.app.broadcast({ type: "permissionResolved", id, decision: "deny" });
-    }
-    this.pending.clear();
+    this.stopTurn(this.activeTurn());
+    // The composer comes back immediately either way. The turn itself may take
+    // a moment longer to unwind - a tool call already in flight gets its abort
+    // signal but a process still has to die - and `finished` plus the
+    // supersede check in `send()` is what keeps that safe.
     this.running = false;
     this.app.setRunning(false);
     this.app.broadcast({ type: "turnEnd" });
+  }
+
+  /**
+   * Stop a turn running in a conversation that is NOT on screen.
+   *
+   * Before this there was no such control anywhere. `interrupt()` deliberately
+   * reaches only the visible turn - Stop is a button in a chat and means "stop
+   * this" - which left a backgrounded turn with no way to be stopped at all.
+   * A turn blocked on an approval the user never saw asked, or inside a
+   * ten-minute command, ran until the window was reloaded, and the history
+   * list marked its conversation as working the whole time.
+   */
+  stopSession(id: string): void {
+    const turn = this.live.get(id);
+    if (!turn) return;
+    this.stopTurn(turn);
+    if (id === this.sessionId) {
+      this.running = false;
+      this.app.setRunning(false);
+      this.app.broadcast({ type: "turnEnd" });
+    }
+    this.app.refreshSessions();
+  }
+
+  /**
+   * Abort one turn and deny only the questions IT was waiting on.
+   *
+   * The scoping is the point. This loop used to run over the whole `pending`
+   * map, so pressing Stop in one conversation resolved every outstanding
+   * approval in every conversation as denied - a backgrounded turn was told
+   * "the user declined this edit" about a card the user had never been shown.
+   */
+  private stopTurn(turn: LiveTurn | undefined): void {
+    if (!turn) return;
+    turn.abort.abort();
+    for (const [id, entry] of [...this.pending]) {
+      if (entry.turnId !== turn.id) continue;
+      this.pending.delete(id);
+      entry.resolve(false);
+      this.app.broadcast({ type: "permissionResolved", id, decision: "deny" });
+    }
+    // Anything typed at this turn that it will now never read.
+    turn.steer = [];
+    turn.steerFiles = [];
   }
 
   /**
@@ -1336,6 +1567,9 @@ export class SessionController {
    * turn finishing should not change where the user lands.
    */
   private persistTurn(turn: LiveTurn): void {
+    // The conversation was deleted while this turn was running. Saving now
+    // would recreate the file the user just removed.
+    if (turn.discarded) return;
     if (!turn.history.length) return;
     this.app.sessions.save(turn.id, turn.history, turn.title);
     if (turn.id === this.sessionId) void this.app.rememberSession(turn.id);
@@ -1444,7 +1678,7 @@ export class SessionController {
   private broadcastQueue(): void {
     this.app.broadcast({
       type: "queueChanged",
-      items: this.queued.map((q) => ({
+      items: this.convo().queued.map((q) => ({
         id: q.id,
         text: q.text,
         files: chipsFor(q.attachments),
@@ -1454,9 +1688,10 @@ export class SessionController {
 
   /** Take a message back out of the queue. */
   cancelQueued(id: string): void {
-    const before = this.queued.length;
-    this.queued = this.queued.filter((q) => q.id !== id);
-    if (this.queued.length !== before) this.broadcastQueue();
+    const convo = this.convo();
+    const before = convo.queued.length;
+    convo.queued = convo.queued.filter((q) => q.id !== id);
+    if (convo.queued.length !== before) this.broadcastQueue();
   }
 
   /**
@@ -1469,15 +1704,17 @@ export class SessionController {
    * about the specific message it is being made about.
    */
   promoteQueued(id: string): void {
-    const item = this.queued.find((q) => q.id === id);
+    const convo = this.convo();
+    const item = convo.queued.find((q) => q.id === id);
     if (!item) return;
-    this.queued = this.queued.filter((q) => q.id !== id);
+    convo.queued = convo.queued.filter((q) => q.id !== id);
     this.broadcastQueue();
-    // `this.running` and not `app.running`: the App flag drives the status bar
-    // and is set for work that is not a turn, while this one is the flag
-    // `send()` itself gates on. Steering into a turn that is not there would
-    // put the message in a list nothing ever drains.
-    if (!this.running) {
+    // The turn in THIS conversation, which is the only one a message queued
+    // here can be steered into. `this.running` was close enough while state
+    // was single-valued; it is not now, and steering into a turn that is not
+    // there would put the message in a list nothing ever drains.
+    const turn = this.activeTurn();
+    if (!turn || turn.finished) {
       // Nothing to steer into. Send it as its own turn, which is what the
       // queue was going to do with it anyway.
       void this.send(item.text, item.attachments);
@@ -1488,13 +1725,13 @@ export class SessionController {
       ? this.composeUserMessage(item.text, item.attachments, profile)
       : { role: "user", content: item.text };
     const chips = chipsFor(item.attachments);
-    this.steer.push(msg);
-    this.steerFiles.push(chips);
+    turn.steer.push(msg);
+    turn.steerFiles.push(chips);
     this.app.broadcast({
       type: "inputAccepted",
       mode: "steer",
       text: item.text,
-      depth: this.steer.length,
+      depth: turn.steer.length,
       files: chips,
     });
   }
@@ -1508,7 +1745,11 @@ export class SessionController {
    * filed under a different id.
    */
   private announce(title: string): void {
-    this.app.broadcast({ type: "todosUpdated", todos: [] });
+    // The conversation's own todos and change list, not an empty pair. These
+    // were hardcoded to nothing, which was right while there was one of each
+    // on the controller and switching threw them away - and wrong now that
+    // coming back to a conversation is supposed to find its work where it was.
+    this.app.broadcast({ type: "todosUpdated", todos: this.convo().todos });
     this.app.broadcast({ type: "changesUpdated", files: this.changedFiles() });
     this.app.broadcast({
       type: "contextUsage",
@@ -1540,18 +1781,20 @@ export class SessionController {
       this.history = [];
     }
     this.title = title;
-    this.alwaysAllowEdits = false;
     this.turnDiffs.clear();
-    // The change list belongs to the conversation, so it leaves with it.
-    this.changes.clear();
-    // So does anything waiting to be said in it. These were typed into a
-    // composer that is no longer on screen; the old code left them in the
-    // array, invisible, to be sent into whatever conversation happened to be
-    // open when a turn next ended.
-    this.queued = [];
+    /* NOTHING BELONGING TO A CONVERSATION IS CLEARED HERE ANY MORE.
+     *
+     * This used to wipe the change list, the queue and the always-allow flag
+     * on every switch, because there was one of each and they had to belong to
+     * whichever conversation was on screen. Two things were wrong with that: a
+     * background turn kept writing into the cleared structures, so its file
+     * changes showed up under the wrong chat, and messages a user had queued
+     * were silently discarded the moment they looked at something else.
+     *
+     * They live on the `Conversation` record now, so switching simply reads a
+     * different one and switching back finds everything where it was left. */
+    this.app.todos = this.convo().todos;
     this.broadcastQueue();
-    this.turnEstimate.clear();
-    this.app.todos = [];
     this.app.lastContext = null;
     void this.app.rememberSession(this.sessionId);
     this.announce(title);
@@ -1570,17 +1813,26 @@ export class SessionController {
     // untouched conversation would walk "Untitled" up to "Untitled 7" for
     // someone who just pressed the button a few times.
     const rotate = this.history.length > 0;
-    // The browser belongs to the conversation that opened it: carrying a
-    // logged-in session into a fresh chat would surprise anyone who pressed
-    // New chat expecting a clean slate.
+    // A fresh chat gets a fresh browser: carrying a logged-in session into one
+    // would surprise anyone who pressed New chat expecting a clean slate.
     //
-    // Not while a turn is still using it, though. Closing Chrome underneath a
-    // backgrounded turn would fail its next browser call for a reason that has
-    // nothing to do with what it was asked to do.
-    if (!this.live.has(this.sessionId)) {
+    // Not while ANY turn is still using it. This checked only the conversation
+    // on screen, which is blind to exactly the case that matters - a turn left
+    // running in another conversation - so pressing New chat closed Chrome out
+    // from under it and its next browser call failed for a reason that had
+    // nothing to do with what it had been asked to do.
+    if (this.live.size === 0) {
       void this.cdp?.close();
       this.cdp = undefined;
     }
+    /* New chat means a clean slate, INCLUDING when the id is kept.
+     *
+     * Rotating mints a new id and `convo()` hands it a fresh record, so that
+     * case takes care of itself. Keeping the id is an optimisation to stop the
+     * history list churning for someone who pressed the button twice - it is
+     * not a promise that the chat still has its old change list and its old
+     * checklist in it, which is what leaving the record alone would mean. */
+    if (!rotate) this.convos.delete(this.sessionId);
     this.reset(rotate, rotate ? this.app.sessions.nextUntitled() : this.title);
   }
 
@@ -1607,6 +1859,23 @@ export class SessionController {
 
   /** Deleting the conversation in the composer drops you into a fresh one. */
   deleteSession(id: string): void {
+    /* A DELETED CONVERSATION HAS TO STOP WORKING, OR IT COMES BACK.
+     *
+     * Nothing here checked `live`. A turn running in the deleted conversation
+     * carried on and called `persistTurn` when it finished, which wrote the
+     * transcript straight back to disk - so the chat vanished from the list
+     * and reappeared a minute later with more messages in it than it had when
+     * it was deleted.
+     *
+     * Aborting is not enough on its own: the turn still runs its tail, and the
+     * tail persists. `discarded` is what that tail checks. */
+    const turn = this.live.get(id);
+    if (turn) turn.discarded = true;
+    this.stopSession(id);
+    this.live.delete(id);
+    // Its change list, queue and todos go with it. This is the one place a
+    // Conversation record is dropped: switching away keeps everything.
+    this.convos.delete(id);
     this.app.sessions.delete(id);
     if (id !== this.sessionId) {
       this.app.refreshSessions();
@@ -1630,10 +1899,14 @@ export class SessionController {
    * denied here would silently refuse an edit the user never saw asked.
    */
   private detach(): void {
+    /* Nothing is discarded here any more.
+     *
+     * This used to empty the steering queues, which belonged to the controller
+     * rather than to a turn - so leaving a conversation threw away messages
+     * typed at a turn that was still running and would still have read them.
+     * They live on the turn now, so a turn keeps whatever was said to it and
+     * the user finds it still pending when they come back. */
     this.running = false;
-    this.steer = [];
-    this.steerFiles = [];
-    this.steerFilesInFlight = [];
     this.app.setRunning(false);
   }
 
@@ -1655,7 +1928,10 @@ export class SessionController {
   dispose(): void {
     // Every turn, not just the visible one: the extension is going away, and a
     // request still in flight has nothing left to write into.
-    for (const turn of this.live.values()) turn.abort.abort();
+    for (const turn of this.live.values()) {
+      turn.abort.abort();
+      turn.finished = true;
+    }
     this.live.clear();
     for (const [, entry] of this.pending) entry.resolve(false);
     this.pending.clear();
@@ -1691,10 +1967,17 @@ export function extractPlan(raw: string): { body: string; steps: string[] } {
 }
 
 /** `Run: pytest -q` → `pytest`. Used for per-workspace command allow-listing. */
-function firstToken(summary: string): string | undefined {
-  const command = summary.replace(/^Run:\s*/, "").trim();
-  const token = command.split(/\s+/)[0];
-  return token || undefined;
+/**
+ * The command a "Run:" approval card is about, whole.
+ *
+ * This used to return the command's FIRST TOKEN, which was then both the
+ * lookup key and the thing remembered by "Always allow" - so a grant on
+ * `npm test` covered every line beginning with `npm`, and the shell ran
+ * whatever followed. The whole line is the only thing a user can actually be
+ * said to have approved, so the whole line is what travels.
+ */
+function commandOf(summary: string): string {
+  return summary.replace(/^Run:\s*/, "").trim();
 }
 
 function messageOf(e: unknown): string {

