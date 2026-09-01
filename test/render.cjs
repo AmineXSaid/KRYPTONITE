@@ -1322,6 +1322,43 @@ function contrast(a, b) {
     }
   }
 
+  /* ── 5m. a pill in the composer can always be dismissed ────────────── */
+  {
+    // Found by a responsive sweep, not by looking: #selText was a flex item at
+    // its default `min-width: auto`, so a long path could not shrink. It
+    // pushed the row 153px past the composer, which CLIPS - and the dismiss
+    // button went with it. Measured before the fix: composer right edge 384px,
+    // clear button at 537-555px, elementFromPoint said it was not there.
+    //
+    // A selection that cannot be cleared rides along with every message sent,
+    // which makes this a correctness bug wearing a layout bug's clothes.
+    //
+    // Asserted by HIT TESTING rather than by geometry: what matters is not
+    // where the button is but whether a click lands on it.
+    const LONG = "src/providers/very/deeply/nested/path/to/a/module/with/a/long/name.ts";
+    for (const width of [300, 340, 400, 520]) {
+      const { ctx, page } = await open(width, { selection: { file: LONG, startLine: 41, endLine: 58 } });
+      const hit = await page.evaluate(() => {
+        const btn = document.getElementById("selClear");
+        if (!btn) return { missing: true };
+        const r = btn.getBoundingClientRect();
+        const comp = document.querySelector(".composer").getBoundingClientRect();
+        const at = document.elementFromPoint(
+          Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2));
+        return {
+          inside: r.right <= comp.right + 1 && r.left >= comp.left - 1,
+          reachable: !!at && (at === btn || btn.contains(at)),
+          btn: [Math.round(r.left), Math.round(r.right)], comp: Math.round(comp.right),
+        };
+      });
+      ok(`the selection pill's dismiss button is inside the composer at ${width}px`,
+        hit.inside === true, JSON.stringify(hit));
+      ok(`and a click actually lands on it at ${width}px`,
+        hit.reachable === true, JSON.stringify(hit));
+      await ctx.close();
+    }
+  }
+
   /* ── 6. the session list, as the reference draws it ────────────────── */
   {
     const { ctx, page } = await open(400, {

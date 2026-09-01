@@ -1108,7 +1108,14 @@ function _sbRun() {
             '</div>' +
             '<div class="composer">' +
               '<div class="sel-pill" id="selPill" hidden>' + icon("i-file", "ic-13") +
-                '<span id="selText"></span><span class="sp"></span>' +
+                /* `ell` is not decoration here. Without it the span is a flex
+                   item at its default `min-width: auto`, so a long path cannot
+                   shrink: it pushed the row 153px past the composer, which
+                   CLIPS - and the dismiss button went with it. A selection on
+                   a deep path could not be cleared at any panel width, so it
+                   rode along with every message sent. The sibling ed-pill
+                   already carried this class; this one was missed. */
+                '<span class="ell" id="selText"></span><span class="sp"></span>' +
                 '<button class="tb-btn" id="selClear" title="Dismiss selection" aria-label="Dismiss selection" style="width:18px;height:18px">' + icon("i-x", "ic-9") + '</button>' +
               '</div>' +
               // The automatic one, above the attachments and visibly unlike
