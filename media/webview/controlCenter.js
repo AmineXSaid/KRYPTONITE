@@ -1480,7 +1480,43 @@ function _run() {
      worse than none. test/control-center.cjs pins the ones that are easy to
      get wrong against the source, so a limit cannot change here alone. */
 
-  function pre(lines) { return '<div class="pre">' + esc(lines.join("\n")) + "</div>"; }
+  /**
+   * A code block. `copyable` adds a copy button.
+   *
+   * It is opt-in rather than on every block, because half the blocks in these
+   * guides are ILLUSTRATIONS rather than templates: the skill folder tree
+   * carries an arrow annotation, the built-in tool names are a word list, and
+   * the five forms of `mcp:` have their meanings written down the right-hand
+   * side. A copy button on those hands the user something that does not parse,
+   * which is worse than no button - they would find out at load time, from a
+   * warning about a file they believed they had been given.
+   *
+   * The four that are marked copyable are complete, valid files as printed.
+   */
+  function pre(lines, copyable, lang) {
+    var body = '<div class="pre">' + esc(lines.join("\n")) + "</div>";
+    if (!copyable) return body;
+    /* A HEADER ROW, not a button floating over the block.
+    
+       Floating it was the first attempt and it is the obvious one: absolute,
+       top-right, with the block padded on that side to keep it off the text.
+       The padding holds for content that can WRAP, and a probe against the
+       four real templates came back clean at every width. It cannot hold in
+       general - `.pre` is `overflow-x: auto`, so a token with no break
+       opportunity runs straight under the button, and the reader can scroll
+       any line under it by hand. Reserving a gutter does not help: there is
+       nothing for the line to wrap at.
+    
+       A row above the block cannot be overlapped by anything, at any width,
+       for any content. It is also what the transcript's code blocks already
+       do (`.cb` / `.cb-h` in sidebar.css), so the two surfaces now offer copy
+       the same way instead of two ways. */
+    return '<div class="pre-wrap">' +
+      '<div class="pre-h"><span class="pre-l">' + esc(lang) + "</span>" +
+      '<button class="pre-copy" data-copy-pre title="Copy to clipboard" ' +
+      'aria-label="Copy this example to the clipboard">Copy</button></div>' +
+      body + "</div>";
+  }
   function kvTable(rows) {
     var h = "";
     for (var i = 0; i < rows.length; i++) {
@@ -1524,7 +1560,7 @@ function _run() {
         "",
         "For a worked example see handshake.md.",
         "For the report layout use templates/report.md."
-      ]) +
+      ], true, "SKILL.md") +
       '<div class="explainer" style="margin-top:9px"><b>The description is the entire trigger.</b> ' +
       "It is the only sentence the model sees before deciding whether to open the skill, so say " +
       "<i>when to use it</i>, not what it contains. A skill with no description still loads, and " +
@@ -1549,7 +1585,13 @@ function _run() {
       '<div class="explainer">A watcher on <code>' + dir + '</code> picks up new and changed skills ' +
       "without a reload. If one does not appear, the Skills tab has a Reload button and lists the " +
       "parse warnings. Every skill has a switch there: a disabled skill stays on disk and out of " +
-      "the prompt.</div></div>" +
+      "the prompt.</div>" +
+      /* The guide's own step 1 is "make the folder", and the panel can just
+         make it: the host mkdirs before revealing, so this works the first
+         time as well as the fortieth. A guide that describes a directory it
+         is perfectly able to open is asking the reader to do its job. */
+      '<div class="row-actions"><button class="btn" data-act="openSkills">' +
+      "Open " + dir + "</button></div></div>" +
 
       '<div class="block"><h4>Limits</h4>' +
       kvTable([
@@ -1580,7 +1622,7 @@ function _run() {
         "    }",
         "  }",
         "}"
-      ]) + "</div>" +
+      ], true, ".agent/mcp.json") + "</div>" +
 
       '<div class="block"><h4>2 &middot; A remote server (HTTP or SSE)</h4>' +
       '<div class="explainer">Anything with a <code>url</code>, or an explicit <code>type</code>, is ' +
@@ -1596,7 +1638,7 @@ function _run() {
         "    }",
         "  }",
         "}"
-      ]) +
+      ], true, ".agent/mcp.json") +
       '<div class="explainer" style="margin-top:9px"><code>type</code> may be <code>http</code>, ' +
       "<code>streamable-http</code> or <code>sse</code>. A server declared remote with no " +
       "<code>url</code> is reported as a warning rather than started.</div></div>" +
@@ -1633,7 +1675,14 @@ function _run() {
       '<div class="block"><h4>5 &middot; Load it</h4>' +
       '<div class="explainer">The MCP tab lists every declared server with its transport, its state ' +
       "and its tool count, and has a Reload button. A server that fails to start stays listed with " +
-      "its error rather than disappearing.</div></div>";
+      "its error rather than disappearing.</div>" +
+      /* `mcpOpenConfig`, not `openFile`: the file usually does not exist yet -
+         that is the whole case this button is for - and the host writes a
+         commented starter before opening. Posting `openFile` here would give
+         "Unable to resolve nonexistent file", which is the mistake the
+         protocol comment on McpOpenConfigMsg already records. */
+      '<div class="row-actions"><button class="btn" data-act="mcpOpen">' +
+      "Open .agent/mcp.json</button></div></div>";
   }
 
   /* ── how to prepare an agent ── */
@@ -1663,7 +1712,7 @@ function _run() {
         "",
         "You are a TLS triage specialist. You read captures and name the",
         "failure. You do not change configuration."
-      ]) +
+      ], true, ".agent/agents/tls-triage.md") +
       '<div class="explainer" style="margin-top:9px"><b>Only <code>name</code> is required</b>, and ' +
       "every omission means <i>unrestricted</i>, not <i>nothing</i>. An agent that declares no " +
       "<code>tools</code> gets the full built-in set; one that declares no <code>mcp</code> gets " +
@@ -1721,6 +1770,8 @@ function _run() {
       "than run.</div></div>" +
 
       '<div class="block"><h4>6 &middot; Use it</h4>' +
+      '<div class="row-actions" style="margin-bottom:9px">' +
+      '<button class="btn" data-act="newAgent">New agent from template</button></div>' +
       '<div class="explainer"><code>/agent</code> in the composer, the command palette, and the ' +
       "Agents tab all reach the same list. While an agent is active a bar under the tabs names it " +
       "and states its scope. The count on the Agents tab is <i>files that failed to parse</i>, not " +
@@ -2017,6 +2068,27 @@ function _run() {
       render();
       return;
     }
+    /* Before [data-act], because the copy button sits inside a block that has
+       none - and because delegation is the only option here: the guides are
+       written as innerHTML and re-rendered on every state sync, so a listener
+       bound per block would be dropped on the next flush. */
+    if ((t = e.target.closest("[data-copy-pre]"))) {
+      var block = t.parentElement && t.parentElement.querySelector(".pre");
+      if (block) {
+        post("copyText", { text: block.textContent });
+        /* Confirmed on the button itself rather than through setFlash: flash
+           goes through render(), which rebuilds the pane and would collapse
+           whichever accordion the reader had open to press it. */
+        var was = t.textContent;
+        t.textContent = "Copied";
+        t.setAttribute("data-done", "1");
+        setTimeout(function () {
+          t.textContent = was;
+          t.removeAttribute("data-done");
+        }, 1400);
+      }
+      return;
+    }
     if ((t = e.target.closest("[data-act]"))) {
       onAction(t.getAttribute("data-act"));
       return;
@@ -2068,6 +2140,8 @@ function _run() {
       case "trace": S.tracing = true; S.rungs = []; render(); post("runTrace"); break;
       case "reloadSkills": post("reloadSkills"); setFlash("reloadSkills"); break;
       case "openSkills": post("openSkillsFolder"); break;
+      case "mcpOpen": post("mcpOpenConfig"); break;
+      case "newAgent": post("newAgent"); break;
       case "export": post("exportBundle"); break;
       case "issues": post("openIssues"); break;
       case "copyEmail":

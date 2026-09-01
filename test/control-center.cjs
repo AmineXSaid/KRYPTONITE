@@ -548,6 +548,84 @@ const sync = (b, over) => b.send({ type: "stateSync", state: state(over) });
   ok("docs: the skills folder comes from config rather than a literal",
     SRC.includes("S.config.skillsDirectory"));
 
+  /* ── the copy buttons, and what they hand over ──────────────────────────
+     A guide that prints a config block and gives no way to take it is asking
+     the reader to retype JSON out of a webview. `copyText` was already wired
+     to the host, so the button costs nothing - but it is only worth having if
+     what it copies actually LOADS.
+
+     So the assertion is not "there is a button". It is that every block
+     wearing one parses as the format it claims to be, and that no block
+     WITHOUT one would have parsed either - which is what keeps the opt-in
+     honest as blocks are added. */
+  {
+    const wraps = [...b.pane().querySelectorAll(".pre-wrap")];
+    ok("docs: the templates carry a copy button", wraps.length === 4, String(wraps.length));
+
+    for (const w of wraps) {
+      const btn = w.querySelector("[data-copy-pre]");
+      const block = w.querySelector(".pre");
+      // The header names the file, so the row says what the block is as well
+      // as offering to copy it.
+      const label = w.querySelector(".pre-l");
+      ok("docs: a copyable block names the file it is",
+        !!label && /\.(md|json)$/.test(label.textContent.trim()),
+        label ? label.textContent : "(none)");
+      ok("docs: a copyable block has exactly one copy button",
+        !!btn && w.querySelectorAll("[data-copy-pre]").length === 1);
+      const t = block.textContent;
+      // Which format it is, decided by the text rather than by position, so
+      // reordering the guides cannot silently move an assertion onto the
+      // wrong block.
+      if (t.trim().startsWith("{")) {
+        let parsed = null, err = "";
+        try { parsed = JSON.parse(t); } catch (e) { err = String(e.message); }
+        ok("docs: a copyable JSON template is valid JSON", parsed !== null, err + " :: " + t.slice(0, 60));
+        ok("docs: and it declares mcpServers, so it is a whole file rather than a fragment",
+          parsed !== null && !!parsed.mcpServers, t.slice(0, 60));
+      } else {
+        // Frontmatter: opening ---, a closing ---, and a body after it.
+        const lines = t.split("\n");
+        ok("docs: a copyable frontmatter template opens with ---",
+          lines[0].trim() === "---", lines[0]);
+        const close = lines.indexOf("---", 1);
+        ok("docs: and closes its frontmatter", close > 1, String(close));
+        ok("docs: and has a name key, the one field both loaders require",
+          /^name:\s*\S/m.test(lines.slice(1, close < 0 ? 1 : close).join("\n")), t.slice(0, 80));
+      }
+    }
+
+    /* The other half: no block that is only an ILLUSTRATION may wear one. The
+       folder tree carries an arrow annotation, the tool list is a word list,
+       and the five forms of `mcp:` have their meanings written down the
+       right-hand side - each would hand over something that does not parse. */
+    const bare = [...b.pane().querySelectorAll(".pre")].filter((e) => !e.closest(".pre-wrap"));
+    ok("docs: the illustration blocks are still there to check", bare.length >= 3, String(bare.length));
+    for (const e of bare) {
+      const t = e.textContent;
+      const looksLikeAFile = t.trim().startsWith("{") || t.trim().startsWith("---");
+      ok("docs: nothing that reads as a whole file was left without a copy button",
+        !looksLikeAFile, t.slice(0, 60));
+    }
+  }
+
+  /* Each guide ends with the action that performs the step it describes. The
+     messages are the host's existing ones; the assertion is that the button
+     posts the RIGHT one, since `openFile` on `.agent/mcp.json` - the obvious
+     wrong choice - fails precisely in the case the button exists for. */
+  {
+    const acts = [...b.pane().querySelectorAll("[data-act]")].map((e) => e.getAttribute("data-act"));
+    for (const a of ["openSkills", "mcpOpen", "newAgent"]) {
+      ok(`docs: the guides offer the ${a} action`, acts.includes(a), acts.join(","));
+    }
+    b.sent.length = 0;
+    b.click('[data-act="mcpOpen"]');
+    ok("docs: the MCP guide's button posts mcpOpenConfig, which writes a starter when the file is missing",
+      b.sent.some((m) => m.type === "mcpOpenConfig"), JSON.stringify(b.sent));
+    ok("docs: and never openFile, which errors on the path that is not there yet",
+      !b.sent.some((m) => m.type === "openFile"), JSON.stringify(b.sent));
+  }
+
   ok("docs: renders without throwing", b.errors.length === 0, b.errors.join(" | "));
   b.dom.window.close();
 }
