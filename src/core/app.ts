@@ -12,6 +12,7 @@ import {
   interpolate,
 } from "../endpoints/profile";
 import type { ProviderConfig } from "../browser/search";
+import { readZip, guessTextType } from "./zip";
 import { clearAuthCache, authCacheReport } from "../endpoints/auth";
 import { clearSecureContexts } from "../endpoints/transport";
 import { EndpointClient } from "../providers/client";
@@ -1525,9 +1526,106 @@ export class App {
     if (uris.length) await this.attachUris(uris);
   }
 
-  /** Read, size-check and base64 a set of URIs, then hand them to the panel. */
+  /**
+   * Turn an archive into the files inside it.
+   *
+   * A zip handed over as base64 is an opaque blob: `composeUserMessage`
+   * decodes text attachments and inlines them, and a zip decodes to nothing a
+   * model can read, so attaching one was a no-op wearing a chip. Expanding it
+   * here means the panel treats `report.zip` as the twelve source files it
+   * holds, each named `report.zip/src/thing.ts`, which is what someone
+   * dragging an archive in meant.
+   *
+   * WHAT IS LEFT OUT, AND WHY EACH
+   *
+   * - Directory records: no bytes.
+   * - The junk every archive of a project carries - `node_modules`, `.git`,
+   *   build output, macOS resource forks. These are the bulk of the entries
+   *   and none of them is what the archive was attached for. A model asked to
+   *   read a project does not want its lockfile tree.
+   * - Files that are not text and not images. The pipeline can use those two;
+   *   everything else would arrive as a note saying it could not be read.
+   *
+   * WHAT IS BOUNDED, AND WHY
+   *
+   * The owner asked for no size limit and there is none on the archive. There
+   * are bounds on what comes OUT of one, which is a different thing: an
+   * archive is attacker-supplied structure, and a 42-kilobyte zip that
+   * expands to several petabytes is a known shape. `MAX_TOTAL` stops reading
+   * rather than refusing the file, so a bomb yields what fitted plus a note,
+   * and an ordinary archive never reaches it.
+   */
+  private expandArchive(
+    buf: Buffer,
+    archiveName: string,
+    MIME: Record<string, string>
+  ): Array<{ name: string; mediaType: string; data: string; size: number }> {
+    const out: Array<{ name: string; mediaType: string; data: string; size: number }> = [];
+    // Generous enough that no real project archive meets them, small enough
+    // that a bomb stops early.
+    const MAX_ENTRIES = 400;
+    const MAX_TOTAL = 64 * 1024 * 1024;
+    const SKIP = /(^|\/)(node_modules|\.git|__MACOSX|\.DS_Store|dist|build|out|coverage|\.next|target|vendor|\.venv|venv|__pycache__)(\/|$)/;
+
+    let listing: ReturnType<typeof readZip>;
+    try {
+      listing = readZip(buf);
+    } catch (e) {
+      void vscode.window.showWarningMessage(
+        `${archiveName} could not be opened: ${e instanceof Error ? e.message : String(e)}`
+      );
+      return out;
+    }
+
+    const notes: string[] = [...listing.problems];
+    let total = 0;
+    let skipped = 0;
+    let taken = 0;
+
+    for (const entry of listing.entries) {
+      if (entry.directory) continue;
+      if (SKIP.test(entry.name)) { skipped++; continue; }
+      if (taken >= MAX_ENTRIES) { skipped++; continue; }
+      if (total + entry.size > MAX_TOTAL) { skipped++; continue; }
+
+      const ext = path.extname(entry.name).toLowerCase();
+      const mediaType = MIME[ext] ?? guessTextType(entry.name);
+      if (!mediaType) { skipped++; continue; }
+
+      let data: Buffer;
+      try {
+        data = entry.read();
+      } catch (e) {
+        // Named, not swallowed: getting fewer files than the archive holds is
+        // exactly the failure worth seeing.
+        notes.push(`${entry.name}: ${e instanceof Error ? e.message : String(e)}`);
+        continue;
+      }
+      total += data.byteLength;
+      taken++;
+      out.push({
+        name: `${archiveName}/${entry.name}`,
+        mediaType,
+        data: data.toString("base64"),
+        size: data.byteLength,
+      });
+    }
+
+    const summary =
+      `${archiveName}: attached ${taken} file${taken === 1 ? "" : "s"}` +
+      (skipped ? `, skipped ${skipped}` : "") +
+      (notes.length ? ` - ${notes.slice(0, 3).join("; ")}` : "");
+    this.log(taken ? "info" : "warn", summary);
+    if (!taken) {
+      void vscode.window.showWarningMessage(
+        `${archiveName} held nothing that could be attached${notes.length ? `: ${notes[0]}` : "."}`
+      );
+    }
+    return out;
+  }
+
+  /** Read and base64 a set of URIs, expanding archives, then hand them to the panel. */
   private async attachUris(uris: vscode.Uri[]): Promise<void> {
-    const MAX = 10 * 1024 * 1024; // 10 MB per file
     const MIME: Record<string, string> = {
       ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
       ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
@@ -1537,22 +1635,45 @@ export class App {
       ".pdf": "application/pdf",
     };
 
+    /* THERE IS NO SIZE LIMIT, at the owner's instruction.
+    
+       There was: 10 MB, and anything past it was refused outright with
+       "Limit is 10 MB", which is how an 11.2 MB archive of a project - the
+       ordinary thing someone wants to hand to a coding assistant - became
+       something the panel would not look at.
+    
+       One honest caveat, since "no limit" cannot be made literally true: a
+       file is read into memory and base64'd, which is a third larger again,
+       and V8 caps a single string at around 512 MB. Past that the RUNTIME
+       refuses, not this code, and it does so with a real error naming the
+       file rather than a policy sentence about a limit nobody chose. That is
+       the difference that matters: nothing here decides a file is too big.
+    
+       Archives are the reason the old number hurt most, and they are handled
+       below rather than by raising a threshold - a 11 MB zip handed over as
+       base64 is 15 MB of opaque payload that no model can read. */
+
     const files: Array<{ name: string; mediaType: string; data: string; size: number }> = [];
     for (const uri of uris) {
+      const base = path.basename(uri.fsPath);
       try {
         const raw = await vscode.workspace.fs.readFile(uri);
-        if (raw.byteLength > MAX) {
-          void vscode.window.showWarningMessage(
-            `${path.basename(uri.fsPath)} is too large (${(raw.byteLength / 1024 / 1024).toFixed(1)} MB). Limit is 10 MB.`
-          );
+        const ext = path.extname(uri.fsPath).toLowerCase();
+        if (ext === ".zip") {
+          files.push(...this.expandArchive(Buffer.from(raw), base, MIME));
           continue;
         }
-        const ext = path.extname(uri.fsPath).toLowerCase();
         const mediaType = MIME[ext] ?? "application/octet-stream";
         const data = Buffer.from(raw).toString("base64");
-        files.push({ name: path.basename(uri.fsPath), mediaType, data, size: raw.byteLength });
+        files.push({ name: base, mediaType, data, size: raw.byteLength });
       } catch (e) {
-        void vscode.window.showWarningMessage(`Could not read ${path.basename(uri.fsPath)}.`);
+        // The message, not a generic sentence: the reasons a read fails here
+        // are worth telling apart - a permission error, a file that vanished
+        // between the drop and the read, and a string too long for V8 are
+        // three different things to do next about.
+        void vscode.window.showWarningMessage(
+          `Could not read ${base}: ${e instanceof Error ? e.message : String(e)}`
+        );
       }
     }
     if (files.length) this.broadcast({ type: "attachmentsReady", files });
