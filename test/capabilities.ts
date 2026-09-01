@@ -99,7 +99,12 @@ const read = () => fs.readFileSync(file, "utf8");
       "capabilities:\n  toolChoice: true\n  tokenCounting: heuristic\n  vision: true\n");
     const p = loadProfile(file);
     ck(p.capabilities.vision === true, "a retired setting does not stop the file loading");
-    ck(!("toolChoice" in p.capabilities), "and does not survive into the parsed profile");
+    // It survives into the parsed object and is read by nothing, which is the
+    // point: a key that was removed has to be inert, not fatal. Rejecting it
+    // would turn deleting a dead field into an endpoint that stops connecting
+    // for everyone who ever wrote it down.
+    ck((p.capabilities as any).toolChoice === true, "it is simply inert");
+    ck(p.capabilities.contextWindow > 0, "and the rest of the block still applies");
   }
   {
     // No capabilities block at all: one gets created rather than nothing

@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import * as crypto from "node:crypto";
 
 /**
  * HTML shells for the two webview surfaces.
@@ -33,17 +33,28 @@ function csp(webview: vscode.Webview, nonce: string): string {
 }
 
 /**
- * The nonce is the whole of `script-src`, so it has to be unguessable.
+ * The nonce is the only script permission the CSP grants, so it has to be
+ * unguessable.
  *
- * This was 32 characters of `Math.random()`, which is a fast PRNG with a
- * recoverable internal state and no security claim of any kind. The CSP above
- * is the only thing standing between untrusted model output rendered into this
- * document and script execution inside it; deriving its one secret from a
- * generator that is documented as "not cryptographically secure" undercuts the
- * entire policy. `node:crypto` was already a dependency of four other files.
+ * This drew from `Math.random()`, which is a fast PRNG and not a random source:
+ * its state is recoverable from a handful of outputs. That matters because the
+ * nonce is the whole of `script-src` - there is no `unsafe-inline` to fall back
+ * on and no allowed origin - so a predictable one is the difference between
+ * "an injected `<script>` cannot run" and "an injected `<script>` runs if the
+ * attacker can guess a number". Nothing in this panel is known to be
+ * injectable, and the markdown renderer escapes before it parses; this is the
+ * layer that has to hold when something else does not.
+ *
+ * `crypto.randomBytes` was already used elsewhere in this codebase, so this was
+ * an oversight rather than a constraint.
+ *
+ * Hex rather than base64: 16 bytes is 128 bits either way, and the hex
+ * alphabet has no character that anything downstream has to think about. The
+ * nonce is interpolated into an HTML attribute and string-compared in three
+ * places, and `activation.ts` has always asserted the shape it appears in.
  */
 function makeNonce(): string {
-  return crypto.randomBytes(24).toString("base64url");
+  return crypto.randomBytes(16).toString("hex");
 }
 
 /**
@@ -112,6 +123,30 @@ function assetUri(
   return webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, ...parts));
 }
 
+/**
+ * The build that produced this document, handed to the frontend.
+ *
+ * The host<->webview contract is enforced entirely by TypeScript at build
+ * time. At runtime both sides switch on `type` and silently ignore anything
+ * they do not recognise, and nothing detects that they disagree - so a webview
+ * VS Code served from its cache after an extension update produces a control
+ * that does nothing, with no error and no log line. That is a support ticket
+ * with no diagnostic path, and it arrives during upgrades, which is when a
+ * hundred people move at once.
+ *
+ * Read from the manifest rather than hardcoded, so it cannot drift.
+ */
+function buildVersion(extensionUri: vscode.Uri): string {
+  try {
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(extensionUri.fsPath, "package.json"), "utf8")
+    );
+    return String(pkg.version ?? "0.0.0");
+  } catch {
+    return "0.0.0";
+  }
+}
+
 function shell(
   webview: vscode.Webview,
   extensionUri: vscode.Uri,
@@ -144,7 +179,11 @@ ${fontFaces(extensionUri, webview)}
 <body>
 <div id="root"></div>
 <script nonce="${nonce}">
-  window.__kx = { api: acquireVsCodeApi(), surface: ${JSON.stringify(surface)} };
+  window.__kx = {
+    api: acquireVsCodeApi(),
+    surface: ${JSON.stringify(surface)},
+    build: ${JSON.stringify(buildVersion(extensionUri))},
+  };
 </script>
 <script nonce="${nonce}" src="${crystal}"></script>
 <script nonce="${nonce}" src="${js}"></script>
@@ -197,7 +236,11 @@ ${fontFaces(extensionUri, webview)}
 <body>
 <div id="root"></div>
 <script nonce="${nonce}">
-  window.__kx = { api: acquireVsCodeApi(), surface: "browser" };
+  window.__kx = {
+    api: acquireVsCodeApi(),
+    surface: "browser",
+    build: ${JSON.stringify(buildVersion(extensionUri))},
+  };
 </script>
 <script nonce="${nonce}" src="${js}"></script>
 </body>
@@ -222,9 +265,4 @@ export function webviewOptions(extensionUri: vscode.Uri): vscode.WebviewOptions 
       ...(vscode.workspace.workspaceFolders ?? []).map((f) => f.uri),
     ],
   };
-}
-
-/** Unused by the shells, kept beside them because it is the same asset concern. */
-export function mediaPath(extensionUri: vscode.Uri, ...parts: string[]): string {
-  return path.join(extensionUri.fsPath, "media", ...parts);
 }

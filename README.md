@@ -14,12 +14,24 @@ Genesis treats the endpoint as the product.
 ## Endpoint profiles
 
 Profiles are YAML files in `.agent/endpoints/` — in your repo, versioned,
-shared with your team. Secrets never live in them: `${env:VAR}` reads the
+shared with your team, so keep secrets out of them: `${env:VAR}` reads the
 environment, `${secret:NAME}` reads the VS Code secret store (key
 `genesis.NAME`), `${file:path}` reads a file, all resolved at request time.
 
-Supported wire formats: `openai`, `anthropic`, and `raw` with a sandboxed
-JavaScript transform module that reshapes anything neither adapter can express.
+Nothing stops you writing a key in directly and nothing will break if you do,
+which is exactly why it happens while you are getting a gateway to answer for
+the first time. Two things catch it: the offline bundle scans what it copies
+and redacts anything that looks like a credential, listing each one in its
+README; and a profile is a file in a repo, so a key in one is a key in your
+git history.
+
+Supported wire formats: `openai`, `anthropic`, and `raw` with a JavaScript
+transform module that reshapes anything neither adapter can express. A
+transform is **arbitrary code running in the extension host** — it is loaded
+with `node:vm`, which is an isolation primitive and not a security boundary —
+so treat one the same way you would treat a build script in the same repo.
+Genesis declares that it does not support untrusted workspaces, so VS Code
+keeps it off entirely until you have trusted the folder.
 
 ### What kind of model is behind it
 
@@ -366,16 +378,33 @@ For air-gapped installs, package on a connected machine and hand over the
 `.vsix`. It ships no `node_modules`, makes no runtime network calls, and loads
 no remote fonts or icons.
 
+**Export offline bundle** carries the workspace's `.agent/` configuration
+alongside it. It scans every file it copies for credentials, replaces what it
+finds, and lists each redaction by file and line in the bundle's own README —
+so what that README says about credentials is what was actually found rather
+than what the convention hoped for. The originals on your own machine are left
+untouched, and are still worth moving into the secret store.
+
 ## Verification
 
 VS Code cannot be launched in a headless build environment, so the extension is
 verified statically instead:
 
 ```bash
-npm run verify       # typecheck plus every suite below
-node test/host.js    # activates dist/extension.js against a vscode stub
-node test/drive.js   # drives the real sidebar frontend in jsdom
+npm run verify         # typecheck, every suite, and the packaged .vsix suites
+npm test               # just the suites that need nothing installed
+node test/run.js reply # any subset, by substring
+node test/run.js --list
 ```
+
+The runner **discovers** suites rather than being handed a list: everything in
+`test/` runs. A suite opts out only by declaring why in its own header —
+`@requires-network`, `@requires-install` or `@requires-package` — and each of
+those tags has a script that supplies what it needs (`test:live`, `test:mcp`,
+`test:package`). `test/host-safety.ts` asserts that every tag is covered by a
+script, because the failure this replaced was invisible: `npm test` was a
+3,000-character string naming fifty files by hand, and a suite left out of it
+sat in `test/` looking like coverage while never once executing.
 
 `host.js` checks that every contributed command is registered and exercises the
 session lifecycle; `drive.js` renders the webview into a real DOM and asserts on

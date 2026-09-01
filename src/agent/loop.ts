@@ -17,8 +17,81 @@ const HOLD_RE = /^(```|<\/?(?:tool_call|function)\b|[^A-Za-z\s]{0,12}\{)/i;
 /** The same XML call, found anywhere rather than only at the start. */
 const XML_CALL_RE = /<(?:tool_call\s*>|function\s*=)/i;
 import { TOOL_DEFS, runTool, ToolContext, ToolResult } from "./tools";
+import { estimateTokens, messageTokens } from "./tokens";
+import type { MicroCompactor } from "./compact";
+/* Re-exported from their new home so every existing importer - and the tests
+   that pin what an image is allowed to cost - keeps working unchanged. */
+export { estimateTokens, messageTokens } from "./tokens";
 import { skillIndex, Skill } from "../skills/loader";
 import { agentAllowsTool, agentPrompt, agentRefusal, type Agent } from "../agents/loader";
+
+/**
+ * Why a run ended.
+ *
+ * `aborted` and `interrupted` are both the user pressing stop, and they are
+ * kept apart because the transcripts differ: `aborted` is a clean stop at the
+ * boundary between two model calls, while `interrupted` stopped with tool
+ * calls already on the wire and had to answer each of them with
+ * INTERRUPTED_RESULT to keep the conversation resumable.
+ */
+export type ExitReason =
+  | "done"
+  | "aborted"
+  | "interrupted"
+  | "budget_exhausted"
+  | "max_iterations"
+  | "failing"
+  | "error";
+
+/**
+ * Consecutive failing steps before the loop stops trying.
+ *
+ * Hermes's `_MAX_OUTER_LOOP_ERRORS`, and their note on why it exists is the
+ * whole argument for having one: a permanent failure spun at roughly sixty-four
+ * retries a second and overwrote the rotated log history, destroying the
+ * evidence needed to diagnose it. The failure that costs you the most is the
+ * one that also erases its own cause.
+ *
+ * Genesis cannot spin that fast - a stream error ends the turn outright here -
+ * but it has the slower version of the same shape: a model that keeps calling
+ * a tool which keeps failing burns every remaining step and the tokens of a
+ * growing transcript, and today only the step cap stops it, with a message
+ * blaming the size of the task. A step counts as failing when it made tool
+ * calls and every one came back an error, or when the gateway sent frames that
+ * would not decode. Any step that gets real work done resets the count, so a
+ * tool that fails once in the middle of a working turn is not a failure run.
+ */
+const MAX_CONSECUTIVE_ERRORS = 8;
+
+/**
+ * How many context windows a single turn may spend before it is stopped.
+ *
+ * The step cap alone is a poor proxy for cost, which is what anybody actually
+ * wants bounded: twenty-five steps against a 200k window and twenty-five short
+ * ones differ by three orders of magnitude and the loop could not tell them
+ * apart. Expressed as a multiple of the window rather than an absolute number
+ * so it scales with the endpoint instead of needing a different value per
+ * profile, and set so it bites before the step cap only on turns that are
+ * genuinely expensive: at ten windows, a run that fills the context every step
+ * stops around step ten, while a run of short steps reaches twenty-five and is
+ * stopped by the step cap, as it always was.
+ */
+const TOKEN_BUDGET_WINDOWS = 10;
+
+/**
+ * What the model is told when the budget runs out, as one last user turn.
+ *
+ * The grace call this introduces is worth the one extra request. Stopping dead
+ * on the step after a tool result leaves the work unreported: the model has
+ * read six files and formed an answer, and the transcript ends with the sixth
+ * file. Asking for the summary costs one call with no tools attached and turns
+ * a truncated run into a short one.
+ */
+export const BUDGET_EXHAUSTED_NOTICE =
+  "You have used the whole token budget for this turn, so this is your last " +
+  "message and no more tools will run. Do not start anything new. Say what you " +
+  "found, what you changed, and what is left to do, so the user can carry on " +
+  "from here or send you back in with a narrower task.";
 
 export interface AgentEvent {
   /**
@@ -30,8 +103,19 @@ export interface AgentEvent {
    */
   type:
     | "text" | "reasoning" | "text_reset" | "tool_start" | "tool_end"
-    | "turn_end" | "error" | "context" | "steer";
+    | "turn_end" | "error" | "context" | "steer" | "exit";
   text?: string;
+  /**
+   * Why the turn stopped. Emitted exactly once, as the last event of every
+   * run - including the ones that used to end by falling off the bottom of the
+   * loop and saying nothing at all.
+   *
+   * A turn that stops is not self-explanatory from the outside. An abort, an
+   * exhausted budget, a step cap and a run of failing tools all look identical
+   * in a transcript: the model was talking, and then it was not. Naming the
+   * reason is the difference between "it broke" and "it hit the cap you set".
+   */
+  exit?: ExitReason;
   tool?: { name: string; args: any; result?: string; isError?: boolean };
   error?: string;
   /**
@@ -45,8 +129,16 @@ export interface AgentEvent {
    */
   errorFix?: string;
   errorDetail?: string;
-  /** `exact` is true only when the endpoint reported real token usage. */
-  context?: { used: number; limit: number; exact: boolean };
+  /**
+   * `exact` is true only when the endpoint reported real token usage.
+   *
+   * `cacheRead` and `cacheWrite` are the prompt-cache counters, present only
+   * when the gateway reports them. They were decoded by the client and then
+   * dropped on the floor, which for a build whose headline is that prompt
+   * caching now works is the one number nobody could see - and the reason a
+   * regression of it could run for months unnoticed.
+   */
+  context?: { used: number; limit: number; exact: boolean; cacheRead?: number; cacheWrite?: number };
 }
 
 const SYSTEM = `You are a coding agent working inside a VS Code workspace.
@@ -101,10 +193,17 @@ export type Phase = (typeof PHASES)[number];
  * promise held only as long as the model chose to honour it.
  *
  * MCP tools are refused outside Act unless the user vouched for their server.
- * The protocol has no way for a server to declare a tool read-only, so there is
- * nothing this code can check - but the person who wrote `.agent/mcp.json` can
- * check, and `readOnly: true` is them saying they did. That claim is the only
- * thing that opens Ask and Plan to an MCP tool.
+ *
+ * This used to say the protocol has no way for a server to declare a tool
+ * read-only, which is simply not true: MCP tools carry an
+ * `annotations.readOnlyHint`, and it is captured at discovery. What is true is
+ * that the hint is the server's own word about itself, and a server that means
+ * harm can set it. So it cannot be the thing that opens Ask and Plan - it would
+ * let any server talk its way into the two modes whose whole promise is that
+ * nothing changes. `readOnly: true` in `.agent/mcp.json` is a different claim
+ * with a different author: the person running the workspace, who can look. That
+ * claim is the only one that opens Ask and Plan to an MCP tool, and the hint is
+ * used only to warn when the two disagree.
  *
  * `mcpReadOnly` is optional, and its absence means "no server is vouched for".
  * A caller that does not pass it gets the old blanket refusal, which is the
@@ -314,67 +413,16 @@ export function parseTextToolCall(
   return { name, arguments: args, consumed: text };
 }
 
-/** No tokenizer, no network. Deliberately conservative so air-gapped setups work. */
-export function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 3.6);
-}
-
-/**
- * Messages are immutable once appended, so their size is worth remembering.
- *
- * This re-serialised every message on every iteration of the agent loop, which
- * on a long transcript meant megabytes of JSON.stringify blocking the
- * extension host immediately before the request went out.
+/*
+ * The old wording ended "Ask if you need something from them", which was an
+ * offer nothing could honour: the turns are not archived anywhere, they are
+ * discarded, and a model that asked would be told nothing. Saying so plainly
+ * is worth more - a model that knows a fact is unrecoverable re-derives it,
+ * where one that thinks it can ask waits for an answer that is not coming.
  */
-const tokenCache = new WeakMap<Msg, number>();
-
-/**
- * What an image costs a model, which is a count of pixels and not of bytes.
- *
- * Both major wires price an image by its dimensions - roughly width times
- * height over 750 - so the same photograph costs the same whether it arrived
- * as a 1.2 MB png or the 170 KB jpeg of the identical picture.
- *
- * Measuring the base64 instead, which is what serialising the content block
- * does, is not a small error: one 1280x800 screenshot is about 1,400 tokens
- * and about 570 KB of base64, so counting the characters overstates it by a
- * factor of a hundred. On a 32k gateway that is the difference between a
- * screenshot costing four percent of the window and appearing to cost five
- * times the whole of it - at which point `fitToWindow` throws the entire
- * conversation away to make room for something that already fits.
- *
- * Only the header is decoded. It is the first few bytes, and decoding half a
- * megabyte of base64 to read six of them would be its own kind of waste.
- */
-const IMAGE_TOKENS_UNKNOWN = 1_600;
-
-function imageBlockTokens(b: { mediaType: string; data: string }): number {
-  const d = imageDimensions(Buffer.from(b.data.slice(0, 4096), "base64"));
-  if (!d || !d.width || !d.height) return IMAGE_TOKENS_UNKNOWN;
-  return Math.ceil((d.width * d.height) / 750);
-}
-
-function contentTokens(content: Msg["content"]): number {
-  if (typeof content === "string") return estimateTokens(content);
-  let n = 0;
-  for (const b of content) {
-    n += b.type === "image" ? imageBlockTokens(b) : estimateTokens(b.text);
-  }
-  return n;
-}
-
-/** Exported for the tests that pin what an image is allowed to cost. */
-export function messageTokens(m: Msg): number {
-  const hit = tokenCache.get(m);
-  if (hit !== undefined) return hit;
-  const n =
-    contentTokens(m.content) + (m.toolCalls ? estimateTokens(JSON.stringify(m.toolCalls)) : 0) + 8;
-  tokenCache.set(m, n);
-  return n;
-}
-
 export const WINDOW_NOTE =
-  "[Earlier turns were dropped to stay within the context window. Ask if you need something from them.]";
+  "[Earlier turns were discarded to stay within the context window and cannot be " +
+  "recovered. If you need something from them, work it out again from the workspace.]";
 
 /** What replaces the body of a message too large to send whole. */
 function truncatedMarker(dropped: number): string {
@@ -440,7 +488,13 @@ function groupTurns(msgs: Msg[]): Msg[][] {
  * Drop the oldest exchanges when the window fills, always keeping the system
  * prompt, the first user turn, and never orphaning a tool result from its call.
  *
- * THREE THINGS THIS GOT WRONG, AND WHY EACH ONE MATTERED.
+ * The backstop, not the strategy. `MicroCompactor` runs ahead of this and
+ * absorbs old exchanges into summaries, which is strictly better because what
+ * it removes is still represented. This is what happens when that is off, has
+ * no auxiliary model, is cooling down after a failure, or could not free
+ * enough - and what happened on every long run before it existed.
+ *
+ * THREE THINGS THIS GOT WRONG AS THAT BACKSTOP, AND WHY EACH ONE MATTERED.
  *
  * It kept `messages.slice(0, 2)` as the head, on the assumption that index 1
  * is the first user turn. When it was an assistant turn holding tool calls -
@@ -552,6 +606,15 @@ export const INTERRUPTED_RESULT =
   "The user interrupted this turn before this tool ran. It did not execute and " +
   "nothing changed. Do not assume it succeeded or retry it without being asked.";
 
+/**
+ * Stands in for a reply that turned out to be nothing at all.
+ *
+ * Written as the model's own words rather than as a bracketed note, because it
+ * is going into the assistant channel and a later turn reads it as something it
+ * said. Short and honest beats an empty string, which no wire accepts.
+ */
+export const EMPTY_REPLY = "(No answer was produced for that step.)";
+
 export const IMAGE_EVICTED =
   "[An earlier image was dropped here to keep this request inside the endpoint's " +
   "image budget. Take another screenshot if you still need to see that page.]";
@@ -634,6 +697,22 @@ export interface AgentRunOptions {
    */
   userMessage: string | Msg;
   maxIterations?: number;
+  /**
+   * Tokens this turn may spend across all of its model calls, counting both
+   * directions. Defaults to `TOKEN_BUDGET_WINDOWS` times the endpoint's
+   * context window; pass a number to bound a turn tighter, or `Infinity` to
+   * bound it only by the step cap.
+   */
+  tokenBudget?: number;
+  /**
+   * Absorbs old exchanges into summaries instead of letting them be dropped.
+   *
+   * Held by the caller across turns, because the every-N-turns gate and the
+   * run of ineffective attempts only mean anything over a conversation. Absent
+   * - which is the default - leaves the old behaviour exactly: `fitToWindow`
+   * trims the front when the window fills.
+   */
+  compactor?: MicroCompactor;
   signal?: AbortSignal;
   /**
    * The workspace's own standing instructions, already formatted.
@@ -747,11 +826,13 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
   // the narrower ASK_ONLY; plan additionally gets update_todos.
   //
   // MCP tools are withheld in both UNLESS the user marked their server
-  // `readOnly: true` in .agent/mcp.json. MCP has no way to declare a tool
-  // read-only, so this code cannot check - but the person who configured the
-  // server can, and that claim is the only thing that opens Ask and Plan. An
-  // unmarked server stays withheld: a plan (or an answer) that quietly filed a
-  // GitHub issue would break the one promise each mode makes.
+  // `readOnly: true` in .agent/mcp.json. A tool's own `readOnlyHint` annotation
+  // is read at discovery but deliberately does not open anything - it is the
+  // server vouching for itself, and these two modes exist precisely so that a
+  // server's word is not what decides. The person who configured it can look;
+  // that claim is the only thing that opens Ask and Plan. An unmarked server
+  // stays withheld: a plan (or an answer) that quietly filed a GitHub issue
+  // would break the one promise each mode makes.
   // generate_image is offered only when the active profile declares an image
   // model. Advertising a tool that can only ever answer "not configured" costs
   // tokens on every request and invites the model to reach for it.
@@ -779,12 +860,56 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
     userTurn,
   ];
 
+  // Once per turn, before the first request, and never again inside the loop.
+  // This is where at most one exchange is absorbed; every step below simply
+  // applies whatever it decided. See MicroCompactor.beginTurn for why the
+  // placement is the correctness.
+  if (opts.compactor) await opts.compactor.beginTurn(messages, opts.signal);
+
   /** Last real figure the endpoint reported, so later turns keep using it. */
   let reported = 0;
 
   const maxIter = opts.maxIterations ?? 25;
-  for (let i = 0; i < maxIter; i++) {
-    if (opts.signal?.aborted) return;
+  /* A window that is not a positive number gives no usable budget, and the
+     arithmetic fails in the worst direction: `contextWindow: 0` in a
+     hand-written profile made the budget zero, so the very first step was over
+     it and every turn ended in a grace call with nothing to report. A budget
+     derived from a nonsense number is worse than no budget, so the step cap
+     governs alone until the profile is fixed. */
+  const window = Number.isFinite(caps.contextWindow) && caps.contextWindow > 0
+    ? caps.contextWindow
+    : 0;
+  const budget =
+    opts.tokenBudget ??
+    (window ? window * TOKEN_BUDGET_WINDOWS : Number.POSITIVE_INFINITY);
+  /** Every token this turn has been billed for, across all of its calls. */
+  let spent = 0;
+  /** Steps in a row that got nothing done. Reset by any step that did. */
+  let failing = 0;
+  /**
+   * The budget ran out and this is the model's last word.
+   *
+   * A grace step is offered no tools and is not counted against the step cap:
+   * it exists to turn a run that was cut off into one that reported itself, and
+   * refusing it because the step cap happened to land on the same step would
+   * defeat the point of having it.
+   */
+  let grace = false;
+
+  for (let i = 0; ; i++) {
+    if (!grace && i >= maxIter) {
+      yield {
+        type: "error",
+        error: `Stopped after ${maxIter} steps without finishing.`,
+        errorFix: "Narrow the task and send it again - a smaller step finishes inside the cap.",
+      };
+      yield { type: "exit", exit: "max_iterations" };
+      return;
+    }
+    if (opts.signal?.aborted) {
+      yield { type: "exit", exit: "aborted" };
+      return;
+    }
 
     // Anything typed while this turn was running joins the conversation here,
     // at the boundary between two model calls.
@@ -812,11 +937,20 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
       };
     }
 
-    // Images first, then the window. The order matters: an evicted picture
-    // becomes one short line, so trimming afterwards sees the sizes that are
-    // actually going out and throws away less history to make room.
+    // Images, then the summaries already decided, then the window. An evicted
+    // picture becomes one short line, so everything after it sees the sizes
+    // actually going out. `apply` is pure - what to absorb was decided once, at
+    // the top of this turn, and applying the same decision to a transcript that
+    // has only grown at the end leaves the prefix where it was. Deciding here
+    // instead, per step, is what the placement bug did, and it rewrote the
+    // cached prefix seven times inside a single twelve-call turn.
+    // `fitToWindow` stays last and unchanged, the backstop for what compaction
+    // could not fix - off, no aux model, cooling down, or out of patience.
+    const compacted = opts.compactor
+      ? opts.compactor.apply(fitImages(messages, caps.maxImageBytes))
+      : fitImages(messages, caps.maxImageBytes);
     const fitted = fitToWindow(
-      fitImages(messages, caps.maxImageBytes),
+      compacted,
       caps.contextWindow,
       caps.maxOutputTokens + 512
     );
@@ -851,11 +985,20 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
     let gaps = 0;
     /** The body ended without the marker that says the reply was finished. */
     let truncated = false;
+    /** An error frame delivered inside the 200, if one arrived. */
+    let streamError = "";
+    /** `length` or `content_filter` - the endings that mean this is not the whole answer. */
+    let stopReason = "";
+    /** Did the endpoint report real usage for this step? */
+    let billed = false;
 
     try {
       for await (const ev of client.complete({
         messages: fitted,
-        tools: caps.tools ? availableTools : undefined,
+        // No tools on a grace step. The budget is spent, so anything the model
+        // asked for could not be run - and offering a tool it is not allowed
+        // to use invites it to spend its last message calling one.
+        tools: !grace && caps.tools ? availableTools : undefined,
         // Aborts the HTTP request itself, so an interrupt during a long pause
         // before the first token takes effect immediately instead of waiting
         // for the next chunk to arrive.
@@ -896,7 +1039,17 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
               }
             }
           } else if (!holding) {
-            yield { type: "text", text: ev.text };
+            // `split.visible`, NOT `ev.text`. This was the raw chunk, which
+            // meant that from the second visible frame onward the panel was
+            // fed the unfiltered stream while `text` - the transcript, and
+            // what the next turn is billed for - kept the filtered one. A
+            // `<think>` block that opens after the first word therefore
+            // rendered verbatim in the answer bubble, tags and all, and at
+            // small frame sizes left tag shrapnel ("<ink>") spliced into the
+            // prose instead. Which of the two you got depended on where the
+            // gateway split its frames, so it was non-deterministic and could
+            // not be reproduced from the saved session.
+            yield { type: "text", text: split.visible };
           }
         }
         if (ev.type === "tool_call") calls.push(ev.toolCall!);
@@ -909,6 +1062,23 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
           gaps += ev.gaps;
         }
         if (ev.type === "stream_truncated") truncated = true;
+        /* An error the gateway delivered inside a 200 stream. Recorded rather
+           than thrown: the text that already arrived is real and belongs in
+           the transcript, and a half answer that says why it is half is worth
+           more than an empty bubble. Reported once, after the stream, next to
+           the gap note. */
+        if (ev.type === "stream_error" && ev.streamError) {
+          streamError = ev.streamError;
+        }
+        /* Why the model stopped. Only the reasons that mean the answer is
+           INCOMPLETE are kept; `stop` and `tool_calls` are the ordinary
+           endings and saying anything about them would be noise on every
+           single turn. */
+        if (ev.type === "stop" && ev.stopReason) {
+          if (ev.stopReason === "length" || ev.stopReason === "content_filter") {
+            stopReason = ev.stopReason;
+          }
+        }
         // Real counts from the gateway. These were being discarded: the client
         // has always decoded `usage` for both wires, nothing consumed it, and
         // the panel showed a character-count estimate instead of the number the
@@ -916,10 +1086,24 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
         if (ev.type === "usage" && ev.usage) {
           const total = (ev.usage.input ?? 0) + (ev.usage.output ?? 0);
           if (total > 0) {
+            // Added rather than assigned: `reported` is what this one call
+            // weighed and is what the meter shows, while `spent` is the bill
+            // for the whole turn, which is the thing the budget bounds. Each
+            // step re-sends the transcript, so a long run costs far more than
+            // its final context size suggests - which is exactly why counting
+            // steps was never a stand-in for counting cost.
+            spent += total;
+            billed = true;
             reported = total;
             yield {
               type: "context",
-              context: { used: total, limit: caps.contextWindow, exact: true },
+              context: {
+                used: total,
+                limit: caps.contextWindow,
+                exact: true,
+                cacheRead: ev.usage.cacheRead,
+                cacheWrite: ev.usage.cacheWrite,
+              },
             };
           }
         }
@@ -931,6 +1115,7 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
         errorFix: e.fix,
         errorDetail: e.detail,
       };
+      yield { type: "exit", exit: "error" };
       return;
     }
 
@@ -947,7 +1132,14 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
      * half-finished reply rather than after whatever came next. The text is
      * still kept: a fragment the user can see and resend beats one silently
      * discarded. */
-    if (truncated) {
+    /* Only when nothing better explains the ending.
+     *
+     * A stream carrying an explicit error frame, or a `finish_reason` of
+     * `length` or `content_filter`, also lacks a terminal marker - so this
+     * would fire alongside them and offer "the connection was cut" as a second,
+     * vaguer answer to a question already answered precisely. The specific
+     * reason wins; this is what is left when there is none. */
+    if (truncated && !streamError && !stopReason) {
       yield {
         type: "error",
         error: "The endpoint closed the stream before the reply had finished.",
@@ -970,6 +1162,44 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
           "The reply above is missing whatever those frames carried. This is the gateway " +
           "or something between it and here corrupting the stream, not the model - send " +
           "again, and run diagnostics if it keeps happening.",
+      };
+    }
+
+    if (streamError) {
+      yield {
+        type: "error",
+        error: "The gateway reported an error part-way through the reply.",
+        errorFix:
+          "Whatever is above stopped there. The connection itself worked - this came back " +
+          "inside a successful response - so it is the gateway or the model behind it " +
+          "failing mid-generation. Send again; run diagnostics if it repeats.",
+        errorDetail: streamError,
+      };
+    }
+
+    /* THE ANSWER IS NOT THE WHOLE ANSWER.
+     *
+     * Both wires have always said this and nothing read it, so a reply
+     * truncated at the output cap ended mid-word and looked finished. Said as
+     * an error rather than a note because acting on half an answer is the
+     * actual harm, and because `maxOutputTokens` defaults to 4096 - this is
+     * the most common way a turn ends badly, not an edge case. */
+    if (stopReason === "length") {
+      yield {
+        type: "error",
+        error: "The model hit its output limit and the reply above is cut off.",
+        errorFix:
+          `Raise capabilities.maxOutputTokens in the "${client.profile.name}" profile - it is ` +
+          `currently ${caps.maxOutputTokens} - or ask for the rest in a follow-up message.`,
+      };
+    } else if (stopReason === "content_filter") {
+      yield {
+        type: "error",
+        error: "The gateway's content filter stopped the reply before it finished.",
+        errorFix:
+          "This is a policy layer in front of the model, not the model refusing. Rephrasing " +
+          "the request usually clears it; if it does not, the filter is on the gateway and " +
+          "whoever runs it has to change the rule.",
       };
     }
 
@@ -1001,7 +1231,12 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
        it and drop the JSON from the transcript entirely - the tool card that
        follows is the honest rendering of what happened. Otherwise release the
        buffered text unchanged. */
-    const known = new Set(availableTools.map((t) => t.name));
+    /* What this step was actually offered, not what the turn has available.
+       On a grace step that is nothing, and the difference matters: a model
+       answering the grace call with a JSON tool call as prose used to have it
+       "recovered", which set `text` to "" on the way to a step that cannot run
+       tools - and then pushed an assistant turn with empty content. */
+    const known = new Set(grace ? [] : availableTools.map((t) => t.name));
     const adopt = (r: { name: string; arguments: any }) => {
       calls.push({
         id: `text_${i}_${Date.now().toString(36)}`,
@@ -1048,35 +1283,48 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
       yield { type: "text", text };
     }
 
-    if (!calls.length) {
-      /* AN EMPTY REPLY IS NOT A REPLY, AND MUST NOT BE RECORDED AS ONE.
+    /* An endpoint that reports no usage still costs money, and a budget that
+       only bounds the endpoints honest enough to say so is not a budget. The
+       estimate is the same chars/3.6 the meter falls back to: wrong, but wrong
+       in a stable direction, and a turn stopped slightly early is a far
+       cheaper mistake than one that is never stopped at all. */
+    if (!billed) {
+      spent += fitted.reduce((n, m) => n + messageTokens(m), 0) + estimateTokens(text);
+    }
+
+    /* A step that made no tool calls is the end of the turn either way: the
+       model answered. `grace` only changes what the answer is called, because
+       a turn that ended by spending its budget did not finish the work and a
+       transcript that says "done" about it is a lie. */
+    if (!calls.length || grace) {
+      /* An assistant turn carrying neither text nor a tool call is not merely
+         untidy: both wires reject an empty content block, so one saved into the
+         transcript fails the NEXT request rather than this one, which is the
+         same delayed-failure shape as an orphaned tool result. A model can
+         produce it by spending a whole reply inside <think>, or by answering a
+         grace call with something the splitter consumed entirely. */
+      /* AND THE USER IS TOLD, NOT ONLY THE MODEL.
        *
-       * A model can answer with nothing - a content filter, a gateway hiccup,
-       * a completion that spent its whole budget before emitting a token. This
-       * used to append `{ role: "assistant", content: "" }` to the transcript
-       * and persist it. Both wires reject an empty content block, so from that
-       * point every later turn failed with a 400 naming a message the user
-       * never wrote and could not see, and the only way out was a new chat.
-       *
-       * Nothing is appended and the turn says what happened instead. The
-       * transcript ends on the user's message, which is exactly where it was
-       * before the request, and the next turn resumes cleanly. */
-      if (!text.trim()) {
+       * The placeholder keeps the transcript sendable, which is what the next
+       * request needs. It does nothing for the person watching, who sees a
+       * bubble containing a stand-in sentence and no reason for it. An empty
+       * completion has causes they can act on - a content filter, max_tokens
+       * set too low, a gateway truncating - so the turn says so. */
+      if (!text.trim() && !grace) {
         yield {
           type: "error",
           error: "The endpoint returned an empty reply.",
           errorFix:
-            "Nothing was added to the conversation, so you can simply send again. If it " +
-            "keeps happening, the gateway is filtering or truncating the response - run " +
-            "diagnostics, and check max_tokens and any content policy on the endpoint.",
+            "Send again - nothing of yours was lost. If it keeps happening, the gateway is " +
+            "filtering or truncating the response rather than the model declining to answer: " +
+            "check max_tokens and any content policy on the endpoint, and run diagnostics.",
         };
-        yield { type: "turn_end" };
-        return;
       }
-      const reply: Msg = { role: "assistant", content: text };
+      const reply: Msg = { role: "assistant", content: text.trim() ? text : EMPTY_REPLY };
       messages.push(reply);
       opts.onMessage?.(reply);
       yield { type: "turn_end" };
+      yield { type: "exit", exit: grace ? "budget_exhausted" : "done" };
       return;
     }
 
@@ -1098,6 +1346,9 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
     // batch race and the loser's list is the one the panel keeps.
     const canParallel =
       caps.parallelToolExecution && calls.length > 1 && calls.every((c) => ASK_ONLY.has(c.name));
+
+    /** Did anything in this step succeed? One clean result is enough. */
+    let worked = false;
 
     // The phase gate, applied to the name the model actually sent rather than
     // to the list it was offered. Everything above this line is advisory; this
@@ -1159,10 +1410,12 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
           messages.push(missed);
           opts.onMessage?.(missed);
         }
+        yield { type: "exit", exit: "interrupted" };
         return;
       }
       yield { type: "tool_start", tool: { name: call.name, args: call.arguments } };
       const result = running ? await running[ci] : await invoke(call);
+      if (!result.isError) worked = true;
       yield {
         type: "tool_end",
         tool: { name: call.name, args: call.arguments, result: result.content, isError: result.isError },
@@ -1188,11 +1441,37 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
       messages.push(toolMsg);
       opts.onMessage?.(toolMsg);
     }
-  }
 
-  yield {
-    type: "error",
-    error: `Stopped after ${maxIter} steps without finishing.`,
-    errorFix: "Narrow the task and send it again - a smaller step finishes inside the cap.",
-  };
+    /* Nothing in this step worked. Counted rather than acted on immediately,
+       because one failed step is ordinary - a path guessed wrong, a command
+       that needed a flag - and the model recovering from it is the loop doing
+       its job. A run of them is not recovery, it is a model retrying something
+       that is never going to work, and every retry re-sends a transcript that
+       is longer than the last. `gaps` counts here too: a gateway corrupting
+       the stream is a failure the model cannot see and therefore cannot learn
+       from, so it will keep going indefinitely. */
+    failing = worked && !gaps ? 0 : failing + 1;
+    if (failing >= MAX_CONSECUTIVE_ERRORS) {
+      yield {
+        type: "error",
+        error: `Stopped after ${failing} steps in a row that got nothing done.`,
+        errorFix:
+          "The last few tool results say why. This is usually a wrong path, a missing " +
+          "dependency, or an endpoint corrupting the stream - fix that and send again, " +
+          "rather than asking for the same thing.",
+      };
+      yield { type: "exit", exit: "failing" };
+      return;
+    }
+
+    /* The budget is spent. One more call, with no tools and a plain
+       instruction to report, rather than stopping on top of a tool result and
+       leaving the work the model has already done unreported. */
+    if (spent >= budget) {
+      const notice: Msg = { role: "user", content: BUDGET_EXHAUSTED_NOTICE };
+      messages.push(notice);
+      opts.onMessage?.(notice);
+      grace = true;
+    }
+  }
 }

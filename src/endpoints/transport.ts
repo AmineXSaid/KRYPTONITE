@@ -364,3 +364,35 @@ export function isStaleSocketError(e: any): boolean {
   const code = e?.code ?? e?.cause?.code ?? "";
   return STALE_SOCKET_CODES.has(code);
 }
+
+/**
+ * Codes worth trying again on, when the profile asks for retries.
+ *
+ * Wider than the stale-socket set and for a different reason: these are
+ * failures that reached the network and came back, and the request may or may
+ * not have arrived. They are retried only because `profile.retries` says to,
+ * and only before any part of a reply has been read - a completion cannot be
+ * duplicated if none of it has arrived yet.
+ *
+ * A corporate gateway drops connections and times out under load; that is the
+ * whole reason the setting exists. DNS and refused connections are included
+ * because a load balancer coming back up produces exactly those for a second
+ * or two, which is precisely the window a retry covers.
+ */
+const RETRIABLE_CODES = new Set([
+  ...STALE_SOCKET_CODES,
+  "ECONNREFUSED",
+  "ETIMEDOUT",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
+]);
+
+export function isRetriableNetworkError(e: any): boolean {
+  const code = e?.code ?? e?.cause?.code ?? "";
+  return RETRIABLE_CODES.has(code);
+}

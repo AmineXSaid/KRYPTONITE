@@ -254,7 +254,6 @@ export class SessionStore {
    */
   save(id: string, messages: Msg[], title?: string): void {
     if (!messages.length) return;
-    this.deleted.delete(id);
     const doc: StoredSession = {
       id,
       title: title?.trim() || titleFrom(messages),
@@ -298,25 +297,10 @@ export class SessionStore {
     await this.writes;
   }
 
-  /**
-   * Ids removed in this window, so a turn still unwinding cannot write one back.
-   *
-   * Bounded, because a long-lived window should not accumulate a set of every
-   * conversation ever deleted in it.
-   */
-  private deleted = new Set<string>();
-
-  wasDeleted(id: string): boolean {
-    return this.deleted.has(id);
-  }
-
   delete(id: string): void {
     this.meta.delete(id);
     this.pending.delete(id);
-    this.deleted.add(id);
-    if (this.deleted.size > 200) {
-      this.deleted.delete(this.deleted.values().next().value as string);
-    }
+
     const file = path.join(this.dir, `${id}.json`);
     this.writes = this.writes
       .then(() => fsp.rm(file, { force: true }))

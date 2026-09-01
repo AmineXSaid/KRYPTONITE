@@ -6,7 +6,9 @@
 import { performance } from "node:perf_hooks";
 import { request, Dispatcher } from "undici";
 import type { EndpointProfile, Wire } from "../endpoints/profile";
-import { buildTransport, isStaleSocketError, TransportStats } from "../endpoints/transport";
+import {
+  buildTransport, isStaleSocketError, isRetriableNetworkError, TransportStats,
+} from "../endpoints/transport";
 import { applyAuth } from "../endpoints/auth";
 import { loadTransform, Transform } from "../endpoints/transform";
 
@@ -68,8 +70,8 @@ export interface CompletionEvent {
    * reasoning and no content, so it happened on every step.
    */
   type:
-    | "text" | "reasoning" | "tool_call" | "done" | "usage"
-    | "stream_gap"
+    | "text" | "reasoning" | "tool_call" | "done" | "usage" | "stream_gap"
+    | "stop" | "stream_error"
     /**
      * The body ended without the marker that says the reply is finished -
      * `[DONE]` or a `finish_reason` on the OpenAI wire, `message_stop` on
@@ -80,6 +82,21 @@ export interface CompletionEvent {
   text?: string;
   toolCall?: ToolCall;
   usage?: TokenUsage;
+  /**
+   * Why the model stopped, carried on `stop` and normalised across the wires.
+   *
+   * Both wires have always sent this and nothing read it. `finish_reason` was
+   * consulted only as a signal to flush pending tool calls, so the two values
+   * that mean the answer is INCOMPLETE - `length` (the output cap was hit) and
+   * `content_filter` - were discarded. A reply truncated mid-word arrived
+   * looking exactly like a reply that had finished, which is the one thing a
+   * user cannot recover from on their own: they read a confident half-answer
+   * and act on it.
+   *
+   * Values are the wire's own, mapped to the OpenAI vocabulary because that is
+   * the one both surfaces already speak: `stop`, `length`, `tool_calls`,
+   * `content_filter`.
+   */
   stopReason?: string;
   /**
    * How many `data:` frames the gateway sent that would not parse.
@@ -91,6 +108,17 @@ export interface CompletionEvent {
    * keep-alives and comments vendors also send on `data:` lines.
    */
   gaps?: number;
+  /**
+   * A gateway error delivered INSIDE a 200 stream, carried on `stream_error`.
+   *
+   * Both wires do this: OpenAI-compatible gateways send `{"error": {...}}` on a
+   * `data:` line, Anthropic sends an `event: error` frame. Neither was handled,
+   * so the frame fell through every branch and the turn ended normally with a
+   * partial answer that looked complete. It is reported rather than thrown so
+   * the text that DID arrive stays in the transcript: half an answer plus the
+   * reason it is half is worth more than an empty bubble.
+   */
+  streamError?: string;
 }
 
 export interface TokenUsage {
@@ -290,13 +318,30 @@ export class EndpointClient {
   }
 
   /**
-   * Issue the request, replaying it once onto a fresh socket if the pooled one
-   * turned out to be dead.
+   * Issue the request, retrying only what is safe to retry.
    *
-   * Holding sockets open for a minute means occasionally picking one a
-   * middlebox has already reaped. That failure happens on the first write,
-   * before the request reaches the server, so the replay cannot produce a
-   * second completion. Every other error is surfaced as-is.
+   * TWO DIFFERENT REASONS TO SEND AGAIN, and the distinction is the whole of
+   * the design.
+   *
+   * The first is a dead pooled socket. Holding sockets open for a minute means
+   * occasionally picking one a middlebox has already reaped; that failure
+   * happens on the first write, before the request reaches the server, so a
+   * replay cannot produce a second completion. It is always retried once and
+   * costs nothing.
+   *
+   * The second is `profile.retries`, which until now was parsed, defaulted,
+   * shown in the Control Center, and read by nothing at all - so the people
+   * this extension is for, who are fighting gateways that fail one request in
+   * twenty, set it and concluded the gateway was worse than it is. It applies
+   * ONLY to failures that happened before any part of a reply arrived: a
+   * connect error, or a 5xx with the body still unread. Retrying after a token
+   * has streamed would bill the prompt twice and splice two answers together,
+   * which is why this lives here, around the request, and not around
+   * `complete()`.
+   *
+   * A 4xx is never retried: the request is wrong and sending it again is a
+   * slower way to be told so. 429 is left alone too - the remedy there is to
+   * wait longer than a retry loop should, and the error already says so.
    */
   private async send(
     url: string,
@@ -304,26 +349,73 @@ export class EndpointClient {
     payload: string,
     signal?: AbortSignal
   ) {
-    for (let attempt = 0; ; attempt++) {
+    const budget = Math.max(0, Math.min(this.profile.retries ?? 0, 10));
+    let attempt = 0;
+    let staleReplayed = false;
+    let sent = 0;
+
+    for (;;) {
       try {
-        return {
-          res: await request(url, {
-            method: "POST",
-            dispatcher: this.dispatcher,
-            headers,
-            body: payload,
-            signal,
-            headersTimeout: this.profile.timeoutMs,
-            bodyTimeout: this.profile.timeoutMs,
-          }),
-          retried: attempt > 0,
-        };
+        const res = await request(url, {
+          method: "POST",
+          dispatcher: this.dispatcher,
+          headers,
+          body: payload,
+          signal,
+          headersTimeout: this.profile.timeoutMs,
+          bodyTimeout: this.profile.timeoutMs,
+        });
+        // A gateway 5xx before a single byte of the reply has been read is the
+        // transient this setting exists for. The body is drained rather than
+        // leaked, and the last attempt's response is handed back so the caller
+        // reports the real status instead of a retry count.
+        if (res.statusCode >= 500 && res.statusCode !== 501 && attempt < budget) {
+          await res.body.dump().catch(() => { /* already gone */ });
+          attempt++;
+          await this.backoff(attempt, signal);
+          continue;
+        }
+        return { res, retried: sent > 0 };
       } catch (e: any) {
         if (signal?.aborted) throw e;
-        if (attempt === 0 && isStaleSocketError(e)) continue;
+        if (!staleReplayed && isStaleSocketError(e)) {
+          staleReplayed = true;
+          sent++;
+          continue;
+        }
+        if (attempt < budget && isRetriableNetworkError(e)) {
+          attempt++;
+          sent++;
+          await this.backoff(attempt, signal);
+          continue;
+        }
         throw explainNetworkError(e, this.profile);
       }
     }
+  }
+
+  /**
+   * Wait before trying again, and stop waiting if the user gives up.
+   *
+   * Exponential with a cap and a jitter. The jitter matters more than it looks
+   * on a corporate gateway: a hundred editors that all retry on the same
+   * schedule turn one blip into a synchronised second wave.
+   */
+  private backoff(attempt: number, signal?: AbortSignal): Promise<void> {
+    const ms = Math.min(250 * 2 ** (attempt - 1), 4000) * (0.5 + Math.random());
+    return new Promise((resolve, reject) => {
+      const t = setTimeout(done, ms);
+      function done() {
+        clearTimeout(t);
+        signal?.removeEventListener("abort", onAbort);
+        resolve();
+      }
+      function onAbort() {
+        clearTimeout(t);
+        reject(new DOMException("Aborted", "AbortError"));
+      }
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
   }
 
   async *complete(req: CompletionRequest): AsyncGenerator<CompletionEvent> {
@@ -431,25 +523,31 @@ export class EndpointClient {
     /* AND A STREAM THAT SIMPLY STOPS IS NOT A REPLY EITHER.
      *
      * The gap counter above catches a frame that arrived corrupted. It cannot
-     * catch the far more common failure in the environment this extension
-     * exists for: a proxy with a response-buffering or idle policy closing an
-     * SSE stream part-way through. That is a clean end-of-body as far as
-     * undici is concerned, so this loop exited normally, `done` was yielded,
-     * and the agent loop wrote the half-sentence into the transcript as the
-     * model's complete answer. The user saw a reply that stopped mid-word with
-     * nothing anywhere saying why, and every later turn reasoned from it.
+     * catch the likeliest failure in the environment this extension exists
+     * for: a proxy with a response-buffering or idle policy closing an SSE
+     * stream part-way through. That is a clean end-of-body as far as undici is
+     * concerned, so the loop below exited normally, `done` was yielded, and
+     * the agent loop wrote the half-sentence into the transcript as the
+     * model's complete answer for every later turn to reason from.
      *
      * Both wires mark the end explicitly - `[DONE]` or a `finish_reason` on
      * the OpenAI side, `message_stop` on Anthropic's - and none of it was
      * being read. It is read now, and its ABSENCE is the finding. */
     let sawTerminal = false;
+
+    /* One frame's worth of `data:` lines, decoded and handed to the parser.
+       Extracted so the trailing frame below - the one an unterminated stream
+       leaves in the buffer - goes through exactly the same path rather than a
+       second copy of it that drifts. */
     const self = this;
-    /** One SSE frame -> the events it carries. */
-    function* handle(frame: string): Generator<CompletionEvent> {
+    function* frameEvents(frame: string): Generator<CompletionEvent> {
       for (const line of frame.split("\n")) {
         if (!line.startsWith("data:")) continue;
         const payloadLine = line.slice(5).trim();
         if (payloadLine === "[DONE]") {
+          // The OpenAI wire's own end marker. Recorded, not merely skipped:
+          // its ABSENCE is how a stream cut by a proxy is told apart from one
+          // the endpoint finished.
           sawTerminal = true;
           continue;
         }
@@ -461,16 +559,14 @@ export class EndpointClient {
           if (payloadLine) undecodable++;
           continue;
         }
-        // Read off the raw frame, before any transform, because a transform
-        // that reshapes the payload has no obligation to preserve the field
-        // that marks the end.
-        if (
-          json?.type === "message_stop" ||
-          json?.choices?.[0]?.finish_reason
-        ) {
+        /* Read off the RAW frame, before any transform: a transform that
+           reshapes the payload has no obligation to preserve the field that
+           marks the end, and a stream wrongly reported as cut is worse than
+           one not reported at all. */
+        if (json?.type === "message_stop" || json?.choices?.[0]?.finish_reason) {
           sawTerminal = true;
         }
-        for (const ev of parser(post ? post(json, self.profile) : json)) yield ev;
+        yield* parser.push(post ? post(json, self.profile) : json);
       }
     }
 
@@ -484,7 +580,7 @@ export class EndpointClient {
         while ((idx = buf.indexOf("\n\n")) !== -1) {
           const frame = buf.slice(0, idx);
           buf = buf.slice(idx + 2);
-          for (const ev of handle(frame)) {
+          for (const ev of frameEvents(frame)) {
             if (ev.type === "text") {
               tokens++;
               if (!ttftMs) ttftMs = performance.now() - t0;
@@ -493,18 +589,23 @@ export class EndpointClient {
           }
         }
       }
-
-      /* The tail of the body, which used to be thrown away.
+      /* THE LAST FRAME, WHICH USED TO BE THROWN AWAY.
        *
-       * A frame is terminated by a blank line, and a gateway that closes right
-       * after its last `data:` line never sends one - so the final delta, and
-       * on some gateways the whole usage frame, sat in `buf` and was dropped
-       * without even being counted as a gap. The decoder is flushed for the
-       * same reason: a multi-byte character split across the last chunk
-       * boundary is still held inside it. */
-      buf += decoder.decode();
-      if (buf.trim()) {
-        for (const ev of handle(buf)) {
+       * The loop above only ever emits a frame terminated by a blank line, so
+       * a gateway that ends its stream after a single `\n` - or that is cut
+       * off by a middlebox mid-frame - left its final `data:` line sitting in
+       * `buf` and it was silently discarded. That is the last tokens of the
+       * reply, or the terminal frame carrying `finish_reason`, gone with no
+       * error and no gap counted.
+       *
+       * `decoder.decode()` with no argument flushes any partial multi-byte
+       * character the stream ended on, for the same reason the streaming
+       * decode exists at all. */
+      buf += decoder.decode().replace(/\r\n/g, "\n");
+      const tail = buf.trim();
+      buf = "";
+      if (tail) {
+        for (const ev of frameEvents(tail)) {
           if (ev.type === "text") {
             tokens++;
             if (!ttftMs) ttftMs = performance.now() - t0;
@@ -512,6 +613,12 @@ export class EndpointClient {
           yield ev;
         }
       }
+
+      /* Anything the decoder is still holding. A stream that ends without a
+       * terminal frame leaves accumulated tool calls in the parser's map, and
+       * before this they died there: the model had asked to read a file and
+       * the turn ended with an empty assistant message. */
+      yield* parser.flush();
 
       // Before `done`, so a consumer that stops at `done` has already seen it.
       if (undecodable) yield { type: "stream_gap", gaps: undecodable };
@@ -966,6 +1073,10 @@ function* decodeWhole(json: any, wire: string): Generator<CompletionEvent> {
       if (b.type === "tool_use") yield { type: "tool_call", toolCall: { id: b.id, name: b.name, arguments: b.input } };
     }
     if (json.usage) yield { type: "usage", usage: anthropicUsage(json.usage) };
+    // Same reason as the streaming path: a non-streamed reply cut off at
+    // `max_tokens` is indistinguishable from a finished one without this.
+    const stop = normaliseStopReason(json.stop_reason);
+    if (stop) yield { type: "stop", stopReason: stop };
   } else {
     const msg = json.choices?.[0]?.message ?? {};
     if (msg.content) yield { type: "text", text: msg.content };
@@ -976,6 +1087,8 @@ function* decodeWhole(json: any, wire: string): Generator<CompletionEvent> {
       };
     }
     if (json.usage) yield { type: "usage", usage: openAiUsage(json.usage) };
+    const stop = normaliseStopReason(json.choices?.[0]?.finish_reason);
+    if (stop) yield { type: "stop", stopReason: stop };
   }
   yield { type: "done" };
 }
@@ -1010,21 +1123,102 @@ function openAiUsage(u: any): TokenUsage {
   };
 }
 
-/** Streaming decoders accumulate partial tool-call arguments across deltas. */
+/**
+ * Streaming decoders accumulate partial tool-call arguments across deltas.
+ *
+ * `flush` is what makes that accumulation safe. A decoder that only ever
+ * emits on a terminal frame is betting that the terminal frame arrives, and
+ * on the gateways this extension exists for it frequently does not: a stream
+ * that stops after the last content frame, with no `finish_reason` and no
+ * `message_stop`, left every accumulated tool call in the map and the turn
+ * ended with an empty assistant message and no error. The model had asked to
+ * read a file; the user saw a blank bubble. `flush` is called once at end of
+ * stream and emits whatever is still held, so the worst case is a tool call
+ * arriving slightly late rather than not at all.
+ */
+export interface StreamDecoder {
+  push(json: any): Generator<CompletionEvent>;
+  /** Emit anything still accumulated. Called exactly once, at end of stream. */
+  flush(): Generator<CompletionEvent>;
+}
+
 /** Exposed for tests; the decoder is otherwise private to `complete()`. */
 export const __openAiStreamForTest = () => openAiStream();
+/** Exposed for the same reason, so the anthropic shapes can be pinned too. */
+export const __anthropicStreamForTest = () => anthropicStream();
+
+/**
+ * Map a wire's own stop vocabulary onto the OpenAI one.
+ *
+ * Anthropic says `max_tokens` where OpenAI says `length`, and `tool_use` where
+ * OpenAI says `tool_calls`. One vocabulary above this line means the loop and
+ * the panel do not each have to know which wire produced a turn.
+ */
+function normaliseStopReason(raw: unknown): string | undefined {
+  if (typeof raw !== "string" || !raw) return undefined;
+  switch (raw) {
+    case "max_tokens": return "length";
+    case "tool_use": return "tool_calls";
+    case "end_turn":
+    case "stop_sequence": return "stop";
+    default: return raw;
+  }
+}
+
+/**
+ * The message an error frame carries, dug out of whichever shape it arrived in.
+ *
+ * Returns undefined when the object is not an error at all, which is the
+ * common case and has to stay cheap - this runs on every frame.
+ */
+function streamErrorOf(json: any): string | undefined {
+  const e = json?.error;
+  if (!e) return undefined;
+  if (typeof e === "string") return e;
+  const msg = typeof e.message === "string" ? e.message : undefined;
+  const kind = typeof e.type === "string" ? e.type : undefined;
+  return [kind, msg].filter(Boolean).join(": ") || "The gateway reported an error mid-stream.";
+}
 
 /**
  * @param onReasoning Called once per turn that carried a reasoning channel.
  *   Optional so the test factory above and the anthropic path need no changes.
  */
-function openAiStream(onReasoning?: () => void) {
+function openAiStream(onReasoning?: () => void): StreamDecoder {
   const pending = new Map<number, { id: string; name: string; args: string }>();
   // Accumulated per step and flushed on finish_reason, so the panel receives
   // one block of working rather than a token-by-token stream of it.
   let reasoning = "";
   let toldReasoning = false;
-  return function* (json: any): Generator<CompletionEvent> {
+
+  /** Emit the accumulated tool calls and working, and reset. Shared by both. */
+  function* drain(): Generator<CompletionEvent> {
+    for (const slot of pending.values()) {
+      yield { type: "tool_call", toolCall: { id: slot.id, name: slot.name, arguments: safeJson(slot.args) } };
+    }
+    pending.clear();
+    // The working, on its own channel. This used to be yielded as `text`,
+    // which is how four paragraphs of "the user provided X, which could
+    // be..." ended up in the transcript looking like the reply - on every
+    // step of an agentic turn, since a step that calls a tool produces
+    // reasoning and no content by definition.
+    //
+    // Still emitted rather than dropped: a turn that spent its whole budget
+    // reasoning and said nothing is otherwise a blank bubble, which is
+    // indistinguishable from a broken endpoint. The surface decides how
+    // loudly to show it; that is not this layer's call.
+    if (reasoning.trim()) yield { type: "reasoning", text: reasoning.trim() };
+    reasoning = "";
+  }
+
+  function* push(json: any): Generator<CompletionEvent> {
+    // An error delivered inside a 200 stream. Checked first, because a frame
+    // carrying one carries nothing else worth reading.
+    const err = streamErrorOf(json);
+    if (err) {
+      yield { type: "stream_error", streamError: err };
+      return;
+    }
     // Usage is checked before the delta branch and independently of it.
     //
     // The spec-shaped final frame carries `usage` with an empty `choices`, and
@@ -1049,55 +1243,89 @@ function openAiStream(onReasoning?: () => void) {
         };
       }
     }
+    // The delta and the finish_reason are handled in that order, and both are
+    // independent of whether the other is present. Gateways disagree on which
+    // frame carries what: the spec puts `finish_reason` on a frame of its own
+    // with an empty delta, several put it on the LAST CONTENT FRAME, and some
+    // omit `delta` from the terminal frame entirely. Draining before reading
+    // the delta would cut the last argument chunk off a tool call on the
+    // second shape; guarding the whole body on `delta` - which is what the
+    // `if (!d) return` here used to do - dropped the terminal frame on the
+    // third, taking every pending tool call with it.
     const d = json.choices?.[0]?.delta;
-    if (!d) return;
-    if (d.content) yield { type: "text", text: d.content };
-    // Reasoning models stream their thinking on a separate field and only then
-    // - if the budget lasts - produce content. Dropping it meant a turn that
-    // spent its whole budget reasoning rendered as an empty reply, and the
-    // streaming probe reported "the model produced no visible output" against
-    // a model that was working perfectly.
-    if (typeof d.reasoning_content === "string" && d.reasoning_content) {
-      reasoning += d.reasoning_content;
-      // Once per turn, not once per delta: capability detection reads this as
-      // "did this request reason", not "how much".
-      if (!toldReasoning) {
-        toldReasoning = true;
-        onReasoning?.();
+    if (d) {
+      if (d.content) yield { type: "text", text: d.content };
+      // Reasoning models stream their thinking on a separate field and only then
+      // - if the budget lasts - produce content. Dropping it meant a turn that
+      // spent its whole budget reasoning rendered as an empty reply, and the
+      // streaming probe reported "the model produced no visible output" against
+      // a model that was working perfectly.
+      if (typeof d.reasoning_content === "string" && d.reasoning_content) {
+        reasoning += d.reasoning_content;
+        // Once per turn, not once per delta: capability detection reads this as
+        // "did this request reason", not "how much".
+        if (!toldReasoning) {
+          toldReasoning = true;
+          onReasoning?.();
+        }
+      }
+      for (const tc of d.tool_calls ?? []) {
+        const slot = pending.get(tc.index) ?? { id: "", name: "", args: "" };
+        if (tc.id) slot.id = tc.id;
+        if (tc.function?.name) slot.name = tc.function.name;
+        if (tc.function?.arguments) slot.args += tc.function.arguments;
+        pending.set(tc.index, slot);
       }
     }
-    for (const tc of d.tool_calls ?? []) {
-      const slot = pending.get(tc.index) ?? { id: "", name: "", args: "" };
-      if (tc.id) slot.id = tc.id;
-      if (tc.function?.name) slot.name = tc.function.name;
-      if (tc.function?.arguments) slot.args += tc.function.arguments;
-      pending.set(tc.index, slot);
-    }
+
     const reason = json.choices?.[0]?.finish_reason;
     if (reason) {
-      for (const slot of pending.values()) {
-        yield { type: "tool_call", toolCall: { id: slot.id, name: slot.name, arguments: safeJson(slot.args) } };
-      }
-      pending.clear();
-      // The working, on its own channel. This used to be yielded as `text`,
-      // which is how four paragraphs of "the user provided X, which could
-      // be..." ended up in the transcript looking like the reply - on every
-      // step of an agentic turn, since a step that calls a tool produces
-      // reasoning and no content by definition.
-      //
-      // Still emitted rather than dropped: a turn that spent its whole budget
-      // reasoning and said nothing is otherwise a blank bubble, which is
-      // indistinguishable from a broken endpoint. The surface decides how
-      // loudly to show it; that is not this layer's call.
-      if (reasoning.trim()) yield { type: "reasoning", text: reasoning.trim() };
-      reasoning = "";
+      yield* drain();
+      const stopReason = normaliseStopReason(reason);
+      if (stopReason) yield { type: "stop", stopReason };
     }
-  };
+  }
+
+  return { push, flush: drain };
 }
 
-function anthropicStream() {
+function anthropicStream(): StreamDecoder {
   const blocks = new Map<number, { id: string; name: string; args: string }>();
-  return function* (json: any): Generator<CompletionEvent> {
+  /**
+   * The input side of the usage, held for the length of the turn.
+   *
+   * Anthropic reports input and cache counts ONCE, on `message_start`, and
+   * output tokens on `message_delta`. Emitting the delta's figure alone -
+   * which is what `{ input: 0, output: … }` did - handed the loop a total that
+   * was the output count with the input silently dropped, and the loop takes
+   * the newest usage event as authoritative. A 50k-token conversation reported
+   * "820 / 200,000" and stayed there, flagged `exact: true`, which is the flag
+   * the panel uses to decide the number is worth printing. Wrong in the
+   * reassuring direction: the meter never filled and the 413 arrived unannounced.
+   */
+  let input = 0;
+  let cacheRead: number | undefined;
+  let cacheWrite: number | undefined;
+
+  /** Emit any tool-use block still accumulating. */
+  function* drain(): Generator<CompletionEvent> {
+    for (const [, slot] of blocks) {
+      yield {
+        type: "tool_call",
+        toolCall: { id: slot.id, name: slot.name, arguments: safeJson(slot.args || "{}") },
+      };
+    }
+    blocks.clear();
+  }
+
+  function* push(json: any): Generator<CompletionEvent> {
+    // `event: error` frames arrive as a `data:` payload like any other, and
+    // fell through this switch untouched.
+    const err = streamErrorOf(json);
+    if (err) {
+      yield { type: "stream_error", streamError: err };
+      return;
+    }
     switch (json.type) {
       case "content_block_start":
         if (json.content_block?.type === "tool_use") {
@@ -1120,16 +1348,47 @@ function anthropicStream() {
         break;
       }
       case "message_delta":
-        if (json.usage) yield { type: "usage", usage: { input: 0, output: json.usage.output_tokens ?? 0 } };
+        // `delta.stop_reason` is where Anthropic says the answer was cut off
+        // at `max_tokens`, or refused. It was read by nothing.
+        {
+          const stopReason = normaliseStopReason(json.delta?.stop_reason);
+          if (json.usage) {
+            yield {
+              type: "usage",
+              usage: {
+                input,
+                output: json.usage.output_tokens ?? 0,
+                cacheRead,
+                cacheWrite,
+              },
+            };
+          }
+          if (stopReason) {
+            // Anthropic ends a tool-using turn with `content_block_stop` for
+            // each block, so `drain` is normally a no-op here; it matters when
+            // the stream ends without one.
+            yield* drain();
+            yield { type: "stop", stopReason };
+          }
+        }
         break;
       // The input and cache counters only ever appear here, on the opening
       // frame. Ignoring it meant the one number that proves prompt caching is
       // working never reached the UI.
       case "message_start":
-        if (json.message?.usage) yield { type: "usage", usage: anthropicUsage(json.message.usage) };
+        if (json.message?.usage) {
+          const u = anthropicUsage(json.message.usage);
+          // Held so `message_delta` can report a total rather than half of one.
+          input = u.input;
+          cacheRead = u.cacheRead;
+          cacheWrite = u.cacheWrite;
+          yield { type: "usage", usage: u };
+        }
         break;
     }
-  };
+  }
+
+  return { push, flush: drain };
 }
 
 /** Turn Node's terse network errors into something a person can act on. */

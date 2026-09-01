@@ -40,40 +40,6 @@ async function boot(root: string | undefined) {
   return { app, out };
 }
 
-/**
- * Put a real turn in flight, rather than only setting the flag.
- *
- * These sections used to do `session.running = true` and nothing else, which
- * is a state the controller cannot actually reach: `running` is only ever set
- * beside a LiveTurn registered in `live`. That mattered once steering moved
- * onto the turn - a message steered into a conversation with no turn has
- * nothing to drain it - and it is worth fixing rather than working around,
- * because a test whose premise is impossible cannot catch a regression in the
- * path it claims to cover.
- */
-function fakeTurn(app: any): { turn: any; end: () => void } {
-  const session = app.session;
-  const turn = {
-    id: session.sessionId,
-    abort: new AbortController(),
-    history: session.history,
-    replay: [],
-    title: session.title,
-    steer: [],
-    steerFiles: [],
-    steerFilesInFlight: [],
-  };
-  session.live.set(turn.id, turn);
-  session.running = true;
-  return {
-    turn,
-    end: () => {
-      session.live.delete(turn.id);
-      session.running = false;
-    },
-  };
-}
-
 const errors = (out: OutboundMessage[]) =>
   out.filter((m) => m.type === "error").map((m: any) => String(m.message));
 const ended = (out: OutboundMessage[]) => out.some((m) => m.type === "turnEnd");
@@ -130,11 +96,29 @@ async function main() {
   console.log("\n──── §2.11 send while a turn is already running ────");
   {
     const { app, out } = await boot(workspace({ "gw.yaml": GOOD }));
-    // Simulate a turn in flight without touching the network.
-    // Refusing was the old behaviour and it made the composer feel broken: a
-    // thought had to be held until the model happened to stop. It is taken
-    // now, and what happens to it is the inputWhileRunning preference.
-    const live = fakeTurn(app);
+    /* Simulate a turn in flight without touching the network.
+     *
+     * A REGISTERED TURN, not just the flag. Steering and the queue used to
+     * read controller-wide arrays, so setting `running` was a complete
+     * simulation; they belong to the turn now - one array per turn, so two
+     * live turns cannot swallow each other's messages - and a bare flag with
+     * nothing in `live` no longer describes anything the controller can
+     * happen. */
+    app.session.running = true;
+    const liveTurn: any = {
+      id: app.session.sessionId,
+      abort: new AbortController(),
+      history: app.session.history,
+      replay: [],
+      title: app.session.title,
+      steer: [],
+      steerFiles: [],
+      steerFilesInFlight: [],
+      estimate: new Map(),
+      finished: false,
+      discarded: false,
+    };
+    (app.session as any).live.set(app.session.sessionId, liveTurn);
 
     let before = out.length;
     app.uiConfig = { ...app.uiConfig, inputWhileRunning: "queue" };
@@ -168,8 +152,8 @@ async function main() {
     // On the turn, not on the controller. A controller-wide queue was cleared
     // by every conversation switch, throwing away messages the user had
     // already been told were accepted.
-    ck(live.turn.steer.length === 1, "steered: it lands on the running turn",
-      String(live.turn.steer.length));
+    ck(liveTurn.steer.length === 1, "steered: it lands on the running turn",
+      String(liveTurn.steer.length));
 
     ck(app.session.running === true, "the running turn is left alone either way");
 
@@ -192,7 +176,8 @@ async function main() {
     ck(after.some((m: any) => m.type === "inputAccepted" && m.mode === "steer"),
       "promote: and is steered into the running turn instead");
 
-    live.end();
+    app.session.running = false;
+    (app.session as any).live.clear();
     await app.dispose();
   }
 
@@ -221,7 +206,23 @@ async function main() {
     const root = workspace({ "gw.yaml": VISION });
     const { app, out } = await boot(root);
     app.uiConfig = { ...app.uiConfig, inputWhileRunning: "steer" };
-    const live = fakeTurn(app);
+    // A registered turn, because steering now lands on the turn rather than on
+    // a controller-wide array. See §2.11.
+    app.session.running = true;
+    const inFlight: any = {
+      id: app.session.sessionId,
+      abort: new AbortController(),
+      history: app.session.history,
+      replay: [],
+      title: app.session.title,
+      steer: [],
+      steerFiles: [],
+      steerFilesInFlight: [],
+      estimate: new Map(),
+      finished: false,
+      discarded: false,
+    };
+    (app.session as any).live.set(app.session.sessionId, inFlight);
 
     const png = Buffer.from("fake png bytes").toString("base64");
     const txt = Buffer.from("hello from a log file").toString("base64");
@@ -230,7 +231,7 @@ async function main() {
       { name: "run.log", mediaType: "text/plain", data: txt },
     ]);
 
-    const steered: any = live.turn.steer[0];
+    const steered: any = inFlight.steer[0];
     ck(!!steered, "the message is queued for steering");
     ck(Array.isArray(steered.content), "it is a block message, not a bare string",
       typeof steered.content);
@@ -251,7 +252,8 @@ async function main() {
       "which is the decoded length",
       String(accepted.files.find((f: any) => f.name === "run.log").size));
 
-    live.end();
+    app.session.running = false;
+    (app.session as any).live.clear();
     await app.dispose();
   }
 
@@ -259,10 +261,23 @@ async function main() {
   {
     const { app, out } = await boot(workspace({ "gw.yaml": VISION }));
     app.uiConfig = { ...app.uiConfig, inputWhileRunning: "queue" };
-    const live = fakeTurn(app);
+    app.session.running = true;
+    (app.session as any).live.set(app.session.sessionId, {
+      id: app.session.sessionId,
+      abort: new AbortController(),
+      history: app.session.history,
+      replay: [],
+      title: app.session.title,
+      steer: [],
+      steerFiles: [],
+      steerFilesInFlight: [],
+      estimate: new Map(),
+      finished: false,
+      discarded: false,
+    });
     const png = Buffer.from("another png").toString("base64");
     await app.session.send("and this", [{ name: "b.png", mediaType: "image/png", data: png }]);
-    const queued: any = (app.session as any).queued[0];
+    const queued: any = (app.session as any).convo().queued[0];
     ck(queued?.attachments?.length === 1, "the queue holds the attachment, not just the text");
     ck(queued.attachments[0].data === png, "byte for byte");
     const accepted: any = out.find((m) => m.type === "queueChanged");
@@ -270,7 +285,8 @@ async function main() {
       "and the queue row can show what is waiting with it");
     ck(accepted?.items?.[0]?.files?.[0]?.name === "b.png", "by name",
       accepted?.items?.[0]?.files?.[0]?.name);
-    live.end();
+    app.session.running = false;
+    (app.session as any).live.clear();
     await app.dispose();
   }
 
@@ -422,11 +438,24 @@ async function main() {
     ck(withAgent !== base, "so the prompt is genuinely different from the unscoped one");
     ck(/does not exist yet/.test(withAgent), "an unwritten memory file says so");
 
-    // The loop closing: the agent writes its memory, and the next prompt has it.
+    // The loop closing - one session later than it used to close, deliberately.
+    // Memory feeds the system prefix, and the prefix is the prompt-cache key,
+    // so re-reading the file on the turn after every write meant an agent that
+    // used its memory well paid cold-cache prices for the rest of the session.
+    // The write still lands on disk immediately; only its arrival in the
+    // prompt waits. test/prompt-cache.ts drives the same trade through real
+    // turns on the wire, including the new-conversation half of it.
     fs.mkdirSync(path.join(root, ".agent", "memory"), { recursive: true });
     fs.writeFileSync(path.join(root, ".agent", "memory", "reader.md"), "Prefers tabs.\n", "utf8");
+    ck(!/Prefers tabs\./.test(app.systemPrompt("act")),
+      "a write mid-session leaves the prefix where it was");
+    // An agent switch is one of the two events that drop the held snapshot,
+    // and the one this section is about. Leaving and coming back is what a
+    // user does, and it is enough.
+    await app.setActiveAgent("");
+    await app.setActiveAgent("reader");
     ck(/Prefers tabs\./.test(app.systemPrompt("act")),
-      "and once written, it is read back into the next turn");
+      "and once written, it is read back the next time the agent is selected");
 
     // A memory file outside the workspace must not be read.
     const outside = path.join(TMP, "outside.md");

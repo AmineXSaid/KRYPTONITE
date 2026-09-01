@@ -84,42 +84,21 @@ function mergeGlobalCa(profiles: EndpointProfile[], globalCa: string): void {
 }
 
 /**
- * Refuse duplicate endpoint names, and sort what is left.
+ * Names two files both claimed.
  *
- * TWO PROFILES WITH THE SAME `name:` IS NOT A COSMETIC PROBLEM. `clientFor`
- * pools clients by `profile.name`, so the second file's baseUrl, TLS material
- * and credential were silently never used - every request went out on the
- * first one's client. The agents loader and the skills loader both refuse
- * duplicate names already; the one place where a collision decides WHERE
- * REQUESTS GO did not check at all.
- *
- * Sorted as well, so `profiles[0]` - the fallback when the configured active
- * profile is missing - is the same profile on every machine rather than
- * whatever the filesystem happened to list first.
+ * The refusal itself lives in `loadAllProfiles`, which is the right layer: a
+ * name is what `activeProfile` looks up, what the client pool is keyed on and
+ * what the auth cache is keyed on, so the loader is where a collision has to
+ * be stopped. This only reads the errors back so the panel can name the
+ * offending profiles without re-parsing them.
  */
-function dedupeProfiles(
-  profiles: EndpointProfile[],
-  errors: ProfileError[]
-): { kept: EndpointProfile[]; duplicates: string[] } {
-  profiles.sort((a, b) => a.name.localeCompare(b.name));
-  const byName = new Map<string, EndpointProfile>();
-  const dupes: string[] = [];
-  for (const p of profiles) {
-    const first = byName.get(p.name);
-    if (first) {
-      dupes.push(p.name);
-      errors.push(
-        new ProfileError(
-          `Another profile is already called "${p.name}" (${path.basename(first.sourceFile ?? "")}). ` +
-            `Endpoint names have to be unique - requests are routed by them - so this file was not loaded.`,
-          p.sourceFile
-        )
-      );
-      continue;
-    }
-    byName.set(p.name, p);
+function duplicateNames(errors: ProfileError[]): string[] {
+  const names: string[] = [];
+  for (const e of errors) {
+    const m = /^Two profiles are called "([^"]+)"/.exec(e.message);
+    if (m) names.push(m[1]);
   }
-  return { kept: [...byName.values()], duplicates: [...new Set(dupes)] };
+  return [...new Set(names)];
 }
 
 /**
@@ -157,7 +136,9 @@ function mergeSkills(
 export function loadWorkspace(src: WorkspaceSources): LoadedWorkspace {
   const { profiles, errors } = loadAllProfiles(path.join(src.root, src.profileDir));
   mergeGlobalCa(profiles, src.globalCaBundle.trim());
-  const { kept, duplicates } = dedupeProfiles(profiles, errors);
+  // Sorted here as well as in the loader, because the fallback when nothing is
+  // selected is `profiles[0]` and that must not depend on directory order.
+  profiles.sort((a, b) => a.name.localeCompare(b.name));
 
   const bundled = fs.existsSync(src.bundledSkillsDir)
     ? loadSkills(src.bundledSkillsDir)
@@ -167,9 +148,9 @@ export function loadWorkspace(src: WorkspaceSources): LoadedWorkspace {
   const agents = loadAgents(src.agentsDir);
 
   return {
-    profiles: kept,
+    profiles,
     profileErrors: errors,
-    duplicateProfileNames: duplicates,
+    duplicateProfileNames: duplicateNames(errors),
     skills: skills.skills,
     skillWarnings: skills.warnings,
     agents: agents.agents,

@@ -1,6 +1,9 @@
 /**
  * Does a small model actually leave skills alone until they are needed?
  *
+ * @requires-network - a real model has to answer for this to mean anything, so
+ * it runs under `npm run test:live` rather than in the default suite.
+ *
  * The system prompt asks it to. Small instruct models ignore polite asks, so this
  * sends the real system prompt and the real tool list to a real endpoint and
  * checks what it does with "hi".

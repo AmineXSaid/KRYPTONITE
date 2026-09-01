@@ -36,7 +36,15 @@ export interface McpServerSpec {
   headers?: Record<string, string>;
   command: string;
   args?: string[];
-  /** Merged over the extension host's own environment. */
+  /**
+   * Extra environment for the server, merged over a small allowlist.
+   *
+   * NOT merged over the whole extension-host environment, which is what it
+   * used to be: a server named by a file in the open workspace was handed
+   * every variable the user's shell exported, and on a developer machine that
+   * is where cloud credentials and registry tokens live. See `serverEnv`.
+   * This block is the explicit, documented way to give a server a credential.
+   */
   env?: Record<string, string>;
   /** Defaults to the workspace root. */
   cwd?: string;
@@ -58,6 +66,19 @@ export interface McpTool {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  /**
+   * The server's `annotations.readOnlyHint`, when it set one to exactly `true`.
+   *
+   * A hint, and the word is load-bearing: it is the server describing itself,
+   * so nothing that grants access may depend on it. It is captured because it
+   * is worth something in the other direction - a server the user vouched for
+   * whose own tools do not claim to be read-only is a disagreement worth
+   * showing them, and that can only ever narrow trust.
+   *
+   * Anything but exactly `true` leaves this undefined, so a malformed or absent
+   * annotation reads as write-capable rather than as a promise.
+   */
+  readOnlyHint?: boolean;
 }
 
 export type McpState = "idle" | "starting" | "ready" | "failed" | "stopped";
@@ -96,42 +117,6 @@ function quoteWin(s: string): string {
  * Combined with `windowsVerbatimArguments`, the quoting is ours rather than
  * Node's, which is what makes an argument containing a space safe.
  */
-/**
- * Signal a child and everything it started.
- *
- * On POSIX the child is its own group leader (see `detached` in `start`), so a
- * negative pid reaches the whole tree; the direct kill is the fallback for a
- * child that somehow is not one. On Windows there are no process groups worth
- * the name, so `taskkill /T /F` walks the tree instead - which is the only
- * thing that reaches the server behind the `cmd.exe` shim.
- */
-function killTree(proc: { pid?: number; kill: (s?: any) => boolean }, signal: "SIGTERM" | "SIGKILL"): void {
-  const pid = proc.pid;
-  if (process.platform === "win32") {
-    if (pid === undefined) return;
-    try {
-      spawn("taskkill", ["/pid", String(pid), "/T", ...(signal === "SIGKILL" ? ["/F"] : [])], {
-        stdio: "ignore",
-        windowsHide: true,
-      }).on("error", () => {
-        try { proc.kill(signal); } catch { /* already gone */ }
-      });
-    } catch {
-      try { proc.kill(signal); } catch { /* already gone */ }
-    }
-    return;
-  }
-  if (pid !== undefined) {
-    try {
-      process.kill(-pid, signal);
-      return;
-    } catch {
-      // No such group - the child was not detached, or it is already gone.
-    }
-  }
-  try { proc.kill(signal); } catch { /* already gone */ }
-}
-
 export function spawnTarget(
   command: string,
   args: string[]
@@ -143,6 +128,97 @@ export function spawnTarget(
     args: ["/d", "/s", "/c", `"${line}"`],
     verbatim: true,
   };
+}
+
+/**
+ * Signal a whole process tree, not just the process we started.
+ *
+ * The command in `.agent/mcp.json` is nearly always a launcher - `npx`, `uvx`,
+ * `node`, a shell script - and the server itself is its child. Signalling only
+ * the direct child left the real server running, and because VS Code does not
+ * guarantee `deactivate` runs at all when the extension host restarts, every
+ * window reload could leave another one behind: invisible in the UI, holding
+ * its own handles, and impossible for the user to find.
+ *
+ * POSIX gets a negative pid, which signals the group the child was detached
+ * into. Windows has no groups, so `taskkill /T` walks the tree instead. Both
+ * fall back to signalling the child alone, because a tree that is already gone
+ * is the common case and not an error.
+ */
+function killTree(proc: { pid?: number; kill: (s?: any) => boolean }, signal: "SIGTERM" | "SIGKILL"): void {
+  const pid = proc.pid;
+  if (!pid) return;
+  if (process.platform === "win32") {
+    try {
+      // `.on("error")` as well as the try/catch: a missing taskkill fails
+      // ASYNCHRONOUSLY as an ENOENT on the child, which the catch below cannot
+      // see, and silently doing nothing is the outcome this whole function
+      // exists to prevent.
+      spawn("taskkill", ["/pid", String(pid), "/T", ...(signal === "SIGKILL" ? ["/F"] : [])], {
+        stdio: "ignore",
+        windowsHide: true,
+      })
+        .on("error", () => {
+          try { proc.kill(signal); } catch { /* already gone */ }
+        })
+        .unref();
+      return;
+    } catch {
+      /* fall through to the direct kill below */
+    }
+  } else {
+    try {
+      process.kill(-pid, signal);
+      return;
+    } catch {
+      /* no group - the spawn may have failed to detach. Kill the child. */
+    }
+  }
+  try {
+    proc.kill(signal);
+  } catch {
+    /* already gone */
+  }
+}
+
+/**
+ * The environment an MCP server is given.
+ *
+ * AN ALLOWLIST, not `process.env`. A server is a program named by a file in
+ * the open workspace, and handing it the whole extension-host environment
+ * hands it every variable the user's shell exported - which on a developer
+ * machine is where cloud credentials, registry tokens and CI secrets live. The
+ * server needs enough to find its interpreter and its packages, and the
+ * `env` block in `.agent/mcp.json` for anything else; that block is the
+ * documented way to give it a credential, and it is explicit.
+ *
+ * PATH, HOME and the platform's own plumbing are the difference between a
+ * server that starts and one that reports "node: not found".
+ */
+const ENV_ALLOW = [
+  "PATH", "Path", "PATHEXT", "HOME", "USERPROFILE", "TMPDIR", "TEMP", "TMP",
+  "LANG", "LC_ALL", "TZ", "SHELL", "COMSPEC", "ComSpec",
+  "SystemRoot", "SystemDrive", "windir", "APPDATA", "LOCALAPPDATA", "ProgramData",
+  "PROGRAMFILES", "ProgramFiles", "ProgramFiles(x86)", "USERNAME", "USER", "LOGNAME",
+  // Toolchain roots, so a server launched through npx/uvx/pyenv finds itself.
+  "NODE_PATH", "NVM_DIR", "NVM_BIN", "npm_config_prefix", "npm_config_cache",
+  "PYENV_ROOT", "VIRTUAL_ENV", "CONDA_PREFIX", "UV_CACHE_DIR", "XDG_DATA_HOME",
+  "XDG_CACHE_HOME", "XDG_CONFIG_HOME",
+];
+
+export function serverEnv(own: Record<string, string> | undefined): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {};
+  for (const key of ENV_ALLOW) {
+    const v = process.env[key];
+    if (v !== undefined) out[key] = v;
+  }
+  // Proxy settings travel too: an MCP server that fetches anything is behind
+  // the same corporate proxy this extension exists to cope with, and omitting
+  // these turns a working server into a hang with no explanation.
+  for (const key of Object.keys(process.env)) {
+    if (/^(https?_proxy|no_proxy|all_proxy)$/i.test(key)) out[key] = process.env[key];
+  }
+  return { ...out, ...(own ?? {}) };
 }
 
 /**
@@ -263,28 +339,26 @@ export class McpClient {
     try {
       this.proc = spawn(file, args, {
         cwd: this.root,
-        env: { ...process.env, ...(this.spec.env ?? {}) },
+        env: serverEnv(this.spec.env),
         stdio: ["pipe", "pipe", "pipe"],
         windowsVerbatimArguments: verbatim,
-        /* Its own process group, so `stop()` can signal the whole tree.
+        /* ITS OWN PROCESS GROUP, so the whole tree can be killed.
          *
-         * Nothing we spawn is the server. On POSIX the canonical command is
-         * `npx -y @modelcontextprotocol/server-…`, which execs a node child;
-         * on Windows every command goes through the `cmd.exe` shim below
-         * because npx and uvx are `.cmd` files. `child.kill()` signals only
-         * the direct child, so the actual server survived every reload, every
-         * window close and every deactivate - and on Windows, where
-         * TerminateProcess does not walk a tree at all, it survived
-         * unconditionally. A day of ordinary editing left a pile of orphaned
-         * node processes nobody could attribute to the extension.
+         * The canonical MCP command is `npx @modelcontextprotocol/server-…`,
+         * and npx is a wrapper that spawns node. `proc.kill()` reaches the
+         * wrapper and leaves the grandchild running, so every window reload
+         * left another orphaned server behind holding its own file handles -
+         * invisible in the UI and impossible for the user to find. Detaching
+         * gives the child a group id that `stop()` can signal as a whole.
          *
-         * Not on Windows: `detached` there creates a new console rather than a
-         * signalable group, and would flash a window. `taskkill /T` in stop()
-         * covers that platform instead. */
+         * Windows has no process groups; `detached` there means "new console
+         * window", which is exactly what nobody wants, so it stays off and
+         * `stop()` uses taskkill /T instead. */
         detached: process.platform !== "win32",
       }) as ChildProcessWithoutNullStreams;
-      // Detached but not unref'd: we want the child to die with us if stop()
-      // never runs, and we want to keep reading its stdio until it does.
+      // Detached without unref still ties the child's lifetime to ours for
+      // exit purposes, which is what we want: the group exists to be killed
+      // together, not to outlive the editor.
     } catch (e: any) {
       this.fail(`could not start "${this.spec.command}": ${e.message}`);
       return;
@@ -360,6 +434,9 @@ export class McpClient {
       const res = (await this.request("tools/list", cursor ? { cursor } : {})) as any;
       for (const t of res?.tools ?? []) {
         if (!t?.name) continue;
+        // `=== true` rather than a truthy test: a server sending "false", 0 or
+        // an object must not be read as a promise that its tool only reads.
+        const hint = (t.annotations as Record<string, unknown> | undefined)?.readOnlyHint;
         out.push({
           name: String(t.name),
           description: String(t.description ?? ""),
@@ -367,6 +444,7 @@ export class McpClient {
             t.inputSchema && typeof t.inputSchema === "object"
               ? t.inputSchema
               : { type: "object", properties: {} },
+          ...(hint === true ? { readOnlyHint: true as const } : {}),
         });
       }
       cursor = res?.nextCursor;
@@ -403,7 +481,7 @@ export class McpClient {
     }
   }
 
-  /** Kill the process and reject anything still outstanding. */
+  /** Kill the process TREE and reject anything still outstanding. */
   async stop(): Promise<void> {
     this.state = "stopped";
     for (const [, p] of this.pending) {
@@ -414,6 +492,7 @@ export class McpClient {
     const proc = this.proc;
     this.proc = undefined;
     if (!proc || proc.exitCode !== null) return;
+
     killTree(proc, "SIGTERM");
     // SIGKILL anything that ignores the polite request.
     await new Promise<void>((resolve) => {
