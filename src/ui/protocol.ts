@@ -274,6 +274,13 @@ export interface ModelGroupDto {
 export interface AgentMcpDto {
   server: string;
   include: string[];
+  /**
+   * Whether an include list was written at all. Carried across because the
+   * label depends on it: an empty include means NO tools on this server, and
+   * a surface that reads `include.length` as "is it filtered" would draw that
+   * as unfiltered - the same inversion the host had.
+   */
+  includeActive: boolean;
   exclude: string[];
 }
 

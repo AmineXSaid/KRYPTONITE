@@ -47,9 +47,14 @@ function csp(webview: vscode.Webview, nonce: string): string {
  *
  * `crypto.randomBytes` was already used elsewhere in this codebase, so this was
  * an oversight rather than a constraint.
+ *
+ * Hex rather than base64: 16 bytes is 128 bits either way, and the hex
+ * alphabet has no character that anything downstream has to think about. The
+ * nonce is interpolated into an HTML attribute and string-compared in three
+ * places, and `activation.ts` has always asserted the shape it appears in.
  */
 function makeNonce(): string {
-  return crypto.randomBytes(24).toString("base64");
+  return crypto.randomBytes(16).toString("hex");
 }
 
 /**

@@ -66,6 +66,19 @@ export interface McpTool {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  /**
+   * The server's `annotations.readOnlyHint`, when it set one to exactly `true`.
+   *
+   * A hint, and the word is load-bearing: it is the server describing itself,
+   * so nothing that grants access may depend on it. It is captured because it
+   * is worth something in the other direction - a server the user vouched for
+   * whose own tools do not claim to be read-only is a disagreement worth
+   * showing them, and that can only ever narrow trust.
+   *
+   * Anything but exactly `true` leaves this undefined, so a malformed or absent
+   * annotation reads as write-capable rather than as a promise.
+   */
+  readOnlyHint?: boolean;
 }
 
 export type McpState = "idle" | "starting" | "ready" | "failed" | "stopped";
@@ -413,6 +426,9 @@ export class McpClient {
       const res = (await this.request("tools/list", cursor ? { cursor } : {})) as any;
       for (const t of res?.tools ?? []) {
         if (!t?.name) continue;
+        // `=== true` rather than a truthy test: a server sending "false", 0 or
+        // an object must not be read as a promise that its tool only reads.
+        const hint = (t.annotations as Record<string, unknown> | undefined)?.readOnlyHint;
         out.push({
           name: String(t.name),
           description: String(t.description ?? ""),
@@ -420,6 +436,7 @@ export class McpClient {
             t.inputSchema && typeof t.inputSchema === "object"
               ? t.inputSchema
               : { type: "object", properties: {} },
+          ...(hint === true ? { readOnlyHint: true as const } : {}),
         });
       }
       cursor = res?.nextCursor;

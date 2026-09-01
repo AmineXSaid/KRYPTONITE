@@ -75,7 +75,7 @@ const AGENT: Agent = {
   tools: ["read_file", "list_files"],
   skills: [],
   allMcp: false,
-  mcp: [{ server: "filesystem", include: ["read_text_file"], exclude: [] }],
+  mcp: [{ server: "filesystem", include: ["read_text_file"], exclude: [], includeActive: true }],
   file: "",
 };
 

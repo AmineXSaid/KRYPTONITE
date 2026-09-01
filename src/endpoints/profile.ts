@@ -271,7 +271,9 @@ export function loadProfile(file: string): EndpointProfile {
     ...capabilitiesFor(kind),
     ...(doc.capabilities ?? {}),
   };
-  validateCapabilities(capabilities, file);
+  // What the FILE said, as opposed to what it inherited. The difference
+  // decides whether a contradiction is the user's to fix or ours to absorb.
+  validateCapabilities(capabilities, (doc.capabilities ?? {}) as Record<string, unknown>, file);
 
   return {
     ...doc,
@@ -300,7 +302,11 @@ export function loadProfile(file: string): EndpointProfile {
  * field where the consequence is worse, and it is made at parse time rather
  * than at use time so it names the file.
  */
-function validateCapabilities(caps: Capabilities, file: string): void {
+function validateCapabilities(
+  caps: Capabilities,
+  declared: Record<string, unknown>,
+  file: string
+): void {
   const numeric: Array<keyof Capabilities> = [
     "contextWindow", "maxOutputTokens", "maxImageBytes",
   ];
@@ -316,18 +322,32 @@ function validateCapabilities(caps: Capabilities, file: string): void {
   }
   /* A REPLY CANNOT BE LONGER THAN THE CONVERSATION IT IS PART OF.
    *
-   * These two sit next to each other in every example profile, so copying one
-   * and editing the wrong line is the ordinary mistake. The result was silent
-   * and looked like the model's fault: `fitToWindow`'s budget goes negative,
-   * history is cut to the last two messages on EVERY turn, and the model
-   * appears to forget the conversation it is having. */
+   * `fitToWindow`'s budget is `contextWindow - (maxOutputTokens + 512)`. When
+   * that goes negative, history is cut to the last two messages on EVERY turn
+   * and the model appears to forget the conversation it is having - silently,
+   * and looking like the model's fault.
+   *
+   * WHICH OF THE TWO IS AT FAULT DEPENDS ON WHO WROTE THEM. The fields sit
+   * next to each other in every example profile, so a user who wrote both in
+   * contradiction has made the ordinary mistake and wants to be told. A user
+   * who wrote only a small `contextWindow` has said something perfectly
+   * coherent - a 1k-window model exists - and inherited the 4096 default from
+   * a table they never read. Refusing their profile over a field that is not
+   * in their file, naming a number they never chose, is a worse failure than
+   * the one being prevented.
+   *
+   * So: refuse a contradiction, clamp an inheritance. The clamp keeps half the
+   * window for the prompt, which is the least that makes a turn worth sending. */
   if (caps.maxOutputTokens >= caps.contextWindow) {
-    throw new ProfileError(
-      `capabilities.maxOutputTokens (${caps.maxOutputTokens}) must be smaller than ` +
-        `capabilities.contextWindow (${caps.contextWindow}) - the reply has to fit inside the ` +
-        `window along with the conversation. Leave room for the prompt as well as the answer.`,
-      file
-    );
+    if (declared.maxOutputTokens !== undefined) {
+      throw new ProfileError(
+        `capabilities.maxOutputTokens (${caps.maxOutputTokens}) must be smaller than ` +
+          `capabilities.contextWindow (${caps.contextWindow}) - the reply has to fit inside the ` +
+          `window along with the conversation. Leave room for the prompt as well as the answer.`,
+        file
+      );
+    }
+    caps.maxOutputTokens = Math.max(256, Math.floor(caps.contextWindow / 2));
   }
 }
 

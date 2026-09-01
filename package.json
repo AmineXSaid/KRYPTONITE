@@ -2,7 +2,7 @@
   "name": "genesis",
   "displayName": "Genesis",
   "description": "A coding agent for endpoints that don't behave. mTLS, corporate CAs, token exchange, air-gapped.",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "publisher": "MohamedAmineSaid",
   "author": {
     "name": "Mohamed Amine Said",
@@ -25,6 +25,20 @@
     "AI",
     "Programming Languages",
     "Other"
+  ],
+  "keywords": [
+    "ai",
+    "agent",
+    "llm",
+    "mcp",
+    "openai",
+    "anthropic",
+    "ollama",
+    "self-hosted",
+    "air-gapped",
+    "mtls",
+    "proxy",
+    "local-llm"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -184,6 +198,28 @@
           "default": ".agent/instructions.md",
           "markdownDescription": "Workspace-relative markdown file whose contents are prepended to every system prompt, for conventions that must hold on every turn. Absent is fine and is not warned about. Skills are the on-demand equivalent; this is the always-on one. Capped at 16,000 characters, with the truncation stated to the model."
         },
+        "genesis.microCompact": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Condense old exchanges into a short summary instead of dropping them when the context window fills.\n\nWithout this, a long run silently loses its own beginning: the oldest turns are shifted off and replaced by a note telling the model to ask if it needs them, which it cannot - they are gone. With it, an exchange is summarised by a second, cheaper model and the summary stays in the conversation.\n\n**Off by default, and that is a real trade rather than caution**. Absorbing an exchange rewrites the middle of the prompt, and the middle of the prompt is inside the cached prefix - so this buys window headroom by giving up prompt-cache hits. Worth it when the alternative is losing the turns; not worth it on a conversation that was never going to fill the window.\n\nName the summariser with `#genesis.microCompactProfile#`; it is never chosen for you, and it needs a context window of at least 64,000 tokens. Without one this stays off and says so in the log; nothing fails."
+        },
+        "genesis.microCompactProfile": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Which endpoint profile condenses old exchanges when `#genesis.microCompact#` is on. Name it by its `name:` field.\n\n**Micro-compaction does not run until this is set**, and there is deliberately no automatic choice. Condensing means sending part of the conversation - including file contents and command output the agent read - to a second endpoint, and which endpoint that is should be a decision rather than a guess. Picking one automatically would quietly route a local-only workspace's code to whatever cloud profile happened to be configured beside it.\n\nThe profile needs a context window of at least 64,000 tokens; a smaller one is refused and the log says so. A cheap `kind: chat` model is the right choice: condensing is the least demanding thing a model can be asked to do, and pointing it at a reasoning profile spends a thinking budget on paraphrase."
+        },
+        "genesis.microCompactEveryNTurns": {
+          "type": "number",
+          "default": 1,
+          "minimum": 1,
+          "markdownDescription": "How often micro-compaction may absorb an exchange, in turns. At most one exchange is ever condensed per attempt. Raise it to rewrite the prompt less often, which costs less cache; lower it to reclaim room faster. Hermes's `micro_compact_every_n_turns`."
+        },
+        "genesis.microCompactDefragThresholdTokens": {
+          "type": "number",
+          "default": 2000,
+          "minimum": 200,
+          "markdownDescription": "How many reclaimable tokens have to be sitting in the compactable middle of a conversation before summarising one is worth a request. Below this, the summary call costs more than the room it wins back. Hermes's `micro_compact_defrag_threshold_tokens`."
+        },
         "genesis.editorContext": {
           "type": "boolean",
           "default": true,
@@ -311,11 +347,10 @@
     "test": "node test/run.js",
     "test:live": "node test/run.js attachment-e2e skill-gating-live --include-tagged",
     "test:mcp": "npm install --no-save @modelcontextprotocol/server-filesystem @modelcontextprotocol/server-memory && node test/run.js mcp-e2e --include-tagged",
+    "test:package": "npm run package && node test/run.js vsix render mentions activate-vsix --include-tagged",
     "verify": "npm run typecheck && npm test && npm run test:package",
     "vscode:prepublish": "npm run build",
-    "package": "vsce package --no-dependencies",
-    "test:package": "npm run package && node test/run.js vsix render mentions --include-tagged"
-  },
+    "package": "vsce package --no-dependencies"  },
   "dependencies": {
     "undici": "^6.19.8",
     "yaml": "^2.5.0"

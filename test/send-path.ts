@@ -418,11 +418,24 @@ async function main() {
     ck(withAgent !== base, "so the prompt is genuinely different from the unscoped one");
     ck(/does not exist yet/.test(withAgent), "an unwritten memory file says so");
 
-    // The loop closing: the agent writes its memory, and the next prompt has it.
+    // The loop closing - one session later than it used to close, deliberately.
+    // Memory feeds the system prefix, and the prefix is the prompt-cache key,
+    // so re-reading the file on the turn after every write meant an agent that
+    // used its memory well paid cold-cache prices for the rest of the session.
+    // The write still lands on disk immediately; only its arrival in the
+    // prompt waits. test/prompt-cache.ts drives the same trade through real
+    // turns on the wire, including the new-conversation half of it.
     fs.mkdirSync(path.join(root, ".agent", "memory"), { recursive: true });
     fs.writeFileSync(path.join(root, ".agent", "memory", "reader.md"), "Prefers tabs.\n", "utf8");
+    ck(!/Prefers tabs\./.test(app.systemPrompt("act")),
+      "a write mid-session leaves the prefix where it was");
+    // An agent switch is one of the two events that drop the held snapshot,
+    // and the one this section is about. Leaving and coming back is what a
+    // user does, and it is enough.
+    await app.setActiveAgent("");
+    await app.setActiveAgent("reader");
     ck(/Prefers tabs\./.test(app.systemPrompt("act")),
-      "and once written, it is read back into the next turn");
+      "and once written, it is read back the next time the agent is selected");
 
     // A memory file outside the workspace must not be read.
     const outside = path.join(TMP, "outside.md");

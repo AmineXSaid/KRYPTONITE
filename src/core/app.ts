@@ -17,6 +17,12 @@ import { clearSecureContexts } from "../endpoints/transport";
 import { EndpointClient } from "../providers/client";
 import { systemPromptFor, PHASES } from "../agent/loop";
 import { runOneShot, OneShotOptions } from "../agent/oneShot";
+import {
+  MicroCompactor,
+  AUX_WINDOW_FLOOR,
+  type MicroCompactConfig,
+  type Summariser,
+} from "../agent/compact";
 import { loadSkills, Skill, skillIndex } from "../skills/loader";
 import {
   loadAgents,
@@ -99,12 +105,25 @@ interface ChatExportSession {
  * persona and different tool lists are different agents - so it belongs in the
  * row rather than one level down.
  */
+/**
+ * One server's entry in the scope line.
+ *
+ * Three states, not two. A count means "these tools"; a bare server name means
+ * "all of them"; and `(none)` means an include list was written and left empty,
+ * which withholds every tool. Reading `include.length` alone drew that last
+ * case as unrestricted - the label agreeing with the bug rather than the user.
+ */
+function mcpScopeLabel(m: { server: string; include: string[]; includeActive: boolean }): string {
+  if (!m.includeActive) return m.server;
+  return m.include.length ? `${m.server} (${m.include.length})` : `${m.server} (none)`;
+}
+
 export function agentScopeLine(a: Agent): string {
   const tools = a.tools.length ? `${a.tools.length} built-in tool(s)` : "all built-in tools";
   const mcp = a.allMcp
     ? "all MCP servers"
     : a.mcp.length
-      ? `MCP: ${a.mcp.map((m) => (m.include.length ? `${m.server} (${m.include.length})` : m.server)).join(", ")}`
+      ? `MCP: ${a.mcp.map(mcpScopeLabel).join(", ")}`
       : "no MCP";
   const extras = [a.model ? a.model : "", a.memory ? "memory" : ""].filter(Boolean);
   return [tools, mcp, ...extras].join(" · ");
@@ -306,6 +325,18 @@ export class App {
   agentWarnings: string[] = [];
 
   phase: Phase = "act";
+
+  /**
+   * The memory block this session is sending, and whose it is.
+   *
+   * One entry, not a map: only the active agent's memory reaches a prompt, and
+   * keying on the name means an agent switch is caught even if the explicit
+   * invalidation below were ever missed.
+   */
+  private memorySnapshot?: { agent: string; memory: string | undefined };
+
+  /** Has the compaction feasibility line been logged in this window yet? */
+  private compactionReported = false;
   running = false;
   tracing = false;
   rungs: RungDto[] = [];
@@ -1031,8 +1062,108 @@ export class App {
     await Promise.allSettled([
       client.warmConnection(),
       client.warmAuth(),
-      client.warmCache(this.systemPrompt()),
+      // The same identity the real request will carry. Without it the warmed
+      // prefix diverges from the second line onwards and the entry is never hit.
+      client.warmCache(
+        this.systemPrompt(this.phase, { model: profile.model, endpoint: profile.name })
+      ),
     ]);
+  }
+
+  /* ─────────────────────── micro-compaction ─────────────────────── */
+
+  /** The knobs, read fresh so a settings change lands on the next conversation. */
+  microCompactConfig(): Partial<MicroCompactConfig> {
+    return {
+      micro_compact: this.cfg().get<boolean>("microCompact", false) === true,
+      micro_compact_every_n_turns: Math.max(
+        1,
+        Number(this.cfg().get<number>("microCompactEveryNTurns", 1)) || 1
+      ),
+      micro_compact_defrag_threshold_tokens:
+        Number(this.cfg().get<number>("microCompactDefragThresholdTokens", 2000)) || 2000,
+    };
+  }
+
+  /**
+   * A second, cheaper model to condense with.
+   *
+   * `kind:` is what picks it, which is the reason that field exists: a profile
+   * that says `chat` is a plain instruct model, and condensing an exchange is
+   * the least demanding thing a model can be asked to do. Sending it to a
+   * reasoning profile would spend a thinking budget on paraphrase, and sending
+   * it to the profile already running the turn would double what that endpoint
+   * is billed for, which is the opposite of the point.
+   *
+   * The active profile is excluded for that reason, so this returns something
+   * only when the workspace really has a second endpoint to spare. Absent is
+   * the normal case and is not a failure - `feasible()` says so once and the
+   * loop keeps trimming as it always did.
+   */
+  auxSummariser(): Summariser | undefined {
+    // Named by the user, never chosen for them. This used to pick the first
+    // profile that was `kind: chat`, was not the active one and cleared the
+    // window floor - which meant switching micro-compaction on quietly sent
+    // conversation content, including file contents and command output the
+    // agent had read, to an endpoint the user configured for something else
+    // entirely. With one user and a line in the log that is survivable. With a
+    // hundred it is a privacy incident waiting for the first person who has a
+    // cloud profile sitting beside a local one.
+    //
+    // So there is no fallback. An unset, unknown or undersized profile means no
+    // summariser, `feasible()` says which and why, and the loop trims with
+    // `fitToWindow` exactly as it did before. The feature not running is a much
+    // smaller cost than the feature running somewhere unexpected.
+    const named = this.cfg().get<string>("microCompactProfile", "").trim();
+    if (!named) return undefined;
+    const aux = this.profiles.find((p) => p.name === named);
+    if (!aux || aux.capabilities.contextWindow < AUX_WINDOW_FLOOR) return undefined;
+    return {
+      name: aux.name,
+      contextWindow: aux.capabilities.contextWindow,
+      summarise: async (transcript, targetChars, signal) =>
+        runOneShot(this.clientFor(aux), transcript, {
+          system:
+            "Condense the transcript below into a compact note, written in the first person as " +
+            "the assistant recalling its own earlier work. Keep file paths, identifiers, " +
+            "commands, decisions and anything discovered; drop narration and repetition. No " +
+            "preamble and no closing remark.",
+          maxTokens: Math.max(128, Math.ceil(targetChars / 3.6)),
+          temperature: 0,
+          signal,
+        }),
+    };
+  }
+
+  /**
+   * A compactor for one conversation, and a line in the log the first time.
+   *
+   * Said once per window rather than per session, because the answer depends on
+   * the profiles and the settings and not on which chat is open - and a line on
+   * every new chat would be noise. Reported at `info` in both directions: "off"
+   * and "on" are both things someone debugging a shrinking context needs to
+   * know, and neither is a warning.
+   */
+  newCompactor(): MicroCompactor {
+    const c = new MicroCompactor(this.microCompactConfig(), this.auxSummariser());
+    if (!this.compactionReported) {
+      this.compactionReported = true;
+      const f = c.feasible();
+      // Both directions are worth a line, and the "on" one says what leaves the
+      // machine. Someone switching this on is agreeing to send parts of their
+      // conversation - file contents and command output included - to a second
+      // endpoint, and that should be stated once where they can see it rather
+      // than inferred from a setting called "micro compact".
+      const hint =
+        !f.ok && this.cfg().get<boolean>("microCompact", false) === true && !this.auxSummariser()
+          ? " Name one with genesis.microCompactProfile."
+          : "";
+      const sends = f.ok
+        ? " Parts of this conversation, including file contents the agent read, will be sent there to be condensed."
+        : "";
+      this.log("info", `Micro-compaction: ${f.ok ? "on" : "not running"} - ${f.why}.${hint}${sends}`);
+    }
+    return c;
   }
 
   /**
@@ -1060,14 +1191,39 @@ export class App {
    * Shared with the agent loop so the pre-warmed cache entry and the real
    * request are byte-identical - a prefix that differs by one character caches
    * nothing.
+   *
+   * "Byte-identical" is a claim about five arguments, and it held for four of
+   * them. `identity` was simply not passed here, and since it is the second
+   * element of the joined array every character after SYSTEM differed - so
+   * every pre-warm on a profile with a model name was warming a prefix no
+   * request would ever send. The audit, so the next reader does not have to
+   * repeat it:
+   *
+   *   skills        `enabledSkills(agent)` here, and `ctx.skills` there, which
+   *                 session.ts fills from this same method.
+   *   instructions  `this.instructions?.block` here; session.ts reads the same
+   *                 field off this same App.
+   *   agent/memory  `agentMemorySnapshot(agent)` in both, which is the point of
+   *                 the snapshot: `agentMemory` returned whatever was on disk
+   *                 at the moment of the call, so the two sites agreed only
+   *                 until the agent wrote to its own memory file.
+   *   identity      passed by both now. The caller supplies it because App
+   *                 must not assume the profile the turn will actually use.
+   *   phase         defaults to `this.phase` here; session.ts reads `app.phase`
+   *                 and runAgent applies `?? "act"` to a value that is never
+   *                 undefined. Same string.
    */
-  systemPrompt(phase: Phase = this.phase): string {
+  systemPrompt(
+    phase: Phase = this.phase,
+    identity?: { model: string; endpoint: string }
+  ): string {
     const agent = this.activeAgent();
     return systemPromptFor(
       this.enabledSkills(agent),
       phase,
-      agent ? { agent, memory: this.agentMemory(agent) } : undefined,
-      this.instructions?.block
+      agent ? { agent, memory: this.agentMemorySnapshot(agent) } : undefined,
+      this.instructions?.block,
+      identity
     );
   }
 
@@ -1346,6 +1502,9 @@ export class App {
 
   async rememberSession(id: string): Promise<void> {
     if (this.lastSessionId() === id) return;
+    // Past the early return, so this fires on a real move between
+    // conversations and not on the same id being persisted every turn.
+    this.invalidateMemorySnapshot();
     await this.context.workspaceState.update("genesis.activeSessionId", id);
   }
 
@@ -1374,6 +1533,7 @@ export class App {
 
   async setActiveAgent(name: string): Promise<void> {
     const next = this.agents.some((a) => a.name === name) ? name : "";
+    this.invalidateMemorySnapshot();
     await this.context.workspaceState.update("genesis.activeAgent", next);
     this.broadcast({ type: "agentChanged", agent: next ? this.agentDto(this.activeAgent()!) : null });
     this.updateStatus();
@@ -1382,32 +1542,96 @@ export class App {
   }
 
   /**
-   * The agent's memory file, capped.
+   * The agent's memory as this session will send it, decided once.
    *
-   * Read at the top of each turn rather than cached: the agent writes to it
-   * with its own tools, so a cached copy would go stale the moment the feature
-   * did its job. Missing is not an error - an agent with a memory file it has
-   * not written yet is the normal first run.
+   * This used to be read fresh at the top of every turn, and the comment
+   * defending that read said the obvious thing: the agent writes to its memory
+   * file with its own tools, so a cached copy goes stale the moment the
+   * feature does its job. True, and it was the wrong trade.
+   *
+   * Memory feeds the system prefix, and the system prefix is the prompt-cache
+   * key. A memory file that changes mid-session changes the prefix, and every
+   * turn after that write is billed cold - so the better an agent was at
+   * remembering things, the more each of its remaining turns cost. That is a
+   * feature that punishes its own use.
+   *
+   * So the snapshot is taken once and held for the life of the session: a
+   * memory entry that arrives one session late is cheaper than a prefix that
+   * changes mid-session, and "late" here means "the next time you open this
+   * conversation". The write still lands on disk immediately; only its arrival
+   * in the prompt is deferred.
+   *
+   * Invalidated on the two events that end a prefix's usefulness anyway - a
+   * different conversation, or a different agent - and deliberately not on a
+   * write. `agentMemory` stays underneath as the uncached reader, because this
+   * needs it and one-shot paths have no session to snapshot against.
    */
-  agentMemory(agent: Agent): string | undefined {
+  agentMemorySnapshot(agent: Agent): string | undefined {
+    if (this.memorySnapshot?.agent === agent.name) return this.memorySnapshot.memory;
+    const memory = this.agentMemory(agent);
+    this.memorySnapshot = { agent: agent.name, memory };
+    return memory;
+  }
+
+  /**
+   * Drop the held snapshot so the next prompt build re-reads the file.
+   *
+   * Called on a session change and an agent switch, and from nowhere else. A
+   * caller reaching for this after a memory write would be undoing the whole
+   * point of the snapshot.
+   */
+  private invalidateMemorySnapshot(): void {
+    this.memorySnapshot = undefined;
+  }
+
+  /**
+   * Where this agent's memory lives, once, for everyone who needs to know.
+   *
+   * The containment check is the reason this is a method rather than a
+   * `path.resolve` at each call site: a memory path pointing out of the
+   * workspace would read - or, now that writes are capped against it, name - a
+   * file the user never meant to hand over. Same rule the tools apply, stated
+   * in one place so the reader and the write guard cannot come to different
+   * conclusions about which file is the memory file.
+   */
+  agentMemoryPath(agent: Agent): string | undefined {
     if (!agent.memory) return undefined;
     const root = this.root;
     if (!root) return undefined;
     const abs = path.resolve(root, agent.memory);
-    // Same containment rule the tools use: a memory path pointing out of the
-    // workspace would read a file the user never meant to hand over.
     const rel = path.relative(root, abs);
     if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
       this.log("warn", `Agent ${agent.name}: memory path is outside the workspace and was ignored.`);
       return undefined;
     }
+    return abs;
+  }
+
+  /**
+   * The agent's memory file, capped.
+   *
+   * The uncached read. Every prompt-building path goes through
+   * `agentMemorySnapshot` instead; this is for callers that genuinely want
+   * what is on disk right now. Missing is not an error - an agent with a
+   * memory file it has not written yet is the normal first run.
+   */
+  agentMemory(agent: Agent): string | undefined {
+    const abs = this.agentMemoryPath(agent);
+    if (!abs) return undefined;
     try {
       const body = fs.readFileSync(abs, "utf8");
       if (body.length <= MAX_MEMORY_CHARS) return body;
+      // A backstop now, not the enforcement. The agent's own writes are
+      // refused at the tool before they can get here, so reaching this line
+      // means the file arrived oversized by some other route - written before
+      // the cap existed, edited by hand, or carried in from another checkout.
+      // Truncating is still the only thing to do about it at read time, but it
+      // is no longer the thing the agent learns the cap from.
       this.log(
         "warn",
         `Agent ${agent.name}: ${agent.memory} is ${Math.round(body.length / 1000)}k characters; ` +
-          `only the first ${MAX_MEMORY_CHARS / 1000}k is sent.`
+          `only the first ${MAX_MEMORY_CHARS / 1000}k is sent. The agent's own writes are ` +
+          `refused above this size, so this file grew some other way - trim it by hand.`
       );
       return body.slice(0, MAX_MEMORY_CHARS);
     } catch {
@@ -1573,7 +1797,12 @@ export class App {
       tools: a.tools,
       skills: a.skills,
       allMcp: a.allMcp,
-      mcp: a.mcp.map((m) => ({ server: m.server, include: m.include, exclude: m.exclude })),
+      mcp: a.mcp.map((m) => ({
+        server: m.server,
+        include: m.include,
+        includeActive: m.includeActive,
+        exclude: m.exclude,
+      })),
       file: this.root ? path.relative(this.root, a.file).split(path.sep).join("/") : a.file,
       active: a.name === this.activeAgentName,
     };

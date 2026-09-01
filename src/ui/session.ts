@@ -3,11 +3,12 @@ import * as path from "node:path";
 import * as crypto from "node:crypto";
 import { request } from "undici";
 import type { Msg } from "../providers/client";
-import { runAgent } from "../agent/loop";
+import { runAgent, type ExitReason } from "../agent/loop";
+import type { MicroCompactor } from "../agent/compact";
 import { isUntitled, titleFrom, sanitizeTitle } from "../core/sessions";
 import type { FileChange, ToolContext, TodoItem, ToolImage } from "../agent/tools";
 import { mentionable } from "../agent/tools";
-import { agentAllowsMcp, agentRefusal } from "../agents/loader";
+import { agentAllowsMcp, agentMemoryFull, agentRefusal, MAX_MEMORY_CHARS } from "../agents/loader";
 import { parseQualified } from "../mcp/registry";
 import { fetchPage, normaliseUrl } from "../browser/fetchPage";
 import { CdpBrowser, findBrowser, listBrowsers } from "../browser/cdp";
@@ -160,6 +161,15 @@ interface LiveTurn {
    * more messages than it had when it was deleted.
    */
   discarded: boolean;
+
+  /**
+   * Has this turn already reported its prompt-cache figures?
+   *
+   * Usage arrives once per model call, and a turn is many calls. One line per
+   * turn is a fact worth having in the log; one per step is a wall of numbers
+   * that stops being read, which is the same as not logging it.
+   */
+  cacheLogged?: boolean;
 }
 
 /**
@@ -193,13 +203,47 @@ interface Conversation {
   alwaysAllowEdits: boolean;
   /** The checklist this conversation's turns have published. */
   todos: TodoDto[];
+  /**
+   * What the compactor has learned about this conversation.
+   *
+   * Per conversation and not per controller, for the same reason everything
+   * else here is: it accumulates across the turns of ONE chat, and a single
+   * instance shared by a backgrounded turn and a visible one would carry what
+   * it learned from each into the other. It was a field on the controller when
+   * it arrived, which is the shape this record exists to replace.
+   */
+  compactor?: MicroCompactor;
 }
 
 const PATCH_LIMIT = 30_000;
 
+/**
+ * Exit reasons as a person would say them.
+ *
+ * The enum is for code and reads like one; this is what goes in the log, where
+ * the audience is someone wondering why their turn stopped. `done` is absent
+ * deliberately - it is never printed.
+ */
+const EXIT_REASONS: Partial<Record<ExitReason, string>> = {
+  aborted: "you stopped it between steps",
+  interrupted: "you stopped it while tools were running",
+  budget_exhausted: "it used the whole token budget for one turn",
+  max_iterations: "it hit the step cap without finishing",
+  failing: "too many steps in a row got nothing done",
+  error: "the endpoint returned an error",
+};
+
 export class SessionController {
   history: Msg[] = [];
   sessionId: string;
+
+  /**
+   * What this conversation has condensed, and how patient it is still being.
+   *
+   * Per conversation, and reset when the conversation changes: the summaries it
+   * holds are keyed by messages from a transcript that is no longer on screen,
+   * and its patience counters describe a run that is over.
+   */
   running = false;
 
   /**
@@ -851,6 +895,19 @@ export class SessionController {
           return this.app.mcp.call(name, args, profile.capabilities.vision === true);
         },
       },
+      // Present only while an agent with a memory file is active, because the
+      // cap is that agent's budget and there is nothing to guard without one.
+      // The path is resolved by App so the guard and the reader agree on which
+      // file is the memory file, containment check included.
+      memory: (() => {
+        const file = agent ? this.app.agentMemoryPath(agent) : undefined;
+        if (!agent || !file) return undefined;
+        return {
+          path: file,
+          cap: MAX_MEMORY_CHARS,
+          refusal: (size: number) => agentMemoryFull(agent, size),
+        };
+      })(),
       // Present only when the profile declares an image model. That absence is
       // what withholds the tool from the model entirely, rather than offering
       // one that could only ever answer "not configured".
@@ -984,14 +1041,25 @@ export class SessionController {
         signal: turn.abort.signal,
         phase,
         mcpTools: this.app.agentMcpTools(),
+        // One per conversation, minted lazily so a window where compaction is
+        // off never builds one. It has to outlive the turn: the every-N-turns
+        // pacing and the run of ineffective attempts are both counted over a
+        // conversation, and a fresh compactor each turn would reset them and
+        // summarise the same exchange again on every send.
+        // The turn's OWN conversation, so a backgrounded turn does not
+        // compact into the chat that happens to be on screen.
+        compactor: (this.convo(turn.id).compactor ??= this.app.newCompactor()),
         // Read fresh off App rather than captured at construction: the file has
         // a watcher, and an edit made mid-conversation should reach the very
         // next turn rather than the next window.
         instructions: this.app.instructions?.block,
-        // Read here rather than at load time: the agent writes to its memory
-        // file with its own tools, so the copy that goes into the prompt has
-        // to be the one on disk when the turn starts.
-        agent: agent ? { agent, memory: this.app.agentMemory(agent) } : undefined,
+        // The session's snapshot, not a fresh read - the opposite of the line
+        // above it, and deliberately. Instructions are a file a person edits
+        // and wants honoured at once; memory is a file this agent writes to
+        // itself, and re-reading it mid-session rewrites the system prefix and
+        // throws away the prompt cache for every remaining turn. A memory
+        // entry that lands one session late costs nothing anybody notices.
+        agent: agent ? { agent, memory: this.app.agentMemorySnapshot(agent) } : undefined,
         // Assistant replies and tool results land in the transcript as the loop
         // produces them, so tool calls survive into the next turn's context and
         // into a restored session.
@@ -1053,6 +1121,27 @@ export class SessionController {
             this.app.lastContext = { used, limit, exact };
             const out: ReplayableEvent = { type: "contextUsage", used, limit, exact };
             this.emit(turn, out);
+            // The prompt-cache counters, said once per turn and only when the
+            // gateway reports them. They are the only honest confirmation that
+            // caching is working - a read of zero, turn after turn in one
+            // conversation, means something in the prefix is moving - and until
+            // now they were decoded and discarded, so nobody could tell. A
+            // regression of that is silent and expensive, which is the worst
+            // pair of properties a bug can have.
+            const cr = ev.context!.cacheRead;
+            const cw = ev.context!.cacheWrite;
+            if ((cr ?? 0) > 0 || (cw ?? 0) > 0) {
+              if (turn.id === this.sessionId && !turn.cacheLogged) {
+                turn.cacheLogged = true;
+                this.app.log(
+                  "info",
+                  `Prompt cache: ${cr ?? 0} token(s) read, ${cw ?? 0} written` +
+                    ((cr ?? 0) === 0
+                      ? " - nothing was reused, so the stable head of the prompt changed since the last turn."
+                      : ".")
+                );
+              }
+            }
             break;
           }
           case "error": {
@@ -1084,6 +1173,17 @@ export class SessionController {
             this.emit(turn, out);
             break;
           }
+          case "exit":
+            // Why the turn stopped, said once, for the ones that need saying.
+            // Before this a turn that hit the step cap, spent its budget or
+            // was aborted between steps all looked the same from outside the
+            // loop: the model was talking, and then it was not. "done" stays
+            // silent - it is what a turn is supposed to do, and a line on
+            // every turn would bury the handful that mean something.
+            if (ev.exit && ev.exit !== "done") {
+              this.app.log("info", `Turn ended: ${EXIT_REASONS[ev.exit] ?? ev.exit}.`);
+            }
+            break;
           case "turn_end":
             break;
         }

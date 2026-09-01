@@ -181,6 +181,34 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   animation: g-drop 130ms cubic-bezier(.16, 1, .3, 1) both;
 }
 
+/* THE TRANSCRIPT'S CONTEXT MENU.
+ *
+ * Same vocabulary as `.popover` above - the near-solid ground with a blur under
+ * it, the hairline, the dialog shadow, the same entrance - because it is the
+ * same kind of object and inventing a second menu treatment would make the
+ * panel look like two products.
+ *
+ * One difference, and it is the whole reason this is not just `.popover`:
+ * position. A popover hangs off a button whose place is known at author time
+ * (`top: 38px; right: 10px`); this one hangs off a pointer, so it is fixed and
+ * its coordinates are set by openMsgMenu at open time - which is also where it
+ * is clamped, because at its narrowest this panel is about 200px and the menu
+ * is wider than that. */
+.ctx-menu {
+  position: fixed; z-index: 70; padding: 4px; min-width: 168px;
+  background: var(--kx-over);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--kx-line); border-radius: 4px;
+  box-shadow: 0 8px 24px var(--kx-shadow);
+  animation: g-drop 130ms cubic-bezier(.16, 1, .3, 1) both;
+}
+/* The rows are `.pop-row`, unchanged. The glyph is the quiet part: it is there
+   to make the row scannable, not to carry the meaning, which the label does. */
+.ctx-menu .pop-row .ic { flex: none; color: var(--kx-fg-3); }
+.ctx-menu .pop-row:hover .ic { color: var(--kx-fg-2); }
+.ctx-menu .pop-row:focus-visible { outline: 1px solid var(--kx-link); outline-offset: -1px; }
+
 /* ── how a menu arrives ────────────────────────────────────────────────────
  *
  * The mode sheet was the only thing in this panel that arrived rather than
@@ -3145,6 +3173,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    abruptness the entrance exists to remove. The fade is what is left of it. */
 @media (prefers-reduced-motion: reduce) {
   .qp,
+  .ctx-menu,
   .popover { animation: g-fade-in 110ms linear both; }
 }
 @keyframes g-fade-in { from { opacity: 0; } to { opacity: 1; } }

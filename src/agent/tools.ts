@@ -216,6 +216,27 @@ export interface ToolContext {
     action: string,
     args: Record<string, unknown>
   ) => Promise<string | { text: string; images?: ToolImage[] }>;
+  /**
+   * The active agent's memory file, and what it is allowed to weigh.
+   *
+   * Structural and optional for the same reason as everything above it: this
+   * module is imported by the agent loop and by the offline harness, and
+   * neither should have to know about the agents loader. Absent means no cap,
+   * which is the right answer for every caller with no agent selected - the
+   * file being guarded is that agent's, and there is not one.
+   *
+   * `refusal` is supplied rather than composed here because the wording
+   * belongs with the other refusals the agent produces, next to
+   * `agentRefusal`, so they stay in one voice.
+   */
+  memory?: {
+    /** Absolute path of the file the cap applies to. */
+    path: string;
+    /** Characters. A write that would leave the file larger than this is refused. */
+    cap: number;
+    /** What the model is told, given the size the write would have produced. */
+    refusal: (size: number) => string;
+  };
 }
 
 /** An image a tool hands back to the model. `data` is base64, no data: prefix. */
@@ -284,6 +305,58 @@ function contains(parent: string, child: string): boolean {
   const a = fold(parent);
   const b = fold(child);
   return b === a || b.startsWith(a.endsWith(path.sep) ? a : a + path.sep);
+}
+
+/**
+ * Would this write burst the active agent's memory cap?
+ *
+ * Returns the refusal to send back, or undefined to let the write proceed.
+ *
+ * Two things make this narrower than it first looks, and both are deliberate.
+ * It applies only to the one file the active agent declared as its memory -
+ * every other file in the workspace is the user's business and has no budget.
+ * And a write that leaves the file no larger than it already is always passes,
+ * even when the result is still over the cap. Without that second rule a file
+ * that had grown past the cap by any route - written before the cap existed,
+ * edited by hand, carried in from another checkout - could never be edited
+ * back under it, and the refusal would be a trap rather than an instruction.
+ */
+/**
+ * Are these two paths the same file?
+ *
+ * A lexical comparison is not enough, and the gap was reachable: `writable()`
+ * hands back a lexically resolved path, so a symlink inside the workspace
+ * pointing at the memory file compared unequal to it and the cap did not
+ * apply. Writing through the alias grew a 100-character budget to 500. Nothing
+ * about it is an escape - the write was always inside the workspace and always
+ * allowed - but the cap exists to make an agent curate, and one it can step
+ * around by writing through another name is not a cap.
+ *
+ * `realpathSync` is what closes it, and it throws on anything that does not
+ * exist yet - which is the ordinary case for a memory file on a first run - so
+ * each side falls back to its lexical form independently.
+ */
+function sameFile(a: string, b: string): boolean {
+  const real = (p: string) => {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  return real(a) === real(b);
+}
+
+function memoryCapRefusal(
+  ctx: ToolContext,
+  abs: string,
+  before: string,
+  after: string
+): string | undefined {
+  const mem = ctx.memory;
+  if (!mem || !sameFile(abs, mem.path)) return undefined;
+  if (after.length <= mem.cap || after.length <= before.length) return undefined;
+  return mem.refusal(after.length);
 }
 
 function writable(root: string, p: string): string {
@@ -963,6 +1036,10 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
             // card falls back to showing the new content, as it always did.
           }
         }
+        // Ahead of the approval: a write that is going to be refused must not
+        // first interrupt the user to ask about it.
+        const capped = memoryCapRefusal(ctx, abs, before, String(args.content ?? ""));
+        if (capped) return { content: capped, isError: true };
         const ok = await ctx.approve(
           `${existed ? "Overwrite" : "Create"} ${args.path}`,
           args.content.slice(0, 2000),
@@ -1010,6 +1087,8 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
         const after = all
           ? before.split(args.old_text).join(args.new_text)
           : before.replace(args.old_text, args.new_text);
+        const cappedEdit = memoryCapRefusal(ctx, abs, before, after);
+        if (cappedEdit) return { content: cappedEdit, isError: true };
         const ok = await ctx.approve(
           `Edit ${args.path}${all && count > 1 ? ` (${count} occurrences)` : ""}`,
           `- ${args.old_text}\n+ ${args.new_text}`,

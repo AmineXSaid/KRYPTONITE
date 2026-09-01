@@ -59,6 +59,23 @@ export function isWrapped(text: string): boolean {
 }
 
 /**
+ * True when a fence appears anywhere inside a string, not only at its start.
+ *
+ * `isWrapped` asks "is this whole string fenced". This asks the different
+ * question a transformation has to ask: "did any of what I just read come from
+ * outside". Anything that condenses, quotes or rewrites a stretch of
+ * transcript needs it, because the fence is a property of the region and a
+ * transformation that drops it launders page text into the model's own voice.
+ *
+ * A defanged tag deliberately does not match: `defang` has already turned it
+ * into prose, so it is no longer a delimiter and no longer evidence that real
+ * fenced content is present.
+ */
+export function containsUntrusted(text: string): boolean {
+  return new RegExp(`<${OPEN}\\s`, "i").test(text);
+}
+
+/**
  * The clause that gives the fence meaning.
  *
  * Kept here beside the tag it describes, so the two cannot drift apart - a
