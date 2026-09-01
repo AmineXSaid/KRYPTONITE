@@ -3067,7 +3067,10 @@ ul.md-l li.md-task, ol.md-l li.md-task {
  *
  * The name is still announced - `aria-label` carries it, and the title carries
  * the full sentence - so nothing is lost to a screen reader, only to width. */
-@media (max-width: 400px) {
+/* 500, not 400. See the note on the phase segment below: these two
+   breakpoints and the model button's are one decision, and splitting them is
+   what produced a panel that got WORSE as it got wider. */
+@media (max-width: 500px) {
   .perm-btn {
     width: 30px; height: 30px; min-height: 0; padding: 0;
     justify-content: center;
@@ -3090,9 +3093,23 @@ ul.md-l li.md-task, ol.md-l li.md-task {
  * character is the same as showing no name. The 18px this releases takes it to
  * "claude-sonne…", which does distinguish.
  *
- * Above 400px nothing changes, so the mockup's 5px 7px segment is what a panel
- * at its drawn width still shows. */
-@media (max-width: 400px) {
+ * The threshold is 500, not 400, and that number is not a taste call - it is
+ * the width at which the model id stops needing the help. Below it the row
+ * cannot afford both the mode word and a readable model name; above it the
+ * model button reaches its 26ch cap with room over, so the segment and the
+ * mode label can have their padding back and cost nothing.
+ *
+ * At 400 the three of them released TOGETHER and the panel got worse as it got
+ * wider. Measured with `claude-sonnet-4-6` (17 characters):
+ *
+ *   400px  13/17    compact segment, icon-only mode
+ *   420px   5/17    <- both labels came back and took 46px off the model
+ *   460px  11/17
+ *   520px  17/17
+ *
+ * A control that degrades when the user drags the panel WIDER is not a
+ * tradeoff, it is a bug, and it is invisible to anyone testing at one width. */
+@media (max-width: 500px) {
   .seg button { padding: 5px 4px; }
   /* A GREEN dot is the absence of news, and at a narrow panel it is spending a
      character and a half of the model name to say nothing. The red one stays,
@@ -3110,53 +3127,61 @@ ul.md-l li.md-task, ol.md-l li.md-task {
      is left over anyway; the basis only decides whether the row wraps. */
   #modelBtn { flex-basis: 48px; }
 }
-/* THE WRAP, WHEN IT FINALLY COMES, PUTS THE MODEL ON THE SECOND ROW.
- *
- * Below about 265px the five controls genuinely do not fit, and something has
- * to go to a second line. Left to the natural order that was `.tb-actions` -
- * attach and send stranded on a row of their own, hugged to the right, with
- * the whole left half of the composer empty. The group was introduced so a
- * wrap would not orphan send by ITSELF; it stopped send being orphaned alone
- * and left the pair orphaned together.
- *
- * `order` sends the model button down instead. Row one keeps the three
- * controls that are pressed - phase, mode, send - and row two is the model
- * name at full width, which is the one item that gets BETTER for the space:
- * the whole id fits where a moment ago it was five characters and an ellipsis.
- *
- * The threshold is 350px, and it is set by LEGIBILITY rather than by the width
- * at which the row happens to break. Inline, the model button gets whatever is
- * left after four fixed controls: about 8 characters at 360px, 6 at 320, 3 at
- * 300. Eight is enough to tell claude-sonnet from claude-opus; six is not, and
- * three is a letter and an ellipsis. So the button stops competing for the row
- * at the width where competing stops paying, and takes a full line instead -
- * where the whole id fits with room over.
- *
- * Keyboard and screen-reader order are unchanged. `order` moves the paint, not
- * the DOM, and the visual sequence still reads left-to-right, top-to-bottom. */
-/* The model name gets a row to itself until the shared row can actually hold
-   it, which is not until about 500px.
-   
-   This was 350, and the result was that the NARROWEST panel showed the model
-   name in full while every ordinary dock width truncated it. Measured with
-   `claude-sonnet-4-6`, which needs 122px:
-   
-     340px  17/17 characters   (its own row)
-     380px  10/17
-     420px   5/17              <- the worst case, just past the old breakpoint
-     460px  11/17
-     520px  17/17              (the row is finally wide enough)
-   
-   Five characters is "claud", which every model this extension is pointed at
-   begins with - a truncation that stops before the first distinguishing
-   character shows nothing at all. Below 500 the row cannot fit the segment
-   control, the permission button, three icon buttons AND a model id, so the
-   id takes the row it needs. */
-@media (max-width: 500px) {
+/* THE WRAP, WHEN IT FINALLY COMES, PUTS THE MODEL ON THE FIRST ROW.
+
+   Something has to give below 400px: five controls do not fit. Left to the
+   natural order the thing that broke away was `.tb-actions` - attach and send
+   stranded on a row of their own, hugged right, with the whole left half of
+   the composer empty. `order` moves the model button instead, because it is
+   the one item that gets BETTER for the space: the whole id fits where a
+   moment ago it was a few characters and an ellipsis.
+
+   The rule that does it is below. This note is here because the numbers in it
+   are the reason the threshold is 400 and not something rounder. */
+/* The model name gets a row to itself only where it genuinely cannot share
+   one - below 400px - and when it does, it is drawn as a BUTTON.
+
+   This was 500, and at 500 the second row was the ordinary case rather than
+   the narrow one: every dock width from 260 to 500 got a two-row toolbar,
+   70px instead of 39px. That alone would be a cost worth arguing about. What
+   made it a defect is what the second row looked like.
+
+   `#modelBtn` carries no background and no border - it is a bare text button,
+   which is right when it sits between the segment control and the mode chip
+   and is read as part of that row. Alone on a row of its own, centred, in
+   `--kx-fg-2`, with 300px of empty space around it, it stops looking like a
+   control at all: it reads as a caption under the composer. The owner
+   reported it as the model button being GONE, which is exactly right - the
+   button was still in the DOM, and its button-ness was not.
+
+   `order: 3` made it worse by putting that row AFTER `.tb-actions`, so the
+   control that answers "which model runs this" was painted below the button
+   that runs it.
+
+   So: inline from 400 up, where the compact segment and icon-only mode button
+   leave it 122px (13 of 17 characters - "claude-sonnet…", which distinguishes)
+   rising to the full id by 460. Below 400 it takes its own row, but ordered
+   FIRST - directly under the text being typed, above the action row - and
+   wearing the same 30px plate and hairline as the mode and attach buttons
+   beside it, left-aligned like every other label in the panel.
+
+   Keyboard and screen-reader order are unchanged: `order` moves the paint,
+   not the DOM. */
+@media (max-width: 400px) {
+  #modelBtn {
+    order: -1; flex: 1 1 100%; max-width: none;
+    justify-content: flex-start;
+    /* The plate is the whole point of this block. Matching `.tb-btn` rather
+       than inventing a treatment: on this row it is a sibling of attach and
+       send, and it should read as one of them. */
+    height: 30px; padding: 0 8px;
+    background: var(--kx-surface-2);
+    border: 1px solid var(--kx-edge);
+  }
+  #modelBtn:hover:not(:disabled) { background: var(--kx-surface-3); }
   .seg { order: 0; }
   .perm-btn { order: 1; }
   .tb-actions { order: 2; }
-  #modelBtn { order: 3; flex: 1 1 100%; max-width: none; justify-content: center; }
 }
 
 

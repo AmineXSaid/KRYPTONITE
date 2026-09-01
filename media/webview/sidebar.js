@@ -5171,6 +5171,19 @@ function _sbRun() {
     S.activeAgent = state.activeAgent || "";
     S.mcp = state.mcp || { servers: [], warnings: [] };
     S.config = state.config;
+    /* The host has always sent `status` in the sync payload and this handler
+       has always dropped it, so `S.status` was written by exactly one message:
+       `statusChanged`. That is a PUSH, sent when the status changes - not when
+       a panel opens - so a webview built while the gateway was failing came up
+       with no status at all and renderFooter's `bad` was false. The health dot
+       sat green, and stayed green until the endpoint's state next CHANGED.
+
+       That is the one case the dot exists for. VS Code's status bar, which the
+       host renders from the same StatusDto, showed "ERROR - HTTP" the whole
+       time; the panel's own dot disagreed with it. Reloading the window - the
+       first thing anyone tries - reproduced it rather than clearing it, since
+       a reload is a fresh sync and no change. */
+    S.status = state.status || null;
     S.tlsError = state.tlsError;
     S.rungs = state.rungs || [];
     S.tracing = state.tracing;

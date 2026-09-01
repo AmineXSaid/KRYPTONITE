@@ -569,8 +569,17 @@ function contrast(a, b) {
     // itself; it must not be orphaned as a PAIR either.
     ok("and send and attach stay on the row with the phase segment",
       rowOf("tb-actions") === rowOf("phaseSeg"), JSON.stringify(rows));
-    ok("while the model button is what moves to the second row",
-      rowOf("modelBtn") > rowOf("phaseSeg"), JSON.stringify(rows));
+    // "the second row" is what this used to say, and that pinned an accident
+    // rather than the rule. The rule is that the MODEL BUTTON is the control
+    // that breaks away and that it goes alone - which is what makes the fix
+    // for it (a plate, so it still reads as a button once it is standing by
+    // itself) meaningful. Which side of the action row it lands on is a
+    // design choice; it is now placed above, directly under the text being
+    // typed, rather than below the send button that acts on it.
+    ok("while the model button is the control that breaks away",
+      rowOf("modelBtn") !== rowOf("phaseSeg"), JSON.stringify(rows));
+    ok("and it goes alone, rather than dragging another control with it",
+      rows[rowOf("modelBtn")].length === 1, JSON.stringify(rows));
     ok("which leaves no row carrying nothing but the two action buttons",
       !rows.some((r) => r.length === 1 && r[0] === "tb-actions"), JSON.stringify(rows));
     await ctx.close();
@@ -1357,6 +1366,161 @@ function contrast(a, b) {
         hit.reachable === true, JSON.stringify(hit));
       await ctx.close();
     }
+  }
+
+  /* ── 5n. the model button is a button, and never after send ────────── */
+  {
+    // Two things reported as "the button to see models is gone".
+    //
+    // It was never gone from the DOM. Below 500px it was given
+    // `flex: 1 1 100%; justify-content: center; order: 3`, which put it alone
+    // on a second row, centred, AFTER `.tb-actions` - so the control naming
+    // the model was painted below the button that sends to it, wearing no
+    // plate and no border, in --kx-fg-2. At that point it reads as a caption,
+    // not a control.
+    //
+    // The assertions are about AFFORDANCE and ORDER, not about which row it
+    // lands on: a second row is a legitimate answer at 300px. What is not
+    // legitimate is a second row that does not look like a button, or one
+    // that comes after send.
+    const ID = "claude-sonnet-4-6";
+    for (const width of [300, 360, 400, 460, 520, 700]) {
+      const { ctx, page } = await open(width, {
+        profiles: [{ id: "gw", status: "ready", active: true, model: ID,
+          wire: "anthropic", baseUrl: "https://x", capabilities: { contextWindow: 200000 } }],
+        models: [{ group: "gw", models: [ID] }],
+      });
+      const m = await page.evaluate(() => {
+        const mb = document.getElementById("modelBtn");
+        const send = document.getElementById("sendBtn");
+        const cs = getComputedStyle(mb);
+        const r = mb.getBoundingClientRect(), sr = send.getBoundingClientRect();
+        const nm = document.getElementById("modelName");
+        // How much of the id actually paints, measured rather than assumed:
+        // the element's width says nothing about how much text fits in it.
+        const probe = document.createElement("span");
+        probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;font:" +
+          getComputedStyle(nm).font;
+        document.body.appendChild(probe);
+        const full = nm.textContent;
+        let shown = 0;
+        for (let i = 1; i <= full.length; i++) {
+          probe.textContent = full.slice(0, i);
+          if (probe.getBoundingClientRect().width <= nm.getBoundingClientRect().width) shown = i;
+          else break;
+        }
+        probe.remove();
+        return {
+          shown, len: full.length,
+          // Same row is decided by vertical OVERLAP, not by equal `top`: the
+          // two controls are 26px and 30px tall and the row centres them, so
+          // sharing a line does not make their tops equal.
+          ownRow: !(r.top < sr.bottom && sr.top < r.bottom),
+          // A row of its own is fine; a row of its own with no plate is not.
+          plated: cs.borderTopWidth !== "0px" &&
+                  !/^rgba\(0, 0, 0, 0\)$/.test(cs.backgroundColor),
+          beforeSend: (r.top < sr.bottom && sr.top < r.bottom) || r.bottom <= sr.top,
+          align: cs.justifyContent,
+          hit: (() => {
+            const at = document.elementFromPoint(
+              Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2));
+            return !!at && (at === mb || mb.contains(at));
+          })(),
+        };
+      });
+      ok(`the model button is clickable at ${width}px`, m.hit === true, JSON.stringify(m));
+      ok(`the model button is never painted after send at ${width}px`,
+        m.beforeSend === true, JSON.stringify(m));
+      // The plate is only required when it is standing alone. Inline between
+      // the segment control and the mode chip it is read as part of that row,
+      // and a plate there would be a third box competing with two real ones.
+      if (m.ownRow) {
+        ok(`a model button on its own row is drawn as a button at ${width}px`,
+          m.plated === true, JSON.stringify(m));
+        ok(`and is left-aligned like every other label at ${width}px`,
+          m.align === "flex-start", JSON.stringify(m));
+      }
+      // The number the breakpoints exist to protect. Eight characters is what
+      // tells claude-sonnet from claude-opus; five is "claud", which every id
+      // this extension is pointed at begins with.
+      ok(`the model id shows enough to distinguish it at ${width}px`,
+        m.shown >= 8, JSON.stringify(m));
+      await ctx.close();
+    }
+
+    // The cliff. This is the assertion the old breakpoints could not pass:
+    // at 400 the model got 13 characters and at 420 it got 5, because the
+    // mode label and the segment padding both came back and took 46px out of
+    // the one control that had nothing to spare. A panel that degrades when
+    // it is made WIDER is a bug no single-width test can see.
+    const chars = {};
+    for (const width of [400, 420, 460, 500, 520]) {
+      const { ctx, page } = await open(width, {
+        profiles: [{ id: "gw", status: "ready", active: true, model: ID,
+          wire: "anthropic", baseUrl: "https://x", capabilities: { contextWindow: 200000 } }],
+        models: [{ group: "gw", models: [ID] }],
+      });
+      chars[width] = await page.evaluate(() => {
+        const nm = document.getElementById("modelName");
+        const probe = document.createElement("span");
+        probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;font:" +
+          getComputedStyle(nm).font;
+        document.body.appendChild(probe);
+        const full = nm.textContent;
+        let shown = 0;
+        for (let i = 1; i <= full.length; i++) {
+          probe.textContent = full.slice(0, i);
+          if (probe.getBoundingClientRect().width <= nm.getBoundingClientRect().width) shown = i;
+          else break;
+        }
+        probe.remove();
+        return shown;
+      });
+      await ctx.close();
+    }
+    const widths = Object.keys(chars).map(Number).sort((a, b) => a - b);
+    const drops = widths.filter((w, i) => i > 0 && chars[w] < chars[widths[i - 1]]);
+    ok("widening the panel never shows LESS of the model id",
+      drops.length === 0, JSON.stringify(chars));
+  }
+
+  /* ── 5o. the health dot knows what the status bar knows ────────────── */
+  {
+    // `stateSync` carries `status` and the handler dropped it, so `S.status`
+    // was only ever written by the `statusChanged` PUSH. A panel opened while
+    // the gateway was failing therefore came up with no status at all and the
+    // dot rendered green - and stayed green until the endpoint's state next
+    // changed, which for a persistently broken gateway is never.
+    //
+    // Reloading the window, the first thing anyone tries, reproduced it:
+    // a reload is a fresh sync, not a change.
+    for (const width of [360, 700]) {
+      const { ctx, page } = await open(width, {
+        status: { state: "error", label: "ERROR · HTTP" },
+      });
+      const d = await page.evaluate(() => {
+        const dot = document.getElementById("epDot");
+        const cs = getComputedStyle(dot);
+        return { err: dot.getAttribute("data-err"), display: cs.display,
+                 label: dot.getAttribute("aria-label") };
+      });
+      ok(`a failing endpoint in the first sync turns the dot red at ${width}px`,
+        d.err === "1", JSON.stringify(d));
+      // The narrow-panel rule hides the GREEN dot only. Red is the one state
+      // you must not have to widen the panel to find, so it stays at every
+      // width - which is exactly what that rule's own comment promises.
+      ok(`and the red dot is visible at ${width}px`,
+        d.display !== "none", JSON.stringify(d));
+      ok(`and it is named, not just coloured, at ${width}px`,
+        /failing/i.test(d.label || ""), JSON.stringify(d));
+      await ctx.close();
+    }
+    // The other half of the same bug: a healthy sync must not report failure.
+    const { ctx, page } = await open(700, { status: { state: "ok", label: "OK" } });
+    const good = await page.evaluate(() =>
+      document.getElementById("epDot").getAttribute("data-err"));
+    ok("a healthy endpoint in the first sync leaves the dot green", good === "0", good);
+    await ctx.close();
   }
 
   /* ── 6. the session list, as the reference draws it ────────────────── */
