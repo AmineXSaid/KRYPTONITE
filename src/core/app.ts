@@ -79,6 +79,12 @@ import type {
   UiConfigDto,
 } from "../ui/protocol";
 import { PROTOCOL_VERSION } from "../ui/protocol";
+import {
+  emptyWorkspace,
+  loadWorkspace,
+  McpConfigStamp,
+  type LoadedWorkspace,
+} from "./workspaceConfig";
 
 type Sink = (msg: OutboundMessage) => void;
 
@@ -351,12 +357,25 @@ export class App {
    */
   readonly beforeContent = new ProposedContent("genesis-before");
 
-  profiles: EndpointProfile[] = [];
-  profileErrors: ProfileError[] = [];
-  skills: Skill[] = [];
-  skillWarnings: string[] = [];
-  agents: Agent[] = [];
-  agentWarnings: string[] = [];
+  /**
+   * Everything the workspace declares, as one value.
+   *
+   * These were six independent fields assigned in six places inside one long
+   * method, which is how `duplicateProfileNames` came to be set on one path
+   * and not on the other. One value, replaced wholesale, cannot be half
+   * updated - and the accessors below keep every existing reader working
+   * without knowing that changed.
+   */
+  workspace: LoadedWorkspace = emptyWorkspace();
+
+  get profiles(): EndpointProfile[] { return this.workspace.profiles; }
+  get profileErrors(): ProfileError[] { return this.workspace.profileErrors; }
+  get skills(): Skill[] { return this.workspace.skills; }
+  get skillWarnings(): string[] { return this.workspace.skillWarnings; }
+  get agents(): Agent[] { return this.workspace.agents; }
+  get agentWarnings(): string[] { return this.workspace.agentWarnings; }
+  /** Names that resolved to more than one file, so the picker can say so. */
+  get duplicateProfileNames(): string[] { return this.workspace.duplicateProfileNames; }
 
   phase: Phase = "act";
   running = false;
@@ -390,10 +409,8 @@ export class App {
   /** Serialises reload(), and remembers whether another one is already queued. */
   private reloading: Promise<void> = Promise.resolve();
   private reloadQueued = false;
-  /** mtime+size of .agent/mcp.json at the last MCP restart. "" before the first. */
-  private mcpStamp = "";
-  /** False until the first MCP load, so activation always starts the servers. */
-  private mcpLoaded = false;
+  /** Decides whether .agent/mcp.json changed enough to restart the servers. */
+  private mcpStamp = new McpConfigStamp();
   private selectionTimer?: NodeJS.Timeout;
   private disposables: vscode.Disposable[] = [];
 
@@ -865,109 +882,38 @@ export class App {
 
     const root = this.root;
     if (!root) {
-      this.profiles = [];
-      this.profileErrors = [];
-      this.skills = [];
-      this.skillWarnings = [];
-      this.agents = [];
-      this.agentWarnings = [];
+      this.workspace = emptyWorkspace();
       this.updateStatus();
       return;
     }
 
-    const profileDir = path.join(root, this.cfg().get<string>("profileDirectory", ".agent/endpoints"));
-    const { profiles, errors } = loadAllProfiles(profileDir);
-    // `warnedMissingProfile` is cleared so a profile that comes back is not
-    // still remembered as missing.
+    /* WHAT THE WORKSPACE DECLARES IS NOW READ IN ONE PLACE, AS A VALUE.
+     *
+     * This method was 170 lines doing two different jobs at once: deciding
+     * what the configuration IS, and telling everything else that it changed.
+     * The first is pure - a root and a few settings in, a value out - so it
+     * moved to workspaceConfig.ts, where the rules that actually bite can be
+     * tested without booting an extension host: a duplicate endpoint name, a
+     * workspace skill shadowing a bundled one, the global CA bundle merging
+     * into every profile. What stays here is the orchestration, which is
+     * where the side effects belong. */
+    this.workspace = loadWorkspace({
+      root,
+      profileDir: this.cfg().get<string>("profileDirectory", ".agent/endpoints"),
+      skillsDir: this.cfg().get<string>("skillsDirectory", ".agent/skills"),
+      agentsDir: this.agentsDir(),
+      bundledSkillsDir: path.join(this.context.extensionPath, "skills"),
+      globalCaBundle: this.cfg().get<string>("caBundlePath", ""),
+    });
+    // A profile that comes back must not still be remembered as missing.
     this.warnedMissingProfile = "";
 
-    // A global CA bundle is a workspace-wide fact, so it merges into every
-    // profile rather than being repeated in each YAML.
-    const globalCa = this.cfg().get<string>("caBundlePath", "").trim();
-    if (globalCa) {
-      for (const p of profiles) {
-        const tls = p.tls ?? {};
-        const existing = tls.caBundle
-          ? Array.isArray(tls.caBundle)
-            ? [...tls.caBundle]
-            : [tls.caBundle]
-          : [];
-        if (!existing.includes(globalCa)) existing.push(globalCa);
-        p.tls = { ...tls, caBundle: existing };
-      }
+    for (const e of this.profileErrors) {
+      this.log("error", `Profile ${e.file ?? "(unknown)"}: ${e.message}`);
     }
-
-    /* TWO PROFILES WITH THE SAME `name:` IS NOT A COSMETIC PROBLEM.
-     *
-     * `clientFor` pools clients by `profile.name`, so the second file's
-     * baseUrl, TLS material and credential were silently never used - every
-     * request went out on the first one's client. The agents loader and the
-     * skills loader both refuse duplicate names already; the one place where
-     * a collision decides WHERE REQUESTS GO did not check at all.
-     *
-     * Sorted as well, so `profiles[0]` - the fallback in `activeProfile` - is
-     * the same profile on every machine rather than whatever the filesystem
-     * listed first.
-     */
-    profiles.sort((a, b) => a.name.localeCompare(b.name));
-    const byName = new Map<string, EndpointProfile>();
-    const dupes: string[] = [];
-    for (const p of profiles) {
-      const first = byName.get(p.name);
-      if (first) {
-        dupes.push(p.name);
-        errors.push(
-          new ProfileError(
-            `Another profile is already called "${p.name}" (${path.basename(first.sourceFile ?? "")}). ` +
-              `Endpoint names have to be unique - requests are routed by them - so this file was not loaded.`,
-            p.sourceFile
-          )
-        );
-        continue;
-      }
-      byName.set(p.name, p);
-    }
-    this.duplicateProfileNames = [...new Set(dupes)];
-
-    this.profiles = [...byName.values()];
-    this.profileErrors = errors;
-    for (const e of errors) this.log("error", `Profile ${e.file ?? "(unknown)"}: ${e.message}`);
-
-    const workspaceSkills = loadSkills(
-      path.join(root, this.cfg().get<string>("skillsDirectory", ".agent/skills"))
-    );
-    const bundledDir = path.join(this.context.extensionPath, "skills");
-    const bundled = fs.existsSync(bundledDir)
-      ? loadSkills(bundledDir)
-      : { skills: [] as Skill[], warnings: [] as string[] };
-
-    // Workspace wins name collisions - a repo's own version of a skill is the
-    // one its authors intended. That is deliberate, but it was also SILENT:
-    // a workspace skill could shadow a bundled one of the same name and the
-    // only visible effect was that the bundled skill's body stopped being the
-    // one that loaded. Intentional behaviour still has to be legible, so the
-    // shadowing is reported. Duplicates WITHIN either directory are refused
-    // outright by loadSkills - see the note there.
-    const merged = new Map<string, Skill>();
-    for (const s of bundled.skills) merged.set(s.name, s);
-    const shadowed: string[] = [];
-    for (const s of workspaceSkills.skills) {
-      if (merged.has(s.name)) shadowed.push(s.name);
-      merged.set(s.name, s);
-    }
-    this.skills = [...merged.values()];
-    this.skillWarnings = [...workspaceSkills.warnings, ...bundled.warnings];
-    if (shadowed.length) {
-      this.skillWarnings.push(
-        `Your workspace overrides ${shadowed.length === 1 ? "a bundled skill" : "bundled skills"}: ` +
-          `${shadowed.join(", ")}. The workspace copy is the one that loads.`
-      );
-    }
-
-    const loaded = loadAgents(this.agentsDir());
-    this.agents = loaded.agents;
-    this.agentWarnings = loaded.warnings;
+    for (const w of this.skillWarnings) this.log("warn", `Skill: ${w}`);
     for (const w of this.agentWarnings) this.log("warn", `Agent: ${w}`);
+
     // An agent that was selected and has since been renamed or deleted must
     // not stay silently active: the persona would be gone while the panel
     // still named it.
@@ -989,15 +935,11 @@ export class App {
      * Still not awaited into the critical path: a cold `npx` fetch takes
      * seconds and the panel must not sit blank behind it. */
     const mcpFile = mcpConfigPath(root);
-    const mcpStamp = fileStamp(mcpFile);
-    if (mcpStamp !== this.mcpStamp || !this.mcpLoaded) {
-      this.mcpStamp = mcpStamp;
-      this.mcpLoaded = true;
+    if (this.mcpStamp.changed(mcpFile)) {
       void this.mcp.reload(mcpFile, root).then(() => {
         this.broadcast({ type: "mcpChanged", servers: this.mcp.statuses(), warnings: this.mcp.warnings });
       });
     }
-    for (const w of this.skillWarnings) this.log("warn", `Skill: ${w}`);
 
     await this.primeSecrets();
 
@@ -1049,9 +991,6 @@ export class App {
   secrets = (key: string): string | undefined => this.secretCache.get(key);
 
   /* ───────────────────────────── accessors ───────────────────────────── */
-
-  /** Names that resolved to more than one file, so the picker can say so. */
-  duplicateProfileNames: string[] = [];
 
   /**
    * The profile requests go out on.

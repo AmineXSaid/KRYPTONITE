@@ -435,6 +435,14 @@ export class McpClient {
 
   private fail(reason: string): void {
     if (this.state === "stopped") return;
+    /* THE FIRST REASON IS THE REAL ONE.
+     *
+     * `reap()` below kills the child, which fires the `exit` handler, which
+     * calls this again with "server exited (SIGTERM)" - and that would replace
+     * "npx: not found" or "handshake timed out" with a description of our own
+     * cleanup. The panel would then explain the failure as the thing we did
+     * about it. */
+    if (this.state === "failed") return;
     this.state = "failed";
     this.error = reason;
     for (const [, p] of this.pending) {
@@ -443,6 +451,34 @@ export class McpClient {
     }
     this.pending.clear();
     this.log("warn", `MCP ${this.spec.name}: ${reason}`);
+    /* A FAILED SERVER IS STILL A RUNNING PROCESS.
+     *
+     * This recorded the failure and left the child alone. A server that starts
+     * but never completes the handshake - the wrong command, a wrapper that
+     * prints a banner and waits, a binary that needs a TTY - sat there
+     * consuming memory with `state: "failed"` beside it, and nothing stopped
+     * it until the next reload or the window closed. Every retry from the
+     * panel's Reconnect button added another one.
+     *
+     * The process goes; the state stays "failed", because that is what the
+     * panel has to show and `stop()` would overwrite it with "stopped". */
+    this.reap();
+  }
+
+  /**
+   * Kill the process tree without changing `state`.
+   *
+   * Deliberately not `stop()`: this is called from `fail()`, and the panel's
+   * row has to keep saying "failed" with the reason beside it rather than
+   * flipping to the state a deliberate shutdown leaves behind.
+   */
+  private reap(): void {
+    const proc = this.proc;
+    this.proc = undefined;
+    if (!proc || proc.exitCode !== null) return;
+    killTree(proc, "SIGTERM");
+    const t = setTimeout(() => killTree(proc, "SIGKILL"), 2000);
+    proc.once("exit", () => clearTimeout(t));
   }
 
   private send(payload: unknown): void {

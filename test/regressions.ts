@@ -13,16 +13,20 @@
  *      node dist/regressions.cjs
  */
 import * as fs from "node:fs";
+import * as http from "node:http";
 import * as os from "node:os";
 import * as path from "node:path";
 import { App } from "../src/core/app";
 import { reset, makeContext } from "./vscode-stub";
 import { fitToWindow, messageTokens, WINDOW_NOTE, runAgent } from "../src/agent/loop";
 import { EndpointClient } from "../src/providers/client";
-import type { CompletionEvent, CompletionRequest, Msg, ToolDef } from "../src/providers/client";
+import type { CompletionEvent, CompletionRequest, Msg } from "../src/providers/client";
 import { loadAgents } from "../src/agents/loader";
+import { emptyWorkspace, loadWorkspace, McpConfigStamp } from "../src/core/workspaceConfig";
 import { loadProfile } from "../src/endpoints/profile";
 import { redactSecrets } from "../src/endpoints/auth";
+import { McpClient } from "../src/mcp/client";
+import { execSync } from "node:child_process";
 import type { ToolContext } from "../src/agent/tools";
 
 let pass = 0;
@@ -31,6 +35,9 @@ function ck(ok: boolean, label: string, detail = "") {
   ok ? pass++ : fail++;
   console.log(`${ok ? "PASS" : "FAIL"}  ${label}${detail ? "  — " + detail : ""}`);
 }
+
+/** Local gateways started by the SSE cases, closed before the run ends. */
+const servers: http.Server[] = [];
 
 const TMP = path.join(os.tmpdir(), "kx-regress-" + Date.now());
 const EXT = path.resolve(".");
@@ -292,6 +299,72 @@ async function main() {
     await app.dispose();
   }
 
+  /* ── 5b. the same, driven through real SSE bytes ──────────────────────── */
+  {
+    // The case above injects the event. This one makes a gateway behave badly
+    // on the wire, because the detection lives in the frame parser and a test
+    // that never parses a frame cannot see it break.
+    const serve = (body: string, opts: { endEarly?: boolean } = {}) =>
+      new Promise<number>((resolve) => {
+        const srv = http.createServer((_req, res) => {
+          res.writeHead(200, { "content-type": "text/event-stream" });
+          res.write(body);
+          res.end();
+          if (opts.endEarly) srv.close();
+        });
+        srv.listen(0, "127.0.0.1", () => resolve((srv.address() as any).port));
+        servers.push(srv);
+      });
+
+    const drain = async (port: number) => {
+      const profile: any = {
+        name: "gw", wire: "openai", baseUrl: `http://127.0.0.1:${port}`, model: "m",
+        auth: { kind: "none" }, timeoutMs: 5000,
+        capabilities: {
+          streaming: true, tools: false, vision: false, systemRole: "message",
+          contextWindow: 32000, maxOutputTokens: 256, maxImageBytes: 1e9,
+          parallelToolCalls: false, promptCaching: "none", cacheTtl: "5m",
+          parallelToolExecution: true, fim: false,
+        },
+      };
+      const c = new EndpointClient(profile, () => undefined, process.cwd());
+      const out: CompletionEvent[] = [];
+      for await (const ev of c.complete({ messages: [{ role: "user", content: "hi" }] })) out.push(ev);
+      await c.close();
+      return out;
+    };
+
+    const frame = (t: string) => `data: ${JSON.stringify({ choices: [{ delta: { content: t } }] })}\n\n`;
+
+    // A well-behaved stream: content, a finish_reason, then [DONE].
+    const okEvents = await drain(await serve(
+      frame("hello") +
+      `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n` +
+      "data: [DONE]\n\n"));
+    ck(!okEvents.some((e) => e.type === "stream_truncated"),
+      "a stream that says it finished is not reported as cut");
+    ck(okEvents.filter((e) => e.type === "text").map((e) => e.text).join("") === "hello",
+      "and its text arrives whole");
+
+    // The proxy case: content, then the connection simply ends.
+    const cutEvents = await drain(await serve(frame("half a sen")));
+    ck(cutEvents.some((e) => e.type === "stream_truncated"),
+      "a stream that just stops is reported as cut");
+    ck(cutEvents.filter((e) => e.type === "text").map((e) => e.text).join("") === "half a sen",
+      "while what did arrive is still delivered");
+
+    // A gateway that closes right after its last data: line, with no blank
+    // line to terminate the frame. That frame used to be dropped entirely.
+    const tail = await drain(await serve(
+      frame("first") +
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "LAST" }, finish_reason: "stop" }] })}\n`));
+    ck(tail.filter((e) => e.type === "text").map((e) => e.text).join("").includes("LAST"),
+      "an unterminated final frame is still read",
+      tail.filter((e) => e.type === "text").map((e) => e.text).join(""));
+    ck(!tail.some((e) => e.type === "stream_truncated"),
+      "and its finish_reason still counts as a clean end");
+  }
+
   /* ── 6. approval is decided by what is being asked, not by its wording ── */
   console.log("\n──── the approval gate ────");
   {
@@ -464,6 +537,76 @@ async function main() {
     await app.dispose();
   }
 
+  /* ── 9b. the workspace's own rules, without an extension host ─────────── */
+  console.log("\n──── loading what the workspace declares ────");
+  {
+    // These rules used to live inside a 170-line method that also closed HTTP
+    // clients, restarted MCP servers and broadcast four messages, so the only
+    // way to exercise them was to boot the whole extension. They are a value
+    // now, and this is what that buys.
+    const root = path.join(TMP, "wsc");
+    fs.mkdirSync(path.join(root, "eps"), { recursive: true });
+    fs.mkdirSync(path.join(root, "sk", "shared"), { recursive: true });
+    const bundled = path.join(TMP, "wsc-bundled", "shared");
+    fs.mkdirSync(bundled, { recursive: true });
+    fs.mkdirSync(path.join(TMP, "wsc-bundled", "only-bundled"), { recursive: true });
+
+    // Two files, same name; and a third that sorts before both.
+    fs.writeFileSync(path.join(root, "eps", "z.yaml"), GOOD.replace("name: gw", "name: zed"), "utf8");
+    fs.writeFileSync(path.join(root, "eps", "a.yaml"), GOOD, "utf8");
+    fs.writeFileSync(path.join(root, "eps", "b.yaml"),
+      GOOD.replace("example.invalid", "other.invalid"), "utf8");
+
+    const skill = (n: string, body: string) =>
+      `---\nname: ${n}\ndescription: d\n---\n\n${body}\n`;
+    fs.writeFileSync(path.join(root, "sk", "shared", "SKILL.md"), skill("shared", "WORKSPACE COPY"), "utf8");
+    fs.writeFileSync(path.join(bundled, "SKILL.md"), skill("shared", "BUNDLED COPY"), "utf8");
+    fs.writeFileSync(path.join(TMP, "wsc-bundled", "only-bundled", "SKILL.md"),
+      skill("only-bundled", "b"), "utf8");
+
+    const w = loadWorkspace({
+      root,
+      profileDir: "eps",
+      skillsDir: "sk",
+      agentsDir: path.join(root, "agents"),
+      bundledSkillsDir: path.join(TMP, "wsc-bundled"),
+      globalCaBundle: "/etc/corp-root.pem",
+    });
+
+    ck(w.profiles.map((p) => p.name).join(",") === "gw,zed",
+      "profiles are sorted, so the fallback is the same on every machine",
+      w.profiles.map((p) => p.name).join(","));
+    ck(w.duplicateProfileNames.includes("gw"), "a duplicate name is reported as one");
+    ck(w.profiles.filter((p) => p.name === "gw").length === 1, "and only one of them loads");
+    ck(w.profiles.every((p) => (p.tls?.caBundle as string[])?.includes("/etc/corp-root.pem")),
+      "the global CA bundle merges into every profile");
+
+    const shared = w.skills.find((s) => s.name === "shared");
+    ck(/WORKSPACE COPY/.test(shared?.body ?? ""), "a workspace skill shadows the bundled one");
+    ck(w.skills.some((s) => s.name === "only-bundled"), "while the rest of the bundled set survives");
+    ck(w.skillWarnings.some((x) => /overrides/.test(x) && /shared/.test(x)),
+      "and the shadowing is reported rather than silent", w.skillWarnings.join(" | "));
+
+    // No folder open is a value, not a special case scattered over six fields.
+    const none = emptyWorkspace();
+    ck(none.profiles.length === 0 && none.skills.length === 0 && none.agents.length === 0,
+      "an empty workspace is one value with nothing in it");
+  }
+  {
+    // MCP servers are child processes. Restarting them because a SKILL.md was
+    // saved killed them under a running turn.
+    const f = path.join(TMP, "stamp.json");
+    fs.writeFileSync(f, "{}", "utf8");
+    const stamp = new McpConfigStamp();
+    ck(stamp.changed(f) === true, "the first check always starts the servers");
+    ck(stamp.changed(f) === false, "an unchanged file does not restart them");
+    fs.writeFileSync(f, '{"mcpServers":{}}', "utf8");
+    ck(stamp.changed(f) === true, "a real edit does");
+    const missing = new McpConfigStamp();
+    ck(missing.changed(path.join(TMP, "nope.json")) === true, "so does a first run with no file");
+    ck(missing.changed(path.join(TMP, "nope.json")) === false, "which then settles");
+  }
+
   /* ── 10. the pre-warmed prompt head is the head that is sent ──────────── */
   console.log("\n──── prompt cache pre-warm ────");
   {
@@ -517,6 +660,52 @@ async function main() {
     await app.dispose();
   }
 
+  /* ── 12b. stopping an MCP server reaches the server ───────────────────── */
+  if (process.platform !== "win32") {
+    console.log("\n──── MCP process trees ────");
+    // Nothing we spawn is the server. The canonical command is `npx -y
+    // @modelcontextprotocol/server-…`, which execs a node child; on Windows
+    // every command goes through a cmd.exe shim. `child.kill()` signals only
+    // the direct child, so the actual server survived every reload, every
+    // window close and every deactivate.
+    const d = fs.mkdtempSync(path.join(TMP, "tree-"));
+    const marker = path.join(d, "pid");
+    fs.writeFileSync(path.join(d, "server.js"),
+      `require("fs").writeFileSync(${JSON.stringify(marker)}, String(process.pid));\n` +
+      `setInterval(() => {}, 1000);\n`, "utf8");
+    fs.writeFileSync(path.join(d, "wrapper.sh"), `#!/bin/sh\nnode ${d}/server.js &\nwait\n`, "utf8");
+    fs.chmodSync(path.join(d, "wrapper.sh"), 0o755);
+
+    // Running means running: a zombie has already terminated, it is merely
+    // unreaped, and `process.kill(pid, 0)` cannot tell the two apart.
+    const running = (pid: number): boolean => {
+      try {
+        const st = execSync(`ps -o stat= -p ${pid}`, { stdio: ["ignore", "pipe", "ignore"] })
+          .toString().trim();
+        return Boolean(st) && !st.startsWith("Z");
+      } catch {
+        return false;
+      }
+    };
+
+    const client = new McpClient(
+      { name: "t", transport: "stdio", command: "/bin/sh", args: [path.join(d, "wrapper.sh")],
+        approval: "ask", readOnly: false } as any,
+      () => {}
+    );
+    // Not awaited: the handshake will time out after the floor, and what is
+    // under test is the teardown, not the wait.
+    void client.start(d);
+    for (let i = 0; i < 100 && !fs.existsSync(marker); i++) await new Promise((r) => setTimeout(r, 30));
+    const pid = Number(fs.readFileSync(marker, "utf8"));
+    ck(running(pid), "the server behind the wrapper started", String(pid));
+    await client.stop();
+    await new Promise((r) => setTimeout(r, 400));
+    const still = running(pid);
+    ck(!still, "and stopping the client kills it, not just the wrapper");
+    if (still) { try { process.kill(pid, "SIGKILL"); } catch { /* */ } }
+  }
+
   /* ── 13. nothing token-shaped survives into an error message ──────────── */
   console.log("\n──── credentials in diagnostics ────");
   {
@@ -527,6 +716,8 @@ async function main() {
     ck(/error/.test(redactSecrets('{"error":"invalid_client","client_secret":"x-very-long-secret"}')),
       "while the part that explains the failure survives");
   }
+
+  for (const srv of servers) srv.close();
 
   console.log(`\n──── ${pass} passed, ${fail} failed ────`);
   if (fail) process.exit(1);
