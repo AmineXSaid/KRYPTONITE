@@ -933,6 +933,34 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   color: var(--kx-fg-4); white-space: pre-wrap; overflow-wrap: anywhere;
 }
 
+/* ── the working, WHILE it is being written ──
+   The box is open and growing here, which is the whole point: a reasoning
+   model that streams its thinking should be watched, not summarised after the
+   fact behind a closed disclosure.
+   
+   The rail turns oxide so the difference between "still thinking" and "thought
+   about it" is visible at a glance without the section changing size, moving,
+   or competing with the answer for attention. */
+.think[data-live="1"] .think-body { border-left-color: var(--kx-accent); }
+.think[data-live="1"] .think-head .n { color: var(--kx-fg-3); }
+
+/* BOUNDED, and scrolled to its own tail.
+   
+   A reasoning model can spend thousands of words before the answer starts. Let
+   the box grow to all of them and the answer is pushed off the bottom of the
+   panel by the working that led to it, and the transcript scrolls under the
+   reader's eyes for the length of the turn. Capped, the newest thinking is
+   what shows - which is the part being written - and the whole of it is still
+   there to scroll or to reopen once the box seals.
+   
+   Following the tail is done in script, not here: `addThinking` sets
+   scrollTop after each chunk. There is no CSS that pins a scroll container to
+   its own bottom - `overflow-anchor` only decides whether Chromium COMPENSATES
+   for content inserted above the viewport, which is a different question. */
+.think[data-live="1"] .think-body {
+  max-height: 168px; overflow-y: auto;
+}
+
 .tool { margin-bottom: 0; }
 .tool-head {
   display: flex; align-items: center; gap: 8px; width: 100%;
@@ -1319,8 +1347,22 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .to-latest:hover { color: var(--kx-fg); border-color: var(--kx-raised); }
 .to-latest:focus-visible { outline: 1px solid var(--kx-link); outline-offset: 2px; }
 .to-latest .ic { transform: rotate(0deg); }
-/* The transcript's own view is what it is positioned against. Without this the
-   pill would anchor to the panel and sit over the composer. */
+/* The transcript and the pill, and nothing else.
+   
+   This wrapper is what the pill is positioned against. It used to be
+   `#viewSession`, which also holds the tip strip and the composer - so
+   `bottom: 8px` put the pill 8px from the bottom of the COMPOSER, on top of
+   the phase segment. The rule that did it carried a comment saying this was
+   the fix for exactly that, which is how it survived: the claim was right
+   about the mechanism and wrong about which element bounds it.
+   
+   `min-height: 0` because it is a flex item that must be allowed to shrink
+   below its content - without it the transcript pushes the composer out of
+   the panel instead of scrolling. */
+.log-wrap {
+  position: relative;
+  flex: 1; min-height: 0; display: flex; flex-direction: column;
+}
 #viewSession { position: relative; }
 
 /* A failure is four things stacked, not one paragraph: what happened, what to
@@ -3138,50 +3180,46 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 
    The rule that does it is below. This note is here because the numbers in it
    are the reason the threshold is 400 and not something rounder. */
-/* The model name gets a row to itself only where it genuinely cannot share
-   one - below 400px - and when it does, it is drawn as a BUTTON.
+/* ONE ROW, AT EVERY WIDTH. The owner's call, made against rendered options.
+   
+   The model button used to take a row of its own below 400px so the whole id
+   could be read. That kept the name but cost a second toolbar row (74px
+   against 39px) at every ordinary dock width, and the plate it needed in order
+   to still read as a button made a full-width bordered box sitting directly
+   under the placeholder - which reads as a second text field, not a control.
+   
+   So it stays inline and truncates. What it must NOT do is truncate from the
+   left: at 360px the row leaves it about 82px, which is seven characters, and
+   seven characters of `claude-sonnet-4-6` is "claude-" - a prefix every model
+   this extension is pointed at shares. `fitModelName` in sidebar.js keeps the
+   distinguishing TAIL instead, so the same seven characters say "…et-4-6"
+   rather than nothing. The full id is on the tooltip and the accessible name.
+   
+   No plate: inline between the segment control and the mode chip it is read as
+   part of that row, and a third bordered box there competes with two real
+   ones. */
+#modelBtn { justify-content: flex-start; }
 
-   This was 500, and at 500 the second row was the ordinary case rather than
-   the narrow one: every dock width from 260 to 500 got a two-row toolbar,
-   70px instead of 39px. That alone would be a cost worth arguing about. What
-   made it a defect is what the second row looked like.
-
-   `#modelBtn` carries no background and no border - it is a bare text button,
-   which is right when it sits between the segment control and the mode chip
-   and is read as part of that row. Alone on a row of its own, centred, in
-   `--kx-fg-2`, with 300px of empty space around it, it stops looking like a
-   control at all: it reads as a caption under the composer. The owner
-   reported it as the model button being GONE, which is exactly right - the
-   button was still in the DOM, and its button-ness was not.
-
-   `order: 3` made it worse by putting that row AFTER `.tb-actions`, so the
-   control that answers "which model runs this" was painted below the button
-   that runs it.
-
-   So: inline from 400 up, where the compact segment and icon-only mode button
-   leave it 122px (13 of 17 characters - "claude-sonnet…", which distinguishes)
-   rising to the full id by 460. Below 400 it takes its own row, but ordered
-   FIRST - directly under the text being typed, above the action row - and
-   wearing the same 30px plate and hairline as the mode and attach buttons
-   beside it, left-aligned like every other label in the panel.
-
-   Keyboard and screen-reader order are unchanged: `order` moves the paint,
-   not the DOM. */
-@media (max-width: 400px) {
-  #modelBtn {
-    order: -1; flex: 1 1 100%; max-width: none;
-    justify-content: flex-start;
-    /* The plate is the whole point of this block. Matching `.tb-btn` rather
-       than inventing a treatment: on this row it is a sibling of attach and
-       send, and it should read as one of them. */
-    height: 30px; padding: 0 8px;
-    background: var(--kx-surface-2);
-    border: 1px solid var(--kx-edge);
-  }
-  #modelBtn:hover:not(:disabled) { background: var(--kx-surface-3); }
+/* Below 330 the row genuinely cannot hold four controls plus a name, and
+   something has to break away. Left to the natural order that was
+   `.tb-actions` - attach and send stranded on a row of their own, hugged
+   right, with the whole left half of the composer empty. The group exists so
+   a wrap does not orphan send BY ITSELF; it stopped send being orphaned alone
+   and left the pair orphaned together.
+   
+   `order` sends the model button down instead: row one keeps the three
+   controls that get pressed, and the model takes the second row, where the
+   whole id fits where a moment ago it was an ellipsis and five characters.
+   
+   330, not 400. Above it everything fits on one line - the owner's call, made
+   against rendered options - and 260-300 is narrower than any practical
+   sidebar dock. Keyboard and screen-reader order are unchanged: `order` moves
+   the paint, not the DOM. */
+@media (max-width: 330px) {
   .seg { order: 0; }
   .perm-btn { order: 1; }
   .tb-actions { order: 2; }
+  #modelBtn { order: 3; flex: 1 1 100%; max-width: none; }
 }
 
 

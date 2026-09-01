@@ -1037,15 +1037,31 @@ function _sbRun() {
           // The conversation's name. Placeholder until the model has been asked
           // for a real one, so the strip never appears and disappears.
           '<div class="convo-title" id="convoTitle" hidden></div>' +
-          '<div id="log"></div>' +
-          /* Once you scroll up mid-stream, autoscroll stops following the
-             answer - correctly, because fighting the user is worse. But nothing
-             offered a way back: the reply kept growing below the fold with no
-             signal it had, and the only route down was scrolling by hand.
-             Shown only when it is true, so it costs no chrome the rest of the
-             time. */
-          '<button class="to-latest" id="toLatest" hidden>' +
-            icon("i-caret", "ic-11") + "<span>Jump to latest</span></button>" +
+          /* The pill is positioned against THIS, not against the view.
+          
+             It used to be an absolute child of `#viewSession` at `bottom: 8px`
+             - and `#viewSession` holds the composer as well as the transcript,
+             so "8px from the bottom" was 8px from the bottom of the COMPOSER.
+             Measured at a 360px panel: the transcript ended at y=418 and the
+             pill sat at 606-632, on top of a composer occupying 497-628,
+             covering the ACT button. The comment on `.to-latest` claimed this
+             wrapper's job was already being done by `#viewSession`; it was
+             not, and nothing rendered the two together to notice.
+          
+             It cannot go inside `#log` either: that is the scroll container,
+             and an absolutely positioned child of a scroller travels with the
+             content instead of staying at its foot. */
+          '<div class="log-wrap">' +
+            '<div id="log"></div>' +
+            /* Once you scroll up mid-stream, autoscroll stops following the
+               answer - correctly, because fighting the user is worse. But
+               nothing offered a way back: the reply kept growing below the fold
+               with no signal it had, and the only route down was scrolling by
+               hand. Shown only when it is true, so it costs no chrome the rest
+               of the time. */
+            '<button class="to-latest" id="toLatest" hidden>' +
+              icon("i-caret", "ic-11") + "<span>Jump to latest</span></button>" +
+          "</div>" +
           /* THE TRANSCRIPT IS NOT A LIVE REGION, AND USED TO BE ONE.
            *
            * `#log` carried aria-live="polite" - which sounds right and is the
@@ -2047,6 +2063,11 @@ function _sbRun() {
     return el;
   }
   function clearTranscript() {
+    /* Dropped, not sealed: the element is about to be removed from the DOM
+       with the rest of the transcript, and holding the reference would have
+       the next turn append its reasoning into a detached node - text written
+       to a box nobody can see. */
+    thinkEl = null;
     if (aiFrame) { cancelAnimationFrame(aiFrame); aiFrame = 0; }
     logEl.innerHTML = "";
     aiEl = null; streamEl = null; pendingTool = null; todoEl = null; toolGroup = null;
@@ -2497,6 +2518,13 @@ function _sbRun() {
 
   function appendAi(text) {
     if (!aiEl) {
+      /* The answer has started, so the working is finished. Sealing HERE
+         rather than only at turn end matters for the common shape: a model
+         thinks, answers, thinks again, answers again. Left open, the second
+         run of reasoning would append into the first box - above the first
+         answer - and the transcript would claim the model thought it all
+         before saying anything. */
+      sealThinking();
       // Prose after a run of tools ends the strip - the model has stopped
       // working and started explaining.
       closeToolGroup();
@@ -2526,6 +2554,7 @@ function _sbRun() {
    * without a trace and the answer to arrive in a fresh one.
    */
   function resetAi() {
+    sealThinking();
     if (!aiEl) return;
     if (aiFrame) { cancelAnimationFrame(aiFrame); aiFrame = null; }
     if (aiEl.parentNode) aiEl.parentNode.removeChild(aiEl);
@@ -2574,47 +2603,112 @@ function _sbRun() {
    * surprising and worth nothing the rest of the time, which is exactly the
    * shape of a disclosure.
    */
-  function addThinking(text) {
-    var t = String(text == null ? "" : text).trim();
-    if (!t) return;
-    // Captured before `aiEl` is dropped, because the insert below needs the
-    // answer element that is already on screen, and the next line is what
-    // forgets it.
-    var prior = aiEl && aiEl.parentNode === logEl ? aiEl : null;
-    // Not through `aiEl`: this is not the answer, and appending it there would
-    // put it back in the same paragraph flow it just came out of.
-    aiEl = null;
+  /* The live box, or null between turns. `addThinking` grows this rather than
+     making a new one per chunk; `sealThinking` closes it. */
+  var thinkEl = null;
 
-    var box = div("think");
+  function thinkWords(t) {
+    var w = t.trim() ? t.trim().split(/\s+/).length : 0;
+    return w + " word" + (w === 1 ? "" : "s");
+  }
+
+  /**
+   * Close the live thinking box: collapse it and give it its final count.
+   *
+   * Called when the answer starts and again at turn end, so a turn that never
+   * produced visible text still seals. Idempotent.
+   */
+  function sealThinking() {
+    if (!thinkEl) return;
+    var box = thinkEl;
+    thinkEl = null;
     box.setAttribute("data-open", "0");
-    var words = t.split(/\s+/).length;
-    box.innerHTML =
-      '<button class="think-head">' + icon("i-chev", "ic-9 chev") +
-        '<span class="n">Thought for ' + words + " word" + (words === 1 ? "" : "s") + "</span></button>" +
-      '<div class="think-body">' + esc(t) + "</div>";
-    box.querySelector(".think-head").addEventListener("click", function () {
-      box.setAttribute("data-open", box.getAttribute("data-open") === "1" ? "0" : "1");
-    });
+    box.setAttribute("data-live", "0");
+    box.querySelector(".think-head .n").textContent =
+      "Thought for " + thinkWords(box._raw || "");
+  }
 
-    // ABOVE the answer, never below it.
-    //
-    // Appending put the working after the prose it produced, because that is
-    // the order the events arrive in: several providers flush a reasoning
-    // summary only once the visible answer has started, so the transcript read
-    // "here is the answer... and here is the thinking that led to it", which is
-    // backwards and makes the disclosure look like an afterthought rather than
-    // a preamble.
-    //
-    if (prior) {
-      flushAi();
-      var stick = atBottom();
-      logEl.insertBefore(box, prior);
-      if (stick) scroll();
-      syncToLatest();
-    syncToLatest();
-    } else {
-      add(box);
+  function addThinking(text) {
+    var t = String(text == null ? "" : text);
+    if (!t.trim() && !thinkEl) return;
+
+    /* ONE BOX PER RUN OF THINKING, OPEN WHILE IT IS BEING WRITTEN.
+    
+       This used to build a fresh `.think` element on every reasoning event.
+       A model that streams its working in chunks - which is what a reasoning
+       model does - therefore produced one collapsed strip PER CHUNK, each
+       labelled "Thought for 4 words" as though it were a finished thought.
+       Measured against the shipped panel with five chunks: five boxes, and
+       `visibleChars: 0` at every step, because every one of them was closed.
+    
+       So while the model was thinking the user watched a stack of identical
+       grey strips accumulate, saw none of the reasoning, and then got the
+       whole answer at once. The panel had the text the entire time and was
+       hiding it behind five doors.
+    
+       Now: the box is created once, opens itself, and grows. The disclosure
+       still exists - it seals shut the moment the answer starts, which is
+       when the working stops being the interesting thing on screen - but
+       while the model IS thinking, its thinking is what you see. */
+    if (!thinkEl) {
+      // Captured before `aiEl` is dropped, because the insert below needs the
+      // answer element that is already on screen, and the next line is what
+      // forgets it.
+      var prior = aiEl && aiEl.parentNode === logEl ? aiEl : null;
+      // Not through `aiEl`: this is not the answer, and appending it there
+      // would put it back in the same paragraph flow it just came out of.
+      aiEl = null;
+
+      var box = div("think");
+      // Open, and marked live so the stylesheet can show it is still being
+      // written rather than presenting it as a finished disclosure.
+      box.setAttribute("data-open", "1");
+      box.setAttribute("data-live", "1");
+      box._raw = "";
+      box.innerHTML =
+        '<button class="think-head">' + icon("i-chev", "ic-9 chev") +
+          '<span class="n">Thinking\u2026</span></button>' +
+        '<div class="think-body"></div>';
+      box.querySelector(".think-head").addEventListener("click", function () {
+        box.setAttribute("data-open", box.getAttribute("data-open") === "1" ? "0" : "1");
+      });
+
+      // ABOVE the answer, never below it.
+      //
+      // Appending put the working after the prose it produced, because that is
+      // the order the events arrive in: several providers flush a reasoning
+      // summary only once the visible answer has started, so the transcript
+      // read "here is the answer... and here is the thinking that led to it",
+      // which is backwards and makes the disclosure look like an afterthought
+      // rather than a preamble.
+      if (prior) {
+        flushAi();
+        var stick = atBottom();
+        logEl.insertBefore(box, prior);
+        if (stick) scroll();
+        syncToLatest();
+      } else {
+        add(box);
+      }
+      thinkEl = box;
     }
+
+    thinkEl._raw += t;
+    /* textContent, not innerHTML: this is the model's raw working, it arrives
+       mid-token, and half a fence or a stray `<` must not become markup. It is
+       also the cheap paint - one text node replaced, no parse - which matters
+       because this runs on every chunk of a stream. */
+    var body = thinkEl.querySelector(".think-body");
+    var stick = atBottom();
+    body.textContent = thinkEl._raw;
+    /* The box is capped at 168px, so past that the newest thinking is below
+       its own fold. Follow it: the point of showing the working live is the
+       part being written, and a live region that stops at the first screenful
+       is back to showing nothing. No CSS does this - see the note in
+       sidebar.css - so it is set here, after the text lands. */
+    body.scrollTop = body.scrollHeight;
+    if (stick) scroll();
+    syncToLatest();
   }
 
   /** Freeze the group's counters. Safe to call when no group is open. */
@@ -3588,6 +3682,10 @@ function _sbRun() {
   }
   function endStream() {
     flushAi();
+    /* A turn can end with the working still open - the model spent the whole
+       turn reasoning and produced no visible text, or it was interrupted. The
+       box must not be left saying "Thinking…" over a model that has stopped. */
+    sealThinking();
     if (S.timer) { clearInterval(S.timer); S.timer = null; }
     if (streamEl) { streamEl.remove(); streamEl = null; }
     S.gerund = "Thinking…";
@@ -4448,6 +4546,58 @@ function _sbRun() {
      on until it was nearly full. The usage is still tracked and still printed
      on each turn's footer line, which is where a figure belongs: attached to
      the turn that spent it, once, and not moving afterwards. */
+  /* The label the button WANTS to show, before it is cut to fit. Kept apart
+     from the DOM text because the fitter reads the element's own width to
+     decide the cut, and measuring a string against a box already containing a
+     truncated copy of itself converges on the wrong answer. */
+  var modelLabel = "No model";
+
+  /**
+   * Show the END of the model id when the whole of it will not fit.
+   *
+   * `text-overflow: ellipsis` cuts the tail, which is the wrong half here.
+   * Model ids share their prefixes - `claude-sonnet-4-6`, `claude-opus-4-1`,
+   * `openai/gpt-oss-20b` - so the row's narrowest case, about seven characters
+   * at a 360px panel, spends all seven on "claude-" and distinguishes nothing.
+   * Truncating before the first distinguishing character is the same as
+   * showing no name at all.
+   *
+   * Binary search rather than a character-width estimate: the face is
+   * proportional at some weights and the id carries digits, slashes and
+   * hyphens whose advances differ, so anything averaged is wrong by a
+   * character or two exactly when the budget is a character or two.
+   */
+  function fitModelName() {
+    var el = $("modelName");
+    if (!el) return;
+    el.textContent = modelLabel;
+    var room = el.clientWidth;
+    // Zero while the panel is hidden or not yet laid out. Leave the full text:
+    // a fit computed against no width would cut everything, and renderFooter
+    // runs again on the next state sync.
+    if (room <= 0 || el.scrollWidth <= room) return;
+
+    // Measured in a detached span carrying the element's own computed font, so
+    // the answer holds whatever the type system is doing today.
+    var probe = document.createElement("span");
+    probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;left:-9999px;font:" +
+      getComputedStyle(el).font;
+    document.body.appendChild(probe);
+    var fits = function (n) {
+      probe.textContent = "\u2026" + modelLabel.slice(modelLabel.length - n);
+      return probe.getBoundingClientRect().width <= room;
+    };
+    var lo = 0, hi = modelLabel.length;
+    while (lo < hi) {
+      var mid = Math.ceil((lo + hi) / 2);
+      if (fits(mid)) lo = mid; else hi = mid - 1;
+    }
+    probe.remove();
+    // Nothing fits, not even one character behind the ellipsis. Leave the full
+    // label and let the CSS clip it: a bare ellipsis names nothing at all.
+    el.textContent = lo > 0 ? "\u2026" + modelLabel.slice(modelLabel.length - lo) : modelLabel;
+  }
+
   function renderFooter() {
     var active = activeProfile();
     // Named here and not inline: it is the model button's tooltip that needs
@@ -4476,9 +4626,10 @@ function _sbRun() {
     // "Auto" when no profile is pinned and there is more than one to
     // choose from: the label has to say the choice is being made for you.
     var pinnedTo = (S.config && S.config.activeProfile) || "";
-    $("modelName").textContent = active
+    modelLabel = active
       ? (pinnedTo === "" && S.models.length > 1 ? "Auto · " + active.model : active.model)
       : "No model";
+    fitModelName();
     // THE MODEL FIRST, THEN THE ENDPOINT.
     //
     // This named only the endpoint. That was defensible while the button was
@@ -5840,6 +5991,16 @@ function _sbRun() {
       S.qpIndex = Number(b.getAttribute("data-i"));
       acceptQuickPick();
     });
+    /* The panel is draggable, so the room the label has is not fixed at render
+       time. Without this the name is fitted once, to whatever width the panel
+       happened to have when the endpoint last changed, and dragging the panel
+       wider leaves it truncated while dragging it narrower overflows it.
+       Observed on the button rather than the window: the button's width is
+       what the fit is against, and it changes for reasons other than a window
+       resize - the mode label appearing at 500px takes 46px out of it. */
+    if (typeof ResizeObserver === "function") {
+      new ResizeObserver(function () { fitModelName(); }).observe($("modelBtn"));
+    }
     $("modelBtn").addEventListener("click", function (e) {
       e.stopPropagation();
       S.modelOpen = !S.modelOpen;

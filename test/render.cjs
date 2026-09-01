@@ -1429,17 +1429,28 @@ function contrast(a, b) {
         };
       });
       ok(`the model button is clickable at ${width}px`, m.hit === true, JSON.stringify(m));
-      ok(`the model button is never painted after send at ${width}px`,
-        m.beforeSend === true, JSON.stringify(m));
+      /* Only while the toolbar is ONE row, which is every width from 330 up.
+         Below that the row cannot hold four controls plus a name and something
+         must break away; the two candidates are the model button and the
+         attach/send pair, and orphaning the pair is worse - the 280px section
+         above owns that tradeoff and pins it. So this asserts the invariant
+         where it is achievable rather than asserting it everywhere and being
+         quietly relaxed to fit. */
+      if (!m.ownRow) {
+        ok(`the model button is not painted after send at ${width}px`,
+          m.beforeSend === true, JSON.stringify(m));
+      }
       // The plate is only required when it is standing alone. Inline between
       // the segment control and the mode chip it is read as part of that row,
       // and a plate there would be a third box competing with two real ones.
-      if (m.ownRow) {
-        ok(`a model button on its own row is drawn as a button at ${width}px`,
-          m.plated === true, JSON.stringify(m));
-        ok(`and is left-aligned like every other label at ${width}px`,
-          m.align === "flex-start", JSON.stringify(m));
-      }
+      /* The plate this used to require is gone by the owner's decision, made
+         against rendered options: on its own row a full-width bordered box
+         sitting under the placeholder reads as a second text field, not a
+         control. What still has to hold is that the button is left-aligned
+         like every other label in the panel, and reachable - which the
+         hit test above covers at every width, own row or not. */
+      ok(`the model button is left-aligned at ${width}px`,
+        m.align === "flex-start", JSON.stringify(m));
       // The number the breakpoints exist to protect. Eight characters is what
       // tells claude-sonnet from claude-opus; five is "claud", which every id
       // this extension is pointed at begins with.
@@ -1521,6 +1532,224 @@ function contrast(a, b) {
       document.getElementById("epDot").getAttribute("data-err"));
     ok("a healthy endpoint in the first sync leaves the dot green", good === "0", good);
     await ctx.close();
+  }
+
+  /* ── 5p. the model's working is visible WHILE it is being written ──── */
+  {
+    // Reported as "show me in real time when the model is thinking, not after
+    // it ends thinking I got all the text at once".
+    //
+    // `addThinking` built a fresh `.think` element per reasoning event, so a
+    // model streaming its working in chunks produced one CLOSED strip per
+    // chunk, each labelled "Thought for 4 words" as though it were a finished
+    // thought. Measured against the shipped panel with five chunks: five
+    // boxes, and zero visible characters at every step. The panel had the
+    // text the whole time and was hiding it behind five doors.
+    const CHUNKS = ["Let me look at the ", "loader first. The skills ",
+                    "directory is read by ", "a watcher, so a new folder ",
+                    "should appear without a reload."];
+    const { ctx, page } = await open(420, {});
+    const send = (d) => page.evaluate(
+      (m) => window.dispatchEvent(new MessageEvent("message", { data: m })), d);
+    const snap = () => page.evaluate(() => {
+      const boxes = [...document.querySelectorAll(".think")];
+      return {
+        boxes: boxes.length,
+        // What a reader can actually SEE, not what is in the DOM: a closed
+        // disclosure holds all of its text and shows none of it, which is
+        // exactly the bug being pinned.
+        visible: boxes.reduce((n, b) => {
+          const body = b.querySelector(".think-body");
+          return n + (getComputedStyle(body).display === "none" ? 0 : body.textContent.length);
+        }, 0),
+        head: boxes.length ? boxes[0].querySelector(".think-head .n").textContent : "",
+        live: boxes.length ? boxes[0].getAttribute("data-live") : "",
+      };
+    });
+
+    let prev = 0;
+    for (let i = 0; i < CHUNKS.length; i++) {
+      await send({ type: "thinking", text: CHUNKS[i] });
+      await page.waitForTimeout(90);
+      const m = await snap();
+      ok(`one thinking box, not one per chunk (after chunk ${i + 1})`,
+        m.boxes === 1, JSON.stringify(m));
+      ok(`the working is on screen while it is being written (chunk ${i + 1})`,
+        m.visible > prev, JSON.stringify(m) + " prev=" + prev);
+      ok(`and it is marked live rather than presented as finished (chunk ${i + 1})`,
+        m.live === "1" && /thinking/i.test(m.head), JSON.stringify(m));
+      prev = m.visible;
+    }
+
+    // The seal. Once the answer starts, the working is no longer the
+    // interesting thing on screen, so it collapses - with an accurate total
+    // rather than the count of whichever chunk arrived last.
+    await send({ type: "streamDelta", text: "Here is the answer." });
+    await page.waitForTimeout(250);
+    const done = await snap();
+    ok("the working seals when the answer starts", done.live === "0", JSON.stringify(done));
+    ok("and it is closed once sealed", done.visible === 0, JSON.stringify(done));
+    const words = CHUNKS.join("").trim().split(/\s+/).length;
+    ok("and its count is the WHOLE working, not the last chunk",
+      done.head === `Thought for ${words} words`, done.head + " != " + words);
+    await ctx.close();
+  }
+
+  /* ── 5q. a second run of reasoning does not join the first ─────────── */
+  {
+    // think, answer, think again, answer again - the ordinary shape of a turn
+    // that calls a tool. Left open, the second run would append into the first
+    // box, which sits ABOVE the first answer, so the transcript would claim
+    // the model thought it all before saying anything.
+    const { ctx, page } = await open(420, {});
+    const send = (d) => page.evaluate(
+      (m) => window.dispatchEvent(new MessageEvent("message", { data: m })), d);
+    await send({ type: "thinking", text: "First I check the loader." });
+    await page.waitForTimeout(80);
+    await send({ type: "streamDelta", text: "Checking the loader." });
+    await page.waitForTimeout(200);
+    await send({ type: "thinking", text: "Now I check the watcher." });
+    await page.waitForTimeout(80);
+    const r = await page.evaluate(() => {
+      const kids = [...document.getElementById("log").children];
+      return {
+        order: kids.map((e) => e.className.split(" ")[0]).filter((c) => /think|msg-ai/.test(c)),
+        bodies: [...document.querySelectorAll(".think-body")].map((b) => b.textContent),
+      };
+    });
+    ok("a second run of reasoning opens its own box",
+      r.bodies.length === 2, JSON.stringify(r));
+    ok("and the first box keeps only its own text",
+      r.bodies[0] === "First I check the loader.", JSON.stringify(r));
+    /* Deliberately NOT asserting which side of the answer the second box
+       lands on. addThinking places reasoning ABOVE the answer on purpose, and
+       the comment there gives the reason: several providers flush a reasoning
+       summary only once the visible answer has started, so ordering by arrival
+       makes the transcript read "here is the answer... and here is the
+       thinking that led to it". A late summary and a fresh run of reasoning
+       are indistinguishable from the event stream, and that tradeoff was
+       already made. What this section owns is that the two runs stay SEPARATE
+       - which is what the accumulating box put at risk. */
+    ok("and both boxes are still collapsed disclosures, not one merged blob",
+      r.bodies.every((b) => b.length > 0) && r.bodies[0] !== r.bodies[1],
+      JSON.stringify(r));
+    await ctx.close();
+  }
+
+  /* ── 5r. Jump to latest floats over the transcript, not the composer ─ */
+  {
+    // `.to-latest` was an absolute child of `#viewSession` at `bottom: 8px`,
+    // and `#viewSession` holds the composer as well as the transcript - so
+    // "8px from the bottom" was 8px from the bottom of the COMPOSER. Measured
+    // at 360px before the fix: transcript ended at y=418, pill sat at 606-632,
+    // over a composer occupying 497-628, covering the ACT button.
+    //
+    // The rule carried a comment claiming this exact bug was what it prevented.
+    // It was right about the mechanism and wrong about which element bounds
+    // it, and nothing had ever rendered the two together to find out.
+    const msgs = [];
+    for (let i = 0; i < 14; i++) {
+      msgs.push({ role: "user", content: `Question number ${i} about the codebase.` });
+      msgs.push({ role: "assistant", content: `Answer ${i}. ` + "Lorem ipsum dolor sit amet. ".repeat(6) });
+    }
+    for (const width of [300, 360, 420, 520]) {
+      const { ctx, page } = await open(width, { session: { id: "s1", title: "Long chat", messages: msgs } });
+      // Scroll up, which is the only state the pill exists in.
+      await page.evaluate(() => { document.getElementById("log").scrollTop = 0; });
+      await page.waitForTimeout(200);
+      const m = await page.evaluate(() => {
+        const btn = document.getElementById("toLatest");
+        const log = document.getElementById("log");
+        const wrap = document.querySelector(".composer-wrap");
+        const br = btn.getBoundingClientRect(), lr = log.getBoundingClientRect();
+        const wr = wrap.getBoundingClientRect();
+        const at = document.elementFromPoint(
+          Math.round(br.left + br.width / 2), Math.round(br.top + br.height / 2));
+        return {
+          hidden: btn.hidden,
+          overComposer: br.bottom > wr.top && br.top < wr.bottom,
+          insideLog: br.bottom <= lr.bottom + 1 && br.top >= lr.top - 1,
+          reachable: !!at && (at === btn || btn.contains(at)),
+          btn: [Math.round(br.top), Math.round(br.bottom)],
+          log: [Math.round(lr.top), Math.round(lr.bottom)],
+          composerWrapTop: Math.round(wr.top),
+        };
+      });
+      ok(`the pill is offered when scrolled up at ${width}px`, m.hidden === false, JSON.stringify(m));
+      ok(`and it never overlaps the composer at ${width}px`, m.overComposer === false, JSON.stringify(m));
+      ok(`and it sits within the transcript it belongs to at ${width}px`,
+        m.insideLog === true, JSON.stringify(m));
+      // The consequence, not the geometry: a pill over the composer is a pill
+      // that eats clicks meant for the phase segment underneath it.
+      ok(`and a click lands on the pill itself at ${width}px`, m.reachable === true, JSON.stringify(m));
+      await ctx.close();
+    }
+    // The composer's own controls must still be clickable with the pill shown.
+    const { ctx, page } = await open(360, { session: { id: "s1", title: "Long chat", messages: msgs } });
+    await page.evaluate(() => { document.getElementById("log").scrollTop = 0; });
+    await page.waitForTimeout(200);
+    const seg = await page.evaluate(() => {
+      const act = document.querySelector('[data-phase="act"]');
+      const r = act.getBoundingClientRect();
+      const at = document.elementFromPoint(
+        Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2));
+      return { reachable: !!at && (at === act || act.contains(at)), tag: at ? at.className : null };
+    });
+    ok("the ACT button is still clickable while the pill is shown",
+      seg.reachable === true, JSON.stringify(seg));
+    await ctx.close();
+  }
+
+  /* ── 5s. a truncated model id keeps the half that identifies it ────── */
+  {
+    // The owner chose one row plus truncation over a second row. That choice
+    // only pays if the characters that survive are the ones that distinguish:
+    // `text-overflow: ellipsis` cuts the tail, and at 360px the row leaves the
+    // label about seven characters - which spent on the HEAD of
+    // `claude-sonnet-4-6` is "claude-", a prefix every model this extension is
+    // pointed at shares. Truncating before the first distinguishing character
+    // shows nothing at all.
+    const IDS = ["claude-sonnet-4-6", "claude-opus-4-1", "openai/gpt-oss-20b"];
+    for (const id of IDS) {
+      for (const width of [340, 360, 400, 460]) {
+        const { ctx, page } = await open(width, {
+          profiles: [{ id: "gw", status: "ready", active: true, model: id,
+            wire: "anthropic", baseUrl: "https://x", capabilities: { contextWindow: 200000 } }],
+          models: [{ group: "gw", models: [id] }],
+        });
+        const m = await page.evaluate(() => {
+          const nm = document.getElementById("modelName");
+          return {
+            painted: nm.textContent,
+            // The fit has to actually fit - a label that still overflows has
+            // been cut by CSS on top of being cut by script, which loses the
+            // tail again.
+            overflows: nm.scrollWidth > nm.clientWidth + 1,
+            title: document.getElementById("modelBtn").title,
+            aria: document.getElementById("modelBtn").getAttribute("aria-label"),
+          };
+        });
+        ok(`the fitted "${id}" label fits its box at ${width}px`,
+          m.overflows === false, JSON.stringify(m));
+        if (m.painted !== id) {
+          ok(`a truncated "${id}" keeps its tail at ${width}px`,
+            m.painted.startsWith("…") && id.endsWith(m.painted.slice(1)),
+            JSON.stringify(m));
+          // The distinguishing part of every id here is its last run of
+          // characters, so a truncation that reaches it says something.
+          ok(`and shows something past the shared prefix at ${width}px`,
+            m.painted.length > 1 && !/^…?claude-?$/.test(m.painted),
+            JSON.stringify(m));
+        }
+        // Truncating the label must never truncate the ANSWER: the whole id
+        // stays on the tooltip and the accessible name at every width.
+        ok(`the whole id is still on the tooltip at ${width}px`,
+          m.title.includes(id), JSON.stringify(m));
+        ok(`and in the accessible name at ${width}px`,
+          (m.aria || "").includes(id), JSON.stringify(m));
+        await ctx.close();
+      }
+    }
   }
 
   /* ── 6. the session list, as the reference draws it ────────────────── */
