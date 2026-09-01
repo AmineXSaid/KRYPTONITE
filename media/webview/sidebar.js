@@ -1950,10 +1950,18 @@ function _sbRun() {
     var spin = arriving !== false ? " spin-in" : "";
     clearTranscript();
     if (!S.workspace.open) {
+      /* A BUTTON, not only a sentence. This screen said the right thing and
+         offered no way to act on it, while the endpoint screen below it -
+         the second-most-likely first-run state - has offered two buttons all
+         along. Someone reading "open a folder" with nothing to press goes to
+         the menu bar if they know VS Code and to Settings if they do not. */
       logEl.appendChild(div("welcome",
         crystal(46, "crystal" + spin) +
         "<h2>Open a folder to use Genesis</h2>" +
-        "<p>Genesis reads endpoint profiles and skills from the folder you have open, and edits files inside it.</p>"));
+        "<p>Genesis reads endpoint profiles and skills from the folder you have open, and edits files inside it. It has nowhere to read from and nothing to edit until there is one.</p>" +
+        '<div class="chips">' +
+          '<button class="btn primary" data-act="openFolder">Open folder…</button>' +
+        '</div>'));
       return;
     }
     if (!hasEndpoint()) {
@@ -3554,8 +3562,22 @@ function _sbRun() {
     // Every branch carries the prompt caret, including the blocked one. Putting
     // it on only some of them made the marker blink in and out as the phase
     // changed, which reads as a rendering bug rather than a prompt.
-    draft.placeholder = CARET + (blocked
-      ? "Configure an endpoint first…"
+    /* TWO DIFFERENT BLOCKERS, TWO DIFFERENT SENTENCES.
+     *
+     * `blocked` is `!workspace.open || !hasEndpoint()`, and both branches used
+     * to print "Configure an endpoint first…" - which names the fix for the
+     * second one. Someone who installs this and clicks the icon on VS Code's
+     * welcome screen, with no folder open, is told to go and configure an
+     * endpoint. There is nothing to configure: profiles are read from .agent/
+     * in the folder you have open, and there is no folder. Nothing on screen
+     * said the word "folder", so the next stop was Settings, and the next stop
+     * after that was uninstalling it. It is the most likely thing in this
+     * panel to happen to a new user, because it happens before they have done
+     * anything at all. */
+    draft.placeholder = CARET + (!S.workspace.open
+      ? "Open a folder to start…"
+      : blocked
+      ? "Add an endpoint to start…"
       : S.running
       ? "Queue another message…" + COMPOSER_HINT
       : S.phase === "plan"
@@ -5522,6 +5544,7 @@ function _sbRun() {
       if (!act) return;
       var a = act.getAttribute("data-act");
       if (a === "doctor") { setTab("diagnostics"); openSection("secTls"); post("runTrace"); }
+      else if (a === "openFolder") post("openFolder");
       else if (a === "newEndpoint") post("newEndpoint");
       else if (a === "ccEndpoints") post("openControlCenter", { section: "endpoints" });
       else if (a === "history") {
@@ -6281,10 +6304,17 @@ function _sbRun() {
         /* This was in the do-nothing list, so "Export offline bundle" wrote a
            folder and the panel said nothing whatsoever - the command looked
            like it had failed. Same treatment the chat export gets, for the same
-           reason: what the user needs afterwards is the path. */
+           reason: what the user needs afterwards is the path.
+
+           It used to end "and no credentials", which was the same unchecked
+           claim the README made. The export scans what it copied now, so this
+           reports the count it was given. */
         addNotice("i-download",
           "Offline bundle written to " + m.path +
-          " - it holds this workspace's .agent configuration, and no credentials.",
+          (m.redactions
+            ? " - " + m.redactions + (m.redactions === 1 ? " credential was" : " credentials were") +
+              " found in this workspace's config and redacted from the copy. See its README."
+            : " - it holds this workspace's .agent configuration, scanned and clear of credentials."),
           m.path);
         break;
 
@@ -6292,6 +6322,23 @@ function _sbRun() {
       case "checkpointRestored":
       case "logLine":
       case "navigate":
+        break;
+
+      /* AN UNRECOGNISED MESSAGE IS A FACT, NOT A NO-OP.
+       *
+       * Both sides used to switch on `type` and fall off the end in silence,
+       * so a host newer than this cached document produced a control that did
+       * nothing at all: no error, no console line, nothing for a bug report to
+       * name. The `ready` handshake compares builds and says so properly; this
+       * is the backstop for anything that slips past it. */
+      default:
+        if (window.console && console.warn) {
+          console.warn(
+            "[genesis] the extension sent a message this panel does not handle: " + m.type +
+            ". This panel is build " + ((window.__kx && window.__kx.build) || "unknown") +
+            "; reload the window if controls are not responding."
+          );
+        }
         break;
     }
   });
@@ -6309,6 +6356,8 @@ function _sbRun() {
   renderEndpoints();
   renderSkills();
   syncComposer();
-  post("ready");
+  // The build this document was served from, so the host can say so if VS
+  // Code has handed the user a cached panel from before an update.
+  post("ready", { build: (window.__kx && window.__kx.build) || "" });
 })();
 } /* end _sbRun */

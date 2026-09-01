@@ -118,6 +118,30 @@ function assetUri(
   return webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, ...parts));
 }
 
+/**
+ * The build that produced this document, handed to the frontend.
+ *
+ * The host<->webview contract is enforced entirely by TypeScript at build
+ * time. At runtime both sides switch on `type` and silently ignore anything
+ * they do not recognise, and nothing detects that they disagree - so a webview
+ * VS Code served from its cache after an extension update produces a control
+ * that does nothing, with no error and no log line. That is a support ticket
+ * with no diagnostic path, and it arrives during upgrades, which is when a
+ * hundred people move at once.
+ *
+ * Read from the manifest rather than hardcoded, so it cannot drift.
+ */
+function buildVersion(extensionUri: vscode.Uri): string {
+  try {
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(extensionUri.fsPath, "package.json"), "utf8")
+    );
+    return String(pkg.version ?? "0.0.0");
+  } catch {
+    return "0.0.0";
+  }
+}
+
 function shell(
   webview: vscode.Webview,
   extensionUri: vscode.Uri,
@@ -150,7 +174,11 @@ ${fontFaces(extensionUri, webview)}
 <body>
 <div id="root"></div>
 <script nonce="${nonce}">
-  window.__kx = { api: acquireVsCodeApi(), surface: ${JSON.stringify(surface)} };
+  window.__kx = {
+    api: acquireVsCodeApi(),
+    surface: ${JSON.stringify(surface)},
+    build: ${JSON.stringify(buildVersion(extensionUri))},
+  };
 </script>
 <script nonce="${nonce}" src="${crystal}"></script>
 <script nonce="${nonce}" src="${js}"></script>
@@ -203,7 +231,11 @@ ${fontFaces(extensionUri, webview)}
 <body>
 <div id="root"></div>
 <script nonce="${nonce}">
-  window.__kx = { api: acquireVsCodeApi(), surface: "browser" };
+  window.__kx = {
+    api: acquireVsCodeApi(),
+    surface: "browser",
+    build: ${JSON.stringify(buildVersion(extensionUri))},
+  };
 </script>
 <script nonce="${nonce}" src="${js}"></script>
 </body>
@@ -228,9 +260,4 @@ export function webviewOptions(extensionUri: vscode.Uri): vscode.WebviewOptions 
       ...(vscode.workspace.workspaceFolders ?? []).map((f) => f.uri),
     ],
   };
-}
-
-/** Unused by the shells, kept beside them because it is the same asset concern. */
-export function mediaPath(extensionUri: vscode.Uri, ...parts: string[]): string {
-  return path.join(extensionUri.fsPath, "media", ...parts);
 }

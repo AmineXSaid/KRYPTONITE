@@ -1913,6 +1913,31 @@ export class App {
   private async dispatch(msg: InboundMessage, source: Surface): Promise<void> {
     switch (msg.type) {
       case "ready": {
+        /* DO THE TWO HALVES AGREE ABOUT WHICH BUILD THIS IS?
+         *
+         * Nothing checked before, so a stale cached frontend after an update
+         * showed a panel where some control silently did nothing - no error,
+         * no log, and no way for the user or for anyone reading their report
+         * to tell that was what had happened. It is a one-line check and it
+         * turns an unattributable bug into a sentence naming the fix. */
+        const running = String(this.context.extension.packageJSON.version ?? "0.0.0");
+        const served = typeof msg.build === "string" ? msg.build : "";
+        if (served !== running) {
+          this.log(
+            "warn",
+            `The ${source} panel is running Genesis ${served || "an older build"} while the ` +
+              `extension is ${running}. VS Code has served a cached webview. Reload the window ` +
+              `(Developer: Reload Window) - some controls in the panel may do nothing until you do.`
+          );
+          this.postTo(source, {
+            type: "error",
+            message: "This panel is from a different build of Genesis than the one running.",
+            fix:
+              `The extension is ${running}; the panel is ${served || "older than 0.9.0"}. VS Code ` +
+              `cached the old panel across an update. Reload the window and it will match - until ` +
+              `then some controls may do nothing.`,
+          });
+        }
         await this.sendStateSync(source);
         // Only the sidebar renders a transcript, so only it needs the replay.
         if (source === "sidebar" && this.session.running) {
@@ -1948,6 +1973,13 @@ export class App {
 
       case "stopSession":
         this.session.stopSession(String(msg.id));
+        return;
+
+      case "openFolder":
+        // VS Code's own picker, so the folder lands in the workspace history
+        // and Genesis reactivates against it exactly as it would have if the
+        // user had opened it from the File menu.
+        await vscode.commands.executeCommand("vscode.openFolder");
         return;
 
       case "newChat":
@@ -2402,6 +2434,25 @@ export class App {
       case "promoteQueued":
         this.session.promoteQueued(msg.id);
         return;
+
+      /* A MESSAGE FROM A PANEL THIS BUILD DOES NOT KNOW ABOUT.
+       *
+       * TypeScript proves this is unreachable for any message the contract
+       * declares, which is exactly why it is worth having: it is reached only
+       * when the frontend is from a different build, and before this it fell
+       * off the end in silence. The `ready` handshake catches most of that
+       * case and says so properly; this is the backstop, and it is the line
+       * that turns "the button does nothing" into something a bug report can
+       * name. */
+      default: {
+        const unknown = msg as { type?: unknown };
+        this.log(
+          "warn",
+          `The ${source} panel sent "${String(unknown?.type)}", which this build does not ` +
+            `handle. It is probably a cached webview from a different version - reload the window.`
+        );
+        return;
+      }
     }
   }
 

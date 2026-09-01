@@ -410,7 +410,22 @@ export interface StateSync {
 
 /* ───────────────────────────── inbound messages ───────────────────────── */
 
-export interface ReadyMsg { type: "ready" }
+export interface ReadyMsg {
+  type: "ready";
+  /**
+   * The build the FRONTEND was served from, echoed back so the host can tell
+   * whether the two halves agree.
+   *
+   * The contract in this file is enforced entirely by TypeScript at build
+   * time. At runtime both sides switch on `type` and silently ignore what they
+   * do not recognise, and nothing detected a disagreement - so a webview VS
+   * Code served from its cache after an update produced a control that did
+   * nothing, with no error and no log line. Optional, because a cached
+   * frontend from before this existed will not send it, and that is itself the
+   * signal.
+   */
+  build?: string;
+}
 export interface SendMessageMsg {
   type: "sendMessage";
   text: string;
@@ -452,6 +467,14 @@ export interface HealthCheckMsg { type: "healthCheck" }
  * the user is still typing, rather than after they press Enter.
  */
 export interface WarmMsg { type: "warm" }
+/**
+ * Open a workspace folder, from the panel's own first-run screen.
+ *
+ * With no folder open there is nothing for Genesis to read profiles from and
+ * nothing for it to edit, and that screen said so while offering no way to act
+ * on it - so the first thing a new user saw was a dead end.
+ */
+export interface OpenFolderMsg { type: "openFolder" }
 export interface InterruptMsg { type: "interrupt" }
 /**
  * Stop a turn running in a conversation that is not on screen.
@@ -594,7 +617,8 @@ export interface McpReloadMsg { type: "mcpReload" }
 
 export type InboundMessage =
   | ReadyMsg | SendMessageMsg | AttachFilesMsg | AttachPathsMsg | WarmMsg | McpOpenConfigMsg
-  | ListModelsMsg | HealthCheckMsg | InterruptMsg | StopSessionMsg | NewChatMsg | SetPhaseMsg
+  | ListModelsMsg | HealthCheckMsg | InterruptMsg | StopSessionMsg | OpenFolderMsg
+  | NewChatMsg | SetPhaseMsg
   | ApprovePlanMsg | ResolvePermissionMsg | ResolveDiffMsg | SelectModelMsg
   | RunTraceMsg | SaveCaBundleMsg | BrowseCaBundleMsg | UseSystemTrustMsg
   | CopyTextMsg | NewEndpointMsg | SaveEndpointMsg | DeleteEndpointMsg

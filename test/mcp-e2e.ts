@@ -1,6 +1,9 @@
 /**
  * MCP end-to-end, against a real server process.
  *
+ * @requires-install - it spawns @modelcontextprotocol/server-filesystem, which
+ * has to be on disk first. `npm run test:mcp` installs it and then runs this.
+ *
  * Run:  npx esbuild test/mcp-e2e.ts --bundle --outfile=dist/mcp-e2e.cjs \n *         --format=cjs --platform=node --target=node20 && node dist/mcp-e2e.cjs
  *
  * Requires @modelcontextprotocol/server-filesystem on disk:

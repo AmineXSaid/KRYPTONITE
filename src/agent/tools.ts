@@ -256,12 +256,39 @@ export interface ToolResult {
  * works, and falls back to the lexical result when nothing on the path exists
  * yet.
  */
+/**
+ * Is `child` inside `parent`?
+ *
+ * THE BOUNDARY HAS TO BE A SEPARATOR, AND ON WINDOWS IT ALSO HAS TO IGNORE
+ * CASE.
+ *
+ * The separator half was fixed a while ago: `abs.startsWith(root)` is a string
+ * comparison pretending to be a path comparison, and with a root of
+ * `/work/proj` it admitted `/work/proj-secrets/id_rsa`.
+ *
+ * The case half was not. Windows paths are case-insensitive, and VS Code hands
+ * back a drive letter whose case depends on how the folder was opened - so
+ * `C:\Work\Proj` and `c:\work\proj\file.ts` are the same location and
+ * different strings. Compared exactly, a file the user is looking at is judged
+ * to be OUTSIDE the workspace: refused for writes, and for reads either
+ * refused or, with `readOutsideWorkspace` on, sent down the wrong branch and
+ * checked against the credential-store list instead of being admitted
+ * outright. Nothing in the suite runs on Windows, so it held there.
+ *
+ * POSIX is left case-sensitive, because on POSIX two paths differing in case
+ * genuinely are two different files and folding them would widen the boundary
+ * rather than fix it.
+ */
+function contains(parent: string, child: string): boolean {
+  const fold = (p: string) => (process.platform === "win32" ? p.toLowerCase() : p);
+  const a = fold(parent);
+  const b = fold(child);
+  return b === a || b.startsWith(a.endsWith(path.sep) ? a : a + path.sep);
+}
+
 function writable(root: string, p: string): string {
   const base = path.resolve(root);
   const abs = path.resolve(base, p ?? ".");
-  const contains = (parent: string, child: string) =>
-    child === parent || child.startsWith(parent.endsWith(path.sep) ? parent : parent + path.sep);
-
   if (!contains(base, abs)) throw new Error(`Path ${p} is outside the workspace.`);
 
   let probe = abs;
@@ -344,19 +371,15 @@ const SECRET_FILES = new Set([
 export function mentionable(root: string, rel: string): { abs: string } | { refused: string } {
   const base = path.resolve(root);
   const abs = path.resolve(base, rel);
-  const inside = abs === base ||
-    abs.startsWith(base.endsWith(path.sep) ? base : base + path.sep);
-  if (!inside) return { refused: `${rel} is outside the workspace` };
+  if (!contains(base, abs)) return { refused: `${rel} is outside the workspace` };
 
   // Symlinks are resolved before judging, so a link named innocuously cannot
   // point at a key. A path that does not exist is judged lexically and will be
   // dropped by the caller's stat anyway.
   let real = abs;
   try { real = fs.realpathSync(abs); } catch { /* judge the lexical path */ }
-  if (real !== abs) {
-    const insideReal = real === base ||
-      real.startsWith(base.endsWith(path.sep) ? base : base + path.sep);
-    if (!insideReal) return { refused: `${rel} is a link out of the workspace` };
+  if (real !== abs && !contains(base, real)) {
+    return { refused: `${rel} is a link out of the workspace` };
   }
 
   const segs = real.split(path.sep).filter(Boolean);
@@ -373,9 +396,6 @@ export function mentionable(root: string, rel: string): { abs: string } | { refu
 function readable(ctx: { root: string; readOutsideWorkspace?: boolean }, p: string): string {
   const base = path.resolve(ctx.root);
   const abs = path.resolve(base, p ?? ".");
-  const contains = (parent: string, child: string) =>
-    child === parent || child.startsWith(parent.endsWith(path.sep) ? parent : parent + path.sep);
-
   if (contains(base, abs)) return writable(ctx.root, p);
 
   if (!ctx.readOutsideWorkspace) {

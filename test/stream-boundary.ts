@@ -157,6 +157,26 @@ const SHAPES: Record<string, (res: http.ServerResponse) => void> = {
   },
 };
 
+/**
+ * Remove the scratch directory, and never fail the run over it.
+ *
+ * The shadow repository spawns git, and a git process can still be flushing
+ * objects when the last assertion has already passed - so the recursive delete
+ * races it and throws ENOTEMPTY. `force: true` covers a directory that is
+ * already gone; it does not cover one that is still being written to.
+ *
+ * A leftover directory in the system temp folder is not a defect in the thing
+ * under test, and reporting it as one turns a green suite red for a reason
+ * nobody can act on.
+ */
+function cleanup(dir: string): void {
+  try {
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  } catch {
+    /* a temp directory outliving the test is not a failure */
+  }
+}
+
 (async () => {
   let mode = "";
   const server = http.createServer((req, res) => {
@@ -347,7 +367,7 @@ const SHAPES: Record<string, (res: http.ServerResponse) => void> = {
   }
 
   server.close();
-  fs.rmSync(tmp, { recursive: true, force: true });
+  cleanup(tmp);
 
   console.log(`\n${pass} passed, ${failures.length} failed`);
   for (const f of failures) console.log("  FAIL " + f);

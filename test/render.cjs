@@ -1,6 +1,10 @@
 /**
  * The panel as it is actually PAINTED, out of the archive we ship, at 200%.
  *
+ * @requires-package - it reads MEDIA FROM THE .vsix rather than from media/,
+ * which is the whole point of it, so the archive has to exist first. Run it
+ * with `npm run test:package`.
+ *
  * Every other UI suite here drives jsdom, which has no layout and no paint. It
  * will happily report that the composer exists, is the right colour and holds
  * the right controls while the shipped panel renders it invisible - which is

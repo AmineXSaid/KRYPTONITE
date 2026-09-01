@@ -44,6 +44,26 @@ function ok(label: string, cond: boolean, detail = ""): void {
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "kx-safety-"));
 
+/**
+ * Remove the scratch directory, and never fail the run over it.
+ *
+ * The shadow repository spawns git, and a git process can still be flushing
+ * objects when the last assertion has already passed - so the recursive delete
+ * races it and throws ENOTEMPTY. `force: true` covers a directory that is
+ * already gone; it does not cover one that is still being written to.
+ *
+ * A leftover directory in the system temp folder is not a defect in the thing
+ * under test, and reporting it as one turns a green suite red for a reason
+ * nobody can act on.
+ */
+function cleanup(dir: string): void {
+  try {
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  } catch {
+    /* a temp directory outliving the test is not a failure */
+  }
+}
+
 (async () => {
   console.log("──── patterns that would hang the extension host ────");
   {
@@ -184,7 +204,52 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "kx-safety-"));
     );
   }
 
-  fs.rmSync(TMP, { recursive: true, force: true });
+  console.log("\n──── every suite in test/ is reachable ────");
+  {
+    /* THE FINDING THIS GUARDS AGAINST IS ITS OWN TEST.
+     *
+     * `npm test` was a 3,000-character string naming fifty files by hand and
+     * `test:bundle` was a second copy of the same list. Adding a suite meant
+     * editing both, and forgetting was invisible: the file sat in test/,
+     * looked like coverage, and never ran. `mentions.cjs` - 99 assertions over
+     * the `@` path that session.ts calls "THIS IS WHAT '@ DOESN'T WORK'
+     * FINALLY WAS" - was referenced by no script at all.
+     *
+     * The runner discovers instead, so the only way back to that state is a
+     * suite that opts out and no script that opts it back in. */
+    const runner = fs.readFileSync(path.resolve("test/run.js"), "utf8");
+    const pkg = JSON.parse(fs.readFileSync(path.resolve("package.json"), "utf8"));
+    const scripts = JSON.stringify(pkg.scripts);
+
+    ok("the runner discovers rather than being told", /readdirSync\(TEST_DIR\)/.test(runner));
+    ok("npm test goes through it", /test\/run\.js/.test(pkg.scripts.test));
+    ok("and no script still lists suites by hand", !/dist\/\w+\.cjs && node dist\//.test(scripts),
+      "a hand-maintained list is back");
+
+    // Every opt-out tag has a script that runs it.
+    const files = fs.readdirSync(path.resolve("test"));
+    const tagged: Record<string, string[]> = {};
+    for (const f of files) {
+      if (!/\.(ts|cjs|js)$/.test(f)) continue;
+      const head = fs.readFileSync(path.resolve("test", f), "utf8").split("\n").slice(0, 40).join("\n");
+      const m = /@requires-(network|install|package)\b/.exec(head);
+      if (m) (tagged[m[1]] ??= []).push(f);
+    }
+    for (const [tag, list] of Object.entries(tagged)) {
+      const covered = list.every((f) =>
+        Object.values(pkg.scripts as Record<string, string>).some(
+          (cmd) => cmd.includes("--include-tagged") && cmd.includes(f.replace(/\.(ts|cjs|js)$/, ""))
+        )
+      );
+      ok(`every @requires-${tag} suite has a script that runs it`, covered, list.join(", "));
+    }
+    // And verify - the release gate - reaches everything that does not need a
+    // live endpoint.
+    ok("verify runs the default suite", /npm test/.test(pkg.scripts.verify));
+    ok("and the packaged-artifact suites", /test:package/.test(pkg.scripts.verify));
+  }
+
+  cleanup(TMP);
   console.log(`\n${pass} passed, ${failures.length} failed`);
   for (const f of failures) console.log("  FAIL " + f);
   process.exit(failures.length ? 1 : 0);
