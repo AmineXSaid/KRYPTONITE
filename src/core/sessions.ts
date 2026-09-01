@@ -146,7 +146,8 @@ export class SessionStore {
     this.hydrated = true;
     if (!fs.existsSync(this.dir)) return;
     for (const name of fs.readdirSync(this.dir)) {
-      if (!name.endsWith(".json")) continue;
+      // `.json.<pid>.tmp` is a write in progress, not a conversation.
+      if (!name.endsWith(".json") || name.includes(".tmp")) continue;
       try {
         const doc = JSON.parse(fs.readFileSync(path.join(this.dir, name), "utf8")) as StoredSession;
         if (!doc || typeof doc.id !== "string") continue;
@@ -253,6 +254,7 @@ export class SessionStore {
    */
   save(id: string, messages: Msg[], title?: string): void {
     if (!messages.length) return;
+    this.deleted.delete(id);
     const doc: StoredSession = {
       id,
       title: title?.trim() || titleFrom(messages),
@@ -266,9 +268,20 @@ export class SessionStore {
     this.pending.set(id, doc);
     const body = JSON.stringify(doc);
     const file = path.join(this.dir, `${id}.json`);
+    /* ATOMIC, BECAUSE A HALF-WRITTEN TRANSCRIPT IS AN INVISIBLE LOSS.
+     *
+     * `writeFile` truncates and then writes. A crash, a full disk or a power
+     * cut in between leaves a JSON file that does not parse - and both readers
+     * here swallow a parse failure and skip the file, so the conversation
+     * simply stopped existing: gone from the history popover, with nothing
+     * anywhere saying why. Writing beside it and renaming makes the swap a
+     * single filesystem operation, so the reader sees either the old
+     * transcript or the new one. */
+    const tmp = `${file}.${process.pid}.tmp`;
     this.writes = this.writes
       .then(() => fsp.mkdir(this.dir, { recursive: true }))
-      .then(() => fsp.writeFile(file, body, "utf8"))
+      .then(() => fsp.writeFile(tmp, body, "utf8"))
+      .then(() => fsp.rename(tmp, file))
       .then(() => {
         // Only clear if a newer save has not already replaced it.
         if (this.pending.get(id) === doc) this.pending.delete(id);
@@ -276,6 +289,7 @@ export class SessionStore {
       .catch(() => {
         // A failed transcript write must not take down the turn that produced
         // it. The in-memory copy stays, so the session is still readable.
+        return fsp.rm(tmp, { force: true }).catch(() => {});
       });
   }
 
@@ -284,9 +298,25 @@ export class SessionStore {
     await this.writes;
   }
 
+  /**
+   * Ids removed in this window, so a turn still unwinding cannot write one back.
+   *
+   * Bounded, because a long-lived window should not accumulate a set of every
+   * conversation ever deleted in it.
+   */
+  private deleted = new Set<string>();
+
+  wasDeleted(id: string): boolean {
+    return this.deleted.has(id);
+  }
+
   delete(id: string): void {
     this.meta.delete(id);
     this.pending.delete(id);
+    this.deleted.add(id);
+    if (this.deleted.size > 200) {
+      this.deleted.delete(this.deleted.values().next().value as string);
+    }
     const file = path.join(this.dir, `${id}.json`);
     this.writes = this.writes
       .then(() => fsp.rm(file, { force: true }))

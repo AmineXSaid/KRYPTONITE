@@ -96,6 +96,42 @@ function quoteWin(s: string): string {
  * Combined with `windowsVerbatimArguments`, the quoting is ours rather than
  * Node's, which is what makes an argument containing a space safe.
  */
+/**
+ * Signal a child and everything it started.
+ *
+ * On POSIX the child is its own group leader (see `detached` in `start`), so a
+ * negative pid reaches the whole tree; the direct kill is the fallback for a
+ * child that somehow is not one. On Windows there are no process groups worth
+ * the name, so `taskkill /T /F` walks the tree instead - which is the only
+ * thing that reaches the server behind the `cmd.exe` shim.
+ */
+function killTree(proc: { pid?: number; kill: (s?: any) => boolean }, signal: "SIGTERM" | "SIGKILL"): void {
+  const pid = proc.pid;
+  if (process.platform === "win32") {
+    if (pid === undefined) return;
+    try {
+      spawn("taskkill", ["/pid", String(pid), "/T", ...(signal === "SIGKILL" ? ["/F"] : [])], {
+        stdio: "ignore",
+        windowsHide: true,
+      }).on("error", () => {
+        try { proc.kill(signal); } catch { /* already gone */ }
+      });
+    } catch {
+      try { proc.kill(signal); } catch { /* already gone */ }
+    }
+    return;
+  }
+  if (pid !== undefined) {
+    try {
+      process.kill(-pid, signal);
+      return;
+    } catch {
+      // No such group - the child was not detached, or it is already gone.
+    }
+  }
+  try { proc.kill(signal); } catch { /* already gone */ }
+}
+
 export function spawnTarget(
   command: string,
   args: string[]
@@ -230,7 +266,25 @@ export class McpClient {
         env: { ...process.env, ...(this.spec.env ?? {}) },
         stdio: ["pipe", "pipe", "pipe"],
         windowsVerbatimArguments: verbatim,
+        /* Its own process group, so `stop()` can signal the whole tree.
+         *
+         * Nothing we spawn is the server. On POSIX the canonical command is
+         * `npx -y @modelcontextprotocol/server-…`, which execs a node child;
+         * on Windows every command goes through the `cmd.exe` shim below
+         * because npx and uvx are `.cmd` files. `child.kill()` signals only
+         * the direct child, so the actual server survived every reload, every
+         * window close and every deactivate - and on Windows, where
+         * TerminateProcess does not walk a tree at all, it survived
+         * unconditionally. A day of ordinary editing left a pile of orphaned
+         * node processes nobody could attribute to the extension.
+         *
+         * Not on Windows: `detached` there creates a new console rather than a
+         * signalable group, and would flash a window. `taskkill /T` in stop()
+         * covers that platform instead. */
+        detached: process.platform !== "win32",
       }) as ChildProcessWithoutNullStreams;
+      // Detached but not unref'd: we want the child to die with us if stop()
+      // never runs, and we want to keep reading its stdio until it does.
     } catch (e: any) {
       this.fail(`could not start "${this.spec.command}": ${e.message}`);
       return;
@@ -360,15 +414,11 @@ export class McpClient {
     const proc = this.proc;
     this.proc = undefined;
     if (!proc || proc.exitCode !== null) return;
-    proc.kill();
+    killTree(proc, "SIGTERM");
     // SIGKILL anything that ignores the polite request.
     await new Promise<void>((resolve) => {
       const t = setTimeout(() => {
-        try {
-          proc.kill("SIGKILL");
-        } catch {
-          /* already gone */
-        }
+        killTree(proc, "SIGKILL");
         resolve();
       }, 2000);
       proc.once("exit", () => {

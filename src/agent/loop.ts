@@ -373,30 +373,161 @@ export function messageTokens(m: Msg): number {
   return n;
 }
 
+export const WINDOW_NOTE =
+  "[Earlier turns were dropped to stay within the context window. Ask if you need something from them.]";
+
+/** What replaces the body of a message too large to send whole. */
+function truncatedMarker(dropped: number): string {
+  return `\n\n[… ${dropped.toLocaleString()} characters removed here to fit the context window.]`;
+}
+
+/** Headroom for that sentence, so trimming to the shortfall actually clears it. */
+const MARKER_TOKENS = estimateTokens(truncatedMarker(1_000_000)) + 8;
+
+/**
+ * Shrink one message's text so it costs at most `want` tokens.
+ *
+ * Only text is cut. An image block is priced by its pixels and cannot be made
+ * cheaper by slicing it, so `fitImages` owns those and this leaves them alone.
+ */
+function shrink(m: Msg, want: number): Msg {
+  if (want <= 0) return m;
+  const chars = Math.max(200, Math.floor(want * 3.6));
+  if (typeof m.content === "string") {
+    if (m.content.length <= chars) return m;
+    return {
+      ...m,
+      content: m.content.slice(0, chars) + truncatedMarker(m.content.length - chars),
+    };
+  }
+  let budget = chars;
+  const content = m.content.map((b) => {
+    if (b.type !== "text") return b;
+    if (b.text.length <= budget) {
+      budget -= b.text.length;
+      return b;
+    }
+    const keep = Math.max(0, budget);
+    budget = 0;
+    return { ...b, text: b.text.slice(0, keep) + truncatedMarker(b.text.length - keep) };
+  });
+  return { ...m, content };
+}
+
+/**
+ * Split a conversation into units that must be dropped together.
+ *
+ * An assistant turn carrying tool calls and the tool results answering it are
+ * ONE unit. Splitting them leaves either an unanswered `tool_use` or an
+ * orphaned `tool_result`, both of which the Anthropic wire rejects outright -
+ * so the damage is not a shorter conversation, it is a conversation that can
+ * never be resumed, discovered one turn later when the next request 400s.
+ */
+function groupTurns(msgs: Msg[]): Msg[][] {
+  const units: Msg[][] = [];
+  for (let i = 0; i < msgs.length; i++) {
+    const unit = [msgs[i]];
+    // Tool results belong to the message before them, whatever it was. A
+    // leading run with no assistant ahead of it is still one unit, so it can
+    // only leave whole.
+    while (i + 1 < msgs.length && msgs[i + 1].role === "tool") unit.push(msgs[++i]);
+    units.push(unit);
+  }
+  return units;
+}
+
 /**
  * Drop the oldest exchanges when the window fills, always keeping the system
  * prompt, the first user turn, and never orphaning a tool result from its call.
+ *
+ * THREE THINGS THIS GOT WRONG, AND WHY EACH ONE MATTERED.
+ *
+ * It kept `messages.slice(0, 2)` as the head, on the assumption that index 1
+ * is the first user turn. When it was an assistant turn holding tool calls -
+ * which a restored or repaired transcript can begin with - the head kept the
+ * call and the trimming loop below dropped its results. That is the exact
+ * orphan the interrupt path goes to such lengths to avoid, manufactured here.
+ *
+ * It appended the "earlier turns were dropped" note unconditionally, so a
+ * first turn whose single message merely exceeded the budget was told that
+ * earlier turns existed and had been discarded - as the LAST thing the model
+ * read, after the user's actual question.
+ *
+ * And it could not shrink below four messages, so a body eight times the
+ * window went out with nothing said. The gateway answered with a 400 naming a
+ * token count, and the one component whose entire job is to prevent that had
+ * already decided it was finished.
  */
 export function fitToWindow(messages: Msg[], limit: number, reserve: number): Msg[] {
   const budget = limit - reserve;
+  // A profile is hand-written YAML: `contextWindow: 128k` parses as a string
+  // and arrives here as NaN. Every comparison against NaN is false, which used
+  // to mean "over budget, always" - the note was pinned to every request and
+  // nothing was ever actually dropped. An unreadable budget now means no
+  // trimming, which is the same thing this did before the field existed.
+  if (!Number.isFinite(budget)) return messages;
+
   let total = messages.reduce((n, m) => n + messageTokens(m), 0);
   if (total <= budget) return messages;
 
-  const head = messages.slice(0, 2);
-  let tail = messages.slice(2);
-  while (total > budget && tail.length > 2) {
-    const dropped = tail.shift()!;
-    total -= messageTokens(dropped);
-    // A tool result whose call just left must go too.
-    while (tail.length && tail[0].role === "tool") {
-      total -= messageTokens(tail.shift()!);
-    }
+  // The head is the leading system prompt plus the first user turn, found
+  // rather than assumed. Anything else at the front is part of an exchange and
+  // has to be eligible for dropping as a whole.
+  let h = 0;
+  while (h < messages.length && messages[h].role === "system") h++;
+  if (h < messages.length && messages[h].role === "user") h++;
+  const head = messages.slice(0, h);
+
+  const units = groupTurns(messages.slice(h));
+  const cost = (u: Msg[]) => u.reduce((n, m) => n + messageTokens(m), 0);
+
+  // The note costs tokens too, and only exists once something is dropped.
+  const noteCost = estimateTokens(WINDOW_NOTE) + 8;
+  let dropped = 0;
+  // Never the last unit: it carries the turn the user is waiting on.
+  while (total > budget && units.length > 1) {
+    total -= cost(units.shift()!);
+    if (!dropped) total += noteCost;
+    dropped++;
   }
-  const note: Msg = {
-    role: "user",
-    content: "[Earlier turns were dropped to stay within the context window. Ask if you need something from them.]",
-  };
-  return [...head, note, ...tail];
+
+  let kept = units.flat();
+  if (dropped) {
+    kept = [{ role: "user", content: WINDOW_NOTE }, ...kept];
+  }
+
+  // Everything droppable is gone and it still does not fit, which means one
+  // message is bigger than the window. Cutting its text is not a good outcome;
+  // it is the only outcome that is not a 400 the user cannot act on, and the
+  // cut says so in-band so the model knows the text has a hole in it.
+  if (total > budget) {
+    const out = [...head, ...kept];
+    // Several passes, because one is not enough: the sentence explaining a cut
+    // costs tokens of its own, so a message trimmed to exactly the shortfall
+    // lands a little over it. Bounded, and it stops as soon as a pass frees
+    // nothing - a floor of 64 tokens a message means there is a size below
+    // which this cannot help, and spinning on it would be worse than saying so.
+    for (let pass = 0; pass < 4 && total > budget; pass++) {
+      let progress = false;
+      for (let i = 0; i < out.length && total > budget; i++) {
+        // The system prompt is the contract for the whole turn and the note is
+        // one line; neither is where the weight is.
+        if (out[i].role === "system" || out[i].content === WINDOW_NOTE) continue;
+        const was = messageTokens(out[i]);
+        const want = Math.max(64, was - (total - budget) - MARKER_TOKENS);
+        if (want >= was) continue;
+        out[i] = shrink(out[i], want);
+        const now = messageTokens(out[i]);
+        if (now >= was) continue;
+        total -= was - now;
+        progress = true;
+      }
+      if (!progress) break;
+    }
+    return out;
+  }
+
+  return [...head, ...kept];
 }
 
 /**
@@ -486,7 +617,22 @@ export interface AgentRunOptions {
   client: EndpointClient;
   ctx: ToolContext;
   history: Msg[];
-  userMessage: string;
+  /**
+   * The user's turn, as the model should receive it.
+   *
+   * A `Msg` when the caller has already composed one - which the extension
+   * always has, because attachments, `@` mentions, pasted images and the
+   * editor-context block are folded in there. A bare string is accepted for
+   * harnesses and one-shot callers that have nothing to fold in.
+   *
+   * This used to be `string` only, and SessionController passed the raw
+   * composer text while pushing the COMPOSED message into the transcript. The
+   * two disagreed: every attachment and every mention reached the model one
+   * turn late, via history, and the turn they were sent in answered the bare
+   * sentence. The chip was on screen, the file was in the log, and the model
+   * had never seen it.
+   */
+  userMessage: string | Msg;
   maxIterations?: number;
   signal?: AbortSignal;
   /**
@@ -623,10 +769,14 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
       (t.name.startsWith("mcp__") || agentAllowsTool(agent, t.name))
   );
 
+  const userTurn: Msg =
+    typeof opts.userMessage === "string"
+      ? { role: "user", content: opts.userMessage }
+      : opts.userMessage;
   const messages: Msg[] = [
     { role: "system", content: system },
     ...opts.history,
-    { role: "user", content: opts.userMessage },
+    userTurn,
   ];
 
   /** Last real figure the endpoint reported, so later turns keep using it. */
@@ -699,6 +849,8 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
     let pending = "";
     /** `data:` frames this step's gateway sent that would not parse. */
     let gaps = 0;
+    /** The body ended without the marker that says the reply was finished. */
+    let truncated = false;
 
     try {
       for await (const ev of client.complete({
@@ -756,6 +908,7 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
         if (ev.type === "stream_gap" && ev.gaps) {
           gaps += ev.gaps;
         }
+        if (ev.type === "stream_truncated") truncated = true;
         // Real counts from the gateway. These were being discarded: the client
         // has always decoded `usage` for both wires, nothing consumed it, and
         // the panel showed a character-count estimate instead of the number the
@@ -779,6 +932,32 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
         errorDetail: e.detail,
       };
       return;
+    }
+
+    /* THE STREAM STOPPED WITHOUT SAYING IT HAD FINISHED.
+     *
+     * A clean end-of-body with no `[DONE]`, no `finish_reason` and no
+     * `message_stop` is a connection that was cut, not a reply that ended -
+     * and in this product's own target environment, a proxy with a
+     * response-buffering or idle policy is the likeliest way for a turn to
+     * fail at all. Nothing detected it, so the fragment was recorded as the
+     * model's complete answer and every later turn reasoned from it.
+     *
+     * Said BEFORE the turn is closed out, so the sentence sits under the
+     * half-finished reply rather than after whatever came next. The text is
+     * still kept: a fragment the user can see and resend beats one silently
+     * discarded. */
+    if (truncated) {
+      yield {
+        type: "error",
+        error: "The endpoint closed the stream before the reply had finished.",
+        errorFix:
+          "What is above is a fragment - the connection was cut part-way through, so the " +
+          "model may have had more to say. Send again. If it keeps happening at roughly " +
+          "the same length or the same elapsed time, something between here and the " +
+          "gateway is cutting long responses: check the proxy's read timeout and any " +
+          "response buffering, and run diagnostics for the streaming rung.",
+      };
     }
 
     if (gaps) {
@@ -870,6 +1049,30 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
     }
 
     if (!calls.length) {
+      /* AN EMPTY REPLY IS NOT A REPLY, AND MUST NOT BE RECORDED AS ONE.
+       *
+       * A model can answer with nothing - a content filter, a gateway hiccup,
+       * a completion that spent its whole budget before emitting a token. This
+       * used to append `{ role: "assistant", content: "" }` to the transcript
+       * and persist it. Both wires reject an empty content block, so from that
+       * point every later turn failed with a 400 naming a message the user
+       * never wrote and could not see, and the only way out was a new chat.
+       *
+       * Nothing is appended and the turn says what happened instead. The
+       * transcript ends on the user's message, which is exactly where it was
+       * before the request, and the next turn resumes cleanly. */
+      if (!text.trim()) {
+        yield {
+          type: "error",
+          error: "The endpoint returned an empty reply.",
+          errorFix:
+            "Nothing was added to the conversation, so you can simply send again. If it " +
+            "keeps happening, the gateway is filtering or truncating the response - run " +
+            "diagnostics, and check max_tokens and any content policy on the endpoint.",
+        };
+        yield { type: "turn_end" };
+        return;
+      }
       const reply: Msg = { role: "assistant", content: text };
       messages.push(reply);
       opts.onMessage?.(reply);
@@ -889,8 +1092,12 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
     // rather than five. A batch containing anything that can touch the
     // workspace stays sequential, because order is part of what the model
     // asked for and a write racing a read is a bug nobody would find.
+    // ASK_ONLY rather than READ_ONLY, which is the same set plus update_todos.
+    // "Read-only" there means "cannot change the WORKSPACE"; update_todos still
+    // writes the session's todo list through ctx.onTodos, so two of them in one
+    // batch race and the loser's list is the one the panel keeps.
     const canParallel =
-      caps.parallelToolExecution && calls.length > 1 && calls.every((c) => READ_ONLY.has(c.name));
+      caps.parallelToolExecution && calls.length > 1 && calls.every((c) => ASK_ONLY.has(c.name));
 
     // The phase gate, applied to the name the model actually sent rather than
     // to the list it was offered. Everything above this line is advisory; this
@@ -936,12 +1143,19 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
         // The assistant turn carrying these calls was already appended above,
         // which is what makes this reachable. Bailing out before that point
         // leaves nothing to orphan and needs no repair.
+        //
+        // On the parallel path `running` holds promises that were ALL started
+        // the moment the batch was dispatched, so INTERRUPTED_RESULT - "it did
+        // not execute and nothing changed" - would be a lie about work already
+        // done. Those are awaited and answered with what actually happened;
+        // only calls that genuinely never started get the interrupted note.
         for (let rest = ci; rest < calls.length; rest++) {
-          const missed: Msg = {
-            role: "tool",
-            toolCallId: calls[rest].id,
-            content: INTERRUPTED_RESULT,
-          };
+          let content = INTERRUPTED_RESULT;
+          if (running) {
+            const settled = await running[rest];
+            content = settled.content.slice(0, 60_000);
+          }
+          const missed: Msg = { role: "tool", toolCallId: calls[rest].id, content };
           messages.push(missed);
           opts.onMessage?.(missed);
         }

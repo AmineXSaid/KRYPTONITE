@@ -40,6 +40,40 @@ async function boot(root: string | undefined) {
   return { app, out };
 }
 
+/**
+ * Put a real turn in flight, rather than only setting the flag.
+ *
+ * These sections used to do `session.running = true` and nothing else, which
+ * is a state the controller cannot actually reach: `running` is only ever set
+ * beside a LiveTurn registered in `live`. That mattered once steering moved
+ * onto the turn - a message steered into a conversation with no turn has
+ * nothing to drain it - and it is worth fixing rather than working around,
+ * because a test whose premise is impossible cannot catch a regression in the
+ * path it claims to cover.
+ */
+function fakeTurn(app: any): { turn: any; end: () => void } {
+  const session = app.session;
+  const turn = {
+    id: session.sessionId,
+    abort: new AbortController(),
+    history: session.history,
+    replay: [],
+    title: session.title,
+    steer: [],
+    steerFiles: [],
+    steerFilesInFlight: [],
+  };
+  session.live.set(turn.id, turn);
+  session.running = true;
+  return {
+    turn,
+    end: () => {
+      session.live.delete(turn.id);
+      session.running = false;
+    },
+  };
+}
+
 const errors = (out: OutboundMessage[]) =>
   out.filter((m) => m.type === "error").map((m: any) => String(m.message));
 const ended = (out: OutboundMessage[]) => out.some((m) => m.type === "turnEnd");
@@ -100,7 +134,7 @@ async function main() {
     // Refusing was the old behaviour and it made the composer feel broken: a
     // thought had to be held until the model happened to stop. It is taken
     // now, and what happens to it is the inputWhileRunning preference.
-    app.session.running = true;
+    const live = fakeTurn(app);
 
     let before = out.length;
     app.uiConfig = { ...app.uiConfig, inputWhileRunning: "queue" };
@@ -131,6 +165,11 @@ async function main() {
     const s: any = out.slice(before).find((m) => m.type === "inputAccepted");
     ck(s?.mode === "steer", "steered: in steer mode", String(s?.mode));
     ck(s?.files !== undefined, "steered: and the note can show what went with it");
+    // On the turn, not on the controller. A controller-wide queue was cleared
+    // by every conversation switch, throwing away messages the user had
+    // already been told were accepted.
+    ck(live.turn.steer.length === 1, "steered: it lands on the running turn",
+      String(live.turn.steer.length));
 
     ck(app.session.running === true, "the running turn is left alone either way");
 
@@ -153,7 +192,7 @@ async function main() {
     ck(after.some((m: any) => m.type === "inputAccepted" && m.mode === "steer"),
       "promote: and is steered into the running turn instead");
 
-    app.session.running = false;
+    live.end();
     await app.dispose();
   }
 
@@ -182,7 +221,7 @@ async function main() {
     const root = workspace({ "gw.yaml": VISION });
     const { app, out } = await boot(root);
     app.uiConfig = { ...app.uiConfig, inputWhileRunning: "steer" };
-    app.session.running = true;
+    const live = fakeTurn(app);
 
     const png = Buffer.from("fake png bytes").toString("base64");
     const txt = Buffer.from("hello from a log file").toString("base64");
@@ -191,7 +230,7 @@ async function main() {
       { name: "run.log", mediaType: "text/plain", data: txt },
     ]);
 
-    const steered: any = (app.session as any).steer[0];
+    const steered: any = live.turn.steer[0];
     ck(!!steered, "the message is queued for steering");
     ck(Array.isArray(steered.content), "it is a block message, not a bare string",
       typeof steered.content);
@@ -212,7 +251,7 @@ async function main() {
       "which is the decoded length",
       String(accepted.files.find((f: any) => f.name === "run.log").size));
 
-    app.session.running = false;
+    live.end();
     await app.dispose();
   }
 
@@ -220,7 +259,7 @@ async function main() {
   {
     const { app, out } = await boot(workspace({ "gw.yaml": VISION }));
     app.uiConfig = { ...app.uiConfig, inputWhileRunning: "queue" };
-    app.session.running = true;
+    const live = fakeTurn(app);
     const png = Buffer.from("another png").toString("base64");
     await app.session.send("and this", [{ name: "b.png", mediaType: "image/png", data: png }]);
     const queued: any = (app.session as any).queued[0];
@@ -231,7 +270,7 @@ async function main() {
       "and the queue row can show what is waiting with it");
     ck(accepted?.items?.[0]?.files?.[0]?.name === "b.png", "by name",
       accepted?.items?.[0]?.files?.[0]?.name);
-    app.session.running = false;
+    live.end();
     await app.dispose();
   }
 

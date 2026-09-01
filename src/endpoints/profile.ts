@@ -62,13 +62,11 @@ export interface ProxySpec {
 export interface Capabilities {
   streaming: boolean;
   tools: boolean;
-  toolChoice: boolean;
   vision: boolean;
   systemRole: "message" | "top-level" | "prepend-user";
   contextWindow: number;
   maxOutputTokens: number;
-  /** "api" trusts a usage field; "heuristic" estimates locally (offline-safe). */
-  tokenCounting: "api" | "heuristic";
+
   /**
    * How much base64 image data one request may carry, in bytes.
    *
@@ -178,7 +176,6 @@ export interface EndpointProfile {
    */
   http2?: boolean;
   timeoutMs?: number;
-  retries?: number;
   /** Free-form defaults merged into every request body. */
   extraBody?: Record<string, unknown>;
   sourceFile?: string;
@@ -187,12 +184,11 @@ export interface EndpointProfile {
 const DEFAULT_CAPS: Capabilities = {
   streaming: true,
   tools: true,
-  toolChoice: true,
   vision: false,
   systemRole: "message",
   contextWindow: 32000,
   maxOutputTokens: 4096,
-  tokenCounting: "heuristic",
+
   // Room for roughly six screenshots. Chosen to sit under the 2 MB body limit
   // that is the common default on nginx and most API gateways, with the rest
   // of the conversation and the tool definitions still to fit around it.
@@ -263,6 +259,8 @@ export function loadProfile(file: string): EndpointProfile {
 
   const kind = isLlmKind(doc.kind) ? doc.kind : DEFAULT_LLM_KIND;
 
+  const caps = validateCapabilities(doc.capabilities, file);
+
   return {
     ...doc,
     kind,
@@ -273,12 +271,98 @@ export function loadProfile(file: string): EndpointProfile {
     capabilities: {
       ...DEFAULT_CAPS,
       ...capabilitiesFor(kind),
-      ...(doc.capabilities ?? {}),
+      ...caps,
     },
     timeoutMs: doc.timeoutMs ?? 120_000,
-    retries: doc.retries ?? 2,
     sourceFile: file,
   } as EndpointProfile;
+}
+
+const NUMERIC_CAPS = ["contextWindow", "maxOutputTokens", "maxImageBytes"] as const;
+const BOOLEAN_CAPS = [
+  "streaming", "tools", "vision", "parallelToolCalls",
+  "parallelToolExecution", "fim",
+] as const;
+const ENUM_CAPS: Record<string, readonly string[]> = {
+  systemRole: ["message", "top-level", "prepend-user"],
+  promptCaching: ["anthropic", "prefix", "none"],
+  cacheTtl: ["5m", "1h"],
+};
+
+/**
+ * Settings that used to exist, accepted and ignored.
+ *
+ * `toolChoice` and `tokenCounting` were parsed, defaulted, written into every
+ * generated profile with an explanatory comment, and read by nothing. Deleting
+ * a field is the right answer to that - but a hand-written profile out there
+ * still has them in it, and rejecting the file over a key that never did
+ * anything would turn a tidy-up into an endpoint that stops working after an
+ * update. They are swallowed instead.
+ *
+ * `tokenCounting` in particular was redundant rather than merely unwired: the
+ * loop already prefers a reported `usage` frame and falls back to an estimate
+ * marked inexact when there is none, which is what the field was trying to
+ * select and is strictly better than selecting it by hand.
+ */
+const RETIRED_CAPS = new Set(["toolChoice", "tokenCounting"]);
+
+/**
+ * Check the capabilities block instead of spreading it over the defaults.
+ *
+ * `...(doc.capabilities ?? {})` took whatever was in the file. A profile is
+ * hand-written YAML, so `contextWindow: 128k` is an ordinary typo - and it
+ * parses as the STRING "128k", which reaches `fitToWindow` as NaN. Every
+ * comparison against NaN is false, so the window was never enforced and the
+ * "earlier turns were dropped" note was pinned to every request while nothing
+ * was ever dropped. `vision: "false"` is the same shape and reads as true.
+ *
+ * A wrong value is refused with its own name, and the default stands. An
+ * unknown key is reported too: it is nearly always a misspelling of a real
+ * one, and silently ignoring it is how someone concludes the setting does
+ * nothing.
+ */
+function validateCapabilities(raw: unknown, file: string): Record<string, unknown> {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new ProfileError("capabilities: must be a block of settings.", file);
+  }
+  const known = new Set<string>([...NUMERIC_CAPS, ...BOOLEAN_CAPS, ...Object.keys(ENUM_CAPS)]);
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (RETIRED_CAPS.has(key)) continue;
+    if (!known.has(key)) {
+      throw new ProfileError(
+        `capabilities.${key} is not a setting. Known settings: ${[...known].sort().join(", ")}.`,
+        file
+      );
+    }
+    if ((NUMERIC_CAPS as readonly string[]).includes(key)) {
+      if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+        throw new ProfileError(
+          `capabilities.${key} must be a positive number - got ${JSON.stringify(value)}. ` +
+            `Write it in full (128000), not as 128k or "128000".`,
+          file
+        );
+      }
+    } else if ((BOOLEAN_CAPS as readonly string[]).includes(key)) {
+      if (typeof value !== "boolean") {
+        throw new ProfileError(
+          `capabilities.${key} must be true or false - got ${JSON.stringify(value)}.`,
+          file
+        );
+      }
+    } else {
+      const allowed = ENUM_CAPS[key];
+      if (typeof value !== "string" || !allowed.includes(value)) {
+        throw new ProfileError(
+          `capabilities.${key} must be one of ${allowed.join(", ")} - got ${JSON.stringify(value)}.`,
+          file
+        );
+      }
+    }
+    out[key] = value;
+  }
+  return out;
 }
 
 export function loadAllProfiles(dir: string): { profiles: EndpointProfile[]; errors: ProfileError[] } {

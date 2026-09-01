@@ -146,7 +146,6 @@ export interface ProfileDto {
   query: Record<string, string>;
   extraBody: Record<string, unknown>;
   timeoutMs: number;
-  retries: number;
   transform: string | null;
   /** True when the profile opts into HTTP/2. */
   http2: boolean;
@@ -373,7 +372,30 @@ export interface EndpointForm {
 }
 
 /** The complete hydration payload sent on every `ready`. */
+/**
+ * The host/webview contract's version.
+ *
+ * Bump this whenever an existing message changes shape or an existing field
+ * changes meaning - not for a purely additive one, which both sides already
+ * tolerate.
+ *
+ * There was no version at all. The two halves ship in the same .vsix, so they
+ * normally agree - but "normally" is doing real work there: a webview panel
+ * can outlive an extension update installed while VS Code is running, and a
+ * retained panel is restored from a serializer against whichever host is now
+ * loaded. On a mismatch the old frontend silently ignored message types it did
+ * not know and read fields that had moved, so the panel rendered a plausible,
+ * stale, wrong picture with nothing on screen suggesting a reload. One
+ * comparison turns that into a sentence.
+ */
+export const PROTOCOL_VERSION = 1;
+
 export interface StateSync {
+  /**
+   * `PROTOCOL_VERSION` as the host understands it. A frontend that does not
+   * recognise it says so and asks for a reload rather than guessing.
+   */
+  protocolVersion: number;
   workspace: { open: boolean; name: string | null };
   running: boolean;
   phase: Phase;
@@ -955,10 +977,25 @@ export type OutboundType = OutboundMessage["type"];
  */
 export interface ThinkingOut { type: "thinking"; text: string }
 
+/**
+ * Events buffered against the turn that produced them, so a webview that
+ * reloads mid-run - and a conversation the user switched away from and came
+ * back to - is redrawn into the state it missed.
+ *
+ * `ErrorOut` and `PlanProposedOut` were NOT in this list, and both were sent
+ * with `show()` rather than `emit()`. `show()` paints only when the turn's
+ * conversation is the one on screen and buffers nothing, so a turn that failed
+ * while the user was reading another chat reported its failure to nobody, ever:
+ * they came back to a turn that simply stopped. A plan produced in the
+ * background rendered no plan card at all, under a comment insisting it was
+ * "buffered, not just shown ... a turn finished in the background has to have
+ * one to replay".
+ */
 export type ReplayableEvent =
   | StreamDeltaOut | ThinkingOut | ToolStartOut | ToolEndOut
   | TodosUpdatedOut | ImageGeneratedOut | FileTouchedOut | ChangesUpdatedOut
-  | PermissionRequestOut | ContextUsageOut | SteerAcceptedOut;
+  | PermissionRequestOut | ContextUsageOut | SteerAcceptedOut
+  | ErrorOut | PlanProposedOut;
 
 /** Narrowing helper for host-side switch statements. */
 export type InboundOf<T extends InboundType> = Extract<InboundMessage, { type: T }>;

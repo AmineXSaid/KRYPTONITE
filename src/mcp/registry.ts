@@ -265,8 +265,22 @@ export class McpRegistry {
    * Reload from disk and connect. Existing clients are stopped first so a reload
    * cannot leave orphaned child processes behind.
    */
+  /**
+   * Generation counter, so an overtaken reload cleans up after itself.
+   *
+   * `reload` stops everything and then repopulates `clients` by name. Two
+   * overlapping calls each spawned a full set of servers and the later `set`
+   * simply overwrote the earlier client objects - whose processes were then
+   * held by nobody and never stopped. App serialises reloads now; this is the
+   * second lock, because the registry is public and a caller elsewhere should
+   * not be able to leak a process tree by calling it twice.
+   */
+  private generation = 0;
+
   async reload(configFile: string, workspaceRoot: string): Promise<void> {
+    const gen = ++this.generation;
     await this.stopAll();
+    if (gen !== this.generation) return;
     this.configPresent = fs.existsSync(configFile);
     const { specs, warnings } = loadMcpConfig(configFile);
     this.warnings = warnings;
@@ -284,8 +298,12 @@ export class McpRegistry {
     await Promise.all(
       enabled.map(async (spec) => {
         const client = makeClient(spec, this.log);
+        if (gen !== this.generation) return;
         this.clients.set(spec.name, client);
         await client.start(workspaceRoot);
+        // A newer reload landed while this one was starting. Nothing else
+        // holds this client, so it stops here or its process outlives us.
+        if (gen !== this.generation) await client.stop();
       })
     );
   }
@@ -300,10 +318,13 @@ export class McpRegistry {
   async restart(name: string, workspaceRoot: string): Promise<void> {
     const existing = this.clients.get(name);
     if (!existing) return;
+    const gen = this.generation;
     await existing.stop();
+    if (gen !== this.generation) return; // a full reload overtook this
     const fresh = makeClient(existing.spec, this.log);
     this.clients.set(name, fresh);
     await fresh.start(workspaceRoot);
+    if (gen !== this.generation) await fresh.stop();
   }
 
   statuses(): McpServerStatus[] {

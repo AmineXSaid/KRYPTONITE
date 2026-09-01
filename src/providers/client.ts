@@ -67,7 +67,16 @@ export interface CompletionEvent {
    * the reply - and on an agentic turn every intermediate step produces
    * reasoning and no content, so it happened on every step.
    */
-  type: "text" | "reasoning" | "tool_call" | "done" | "usage" | "stream_gap";
+  type:
+    | "text" | "reasoning" | "tool_call" | "done" | "usage"
+    | "stream_gap"
+    /**
+     * The body ended without the marker that says the reply is finished -
+     * `[DONE]` or a `finish_reason` on the OpenAI wire, `message_stop` on
+     * Anthropic's. Whatever text arrived is a fragment, and the consumer has
+     * to say so rather than record it as the answer.
+     */
+    | "stream_truncated";
   text?: string;
   toolCall?: ToolCall;
   usage?: TokenUsage;
@@ -322,7 +331,7 @@ export class EndpointClient {
     // Auth is I/O and encoding is CPU; neither depends on the other, so a
     // credential helper process or a token exchange round trip now overlaps
     // the serialisation of the request body instead of preceding it.
-    const authPromise = applyAuth(this.profile, this.dispatcher, this.secrets);
+    const authPromise = applyAuth(this.profile, this.dispatcher, this.secrets, req.signal);
     const { body, stream: wantsStream } = this.encode(req);
     const payload = JSON.stringify(body);
     const auth = await authPromise;
@@ -419,6 +428,52 @@ export class EndpointClient {
        in one line saying so, which is the difference between a mangled answer
        and a mangled answer you know about. */
     let undecodable = 0;
+    /* AND A STREAM THAT SIMPLY STOPS IS NOT A REPLY EITHER.
+     *
+     * The gap counter above catches a frame that arrived corrupted. It cannot
+     * catch the far more common failure in the environment this extension
+     * exists for: a proxy with a response-buffering or idle policy closing an
+     * SSE stream part-way through. That is a clean end-of-body as far as
+     * undici is concerned, so this loop exited normally, `done` was yielded,
+     * and the agent loop wrote the half-sentence into the transcript as the
+     * model's complete answer. The user saw a reply that stopped mid-word with
+     * nothing anywhere saying why, and every later turn reasoned from it.
+     *
+     * Both wires mark the end explicitly - `[DONE]` or a `finish_reason` on
+     * the OpenAI side, `message_stop` on Anthropic's - and none of it was
+     * being read. It is read now, and its ABSENCE is the finding. */
+    let sawTerminal = false;
+    const self = this;
+    /** One SSE frame -> the events it carries. */
+    function* handle(frame: string): Generator<CompletionEvent> {
+      for (const line of frame.split("\n")) {
+        if (!line.startsWith("data:")) continue;
+        const payloadLine = line.slice(5).trim();
+        if (payloadLine === "[DONE]") {
+          sawTerminal = true;
+          continue;
+        }
+        let json: any;
+        try {
+          json = JSON.parse(payloadLine);
+        } catch {
+          // Empty payloads are keep-alives by convention and are not a gap.
+          if (payloadLine) undecodable++;
+          continue;
+        }
+        // Read off the raw frame, before any transform, because a transform
+        // that reshapes the payload has no obligation to preserve the field
+        // that marks the end.
+        if (
+          json?.type === "message_stop" ||
+          json?.choices?.[0]?.finish_reason
+        ) {
+          sawTerminal = true;
+        }
+        for (const ev of parser(post ? post(json, self.profile) : json)) yield ev;
+      }
+    }
+
     try {
       for await (const chunk of res.body) {
         // Normalise only the newly arrived text: re-scanning the whole
@@ -429,30 +484,38 @@ export class EndpointClient {
         while ((idx = buf.indexOf("\n\n")) !== -1) {
           const frame = buf.slice(0, idx);
           buf = buf.slice(idx + 2);
-          for (const line of frame.split("\n")) {
-            if (!line.startsWith("data:")) continue;
-            const payloadLine = line.slice(5).trim();
-            if (payloadLine === "[DONE]") continue;
-            let json: any;
-            try {
-              json = JSON.parse(payloadLine);
-            } catch {
-              // Empty payloads are keep-alives by convention and are not a gap.
-              if (payloadLine) undecodable++;
-              continue;
+          for (const ev of handle(frame)) {
+            if (ev.type === "text") {
+              tokens++;
+              if (!ttftMs) ttftMs = performance.now() - t0;
             }
-            for (const ev of parser(post ? post(json, this.profile) : json)) {
-              if (ev.type === "text") {
-                tokens++;
-                if (!ttftMs) ttftMs = performance.now() - t0;
-              }
-              yield ev;
-            }
+            yield ev;
           }
         }
       }
+
+      /* The tail of the body, which used to be thrown away.
+       *
+       * A frame is terminated by a blank line, and a gateway that closes right
+       * after its last `data:` line never sends one - so the final delta, and
+       * on some gateways the whole usage frame, sat in `buf` and was dropped
+       * without even being counted as a gap. The decoder is flushed for the
+       * same reason: a multi-byte character split across the last chunk
+       * boundary is still held inside it. */
+      buf += decoder.decode();
+      if (buf.trim()) {
+        for (const ev of handle(buf)) {
+          if (ev.type === "text") {
+            tokens++;
+            if (!ttftMs) ttftMs = performance.now() - t0;
+          }
+          yield ev;
+        }
+      }
+
       // Before `done`, so a consumer that stops at `done` has already seen it.
       if (undecodable) yield { type: "stream_gap", gaps: undecodable };
+      if (!sawTerminal) yield { type: "stream_truncated" };
       yield { type: "done" };
     } finally {
       report();
@@ -517,7 +580,7 @@ export class EndpointClient {
       ...(spec.extraBody ?? {}),
     };
 
-    const auth = await applyAuth(this.profile, this.dispatcher, this.secrets);
+    const auth = await applyAuth(this.profile, this.dispatcher, this.secrets, opts.signal);
     const budget = spec.timeoutMs ?? Math.max(this.profile.timeoutMs ?? 120_000, 180_000);
 
     const res = await request(url.toString(), {
@@ -619,8 +682,8 @@ export class EndpointClient {
    * credential-helper process runs while the user is still typing instead of
    * sitting between their Enter key and the first token.
    */
-  async warmAuth(): Promise<void> {
-    await applyAuth(this.profile, this.dispatcher, this.secrets);
+  async warmAuth(signal?: AbortSignal): Promise<void> {
+    await applyAuth(this.profile, this.dispatcher, this.secrets, signal);
   }
 
   /**
@@ -634,7 +697,7 @@ export class EndpointClient {
   async warmCache(system: string, signal?: AbortSignal): Promise<void> {
     const caps = this.profile.capabilities;
     if (caps.promptCaching !== "anthropic" || !system) return;
-    const auth = await applyAuth(this.profile, this.dispatcher, this.secrets);
+    const auth = await applyAuth(this.profile, this.dispatcher, this.secrets, signal);
     const res = await request(this.url(), {
       method: "POST",
       dispatcher: this.dispatcher,
@@ -705,7 +768,49 @@ function packAnthropicMessages(msgs: Msg[]): any[] {
     i--;
     out.push({ role: "user", content: blocks });
   }
+  return mergeAdjacent(out);
+}
+
+/**
+ * Fold consecutive same-role turns into one.
+ *
+ * This wire alternates, and two `user` messages in a row are a 400 on a strict
+ * gateway. They are easy to produce without meaning to: the context trimmer
+ * inserts its "earlier turns were dropped" note as a user turn directly after
+ * the first user turn it kept, and a steered message can land beside the one
+ * before it. Merging is the shape the API would have accepted anyway, so it
+ * costs nothing and removes a whole class of failure that only ever showed up
+ * as an opaque status code.
+ */
+function mergeAdjacent(msgs: any[]): any[] {
+  const out: any[] = [];
+  for (const m of msgs) {
+    const prev = out[out.length - 1];
+    if (!prev || prev.role !== m.role || m.role === "system") {
+      out.push(m);
+      continue;
+    }
+    const asBlocks = (c: any) =>
+      Array.isArray(c) ? c : [{ type: "text", text: String(c ?? "") }];
+    out[out.length - 1] = {
+      ...prev,
+      content: [...asBlocks(prev.content), ...asBlocks(m.content)],
+    };
+  }
   return out;
+}
+
+/**
+ * Anthropic rejects an empty text block, and a transcript can already hold
+ * one: before the loop learned not to record an empty completion, a model that
+ * answered with nothing put `{ role: "assistant", content: "" }` into the
+ * saved conversation. Refusing to send it would strand every user who has one
+ * on disk, so it is replaced on the way out with a line that says what it was.
+ */
+const EMPTY_TURN = "(this turn produced no reply)";
+
+function nonEmptyText(t: string): string {
+  return t.trim() ? t : EMPTY_TURN;
 }
 
 /**
@@ -755,15 +860,41 @@ function imagesOf(m: Msg): { mediaType: string; data: string }[] {
  */
 function packOpenAiMessages(msgs: Msg[]): any[] {
   const out: any[] = [];
+  /* THE PICTURE HAS TO WAIT FOR THE END OF THE BATCH.
+   *
+   * This used to push the image-bearing user message immediately after the
+   * tool message it belonged to. With one tool call in the turn that is
+   * correct. With two - a screenshot and a file read, which is exactly what
+   * the browser tool's own description encourages - it puts a `user` message
+   * BETWEEN two tool results, and the wire is explicit that an assistant
+   * message carrying `tool_calls` must be followed by one `tool` message per
+   * id and nothing else. The result was a 400 naming tool_call_id, on a
+   * transcript that then kept producing it.
+   *
+   * So they are carried and flushed once the run of tool results ends, which
+   * is the first position where a user message is legal again. */
+  let carried: any[] = [];
+  const flush = () => {
+    if (!carried.length) return;
+    out.push(...carried);
+    carried = [];
+  };
   for (const m of msgs) {
+    if (m.role !== "tool") flush();
     out.push(toOpenAiMessage(m));
     if (m.role !== "tool") continue;
     const imgs = imagesOf(m);
     if (!imgs.length) continue;
-    out.push({
+    carried.push({
       role: "user",
       content: [
-        { type: "text", text: "Image returned by the tool call above:" },
+        {
+          type: "text",
+          // Named rather than "above": once these are flushed together, two
+          // batched screenshots would otherwise both claim to belong to
+          // whichever call happened to be last.
+          text: `Image returned by tool call ${m.toolCallId ?? "(unknown)"}:`,
+        },
         ...imgs.map((b) => ({
           type: "image_url",
           image_url: { url: `data:${b.mediaType};base64,${b.data}` },
@@ -771,6 +902,7 @@ function packOpenAiMessages(msgs: Msg[]): any[] {
       ],
     });
   }
+  flush();
   return out;
 }
 
@@ -817,16 +949,14 @@ function toAnthropicMessage(m: Msg): any {
     return { role: "assistant", content: blocks };
   }
   if (typeof m.content !== "string") {
-    return {
-      role: m.role,
-      content: m.content.map((b) =>
-        b.type === "text"
-          ? { type: "text", text: b.text }
-          : { type: "image", source: { type: "base64", media_type: b.mediaType, data: b.data } }
-      ),
-    };
+    const blocks = m.content.map((b) =>
+      b.type === "text"
+        ? { type: "text", text: nonEmptyText(b.text) }
+        : { type: "image", source: { type: "base64", media_type: b.mediaType, data: b.data } }
+    );
+    return { role: m.role, content: blocks.length ? blocks : nonEmptyText("") };
   }
-  return { role: m.role, content: m.content };
+  return { role: m.role, content: nonEmptyText(m.content) };
 }
 
 function* decodeWhole(json: any, wire: string): Generator<CompletionEvent> {

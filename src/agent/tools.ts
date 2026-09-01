@@ -106,6 +106,27 @@ export function unifiedPatch(before: string, after: string, rel: string, context
   );
 }
 
+/**
+ * What kind of side effect an approval is being asked about.
+ *
+ * THIS EXISTS BECAUSE THE ANSWER USED TO BE DERIVED FROM THE PROSE.
+ *
+ * `requestApproval` classified a request by testing whether its human-readable
+ * summary began with "Run:". Everything else - a fetch, a web search, an MCP
+ * call, an image generation, and every browser action including `eval`, whose
+ * summary begins "Run JavaScript in the page" and therefore does NOT begin
+ * "Run:" - fell into the same bucket as a file edit. So `approvalMode:
+ * edits-auto`, and a single click of "Always allow" on a one-line edit, both
+ * silently granted arbitrary JavaScript execution in a browser holding the
+ * user's live logins, unrestricted network egress, and every MCP side effect,
+ * for the rest of the session.
+ *
+ * The kind is now stated by the call site, which is the only place that knows
+ * it, and the summary goes back to being what it was always meant to be: text
+ * for a person to read.
+ */
+export type ApprovalKind = "edit" | "command" | "network" | "mcp" | "browser";
+
 export interface ToolContext {
   root: string;
   /**
@@ -126,7 +147,16 @@ export interface ToolContext {
    * diff card uses, so approving an edit and reviewing one look alike - which
    * they should, being the same information at two moments.
    */
-  approve: (summary: string, detail?: string, patch?: string) => Promise<boolean>;
+  approve: (
+    summary: string,
+    detail?: string,
+    patch?: string,
+    /**
+     * Absent means "command" - the most restrictive bucket - so a call site
+     * that forgets to say gets the strongest gate rather than the weakest.
+     */
+    kind?: ApprovalKind
+  ) => Promise<boolean>;
   /**
    * A file on disk changed. `change` is absent only for callers that do not
    * track line counts, which is every offline harness and nothing in the
@@ -797,7 +827,9 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
         const preview = JSON.stringify(args ?? {});
         const ok = await ctx.approve(
           `Call MCP tool ${name}`,
-          preview.length > 2000 ? preview.slice(0, 2000) + "…" : preview
+          preview.length > 2000 ? preview.slice(0, 2000) + "…" : preview,
+          undefined,
+          "mcp"
         );
         if (!ok) return { content: "The user declined this MCP tool call.", isError: true };
       }
@@ -864,7 +896,8 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
         const ok = await ctx.approve(
           `${existed ? "Overwrite" : "Create"} ${args.path}`,
           args.content.slice(0, 2000),
-          existed && before ? unifiedPatch(before, args.content, args.path) : undefined
+          existed && before ? unifiedPatch(before, args.content, args.path) : undefined,
+          "edit"
         );
         if (!ok) return { content: "The user declined this edit.", isError: true };
         fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -911,7 +944,8 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
         const ok = await ctx.approve(
           `Edit ${args.path}${all && count > 1 ? ` (${count} occurrences)` : ""}`,
           `- ${args.old_text}\n+ ${args.new_text}`,
-          unifiedPatch(before, after, args.path)
+          unifiedPatch(before, after, args.path),
+          "edit"
         );
         if (!ok) return { content: "The user declined this edit.", isError: true };
         fs.writeFileSync(abs, after, "utf8");
@@ -1096,7 +1130,7 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
         if (typeof args.command !== "string" || !args.command.trim()) {
           return { content: "command is required.", isError: true };
         }
-        const ok = await ctx.approve(`Run: ${args.command}`, args.reason);
+        const ok = await ctx.approve(`Run: ${args.command}`, args.reason, undefined, "command");
         if (!ok) return { content: "The user declined to run that command.", isError: true };
         const timeout = Math.max(1_000, Math.min(args.timeout_ms ?? 120_000, 600_000));
         try {
@@ -1194,7 +1228,12 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
           eval: `Run JavaScript in the page: ${String(args?.expression ?? "").slice(0, 120)}`,
         };
         if (gated[action]) {
-          const ok = await ctx.approve(gated[action]!, "The browser is driven by the model.");
+          const ok = await ctx.approve(
+            gated[action]!,
+            "The browser is driven by the model.",
+            undefined,
+            "browser"
+          );
           if (!ok) return { content: "The user declined that browser action.", isError: true };
         }
 
@@ -1220,7 +1259,9 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
         // came from the model rather than from the user.
         const ok = await ctx.approve(
           `Search the web for ${JSON.stringify(query)}`,
-          "Queries the configured search provider over HTTP on the active endpoint's connection."
+          "Queries the configured search provider over HTTP on the active endpoint's connection.",
+          undefined,
+          "network"
         );
         if (!ok) return { content: "The user declined that search.", isError: true };
 
@@ -1241,7 +1282,12 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
         // model rather than the user, so it goes through the same gate as a
         // shell command. The full URL is shown because that is the thing being
         // approved.
-        const ok = await ctx.approve(`Fetch ${raw}`, "Reads the page as text. No cookies are sent.");
+        const ok = await ctx.approve(
+          `Fetch ${raw}`,
+          "Reads the page as text. No cookies are sent.",
+          undefined,
+          "network"
+        );
         if (!ok) return { content: "The user declined that fetch.", isError: true };
         try {
           const p = await ctx.fetchUrl(raw, args?.links === true);
@@ -1271,7 +1317,9 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
 
         const ok = await ctx.approve(
           `Generate an image with ${ctx.image.model}`,
-          `${prompt}\n\n→ ${wanted}`
+          `${prompt}\n\n→ ${wanted}`,
+          undefined,
+          "network"
         );
         if (!ok) return { content: "The user declined image generation.", isError: true };
 

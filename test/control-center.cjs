@@ -74,9 +74,9 @@ function boot() {
 }
 
 const CAPS = {
-  streaming: true, tools: true, toolChoice: true, vision: true,
+  streaming: true, tools: true, vision: true,
   systemRole: "message", contextWindow: 128000, maxOutputTokens: 4096,
-  tokenCounting: "heuristic", maxImageBytes: 1500000, parallelToolCalls: false,
+  maxImageBytes: 1500000, parallelToolCalls: false,
   promptCaching: "none", cacheTtl: "5m", parallelToolExecution: true,
 };
 

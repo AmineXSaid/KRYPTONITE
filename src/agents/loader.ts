@@ -203,8 +203,22 @@ function readMcp(
     }
     return { mcp: out, allMcp: false };
   }
-  warnings.push(`${name}: mcp must be "*", a list of servers, or a map of servers to tool filters.`);
-  return { mcp: [], allMcp: true };
+  /* A MALFORMED RESTRICTION IS NOT AN ABSENT ONE.
+   *
+   * This returned `allMcp: true` - every configured server, every tool - on
+   * anything the four branches above did not recognise. The rule that an
+   * omitted key means "unrestricted" is a reasonable default; applying it to a
+   * key the user WROTE and got wrong is the opposite, because the whole point
+   * of writing it was to narrow something. `.agent/mcp.json` gets this right
+   * for the analogous case (a non-boolean `readOnly` stays withheld, and says
+   * why); the agent loader did not.
+   */
+  warnings.push(
+    `${name}: mcp must be "*", a list of servers, or a map of servers to tool filters - ` +
+      `got ${JSON.stringify(raw)}. Treating it as no MCP access, so a typo cannot widen ` +
+      `what this agent can reach.`
+  );
+  return { mcp: [], allMcp: false };
 }
 
 /**
@@ -235,6 +249,15 @@ export function loadAgents(dir: string): { agents: Agent[]; warnings: string[] }
     warnings.push(`Could not read ${dir}: ${e instanceof Error ? e.message : String(e)}`);
     return { agents, warnings };
   }
+
+  /* Sorted before the loop, not after it.
+   *
+   * Two agents with the same `name:` warns that "only the first was loaded" -
+   * but "first" was `readdirSync` order, which is insertion order on ext4 and
+   * sorted on APFS. The same `.agent/agents/` directory loaded a different
+   * agent depending on the machine, silently. Sorting the entries makes the
+   * winner the same everywhere; the warning already explains the collision. */
+  entries.sort((a, b) => a.name.localeCompare(b.name));
 
   for (const entry of entries) {
     // A folder with an AGENT.md inside is accepted as well as a bare file, so
@@ -297,13 +320,37 @@ export function loadAgents(dir: string): { agents: Agent[]; warnings: string[] }
     }
 
     const { mcp, allMcp } = readMcp(meta.mcp, name, warnings);
+
+    /* A MEMORY FILE THE AGENT CANNOT WRITE IS A PROMPT THAT ARGUES WITH ITSELF.
+     *
+     * `agentPrompt` tells the model, on every single request, to keep the file
+     * up to date "with edit_file or write_file". If `tools:` does not admit
+     * either, the execution gate refuses both - so the agent is instructed to
+     * do something it will be refused for attempting, every turn, and ends up
+     * explaining to the user that it cannot save what it learned. Nothing
+     * checked, and the combination is the documented one: the header's own
+     * example is a read-only triage agent, and the template offers `memory:`
+     * and a read-only `tools:` list two lines apart.
+     */
+    const tools = asList(meta.tools);
+    const memory = String(meta.memory ?? "").trim().replace(/\\/g, "/");
+    const canWrite =
+      !tools.length || tools.some((p) => matchesGlob(p, "write_file") || matchesGlob(p, "edit_file"));
+    if (memory && !canWrite) {
+      warnings.push(
+        `${name} has a memory file (${memory}) but its tools list allows neither write_file ` +
+          `nor edit_file, so it is told to maintain the file on every request and refused ` +
+          `every time it tries. Add edit_file to tools, or remove memory.`
+      );
+    }
+
     agents.push({
       name,
       description,
       persona,
       model: String(meta.model ?? "").trim(),
-      memory: String(meta.memory ?? "").trim().replace(/\\/g, "/"),
-      tools: asList(meta.tools),
+      memory,
+      tools,
       skills: asList(meta.skills),
       mcp,
       allMcp,

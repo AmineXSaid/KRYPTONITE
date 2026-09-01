@@ -78,6 +78,7 @@ import type {
   TodoDto,
   UiConfigDto,
 } from "../ui/protocol";
+import { PROTOCOL_VERSION } from "../ui/protocol";
 
 type Sink = (msg: OutboundMessage) => void;
 
@@ -243,6 +244,93 @@ const REAL_CONFIG_KEYS = new Set([
  * Everything that survives a reload - profiles, skills, phase, trace results,
  * the client pool, the running turn - lives here.
  */
+/** The value written in place of a literal credential in an exported bundle. */
+const BUNDLE_REDACTION = "REPLACED-SEE-README";
+
+/**
+ * Replace literal credentials in an exported bundle, in place.
+ *
+ * Only the copy is touched; the workspace is never written to. The test is
+ * deliberately shape-based rather than clever: a value under an auth-ish key
+ * that is NOT an interpolation (`${secret:…}`, `${env:…}`, `${file:…}`) is
+ * treated as the real thing. A false positive costs a placeholder in a config
+ * the recipient has to fill in anyway; a false negative is a live key in a
+ * folder someone was told was safe to email.
+ *
+ * Returns `<file>: <key>` for each replacement, for the manifest and the README.
+ */
+function redactBundleSecrets(dir: string): string[] {
+  const found: string[] = [];
+  const INTERPOLATED = /^\s*\$\{(secret|env|file):[^}]*\}\s*$/;
+  // YAML `value: xyz` / `keyPassphrase: xyz`, and JSON "Authorization": "xyz".
+  const SENSITIVE_KEY =
+    /^(value|token|secret|password|passphrase|key|api[_-]?key|apikey|client[_-]?secret|authorization|x-api-key|keypassphrase|pfxpassphrase)$/i;
+
+  const walk = (from: string) => {
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = fs.readdirSync(from, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const abs = path.join(from, e.name);
+      if (e.isDirectory()) {
+        walk(abs);
+        continue;
+      }
+      if (!/\.(ya?ml|json)$/i.test(e.name)) continue;
+      let text: string;
+      try {
+        text = fs.readFileSync(abs, "utf8");
+      } catch {
+        continue;
+      }
+      const rel = path.relative(dir, abs).split(path.sep).join("/");
+      // Line-based on purpose: it works identically for YAML and JSON, it
+      // cannot reorder or reformat a file someone hand-wrote, and a config
+      // that fails to parse still gets scanned.
+      const out = text.split("\n").map((line) => {
+        const m = line.match(/^(\s*"?)([A-Za-z0-9_.-]+)("?\s*[:=]\s*)(.*)$/);
+        if (!m) return line;
+        const [, lead, key, sep, rawValue] = m;
+        if (!SENSITIVE_KEY.test(key)) return line;
+        const value = rawValue.replace(/,\s*$/, "").trim();
+        const bare = value.replace(/^["']|["']$/g, "");
+        if (!bare || INTERPOLATED.test(bare)) return line;
+        // A structural value (a nested block, a list) holds no secret itself.
+        if (bare === "|" || bare === ">" || bare === "{" || bare === "[") return line;
+        found.push(`${rel}: ${key}`);
+        const quoted = /^["']/.test(value);
+        const trailing = rawValue.endsWith(",") ? "," : "";
+        return `${lead}${key}${sep}${quoted ? `"${BUNDLE_REDACTION}"` : BUNDLE_REDACTION}${trailing}`;
+      });
+      const next = out.join("\n");
+      if (next !== text) {
+        try {
+          fs.writeFileSync(abs, next, "utf8");
+        } catch {
+          /* the manifest still names it */
+        }
+      }
+    }
+  };
+  walk(dir);
+  return found;
+}
+
+/** Cheap change detector for a single config file. Absent reads as "". */
+function fileStamp(file: string): string {
+  try {
+    const st = fs.statSync(file);
+    return `${st.mtimeMs}:${st.size}`;
+  } catch {
+    return "";
+  }
+}
+
+const WATCH_DEBOUNCE_MS = 300;
+
 export class App {
   readonly output: vscode.OutputChannel;
   readonly sessions: SessionStore;
@@ -297,6 +385,15 @@ export class App {
   /** Last published render, so an unchanged screen does not re-broadcast. */
   private editorRendered = "";
   private warmTimer?: NodeJS.Timeout;
+  /** Cancels for the watchers' debounce timers, so dispose leaves none armed. */
+  private watchTimers: Array<() => void> = [];
+  /** Serialises reload(), and remembers whether another one is already queued. */
+  private reloading: Promise<void> = Promise.resolve();
+  private reloadQueued = false;
+  /** mtime+size of .agent/mcp.json at the last MCP restart. "" before the first. */
+  private mcpStamp = "";
+  /** False until the first MCP load, so activation always starts the servers. */
+  private mcpLoaded = false;
   private selectionTimer?: NodeJS.Timeout;
   private disposables: vscode.Disposable[] = [];
 
@@ -603,6 +700,8 @@ export class App {
    * destroyed the connection pool and made the next turn pay a full handshake.
    */
   private installWatcher(): void {
+    for (const cancel of this.watchTimers) cancel();
+    this.watchTimers = [];
     this.watcher?.dispose();
     this.watcher = undefined;
     this.skillWatcher?.dispose();
@@ -616,11 +715,28 @@ export class App {
     const profileDir = this.cfg().get<string>("profileDirectory", ".agent/endpoints");
     const skillsDir = this.cfg().get<string>("skillsDirectory", ".agent/skills");
 
+    /* DEBOUNCED, WHICH IT WAS NOT.
+     *
+     * A VS Code file watcher fires once per file. A `git checkout`, an `npm
+     * install`, a formatter saving on a multi-file edit, or the agent itself
+     * writing several skills, all deliver a burst - and every one of those
+     * events used to call `reload()` in full. Each reload stops and respawns
+     * every MCP server, so a routine branch switch could mean dozens of
+     * process teardowns racing each other. */
     const bind = (glob: string, handler: () => void) => {
       const w = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, glob));
-      w.onDidChange(handler);
-      w.onDidCreate(handler);
-      w.onDidDelete(handler);
+      let timer: NodeJS.Timeout | undefined;
+      const debounced = () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+          timer = undefined;
+          handler();
+        }, WATCH_DEBOUNCE_MS);
+      };
+      this.watchTimers.push(() => timer && clearTimeout(timer));
+      w.onDidChange(debounced);
+      w.onDidCreate(debounced);
+      w.onDidDelete(debounced);
       return w;
     };
 
@@ -656,6 +772,8 @@ export class App {
 
   async dispose(): Promise<void> {
     this.session.dispose();
+    for (const cancel of this.watchTimers) cancel();
+    this.watchTimers = [];
     this.skillWatcher?.dispose();
     this.agentWatcher?.dispose();
     this.instructionsWatcher?.dispose();
@@ -714,7 +832,30 @@ export class App {
 
   /* ───────────────────────────── reload ───────────────────────────── */
 
+  /**
+   * Reload configuration, one at a time.
+   *
+   * `reload` had no reentrancy guard, and it is called from four watchers and
+   * from activation. Two overlapping calls each ran `mcp.reload`, which stops
+   * every server and then repopulates the registry by name - so the second
+   * call's `clients.set` overwrote the first call's freshly spawned client
+   * objects, and the processes they held were left running with nothing
+   * holding a reference to stop them. Serialising removes the race; collapsing
+   * a queued reload into one removes the pile-up behind it.
+   */
   async reload(reason: string, opts?: { keepClients?: boolean }): Promise<void> {
+    if (this.reloadQueued) return this.reloading;
+    this.reloadQueued = true;
+    const run = this.reloading.then(async () => {
+      this.reloadQueued = false;
+      await this.reloadNow(reason, opts);
+    });
+    // A failed reload must not wedge every reload after it.
+    this.reloading = run.catch(() => {});
+    return run;
+  }
+
+  private async reloadNow(reason: string, opts?: { keepClients?: boolean }): Promise<void> {
     if (!opts?.keepClients) {
       await this.closeClients();
       // Profiles can change CA bundles or client certificates, so the parsed
@@ -736,6 +877,9 @@ export class App {
 
     const profileDir = path.join(root, this.cfg().get<string>("profileDirectory", ".agent/endpoints"));
     const { profiles, errors } = loadAllProfiles(profileDir);
+    // `warnedMissingProfile` is cleared so a profile that comes back is not
+    // still remembered as missing.
+    this.warnedMissingProfile = "";
 
     // A global CA bundle is a workspace-wide fact, so it merges into every
     // profile rather than being repeated in each YAML.
@@ -753,7 +897,39 @@ export class App {
       }
     }
 
-    this.profiles = profiles;
+    /* TWO PROFILES WITH THE SAME `name:` IS NOT A COSMETIC PROBLEM.
+     *
+     * `clientFor` pools clients by `profile.name`, so the second file's
+     * baseUrl, TLS material and credential were silently never used - every
+     * request went out on the first one's client. The agents loader and the
+     * skills loader both refuse duplicate names already; the one place where
+     * a collision decides WHERE REQUESTS GO did not check at all.
+     *
+     * Sorted as well, so `profiles[0]` - the fallback in `activeProfile` - is
+     * the same profile on every machine rather than whatever the filesystem
+     * listed first.
+     */
+    profiles.sort((a, b) => a.name.localeCompare(b.name));
+    const byName = new Map<string, EndpointProfile>();
+    const dupes: string[] = [];
+    for (const p of profiles) {
+      const first = byName.get(p.name);
+      if (first) {
+        dupes.push(p.name);
+        errors.push(
+          new ProfileError(
+            `Another profile is already called "${p.name}" (${path.basename(first.sourceFile ?? "")}). ` +
+              `Endpoint names have to be unique - requests are routed by them - so this file was not loaded.`,
+            p.sourceFile
+          )
+        );
+        continue;
+      }
+      byName.set(p.name, p);
+    }
+    this.duplicateProfileNames = [...new Set(dupes)];
+
+    this.profiles = [...byName.values()];
     this.profileErrors = errors;
     for (const e of errors) this.log("error", `Profile ${e.file ?? "(unknown)"}: ${e.message}`);
 
@@ -800,12 +976,27 @@ export class App {
       void this.setActiveAgent("");
     }
 
-    // MCP servers are child processes, so a reload stops the old ones first.
-    // Not awaited into the critical path: a cold `npx` fetch can take seconds
-    // and the panel must not sit blank behind it.
-    void this.mcp.reload(mcpConfigPath(root), root).then(() => {
-      this.broadcast({ type: "mcpChanged", servers: this.mcp.statuses(), warnings: this.mcp.warnings });
-    });
+    /* MCP SERVERS ARE ONLY RESTARTED WHEN THEIR CONFIG ACTUALLY CHANGED.
+     *
+     * This ran unconditionally, which means `reloadSkillsOnly` ran it too -
+     * the "cheap" reload whose entire purpose is not to tear things down
+     * mid-conversation, and whose comment says agents and skills "share the
+     * cheap reload rather than tearing the connection pool down". True of the
+     * HTTP clients; false of every MCP child process, which is a heavier thing
+     * to lose. Saving a SKILL.md while a turn was running killed the servers
+     * under it, and an in-flight call came back "MCP server is stopped".
+     *
+     * Still not awaited into the critical path: a cold `npx` fetch takes
+     * seconds and the panel must not sit blank behind it. */
+    const mcpFile = mcpConfigPath(root);
+    const mcpStamp = fileStamp(mcpFile);
+    if (mcpStamp !== this.mcpStamp || !this.mcpLoaded) {
+      this.mcpStamp = mcpStamp;
+      this.mcpLoaded = true;
+      void this.mcp.reload(mcpFile, root).then(() => {
+        this.broadcast({ type: "mcpChanged", servers: this.mcp.statuses(), warnings: this.mcp.warnings });
+      });
+    }
     for (const w of this.skillWarnings) this.log("warn", `Skill: ${w}`);
 
     await this.primeSecrets();
@@ -859,10 +1050,47 @@ export class App {
 
   /* ───────────────────────────── accessors ───────────────────────────── */
 
+  /** Names that resolved to more than one file, so the picker can say so. */
+  duplicateProfileNames: string[] = [];
+
+  /**
+   * The profile requests go out on.
+   *
+   * The fallback to `profiles[0]` is deliberate - a workspace with one profile
+   * and no setting should just work - but it used to be SILENT, and
+   * `profiles[0]` is whatever `readdirSync` happened to return first, which is
+   * filesystem order and differs between machines. Someone who renamed or
+   * deleted the profile named in their settings carried on working, against a
+   * different endpoint, with nothing anywhere saying so. In a workspace with a
+   * production gateway and a sandbox that is not a papercut.
+   *
+   * The substitution is now reported once per change, and `profiles` is sorted
+   * so at least it is the same profile on every machine.
+   */
   activeProfile(): EndpointProfile | undefined {
     const name = this.cfg().get<string>("activeProfile", "");
-    return this.profiles.find((p) => p.name === name) ?? this.profiles[0];
+    const wanted = this.profiles.find((p) => p.name === name);
+    if (wanted) return wanted;
+    const fallback = this.profiles[0];
+    if (name && fallback && this.warnedMissingProfile !== name) {
+      this.warnedMissingProfile = name;
+      this.log(
+        "warn",
+        `No endpoint profile is named "${name}" (genesis.activeProfile). Using "${fallback.name}" instead.`
+      );
+      this.broadcast({
+        type: "error",
+        message: `The selected endpoint "${name}" no longer exists.`,
+        fix: `Requests are going to "${fallback.name}" instead. Pick the one you meant, or ` +
+          `restore the profile file.`,
+        action: "endpoints",
+      });
+    }
+    return fallback;
   }
+
+  /** So the substitution above is reported once, not on every accessor call. */
+  private warnedMissingProfile = "";
 
   /** What to do with a message typed while a turn is running. */
   inputWhileRunning(): "queue" | "steer" {
@@ -969,11 +1197,23 @@ export class App {
    */
   systemPrompt(phase: Phase = this.phase): string {
     const agent = this.activeAgent();
+    const profile = this.activeProfile();
     return systemPromptFor(
       this.enabledSkills(agent),
       phase,
       agent ? { agent, memory: this.agentMemory(agent) } : undefined,
-      this.instructions?.block
+      this.instructions?.block,
+      /* THE FIFTH ARGUMENT, WHICH WAS MISSING.
+       *
+       * `identityLine` was added to `systemPromptFor` and this call site was
+       * not updated, so the pre-warmed head stopped one paragraph short of the
+       * real one - and that paragraph sits SECOND in the join, ahead of the
+       * skills index, the instructions, the persona and the addendum. Prompt
+       * caching is a prefix match, so the entry this wrote covered a prefix no
+       * real request ever sent: every warm-up was a billed round trip that
+       * bought nothing, and every real request still paid a full cache write.
+       * The comment above has always promised the two are byte-identical. */
+      profile ? { model: profile.model, endpoint: profile.name } : undefined
     );
   }
 
@@ -1253,15 +1493,37 @@ export class App {
     const root = this.root;
     if (!root) return undefined;
     const abs = path.resolve(root, agent.memory);
-    // Same containment rule the tools use: a memory path pointing out of the
-    // workspace would read a file the user never meant to hand over.
+    /* THE SAME CONTAINMENT RULE THE TOOLS USE, WHICH THIS WAS NOT.
+     *
+     * The comment here claimed parity with `readable()`, `writable()` and
+     * `mentionable()`. All three resolve symlinks before judging a path,
+     * precisely because a lexical check is a string comparison pretending to
+     * be a path comparison. This one compared and stopped - so a symlink at
+     * `.agent/memory/notes.md` pointing at `~/.ssh/id_rsa` passed, and its
+     * contents went into the system prompt on every single request. */
     const rel = path.relative(root, abs);
     if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
       this.log("warn", `Agent ${agent.name}: memory path is outside the workspace and was ignored.`);
       return undefined;
     }
+    let real = abs;
     try {
-      const body = fs.readFileSync(abs, "utf8");
+      real = fs.realpathSync(abs);
+    } catch {
+      // Not written yet, which is the normal first run. The lexical check above
+      // stands, and there is nothing to read.
+      return undefined;
+    }
+    const realRel = path.relative(fs.realpathSync(root), real);
+    if (!realRel || realRel.startsWith("..") || path.isAbsolute(realRel)) {
+      this.log(
+        "warn",
+        `Agent ${agent.name}: ${agent.memory} resolves outside the workspace and was ignored.`
+      );
+      return undefined;
+    }
+    try {
+      const body = fs.readFileSync(real, "utf8");
       if (body.length <= MAX_MEMORY_CHARS) return body;
       this.log(
         "warn",
@@ -1382,7 +1644,6 @@ export class App {
         query: p.query ?? {},
         extraBody: p.extraBody ?? {},
         timeoutMs: p.timeoutMs ?? 120000,
-        retries: p.retries ?? 2,
         transform: p.transform ?? null,
         http2: p.http2 === true,
       };
@@ -1415,7 +1676,6 @@ export class App {
       query: {},
       extraBody: {},
       timeoutMs: 0,
-      retries: 0,
       transform: null,
       http2: false,
     }));
@@ -1551,6 +1811,7 @@ export class App {
     const active = this.activeProfile();
     const folder = vscode.workspace.workspaceFolders?.[0];
     return {
+      protocolVersion: PROTOCOL_VERSION,
       workspace: { open: Boolean(folder), name: folder?.name ?? null },
       running: this.session.running,
       phase: this.phase,
@@ -2584,6 +2845,30 @@ export class App {
       // to build one.
     }
 
+    /* THE README SAYS "NO CREDENTIAL IS IN IT". NOW SOMETHING CHECKS.
+     *
+     * That claim held only for profiles written by the wizard, which emit
+     * `${secret:…}`. The generated file also says "edit freely - the file is
+     * the source of truth", and a hand-written `value: sk-live-…` is both
+     * accepted by the loader and entirely ordinary. `.agent/mcp.json` is worse:
+     * literal `"headers": { "Authorization": "Bearer ghp_…" }` is the shape
+     * people copy out of a Claude Desktop config.
+     *
+     * So the bundle was a folder that could contain a live key, carrying a
+     * README stating categorically that it did not - which is worse than
+     * saying nothing, because it is the sentence that stops the recipient
+     * looking. Anything that looks like a literal credential is replaced with
+     * a placeholder naming the file it came from, and the export reports what
+     * it redacted. */
+    const redacted = redactBundleSecrets(agentOut);
+    if (redacted.length) {
+      this.log(
+        "warn",
+        `Offline bundle: replaced ${redacted.length} literal credential(s) with a placeholder ` +
+          `(${redacted.join(", ")}). The originals are untouched in your workspace.`
+      );
+    }
+
     const version = String(this.context.extension.packageJSON.version ?? "0.0.0");
     const manifest = {
       generatedAt: new Date().toISOString(),
@@ -2594,21 +2879,34 @@ export class App {
       mcpServers: this.mcp.statuses().map((m) => m.name),
       carried,
       vsix,
+      redacted,
     };
     fs.writeFileSync(path.join(out, "manifest.json"), JSON.stringify(manifest, null, 2), "utf8");
-    fs.writeFileSync(path.join(out, "README.md"), this.bundleReadme(version, carried, vsix), "utf8");
+    fs.writeFileSync(
+      path.join(out, "README.md"),
+      this.bundleReadme(version, carried, vsix, redacted),
+      "utf8"
+    );
 
     this.broadcast({ type: "bundleExported", path: out });
     this.log("info", `Exported offline bundle to ${out}.`);
   }
 
   /** What to do with the folder, for the person who receives it. */
-  private bundleReadme(version: string, carried: string[], vsix: string | null): string {
+  private bundleReadme(
+    version: string,
+    carried: string[],
+    vsix: string | null,
+    redacted: string[]
+  ): string {
     return [
       `# Genesis offline bundle`,
       "",
-      `Genesis ${version}. Everything below is configuration this workspace was using;`,
-      "no credential is in it.",
+      `Genesis ${version}. Everything below is configuration this workspace was using.`,
+      redacted.length
+        ? `Literal credentials were found in ${redacted.length} place(s) and replaced with a ` +
+          `placeholder before the copy was written - see "What is deliberately NOT here".`
+        : "No credential is in it; every one was already a `${secret:…}` reference.",
       "",
       "## Install",
       "",
@@ -2637,6 +2935,21 @@ export class App {
       "`genesis.caBundlePath` is not here either. It is an absolute path on the machine that",
       "made this bundle; set your own under Settings › Genesis if your gateway needs one.",
       "",
+      ...(redacted.length
+        ? [
+            "### Redacted here",
+            "",
+            "These files held a credential written out in full rather than as a",
+            "`${secret:…}` reference. The copies in this bundle have `REPLACED-SEE-README`",
+            "where the value was; the originals in the source workspace are untouched.",
+            "",
+            ...redacted.map((r) => `- \`${r}\``),
+            "",
+            "Put the real values into SecretStorage on this machine and change the source",
+            "files to use `${secret:…}`, so the next bundle needs no redaction at all.",
+            "",
+          ]
+        : []),
     ].join("\n");
   }
 

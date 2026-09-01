@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as crypto from "node:crypto";
 
 /**
  * HTML shells for the two webview surfaces.
@@ -31,11 +32,18 @@ function csp(webview: vscode.Webview, nonce: string): string {
   ].join("; ");
 }
 
+/**
+ * The nonce is the whole of `script-src`, so it has to be unguessable.
+ *
+ * This was 32 characters of `Math.random()`, which is a fast PRNG with a
+ * recoverable internal state and no security claim of any kind. The CSP above
+ * is the only thing standing between untrusted model output rendered into this
+ * document and script execution inside it; deriving its one secret from a
+ * generator that is documented as "not cryptographically secure" undercuts the
+ * entire policy. `node:crypto` was already a dependency of four other files.
+ */
 function makeNonce(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let out = "";
-  for (let i = 0; i < 32; i++) out += chars[Math.floor(Math.random() * chars.length)];
-  return out;
+  return crypto.randomBytes(24).toString("base64url");
 }
 
 /**

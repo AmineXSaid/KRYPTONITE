@@ -289,7 +289,36 @@ console.log("\n──── the shipped example ────");
     ck(!agentAllowsTool(reader, "run_command"), "nor run a command");
     ck(agentAllowsTool(reader, "read_file"), "while still being able to read one");
     ck(reader.memory.length > 0, "and it demonstrates a memory file");
+    // The half of that demonstration that was missing. The agent is told on
+    // every request to maintain this file; with no writer on its tools list it
+    // was refused every time it tried, and the example shipped that way.
+    ck(agentAllowsTool(reader, "edit_file"),
+      "which it can actually write, or the memory loop is a prompt that argues with itself");
   }
+}
+
+/* ── 7b. a memory file with no way to write it is reported ─────────────── */
+console.log("\n──── memory without a writer ────");
+{
+  const d = path.join(root, "agents-memory");
+  fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(d, "sealed.md"), [
+    "---", "name: sealed", "description: reads only.",
+    "memory: .agent/memory/sealed.md",
+    "tools: [read_file, search]", "---", "", "You read things.", "",
+  ].join("\n"), "utf8");
+  const got = loadAgents(d);
+  ck(got.agents.length === 1, "the agent still loads - this is a warning, not a rejection");
+  ck(got.warnings.some((w) => /memory file/.test(w) && /edit_file/.test(w)),
+    "and the contradiction is reported, naming the fix", got.warnings.join(" "));
+
+  fs.writeFileSync(path.join(d, "sealed.md"), [
+    "---", "name: sealed", "description: reads only.",
+    "memory: .agent/memory/sealed.md",
+    "tools: [read_file, search, edit_*]", "---", "", "You read things.", "",
+  ].join("\n"), "utf8");
+  ck(loadAgents(d).warnings.length === 0,
+    "a glob that admits edit_file satisfies it, since that is what the gate checks");
 }
 
 /* ── 8. an absent directory is not an error ────────────────────────────── */

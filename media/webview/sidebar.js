@@ -124,7 +124,7 @@ function _sbRun() {
   var RUNG_LABELS = {
     "Certificates and keys": "Config", "Profile": "Config", "DNS": "DNS", "TCP": "TCP",
     "TLS handshake": "TLS", "Authentication": "Auth", "Completion": "HTTP",
-    "Streaming": "Stream", "Tool calling": "Tools"
+    "Streaming": "Stream", "Tool calling": "Tools", "Proxy tunnel": "Proxy"
   };
 
   /* GitHub-flavoured callout kinds -> the glyph each one wears. */
@@ -1989,8 +1989,16 @@ function _sbRun() {
       '<div class="w-mark">Genesis</div>' +
       '<p>' + (recent.length
         ? "Pick up where you left off, or start something new."
-        : "I read your workspace, propose edits as diffs, and never write a file " +
-          "until you accept it. Ask anything about this repository.") + "</p>";
+        /* This used to say "never write a file until you accept it", which is
+           the first sentence a new user reads and is not what happens: a write
+           lands on disk as soon as the approval card is answered, and the diff
+           card afterwards is a review with an undo behind it. In edits-auto or
+           full-auto, and after one "Always allow", there is no card at all.
+           The honest version is still the reassuring one - nothing happens
+           unasked, and every change is reviewable and revertible. */
+        : "I read your workspace and ask before I change anything. Every edit " +
+          "arrives as a diff you can review and undo. Ask anything about this " +
+          "repository.") + "</p>";
 
     // Openers. These were removed once for being invented examples about a
     // function nobody in the workspace has - and that objection was right about
@@ -4955,7 +4963,29 @@ function _sbRun() {
 
   /* ───────────────────────── hydration ───────────────────────── */
 
+  /**
+   * The contract version this frontend was built against. See PROTOCOL_VERSION
+   * in src/ui/protocol.ts.
+   */
+  var PROTOCOL_VERSION = 1;
+  var versionWarned = false;
+
   function hydrate(state) {
+    /* The two halves ship together, so this normally never fires. It fires when
+       a webview outlives an extension update installed while VS Code is
+       running: the panel is restored against the new host, and every message
+       type it does not recognise is silently ignored while every field that
+       moved reads as undefined. That produced a plausible, stale, wrong panel
+       with nothing suggesting a reload. */
+    if (!versionWarned && state && typeof state.protocolVersion === "number" &&
+        state.protocolVersion !== PROTOCOL_VERSION) {
+      versionWarned = true;
+      addError({
+        message: "This panel is running an older build than the extension.",
+        fix: "Reload the window (Developer: Reload Window) so the panel and the extension " +
+             "match. Until then some things here may be out of date or missing."
+      });
+    }
     S.workspace = state.workspace;
     S.running = state.running;
     S.phase = state.phase;

