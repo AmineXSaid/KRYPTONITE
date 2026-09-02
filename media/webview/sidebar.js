@@ -3260,20 +3260,24 @@ function _sbRun() {
      *
      * The label was "Always allow" for both kinds of request, and the two are
      * not the same grant at all. For an edit it sets a flag for this session.
-     * For a command it appends the command's FIRST TOKEN to a workspace-level
-     * list that survives restarts - so "always allow" on `git status`
-     * permanently authorises `git push --force`, and the only place that was
-     * ever said was the card's replacement text, after the click.
+     * For a command it stores a workspace-level grant that survives restarts.
      *
-     * The scope goes on the control. `git` rather than `git status`, because
-     * the token is what is actually being granted and printing the full command
-     * would promise a precision the grant does not have. */
+     * That grant used to be keyed on the command's FIRST WORD, so "always
+     * allow" on `git status` permanently authorised `git push --force`. The
+     * host keys it on a signature now - program, subcommand and flags - and
+     * sends the exact keys as `m.grants`. They are printed rather than
+     * recomputed here: the card deriving its own label from the summary is
+     * precisely how the label and the grant came apart in the first place.
+     *
+     * `m.risk` is the host's verdict on the command. A `destructive` one is
+     * refused on the next invocation whatever is stored, so the button is
+     * withheld rather than offered and quietly ignored. */
     var isCmd = String(m.summary || "").indexOf("Run:") === 0;
-    var token = isCmd
-      ? String(m.summary).replace(/^Run:\s*/, "").trim().split(/\s+/)[0]
-      : "";
+    var grants = m.grants || [];
+    var destructive = m.risk === "destructive";
+    var canAlways = isCmd ? grants.length > 0 : true;
     var always = isCmd
-      ? "Always allow " + esc(token)
+      ? "Always allow " + esc(grants.join(", "))
       : "Always allow edits";
     /* Built raw and escaped ONCE, at the point of use. Escaping the token and
        then dropping the result into a double-quoted attribute alongside a
@@ -3281,13 +3285,23 @@ function _sbRun() {
        of the sentence - the tooltip read "Every command starting with " and
        stopped. Typographic quotes would have hidden that rather than fixed it. */
     var alwaysTitle = isCmd
-      ? 'Every command starting with "' + token + '" runs without asking, in this ' +
-        "workspace, until you revoke it in the Control Center."
+      ? "These exact commands run without asking, in this workspace, until you " +
+        "revoke them in the Control Center. Other commands, including ones " +
+        "sharing a program name, still ask."
       : "Every file edit runs without asking for the rest of this conversation.";
-    var el = add(div("perm",
-      '<div class="perm-t">' + icon("i-warn", "ic-14") + "Permission required</div>" +
+    var el = add(div("perm" + (destructive ? " perm-danger" : ""),
+      '<div class="perm-t">' + icon("i-warn", "ic-14") +
+        (destructive ? "This can destroy work" : "Permission required") + "</div>" +
       '<div class="perm-b">Genesis wants to:</div>' +
       '<div class="perm-cmd">' + esc(m.summary) + "</div>" +
+      /* Said on the card, not only in a tooltip. A command that can discard
+         uncommitted work is the one place where the reason to read before
+         clicking has to survive someone who is not reading. */
+      (destructive
+        ? '<div class="perm-b" style="margin-top:6px">This command can discard work ' +
+          "that cannot be recovered. It is never approved automatically, and it " +
+          "cannot be granted for next time.</div>"
+        : "") +
       /* THE CHANGE, AS A DIFF, AT THE MOMENT OF THE DECISION.
        *
        * This was `esc(m.detail)` in a monospace block: no gutter, no line
@@ -3304,7 +3318,9 @@ function _sbRun() {
         : m.detail ? '<div class="perm-cmd" style="margin-top:6px">' + esc(String(m.detail).slice(0, 4000)) + "</div>" : "") +
       '<div class="perm-actions">' +
         '<button class="btn go" data-perm="allow">Allow once</button>' +
-        '<button class="btn" data-perm="always" title="' + esc(alwaysTitle) + '">' + always + "</button>" +
+        (canAlways
+          ? '<button class="btn" data-perm="always" title="' + esc(alwaysTitle) + '">' + always + "</button>"
+          : "") +
         '<button class="btn" data-perm="deny">Deny</button></div>'));
     el.dataset.perm = m.id;
     el.dataset.summary = m.summary;

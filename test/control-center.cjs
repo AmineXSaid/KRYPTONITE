@@ -695,7 +695,13 @@ const sync = (b, over) => b.send({ type: "stateSync", state: state(over) });
   sync(b);
   b.click('[data-section="agent"]');
   ok("an empty grant list explains how one is made",
-    /Always allow/.test(b.pane().textContent) && /first word/.test(b.pane().textContent));
+    /Always allow/.test(b.pane().textContent) && /exact command/.test(b.pane().textContent));
+  /* The card is the one place a standing grant can be audited, so what it says
+     the grant covers has to be what the host actually honours. It used to say
+     "first word", truthfully, back when a yes to `git status` carried
+     `git push --force`. */
+  ok("and says destructive commands are never added",
+    /discard your work/.test(b.pane().textContent), b.pane().textContent.slice(0, 300));
   ok("and offers nothing to revoke", !b.d.querySelector("[data-forget]"));
   b.dom.window.close();
 }

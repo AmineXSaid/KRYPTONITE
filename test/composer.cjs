@@ -685,29 +685,56 @@ console.log("\n──── the send control ────");
   /* THE SAME LABEL FOR TWO DIFFERENT PROMISES.
    *
    * "Always allow" on an EDIT sets a flag for this conversation. "Always
-   * allow" on a COMMAND appends the command's first token to a workspace-level
-   * list that survives restarts - so one yes to `git status` authorises
-   * `git push --force` for good. Both buttons read "Always allow", and the
-   * distinction appeared only in the card's replacement text, after the click.
+   * allow" on a COMMAND stores a workspace-level grant that survives restarts.
+   * Both buttons read "Always allow", and the distinction appeared only in the
+   * card's replacement text, after the click. The scope belongs on the control.
    *
-   * The scope belongs on the control. The TOKEN, not the whole command:
-   * printing "Always allow git status" would promise a precision the grant
-   * does not have. */
+   * That command grant used to be keyed on the first WORD, and the card
+   * printed the word - "Always allow git" - because that was honestly what was
+   * being granted: one yes to `git status` authorised `git push --force` for
+   * good. The host keys grants by signature now and sends the exact keys as
+   * `grants`, so the card prints those. The card no longer derives the label
+   * from the summary at all, which is what kept the label and the grant
+   * honest with each other. */
   const b = boot();
   b.sync("ask");
   b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
-    type: "permissionRequest", id: "p1", summary: "Run: git status --porcelain",
+    type: "permissionRequest", id: "p1", summary: "Run: npm test --silent",
+    risk: "write", grants: ["npm test --silent"],
   } }));
   const cmdBtn = b.d.querySelector('.perm [data-perm="always"]');
-  ok("a command grant names the token it actually grants",
-    cmdBtn.textContent.trim() === "Always allow git", cmdBtn.textContent);
+  ok("a command grant names the exact keys it grants",
+    cmdBtn.textContent.trim() === "Always allow npm test --silent", cmdBtn.textContent);
   ok("and its tooltip says the grant outlives the turn",
     /workspace/.test(cmdBtn.title) && /revoke/i.test(cmdBtn.title), cmdBtn.title);
+  ok("and that a shared program name is not covered by it",
+    /still ask/i.test(cmdBtn.title), cmdBtn.title);
   ok("allow-once says it is once",
     /once/i.test(b.d.querySelector('.perm [data-perm="allow"]').textContent));
 
+  /* A DESTRUCTIVE COMMAND CANNOT BE GRANTED FOR NEXT TIME.
+   *
+   * The host refuses it on every future invocation whatever is stored, so a
+   * button offering to store one would promise something nothing honours. It
+   * is withheld rather than shown and ignored, and the card says why in its
+   * own text - not only in a tooltip, because the person about to lose
+   * uncommitted work is the person not reading tooltips. */
   b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
-    type: "permissionRequest", id: "p2", summary: "Overwrite src/index.ts",
+    type: "permissionRequest", id: "p2", summary: "Run: git reset --hard origin/main",
+    risk: "destructive", grants: [],
+  } }));
+  const danger = [...b.d.querySelectorAll(".perm")].pop();
+  ok("a destructive command offers no 'always' at all",
+    !danger.querySelector('[data-perm="always"]'), danger.textContent);
+  ok("but still offers allow-once and deny",
+    !!danger.querySelector('[data-perm="allow"]') && !!danger.querySelector('[data-perm="deny"]'));
+  ok("the card is marked as the different kind of question it is",
+    danger.classList.contains("perm-danger"), danger.className);
+  ok("and says on its face that the work may not come back",
+    /cannot be recovered/i.test(danger.textContent), danger.textContent.slice(0, 200));
+
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "permissionRequest", id: "p3", summary: "Overwrite src/index.ts",
   } }));
   const editBtn = [...b.d.querySelectorAll('.perm [data-perm="always"]')].pop();
   ok("an edit grant is named as an edit grant",

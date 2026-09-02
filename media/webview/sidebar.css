@@ -1114,8 +1114,16 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   border: 1px solid var(--kx-line); border-radius: 4px;
   padding: 11px 12px; margin-bottom: 14px;
 }
+/* A command that can discard work the user cannot get back.
+   The card carries the alarm hue rather than the warn hue the ordinary
+   permission card wears, because these two questions should not look alike:
+   one is "may I", the other is "this is not undoable". */
+.perm.perm-danger {
+  border-color: var(--kx-error); background: var(--kx-error-wash);
+}
 .perm-t { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; }
 .perm-t .ic { color: var(--kx-warn); }
+.perm-danger .perm-t, .perm-danger .perm-t .ic { color: var(--kx-error-2); }
 .perm-b { font-size: 12.5px; color: var(--kx-fg-2); margin: 6px 0 8px; }
 .perm-cmd {
   background: var(--kx-surface-2); border-radius: 4px; padding: 7px 9px;

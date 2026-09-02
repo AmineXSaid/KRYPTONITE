@@ -19,6 +19,7 @@ import {
 // without going through a model turn.
 import { navigate, snapshot } from "../browser/page";
 import { wrapUntrusted } from "../agent/untrusted";
+import { classify, grantSignatures, isAllowed } from "../agent/risk";
 import type { App } from "../core/app";
 import type {
   AttachmentChipDto,
@@ -1080,23 +1081,48 @@ export class SessionController {
   /**
    * Decide whether a side effect may proceed, escalating to the user only when
    * the configured mode requires it.
+   *
+   * For a shell command the decision is made on its RISK before its mode, and
+   * the order matters more than it looks. A `destructive` command is asked
+   * about whatever the mode says and whatever has been granted, because the
+   * thing a mode expresses is how much the user wants to be interrupted, and
+   * that is not an opinion about whether their uncommitted work should
+   * survive. A `safe` one is never asked about at all, which is the other half
+   * of the same idea: prompts that fire on `git status` are what train someone
+   * to approve without reading, and the prompt that then goes unread is the
+   * one on `git reset --hard`.
    */
   requestApproval(summary: string, detail?: string, turn?: LiveTurn, patch?: string): Promise<boolean> {
     const mode = this.app.approvalMode();
     const isCommand = summary.startsWith("Run:");
+    const risk = isCommand ? classify(commandOf(summary)) : undefined;
 
-    if (mode === "full-auto") return Promise.resolve(true);
-    if (mode === "edits-auto" && !isCommand) return Promise.resolve(true);
-    if (!isCommand && this.alwaysAllowEdits) return Promise.resolve(true);
     if (isCommand) {
-      const token = firstToken(summary);
-      if (token && this.app.alwaysAllowedCommands.includes(token)) return Promise.resolve(true);
+      // The circuit breaker. Nothing below this line can approve it, and that
+      // includes full-auto and a signature the user granted themselves.
+      if (risk !== "destructive") {
+        if (mode === "full-auto") return Promise.resolve(true);
+        if (risk === "safe") return Promise.resolve(true);
+        if (isAllowed(commandOf(summary), this.app.alwaysAllowedCommands)) {
+          return Promise.resolve(true);
+        }
+      }
+    } else {
+      if (mode === "full-auto") return Promise.resolve(true);
+      if (mode === "edits-auto") return Promise.resolve(true);
+      if (this.alwaysAllowEdits) return Promise.resolve(true);
     }
+
+    // What "always" would actually store, computed here so the card's label and
+    // the grant behind it cannot disagree.
+    const grants = isCommand ? grantSignatures(commandOf(summary)) : undefined;
 
     const id = crypto.randomUUID();
     return new Promise<boolean>((resolve) => {
       this.pending.set(id, { resolve, summary });
-      const ev: ReplayableEvent = { type: "permissionRequest", id, summary, detail, patch };
+      const ev: ReplayableEvent = {
+        type: "permissionRequest", id, summary, detail, patch, risk, grants,
+      };
       // Through the turn when there is one, so a question asked by a
       // background turn is buffered rather than shown over a different
       // conversation. It reappears when the user comes back, and the promise
@@ -1113,8 +1139,16 @@ export class SessionController {
 
     if (decision === "always") {
       if (entry.summary.startsWith("Run:")) {
-        const token = firstToken(entry.summary);
-        if (token) await this.app.rememberAllowedCommand(token);
+        // One grant per subcommand rather than one for the line, so a grant
+        // made for `npm test` in `cd app && npm test` is a grant for `npm
+        // test` and not for whatever else is chained beside it next time.
+        //
+        // Empty for a destructive command, which is what makes "always"
+        // inert for one: there is nothing to write down, so the next
+        // invocation asks again.
+        for (const sig of grantSignatures(commandOf(entry.summary))) {
+          await this.app.rememberAllowedCommand(sig);
+        }
       } else {
         this.alwaysAllowEdits = true;
       }
@@ -1690,11 +1724,21 @@ export function extractPlan(raw: string): { body: string; steps: string[] } {
   return { body, steps };
 }
 
-/** `Run: pytest -q` → `pytest`. Used for per-workspace command allow-listing. */
-function firstToken(summary: string): string | undefined {
-  const command = summary.replace(/^Run:\s*/, "").trim();
-  const token = command.split(/\s+/)[0];
-  return token || undefined;
+/**
+ * The command back out of the summary the approval was raised with.
+ *
+ * This replaced `firstToken`, which returned the first WORD of the command and
+ * used it as the key a standing grant was stored under. Approving `git status`
+ * once with "always" stored `git`, and every `git` invocation after it ran
+ * unprompted - `reset --hard` and `push --force` included. The grant the user
+ * read and the grant they gave were different grants.
+ *
+ * Nothing here decides anything now. `src/agent/risk.ts` classifies the
+ * command and keys the grant; this only undoes the `Run: ` that
+ * `tools.ts` puts on the front for display.
+ */
+function commandOf(summary: string): string {
+  return summary.replace(/^Run:\s*/, "").trim();
 }
 
 function messageOf(e: unknown): string {

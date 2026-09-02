@@ -27,6 +27,7 @@ import {
 } from "../agents/loader";
 import { McpRegistry, mcpConfigPath } from "../mcp/registry";
 import { ShadowRepo } from "../checkpoint/shadow";
+import { isSignature } from "../agent/risk";
 import { ProposedContent } from "../ui/quickEdit";
 import { DiagnosticsService, rungLabel } from "../diagnostics/service";
 import { SessionStore } from "./sessions";
@@ -402,10 +403,30 @@ export class App {
       ...(this.context.workspaceState.get<Partial<UiConfigDto>>("genesis.uiConfig") ?? {}),
     };
     this.disabledSkills = this.context.workspaceState.get<string[]>("genesis.disabledSkills", []);
-    this.alwaysAllowedCommands = this.context.workspaceState.get<string[]>(
-      "genesis.alwaysAllowedCommands",
-      []
-    );
+    // Grants written by the first-token scheme are dropped on sight.
+    //
+    // That scheme keyed a standing grant on the first WORD of a command, so a
+    // stored `git` is a permanent grant for `git reset --hard` and a stored
+    // `cd` is one for every compound command that begins with it. The entries
+    // ARE the vulnerability, and they cannot be repaired into signatures
+    // because the command the user actually approved was never recorded - only
+    // the word. So they go, and the user grants again once, against a key that
+    // says what it covers.
+    const stored = this.context.workspaceState.get<string[]>("genesis.alwaysAllowedCommands", []);
+    this.alwaysAllowedCommands = stored.filter(isSignature);
+    if (this.alwaysAllowedCommands.length !== stored.length) {
+      const dropped = stored.filter((s) => !isSignature(s));
+      this.log(
+        "info",
+        `Dropped ${dropped.length} shell grant(s) stored under the old first-word scheme ` +
+          `(${dropped.join(", ")}). A grant on one command must not authorise another; ` +
+          `these will be asked about again.`
+      );
+      void this.context.workspaceState.update(
+        "genesis.alwaysAllowedCommands",
+        this.alwaysAllowedCommands
+      );
+    }
     // Pick the conversation back up where the last window left it.
     this.session.restore();
 
@@ -1159,26 +1180,37 @@ export class App {
     if (files.length) this.broadcast({ type: "attachmentsReady", files });
   }
 
-  async rememberAllowedCommand(token: string): Promise<void> {
-    if (this.alwaysAllowedCommands.includes(token)) return;
-    this.alwaysAllowedCommands = [...this.alwaysAllowedCommands, token];
+  /**
+   * Store one standing grant.
+   *
+   * `sig` is a SIGNATURE from `src/agent/risk.ts` - program, subcommand and
+   * sorted flags - not a bare program name. That is the whole difference
+   * between `git status` granting `git status` and granting `git reset
+   * --hard`, so a caller that passes a raw first word is reintroducing the
+   * bug this replaced. A compound command yields one signature per
+   * subcommand, so this is called once per piece.
+   */
+  async rememberAllowedCommand(sig: string): Promise<void> {
+    if (this.alwaysAllowedCommands.includes(sig)) return;
+    this.alwaysAllowedCommands = [...this.alwaysAllowedCommands, sig];
     await this.context.workspaceState.update(
       "genesis.alwaysAllowedCommands",
       this.alwaysAllowedCommands
     );
-    this.log("info", `Always allowing shell command: ${token}`);
+    this.log("info", `Always allowing shell command: ${sig}`);
     // So the Control Center's list is right without waiting for a reload. A
     // grant nobody can see is a grant nobody can take back.
     this.broadcast({ type: "configChanged", config: this.configDto() });
   }
 
   /**
-   * Take a grant back. An empty token clears all of them.
+   * Take a grant back. An empty argument clears all of them.
    *
-   * The grant is keyed on the command's FIRST TOKEN, which is what makes this
-   * necessary rather than tidy: saying yes to `git status` once authorised
-   * every `git` invocation in the workspace, permanently, and until now there
-   * was no surface on which to discover that or undo it.
+   * Grants are keyed by signature now, so this is no longer the only defence
+   * against one - a grant covers the command shape the user actually read, and
+   * a destructive command is refused whatever is stored. It stays because a
+   * standing permission the user cannot see and cannot withdraw is still the
+   * wrong shape, however narrow it is.
    */
   async forgetAllowedCommand(token: string): Promise<void> {
     const before = this.alwaysAllowedCommands.length;

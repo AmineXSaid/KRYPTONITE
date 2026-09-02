@@ -452,22 +452,26 @@ function _run() {
   /**
    * The persisted always-allow grants, with a way to take each one back.
    *
-   * Deliberately blunt about scope: the row shows the TOKEN and says what it
-   * covers, because "git" and "git status" are different promises and the one
-   * that was made is the first.
+   * Deliberately blunt about scope: the row shows the SIGNATURE and says what
+   * it covers. It used to show a first word - "git" - because that is honestly
+   * what was granted, and one yes to `git status` carried `git push --force`
+   * with it. Grants are keyed on program, subcommand and flags now, so the row
+   * can name a command shape the user recognises and have it be true.
    */
   function allowList() {
     var list = (S.config && S.config.alwaysAllowedCommands) || [];
     if (!list.length) {
       return '<div class="hint muted" style="font-size:11px">' +
-        "None. Pressing “Always allow ⟨command⟩” on a permission request adds the " +
-        "command’s first word here, for this workspace, until you remove it.</div>";
+        "None. Pressing “Always allow ⟨command⟩” on a permission request adds that " +
+        "exact command here, for this workspace, until you remove it. Commands that " +
+        "can discard your work are never added, whatever the approval mode.</div>";
     }
     var rows = "";
     for (var i = 0; i < list.length; i++) {
       rows += '<div class="tr2" style="grid-template-columns:minmax(0,1fr) auto">' +
-        '<span class="v mono ell" title="Every command starting with ' + esc(list[i]) + '">' +
-          esc(list[i]) + " …</span>" +
+        '<span class="v mono ell" title="Runs without asking: ' + esc(list[i]) +
+          ". Other commands, including ones sharing a program name, still ask.\">" +
+          esc(list[i]) + "</span>" +
         '<button class="mini" data-forget="' + esc(list[i]) +
           '" title="Stop always allowing ' + esc(list[i]) + '" ' +
           'aria-label="Stop always allowing ' + esc(list[i]) + '">' + icon("i-x", "ic-13") + "</button>" +
@@ -1423,13 +1427,18 @@ function _run() {
         "Manual: always ask before making changes · Accept edits: file edits run " +
         "automatically, shell commands still ask · Auto: never asks, and runs shell " +
         "commands and writes files without stopping</div>") +
-      /* WHAT "ALWAYS ALLOW" ACTUALLY GRANTED, AND THE ONLY WAY BACK.
+      /* WHAT "ALWAYS ALLOW" ACTUALLY GRANTS, AND THE ONLY WAY BACK.
        *
-       * Pressing "Always allow" on a shell command appends its FIRST TOKEN to a
-       * workspace-level list that survives restarts. So one yes to `git status`
-       * authorises `git push --force` for good - and until this card the list
-       * existed only in workspaceState: no screen, no setting, no protocol
-       * message. A grant nobody can see is a grant nobody can revoke. */
+       * Pressing "Always allow" on a shell command stores a workspace-level
+       * grant that survives restarts. It used to be keyed on the command's
+       * FIRST TOKEN, so one yes to `git status` authorised `git push --force`
+       * for good; grants are signatures now, and a destructive command is
+       * refused however the list reads.
+       *
+       * The card stays for the reason it was built: until it existed the list
+       * lived only in workspaceState, with no screen, no setting and no
+       * protocol message. A grant nobody can see is a grant nobody can
+       * revoke, and that is true of a narrow grant too. */
       card("Always-allowed commands", allowList()) +
       /* The browser the agent drives is a real Chromium, and by default you
          cannot see it. Headless is still right most of the time - a window

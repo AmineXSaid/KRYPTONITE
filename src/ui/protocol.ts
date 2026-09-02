@@ -10,6 +10,11 @@
  *   Outbound = host    -> webview
  */
 
+// `import type` erases, so this module still emits nothing. The alternative
+// was restating the union here, which would let the two definitions drift and
+// leave the panel deciding a command is safe on a rule the host no longer has.
+import type { Risk } from "../agent/risk";
+
 import type { Capabilities, LlmKind, Wire } from "../endpoints/profile";
 export type { LlmKind };
 import type { Msg } from "../providers/client";
@@ -220,14 +225,16 @@ export interface ConfigDto {
    */
   extensionVersion: string;
   /**
-   * Shell commands the user has said "always allow" to, by first token.
+   * Shell commands the user has said "always allow" to, by signature.
    *
-   * A grant made in the transcript was permanent, workspace-wide, keyed on the
-   * command's FIRST WORD, and reachable from nowhere: it lived in
-   * workspaceState and appeared in no surface, no protocol message and no
-   * setting. So saying yes once to `git status` authorised `git push --force`
-   * for good, and there was no screen on which to discover that or take it
-   * back. Carried here so the Control Center can list it and revoke it.
+   * A grant made in the transcript is permanent and workspace-wide, so two
+   * things had to be true of it and neither was. It was keyed on the command's
+   * FIRST WORD, so saying yes once to `git status` authorised `git push
+   * --force` for good; grants are keyed by signature now - program,
+   * subcommand and flags - and `src/agent/risk.ts` refuses a destructive
+   * command whatever is stored. And it was reachable from nowhere, living in
+   * workspaceState with no surface, no protocol message and no setting, which
+   * is what this field is for: the Control Center lists it and revokes it.
    */
   alwaysAllowedCommands: string[];
   ui: UiConfigDto;
@@ -658,6 +665,28 @@ export interface PermissionRequestOut {
    * as the fallback for the cases with no patch - a shell command, a fetch.
    */
   patch?: string;
+  /**
+   * How much this command can cost, for shell commands only.
+   *
+   * The panel uses it to mark the card and to withhold "always" on a
+   * `destructive` one - a grant that would be refused on the next invocation
+   * anyway, so offering the button would promise something the host does not
+   * honour. Absent for edits, fetches, and everything that is not a command.
+   */
+  risk?: Risk;
+  /**
+   * Exactly what "always" would grant, as the keys that would be stored.
+   *
+   * Sent rather than derived in the panel, because the panel deriving it is
+   * how the label and the grant drift apart - the card used to print the
+   * command's first word beside a button that stored that word as a permanent
+   * grant for every command sharing it. One place computes a grant, and it is
+   * the place that honours it.
+   *
+   * Empty for a `destructive` command: nothing would be stored, so the panel
+   * withholds the button instead of offering one the host will ignore.
+   */
+  grants?: string[];
 }
 export interface PermissionResolvedOut {
   type: "permissionResolved";
