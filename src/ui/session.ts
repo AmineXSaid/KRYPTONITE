@@ -908,7 +908,13 @@ export class SessionController {
               // Every turn failure is worth one click to the ladder: it is the
               // only surface that can say which step of the connection stops,
               // and reaching it used to mean knowing the tab existed.
-              action: "diagnostics",
+              //
+              // Unless the event says otherwise. Not every agent error is a
+              // connection error - a reply cut off at the output ceiling comes
+              // through this channel too, and pointing that at diagnostics
+              // sends the user to a ladder that will report, correctly, that
+              // nothing is wrong. "none" is how a note declines the button.
+              action: ev.errorAction === "none" ? undefined : ev.errorAction ?? "diagnostics",
             });
             break;
           }

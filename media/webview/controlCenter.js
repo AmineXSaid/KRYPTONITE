@@ -313,21 +313,35 @@ function _run() {
   }
 
   /**
-   * The waiting mark: three arcs from the palette on their own periods.
+   * The waiting mark: one arc travelling one track.
    *
-   * One rotating ring reads as a stalled image; three at 1.1s, 1.7s and 2.6s
-   * never repeat the same figure, so the eye keeps reading it as work.
+   * It was three concentric arcs in three palette colours on three
+   * incommensurate periods - 1.1s, 1.7s, 2.6s - chosen so the figure never
+   * repeated. The reasoning was that a single rotating ring reads as a stalled
+   * image. At the size this is actually drawn, 12 to 13 pixels, it did not
+   * work: three rings inside 13px leaves under two pixels between strokes, the
+   * three hues smear into one muddy colour, and three unrelated speeds read as
+   * jitter rather than as motion. It was the busiest thing in a panel whose
+   * every other surface is quiet.
+   *
+   * One idea instead, and it is the panel's own: a faint track with an arc
+   * travelling it, which is exactly what `liveMark` draws for a conversation
+   * working in the background. The two "something is happening" marks now
+   * speak one language instead of two.
+   *
+   * The stalled-image worry is real and is answered by the arc's LENGTH rather
+   * than by more rings: it breathes between a sixth of the circle and a half
+   * while it travels, so no frame looks like any other and a frozen render is
+   * obvious. The two periods are 2:1 on purpose - the arc is longest at the
+   * same two points of every turn, which is a rhythm rather than the beating
+   * that three coprime periods produced.
    */
   function spinner(size) {
     var s = size || 12;
     return '<svg class="kx-spin" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" ' +
       'fill="none" aria-hidden="true">' +
-      '<circle class="a1" cx="12" cy="12" r="10" stroke="var(--kx-accent)" stroke-width="2.5" ' +
-        'stroke-linecap="round" stroke-dasharray="16 47"/>' +
-      '<circle class="a2" cx="12" cy="12" r="6.5" stroke="var(--kx-agent)" stroke-width="2.5" ' +
-        'stroke-linecap="round" stroke-dasharray="10 31"/>' +
-      '<circle class="a3" cx="12" cy="12" r="3" stroke="var(--kx-active)" stroke-width="2.5" ' +
-        'stroke-linecap="round" stroke-dasharray="5 14"/>' +
+      '<circle class="kx-track" cx="12" cy="12" r="9" stroke-width="2.6"/>' +
+      '<circle class="kx-arc" cx="12" cy="12" r="9" stroke-width="2.6" stroke-linecap="round"/>' +
       "</svg>";
   }
 

@@ -42,6 +42,8 @@ function frames(text: string, size: number): string[] {
 (async () => {
   let reply = "";
   let chunk = 7;
+  /** The gateway's last word on why it stopped. "" sends no such frame at all. */
+  let finish = "";
   const server = http.createServer((req, res) => {
     let body = "";
     req.on("data", (c) => (body += c));
@@ -49,6 +51,12 @@ function frames(text: string, size: number): string[] {
       res.writeHead(200, { "content-type": "text/event-stream" });
       for (const f of frames(reply, chunk)) {
         res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: f } }] })}\n\n`);
+      }
+      // The shape a real gateway closes with: an empty delta carrying the
+      // reason. Sent only when a case asks for one, so every existing
+      // assertion here still runs against the stream it was written for.
+      if (finish) {
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: finish }] })}\n\n`);
       }
       res.write("data: [DONE]\n\n");
       res.end();
@@ -75,9 +83,10 @@ function frames(text: string, size: number): string[] {
     },
   };
 
-  async function turn(text: string, chunkSize = 7) {
+  async function turn(text: string, chunkSize = 7, stopReason = "") {
     reply = text;
     chunk = chunkSize;
+    finish = stopReason;
     ran.length = 0;
     const client = new EndpointClient(loadProfile(file), () => undefined, tmp);
     const events: AgentEvent[] = [];
@@ -178,6 +187,36 @@ function frames(text: string, size: number): string[] {
     ck(/still working through this/.test(shown),
       "a turn that was only thinking falls back to showing the working",
       JSON.stringify(shown));
+  }
+
+  /* ── a reply that ran out of room says so ───────────────────────── */
+  console.log("\n──── the output ceiling is not silent ────");
+  {
+    // The bug this covers: `finish_reason: "length"` was decoded and dropped,
+    // so a sentence that stopped mid-word closed the turn exactly as a
+    // finished one did. Nothing on screen distinguished them.
+    const { events, shown } = await turn("Short version:\n\nMCP = a protocol that lets me ca", 7, "length");
+    const note = events.find((e) => e.type === "error");
+    ck(Boolean(note), "a truncated reply produces a note");
+    ck(/unfinished/.test(note?.error ?? ""), "which says the answer is unfinished", note?.error);
+    ck(/4096/.test(note?.error ?? ""), "and names the ceiling it hit", note?.error);
+    ck(/maxOutputTokens/.test(note?.errorFix ?? ""), "the remedy names the field to change",
+      note?.errorFix);
+    ck(note?.errorAction === "none",
+      "and offers no diagnostics button, because the endpoint is healthy", String(note?.errorAction));
+    ck(/MCP = a protocol/.test(shown), "the fragment that did arrive is kept", JSON.stringify(shown));
+    ck(events.some((e) => e.type === "turn_end"), "and the turn still ends normally");
+  }
+  {
+    // The ordinary ending must stay silent, or the note is noise on every turn.
+    const { events } = await turn("All done.", 7, "stop");
+    ck(!events.some((e) => e.type === "error"), "a normal finish_reason produces no note");
+  }
+  {
+    // A gateway that says nothing about why it stopped is the common case for
+    // local servers, and must not be read as a truncation.
+    const { events } = await turn("All done.", 7, "");
+    ck(!events.some((e) => e.type === "error"), "and neither does a stream with no reason at all");
   }
 
   await new Promise<void>((r) => server.close(() => r()));

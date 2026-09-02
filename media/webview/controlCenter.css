@@ -310,13 +310,40 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 .hp[data-band="down"] { color: var(--kx-error); }
 .hp[data-band="wait"] { color: var(--kx-fg-3); }
 
-/* Three arcs on their own periods: one ring reads as a stalled image. */
-.kx-spin .a1 { transform-origin: 50% 50%; animation: kxspin 1.1s linear infinite; }
-.kx-spin .a2 { transform-origin: 50% 50%; animation: kxspin 1.7s linear infinite reverse; }
-.kx-spin .a3 { transform-origin: 50% 50%; animation: kxspin 2.6s linear infinite; }
+/* ── the waiting mark ──────────────────────────────────────────────────────
+   One arc travelling one faint track, in the panel's own vocabulary - the
+   same figure `liveMark` draws for a background conversation. It replaced
+   three concentric arcs in three hues on three coprime periods, which inside
+   13px was under two pixels of gap between strokes, one muddy colour, and
+   three unrelated speeds reading as jitter.
+
+   THE ARC'S LENGTH IS WHAT STOPS IT LOOKING FROZEN, not a second ring. 2πr at
+   r=9 is 56.5, and the dash runs between 9 of that and 30 of it - a sixth of
+   the circle to a little over half - so no two frames of a turn look alike.
+
+   The two periods are exactly 2:1. Coprime periods were the old mark's whole
+   idea and they are what made it read as noise; a whole ratio gives the same
+   never-quite-repeating figure a rhythm, with the arc at its longest at the
+   same two points of every turn. */
+.kx-spin { flex: none; }
+.kx-spin .kx-track { fill: none; stroke: var(--kx-link); stroke-opacity: .24; }
+.kx-spin .kx-arc {
+  fill: none; stroke: var(--kx-link);
+  stroke-dasharray: 14 43;
+  transform-origin: 50% 50%;
+  animation: kxspin 1.15s linear infinite, kxdraw 2.3s ease-in-out infinite;
+}
 @keyframes kxspin { to { transform: rotate(360deg); } }
+@keyframes kxdraw {
+  0%, 100% { stroke-dasharray: 9 48; }
+  50%      { stroke-dasharray: 30 27; }
+}
+/* Motion off: a three-quarter arc, held still. Not `animation: none` on a
+   FULL ring - a closed circle is the shape every progress control uses for
+   "finished", and the one thing this mark must never say while waiting is
+   that the wait is over. */
 @media (prefers-reduced-motion: reduce) {
-  .kx-spin .a1, .kx-spin .a2, .kx-spin .a3 { animation: none; }
+  .kx-spin .kx-arc { animation: none; stroke-dasharray: 42 15; }
 }
 
 /* Sync bar. It sits above the table because it governs the Health column the

@@ -3019,12 +3019,18 @@ function _sbRun() {
 
     var html = "";
     if (!S.agents.length) {
+      /* Same shape as the MCP tab's empty state and the welcome screen: a
+         mark, a line saying what is missing, the explanation held to a
+         measure, and one action. It was a full-width paragraph with a button
+         underneath, sitting at the top of an otherwise blank screen. */
       html +=
-        '<div class="ag-empty">' +
-        "<p>An agent is a persona plus a list of what it may reach: which built-in tools, " +
-        "which MCP servers and which of their tools, which skills, and a memory file it " +
+        '<div class="tab-empty">' +
+        '<span class="te-mark">' + icon("i-agent", "ic-22") + "</span>" +
+        '<p class="te-t">No agents yet</p>' +
+        '<p class="te-s">An agent is a persona plus a list of what it may reach: which built-in ' +
+        "tools, which MCP servers and which of their tools, which skills, and a memory file it " +
         "keeps for itself. They live in <code>.agent/agents/</code>, one Markdown file each.</p>" +
-        '<button class="btn primary sm" data-ag="new">Create an agent</button></div>';
+        '<button class="btn primary" data-ag="new">Create an agent</button></div>';
     } else {
       html += '<div class="ag-rows">';
       for (var i = 0; i < S.agents.length; i++) {
@@ -4625,23 +4631,35 @@ function _sbRun() {
   var MCP_CHIP_CAP = 5;
 
   /**
-   * The waiting mark: three arcs from the palette, each on its own period.
+   * The waiting mark: one arc travelling one track.
    *
-   * A single rotating ring reads as a stalled GIF; three arcs at 1.1s, 1.7s
-   * and 2.6s never repeat the same figure, so the eye keeps reading it as
-   * work in progress. Colours are the wall, the shadow and the frame, so it
-   * belongs to this app rather than to the operating system.
+   * It was three concentric arcs in three palette colours on three
+   * incommensurate periods - 1.1s, 1.7s, 2.6s - chosen so the figure never
+   * repeated. The reasoning was that a single rotating ring reads as a stalled
+   * image. At the size this is actually drawn, 12 to 13 pixels, it did not
+   * work: three rings inside 13px leaves under two pixels between strokes, the
+   * three hues smear into one muddy colour, and three unrelated speeds read as
+   * jitter rather than as motion. It was the busiest thing in a panel whose
+   * every other surface is quiet.
+   *
+   * One idea instead, and it is the panel's own: a faint track with an arc
+   * travelling it, which is exactly what `liveMark` draws for a conversation
+   * working in the background. The two "something is happening" marks now
+   * speak one language instead of two.
+   *
+   * The stalled-image worry is real and is answered by the arc's LENGTH rather
+   * than by more rings: it breathes between a sixth of the circle and a half
+   * while it travels, so no frame looks like any other and a frozen render is
+   * obvious. The two periods are 2:1 on purpose - the arc is longest at the
+   * same two points of every turn, which is a rhythm rather than the beating
+   * that three coprime periods produced.
    */
   function spinner(size) {
     var s = size || 13;
     return '<svg class="kx-spin" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" ' +
       'fill="none" aria-hidden="true">' +
-      '<circle class="a1" cx="12" cy="12" r="10" stroke="var(--kx-accent)" stroke-width="2.5" ' +
-        'stroke-linecap="round" stroke-dasharray="16 47"/>' +
-      '<circle class="a2" cx="12" cy="12" r="6.5" stroke="var(--kx-agent)" stroke-width="2.5" ' +
-        'stroke-linecap="round" stroke-dasharray="10 31"/>' +
-      '<circle class="a3" cx="12" cy="12" r="3" stroke="var(--kx-active)" stroke-width="2.5" ' +
-        'stroke-linecap="round" stroke-dasharray="5 14"/>' +
+      '<circle class="kx-track" cx="12" cy="12" r="9" stroke-width="2.6"/>' +
+      '<circle class="kx-arc" cx="12" cy="12" r="9" stroke-width="2.6" stroke-linecap="round"/>' +
       "</svg>";
   }
 
@@ -4710,16 +4728,28 @@ function _sbRun() {
       "</div>";
 
     if (m.warnings && m.warnings.length) {
-      head += '<div class="warn-line" style="padding:0 16px 10px">' + esc(m.warnings.join(" ")) + "</div>";
+      // The gutter is the stylesheet's - see `#mcpBody .warn-line`. It was an
+      // inline `padding:0 16px 10px`, which is a second place the tab's
+      // measurements lived and the one place no stylesheet change could reach.
+      head += '<div class="warn-line">' + esc(m.warnings.join(" ")) + "</div>";
     }
 
     if (!servers.length) {
+      /* Centred, and holding the prose to a measure. It was a left-aligned
+         paragraph pinned under the header with the button loose beneath it,
+         which at panel width was one 90-character line and then most of a
+         screen of nothing. `.tab-empty` is the shape the welcome screen
+         already uses for the same job; the Agents tab now uses it too, so the
+         extension answers "there is nothing here yet" the same way
+         everywhere. */
       body.innerHTML = head +
-        '<div class="mcp-empty">' +
-        "<p>No MCP servers configured.</p>" +
-        '<p class="s">Declare them in <code>.agent/mcp.json</code>, in the same shape Claude Desktop uses. ' +
-        "Their tools reach the model as <code>mcp__server__tool</code>, and are withheld in Ask and Plan mode.</p>" +
-        '<div><button class="btn sm primary" data-mcp="open">Create config</button></div>' +
+        '<div class="tab-empty">' +
+        '<span class="te-mark">' + icon("i-bolt", "ic-22") + "</span>" +
+        '<p class="te-t">No MCP servers configured</p>' +
+        '<p class="te-s">Declare them in <code>.agent/mcp.json</code>, in the same shape Claude ' +
+        "Desktop uses. Their tools reach the model as <code>mcp__server__tool</code>, and are " +
+        "withheld in Ask and Plan mode.</p>" +
+        '<button class="btn primary" data-mcp="open">Create config</button>' +
         "</div>";
       return;
     }

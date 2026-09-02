@@ -45,6 +45,17 @@ export interface AgentEvent {
    */
   errorFix?: string;
   errorDetail?: string;
+  /**
+   * Where the surface should point the one button under an error.
+   *
+   * Every agent error used to get "Run diagnostics", because the surface added
+   * it unconditionally and every failure it had seen was a connection failure.
+   * A reply cut off at the output ceiling is not: the ladder would walk eight
+   * rungs and report a healthy endpoint, because the endpoint IS healthy. The
+   * remedy is a number in the profile, so the notice says so and offers
+   * nothing rather than offering the wrong thing.
+   */
+  errorAction?: "diagnostics" | "endpoints" | "none";
   /** `exact` is true only when the endpoint reported real token usage. */
   context?: { used: number; limit: number; exact: boolean };
 }
@@ -426,6 +437,22 @@ export const IMAGE_EVICTED =
   "image budget. Take another screenshot if you still need to see that page.]";
 
 /**
+ * Did the endpoint stop because it ran out of output budget?
+ *
+ * The two wires spell it differently and neither is normalised on the way in,
+ * so this is the one place that knows both words. Anything else - "stop",
+ * "tool_calls", "end_turn", or a gateway's own invention - is a turn that
+ * finished, and finishing is not news.
+ *
+ * `content_filter` is deliberately NOT in here. It also truncates, but for a
+ * reason the user cannot fix by raising a number, and telling them to raise
+ * one would be advice that cannot work.
+ */
+export function truncatedByLimit(stopReason: string | undefined): boolean {
+  return stopReason === "length" || stopReason === "max_tokens";
+}
+
+/**
  * Hold the request body under the endpoint's image budget, newest first.
  *
  * Images are the only thing in a conversation whose weight on the wire has
@@ -699,6 +726,8 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
     let pending = "";
     /** `data:` frames this step's gateway sent that would not parse. */
     let gaps = 0;
+    /** Why the endpoint stopped, in its own word. See `truncatedByLimit`. */
+    let stopReason: string | undefined;
 
     try {
       for await (const ev of client.complete({
@@ -756,6 +785,10 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
         if (ev.type === "stream_gap" && ev.gaps) {
           gaps += ev.gaps;
         }
+        /* Last one wins. A step is one model call and so has one ending, but a
+           gateway that replays a `finish_reason` on its final frame would
+           otherwise leave the first value standing. */
+        if (ev.type === "stop" && ev.stopReason) stopReason = ev.stopReason;
         // Real counts from the gateway. These were being discarded: the client
         // has always decoded `usage` for both wires, nothing consumed it, and
         // the panel showed a character-count estimate instead of the number the
@@ -867,6 +900,39 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
     if (!calls.length && !text.trim() && think.onlyThought) {
       text = think.thinking.trim();
       yield { type: "text", text };
+    }
+
+    /* THE REPLY RAN OUT OF ROOM, AND USED TO END MID-WORD IN SILENCE.
+     *
+     * `finish_reason: "length"` was decoded on every streamed turn and thrown
+     * away, so a truncated answer and a finished one were the same event: the
+     * bubble closed, the composer came back, and the last sentence simply
+     * stopped. The user is left deciding whether the model had nothing more to
+     * say or whether the panel lost it, and nothing on screen can tell them.
+     *
+     * Said here rather than in the panel because this is the only layer that
+     * knows both facts - that the endpoint stopped for room, and what the
+     * ceiling it hit actually is. The number matters: "raise the limit" is not
+     * actionable, "you are at 4096" is.
+     *
+     * It is a note, not a failure. The turn produced a real answer and keeps
+     * it; the ladder has nothing to say about a healthy endpoint that did
+     * exactly what it was asked, which is why this one carries no action. */
+    if (truncatedByLimit(stopReason)) {
+      const ceiling = caps.maxOutputTokens;
+      yield {
+        type: "error",
+        error: calls.length
+          ? `The model reached this endpoint's ${ceiling}-token output limit while writing a tool ` +
+            "call, so the call below is incomplete and may not run as intended."
+          : `The reply above is unfinished: the model reached this endpoint's ${ceiling}-token ` +
+            "output limit and stopped mid-answer.",
+        errorFix:
+          `Raise capabilities.maxOutputTokens above ${ceiling} in this endpoint's profile for ` +
+          "more room next time. Nothing was lost - ask it to carry on and it continues from " +
+          "where it stopped.",
+        errorAction: "none",
+      };
     }
 
     if (!calls.length) {

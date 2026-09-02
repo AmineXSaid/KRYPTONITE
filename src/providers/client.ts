@@ -67,10 +67,25 @@ export interface CompletionEvent {
    * the reply - and on an agentic turn every intermediate step produces
    * reasoning and no content, so it happened on every step.
    */
-  type: "text" | "reasoning" | "tool_call" | "done" | "usage" | "stream_gap";
+  type: "text" | "reasoning" | "tool_call" | "done" | "usage" | "stream_gap" | "stop";
   text?: string;
   toolCall?: ToolCall;
   usage?: TokenUsage;
+  /**
+   * Why the model stopped, in the wire's own word, carried on `stop`.
+   *
+   * The field has existed on this interface since the beginning and nothing
+   * ever set it, which is how a reply that ran out of output budget arrived
+   * looking exactly like a reply that had finished: the gateway says
+   * `finish_reason: "length"` (or `stop_reason: "max_tokens"`), the decoder
+   * read it to flush tool calls, and then dropped it. The sentence simply
+   * ended mid-word and the turn closed normally.
+   *
+   * Not normalised across the two wires on purpose. "length" and "max_tokens"
+   * are the vendors' words, `truncated()` in the agent loop is the one place
+   * that has to know both, and a third invented vocabulary in between would be
+   * one more thing to keep in sync for no reader's benefit.
+   */
   stopReason?: string;
   /**
    * How many `data:` frames the gateway sent that would not parse.
@@ -836,6 +851,7 @@ function* decodeWhole(json: any, wire: string): Generator<CompletionEvent> {
       if (b.type === "tool_use") yield { type: "tool_call", toolCall: { id: b.id, name: b.name, arguments: b.input } };
     }
     if (json.usage) yield { type: "usage", usage: anthropicUsage(json.usage) };
+    if (json.stop_reason) yield { type: "stop", stopReason: json.stop_reason };
   } else {
     const msg = json.choices?.[0]?.message ?? {};
     if (msg.content) yield { type: "text", text: msg.content };
@@ -846,6 +862,9 @@ function* decodeWhole(json: any, wire: string): Generator<CompletionEvent> {
       };
     }
     if (json.usage) yield { type: "usage", usage: openAiUsage(json.usage) };
+    if (json.choices?.[0]?.finish_reason) {
+      yield { type: "stop", stopReason: json.choices[0].finish_reason };
+    }
   }
   yield { type: "done" };
 }
@@ -961,6 +980,10 @@ function openAiStream(onReasoning?: () => void) {
       // loudly to show it; that is not this layer's call.
       if (reasoning.trim()) yield { type: "reasoning", text: reasoning.trim() };
       reasoning = "";
+      // The reason itself, which this branch has always had in hand and always
+      // threw away. "length" means the answer above is a fragment, and saying
+      // so is the whole point of carrying it out of here.
+      yield { type: "stop", stopReason: reason };
     }
   };
 }
@@ -991,6 +1014,10 @@ function anthropicStream() {
       }
       case "message_delta":
         if (json.usage) yield { type: "usage", usage: { input: 0, output: json.usage.output_tokens ?? 0 } };
+        // The frame that closes an Anthropic turn is also the only one that
+        // says why it closed. `max_tokens` here is the same fact `length` is
+        // on the other wire.
+        if (json.delta?.stop_reason) yield { type: "stop", stopReason: json.delta.stop_reason };
         break;
       // The input and cache counters only ever appear here, on the opening
       // frame. Ignoring it meant the one number that proves prompt caching is
