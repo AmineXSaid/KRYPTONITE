@@ -1153,6 +1153,31 @@ function contrast(a, b) {
     ok("and Edit is not yet warning about a draft",
       /^Edit$/.test((rows[0] || "").trim()), rows[0]);
 
+    /* With a checkpoint behind the turn the menu grows a fifth row, so the
+       clamp is measured again on the taller menu rather than only on the short
+       one - a menu that fits at four rows and hangs off the bottom at five
+       would pass every assertion above. */
+    await page.keyboard.press("Escape");
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", {
+      data: { type: "checkpointsListed", checkpoints: [
+        { hash: "abc1234", label: "a question worth right-clicking", when: "now" },
+      ] },
+    })));
+    await page.locator(".msg-user").first().click({
+      button: "right",
+      position: { x: Math.max(1, box.width - 2), y: Math.max(1, box.height - 2) },
+    });
+    await page.waitForTimeout(200);
+    const withRewind = await page.locator("#msgMenu [data-mm]").allTextContents();
+    ok("a snapshotted turn also offers Rewind", withRewind.length === 5 &&
+      /rewind/i.test(withRewind.join(" ")), JSON.stringify(withRewind));
+    const m2 = await page.locator("#msgMenu").boundingBox();
+    ok("and the taller menu still lands inside the panel",
+      m2 && m2.x >= -0.5 && m2.x + m2.width <= 200 + 0.5 && m2.y >= -0.5 &&
+      m2.y + m2.height <= 640 + 0.5,
+      m2 && `x ${m2.x.toFixed(1)} w ${m2.width.toFixed(1)} y ${m2.y.toFixed(1)} h ${m2.height.toFixed(1)}`);
+    await page.keyboard.press("Escape");
+
     // A code block keeps VS Code's own menu: nothing of ours may open there.
     await page.keyboard.press("Escape");
     await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", {

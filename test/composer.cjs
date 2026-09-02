@@ -876,9 +876,12 @@ console.log("\n──── the send control ────");
     rows().join(",") === "edit,resend,attach,copy", rows().join(","));
 
   rc(".msg-ai");
-  ok("an answer offers only the two that mean anything on it",
-    rows().join(",") === "attach,copy", rows().join(","));
+  // Copy and its stripped variant, which only an answer has - a question is
+  // never markdown-rendered, so there is no second reading of one to offer.
+  ok("an answer offers only the ones that mean anything on it",
+    rows().join(",") === "attach,copy,copyPlain", rows().join(","));
   ok("no Edit on an answer", !rows().includes("edit"));
+  ok("and no Resend either", !rows().includes("resend"));
 
   b.dom.window.close();
 }
@@ -1066,6 +1069,167 @@ console.log("\n──── the send control ────");
     left + 180 <= 200 && left >= 0, menu && `left ${menu.style.left}`);
   ok("and one opened at the bottom flips up rather than clipping",
     top + 120 <= 400 && top >= 0, menu && `top ${menu.style.top}`);
+  b.dom.window.close();
+}
+
+/* An answer has TWO readings and a question has one.
+
+   .msg-ai keeps its markdown source on _raw, which is what Copy has always
+   given - here and in turn-foot, which must not disagree with it. What did not
+   exist was the other reading: the answer as it is actually displayed. A
+   question is never markdown-rendered, so it has no second reading and gets no
+   second row. */
+{
+  const b = boot();
+  b.sync("ask");
+  const rc = (sel) => b.d.querySelector(sel).dispatchEvent(
+    new b.w.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 60 }));
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "streamDelta", text: "Try this:\n\n```python\nx = 1\n```\n",
+  } }));
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: { type: "turnEnd" } }));
+
+  b.sent.length = 0;
+  rc(".msg-ai");
+  b.click('#msgMenu [data-mm="copy"]');
+  rc(".msg-ai");
+  b.click('#msgMenu [data-mm="copyPlain"]');
+  const c = b.sent.filter((m) => m.type === "copyText");
+  ok("both readings reach the clipboard", c.length === 2, JSON.stringify(c.map((m) => m.text)));
+  ok("Copy is still the markdown, as the turn footer's Copy already was",
+    c[0] && c[0].text.indexOf("```") !== -1, JSON.stringify(c[0]));
+  ok("Copy as plain text is not", c[1] && c[1].text.indexOf("```") === -1,
+    JSON.stringify(c[1]));
+  /* The block's header is chrome, not prose: pasting an answer that reads
+     "pythonx = 1" is the defect this drops .cb-h to avoid. */
+  ok("and it drops the block's language label rather than reading it as prose",
+    c[1] && c[1].text.indexOf("python") === -1, JSON.stringify(c[1]));
+  ok("while keeping the code itself", c[1] && c[1].text.indexOf("x = 1") !== -1,
+    JSON.stringify(c[1]));
+  b.dom.window.close();
+}
+
+/* REWIND FINDS ITS CHECKPOINT BY LABEL, AND LABELS REPEAT.
+
+   The hash cannot ride on the message: the stored session and the stateSync
+   payload both carry Msg[], the model's own wire format, so a field added there
+   would be sent to the model. The host commits each snapshot with the message
+   text as its subject, so the label is what there is to match on - and the
+   Retry button sends "Retry that last step." verbatim every time, which is why
+   the match consumes as it goes rather than taking the first hit twice. */
+{
+  const b = boot();
+  b.sync("ask");
+  const rc = (sel, n) => [...b.d.querySelectorAll(sel)][n].dispatchEvent(
+    new b.w.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 60 }));
+  const rows = () => [...b.d.querySelectorAll("#msgMenu [data-mm]")]
+    .map((r) => r.getAttribute("data-mm"));
+  const say = (text) => b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "steerAccepted", text, files: [] } }));
+
+  say("Retry that last step.");
+  say("Retry that last step.");
+  ok("two identically worded turns are on screen",
+    b.d.querySelectorAll(".msg-user").length === 2,
+    String(b.d.querySelectorAll(".msg-user").length));
+
+  rc(".msg-user", 0);
+  ok("with nothing snapshotted there is no Rewind row to press",
+    !rows().includes("rewind"), rows().join(","));
+
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "checkpointsListed",
+    checkpoints: [
+      { hash: "hnew", label: "Retry that last step.", when: "now" },
+      { hash: "hold", label: "Retry that last step.", when: "2m ago" },
+    ],
+  } }));
+
+  b.sent.length = 0;
+  rc(".msg-user", 0);
+  ok("once the host lists one, the row appears", rows().includes("rewind"), rows().join(","));
+  b.click('#msgMenu [data-mm="rewind"]');
+  let r = b.sent.filter((m) => m.type === "restoreCheckpoint");
+  ok("the first turn rewinds to the OLDER checkpoint",
+    r.length === 1 && r[0].hash === "hold", JSON.stringify(r));
+
+  b.sent.length = 0;
+  rc(".msg-user", 1);
+  b.click('#msgMenu [data-mm="rewind"]');
+  r = b.sent.filter((m) => m.type === "restoreCheckpoint");
+  ok("and the second, worded identically, rewinds to the newer one",
+    r.length === 1 && r[0].hash === "hnew", JSON.stringify(r));
+
+  /* It posts the message the Control Center's checkpoint list already posts,
+     so the modal naming the files is the host's existing one rather than a
+     second confirmation that could disagree with it. */
+  ok("it asks the host to restore rather than doing anything itself",
+    !b.sent.some((m) => m.type === "sendMessage" || m.type === "newChat"));
+  b.dom.window.close();
+}
+
+/* role="menu" IS A PROMISE ABOUT THE KEYBOARD.
+
+   a11y.cjs exists because role="tablist" was once declared and the contract
+   that goes with it was not implemented. The same trap is open here: the menu
+   already says role="menu" and role="menuitem". */
+{
+  const b = boot();
+  b.sync("ask");
+  const rc = (sel) => b.d.querySelector(sel).dispatchEvent(
+    new b.w.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 60 }));
+  const key = (k, el) => (el || b.d).dispatchEvent(
+    new b.w.KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "steerAccepted", text: "the original question", files: [] } }));
+
+  rc(".msg-user");
+  const rows = [...b.d.querySelectorAll("#msgMenu .pop-row")];
+  ok("focus enters the menu when it opens", b.d.activeElement === rows[0],
+    b.d.activeElement && b.d.activeElement.className);
+  ok("and no row is a tab stop, so the panel gains none",
+    rows.every((r) => r.getAttribute("tabindex") === "-1"));
+  key("ArrowDown", rows[0]);
+  ok("ArrowDown moves to the next row", b.d.activeElement === rows[1]);
+  key("End", rows[1]);
+  ok("End goes to the last", b.d.activeElement === rows[rows.length - 1]);
+  key("ArrowDown", rows[rows.length - 1]);
+  ok("and it wraps rather than stopping dead", b.d.activeElement === rows[0]);
+  key("ArrowUp", rows[0]);
+  ok("ArrowUp wraps the other way", b.d.activeElement === rows[rows.length - 1]);
+  key("Home", rows[rows.length - 1]);
+  ok("Home returns to the first", b.d.activeElement === rows[0]);
+  key("Escape", rows[0]);
+  ok("Escape closes it", b.d.getElementById("msgMenu").hidden);
+  /* Focus on <body> would mean the next Tab restarts from the top of the
+     panel, which is further from where the user was than where they started. */
+  ok("and focus goes back to the message rather than to the body",
+    b.d.activeElement === b.d.querySelector(".msg-user"),
+    b.d.activeElement && (b.d.activeElement.className || b.d.activeElement.tagName));
+  b.dom.window.close();
+}
+
+/* Escape dismissing a menu must not also kill the turn underneath it. */
+{
+  const b = boot();
+  b.sync("ask");
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "steerAccepted", text: "the original question", files: [] } }));
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "streamDelta", text: "working" } }));
+
+  b.sent.length = 0;
+  b.d.dispatchEvent(new b.w.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  ok("Escape with no menu open still interrupts a running turn",
+    b.sent.filter((m) => m.type === "interrupt").length === 1, JSON.stringify(b.sent));
+
+  b.sent.length = 0;
+  b.d.querySelector(".msg-user").dispatchEvent(
+    new b.w.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 60 }));
+  b.d.querySelector("#msgMenu .pop-row").dispatchEvent(
+    new b.w.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  ok("but Escape that dismisses the menu leaves the turn running",
+    b.sent.filter((m) => m.type === "interrupt").length === 0, JSON.stringify(b.sent));
   b.dom.window.close();
 }
 

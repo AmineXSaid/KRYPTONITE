@@ -374,6 +374,9 @@ function _sbRun() {
     timer: null,
     searchTimer: null,
     attachments: [],
+    /* The shadow-repo checkpoints. Kept because "Rewind to here" resolves a
+       message to one of them. */
+    checkpoints: [],
     sessionId: null,
     title: ""
   };
@@ -1421,11 +1424,66 @@ function _sbRun() {
    * that mean something and no more.
    */
   var MSG_ACTIONS = [
-    ["edit",   "user", "i-compose", "Edit"],
-    ["resend", "user", "i-up",      "Resend"],
-    ["attach", "both", "i-clip",    "Attach to composer"],
-    ["copy",   "both", "i-copy",    "Copy"]
+    ["edit",      "user", "i-compose", "Edit"],
+    ["resend",    "user", "i-up",      "Resend"],
+    ["attach",    "both", "i-clip",    "Attach to composer"],
+    ["copy",      "both", "i-copy",    "Copy"],
+    /* Only on an answer. A question is never markdown-rendered, so there is no
+       second reading of one to offer. Copy above stays the RAW markdown, which
+       is what turn-foot's Copy has always given - the two disagreeing about
+       what "copy this answer" means would be the surprise. */
+    ["copyPlain", "ai",   "i-file",    "Copy as plain text"],
+    /* Last, because it is the only row that changes anything outside the panel.
+       Shown only when a checkpoint is actually behind the turn. */
+    ["rewind",    "user", "i-history", "Rewind to here"]
   ];
+
+  /**
+   * An answer with the markdown taken out.
+   *
+   * md() is one-way, so this reads the rendered tree back rather than trying to
+   * unparse. .cb-h goes first, or every fenced block contributes its language
+   * label and its copy button to what is supposed to be prose.
+   */
+  function msgPlain(el) {
+    var clone = el.cloneNode(true);
+    var heads = clone.querySelectorAll(".cb-h");
+    for (var i = 0; i < heads.length; i++) heads[i].parentNode.removeChild(heads[i]);
+    return (clone.textContent || "").replace(/\n{3,}/g, "\n\n").trim();
+  }
+
+  /** The label the host commits a snapshot under: the first line, cut at 60. */
+  function ckptLabel(text) {
+    return String(text).slice(0, 60).split("\n")[0].trim();
+  }
+
+  /**
+   * The checkpoint taken before this message's turn, or "" when there is none.
+   *
+   * The hash cannot travel on the message. Both the stored session and the
+   * stateSync payload carry Msg[], which is the MODEL's wire format - a field
+   * added there would be sent to the model on the next turn. What can be
+   * matched is the label, because the host commits each snapshot with the
+   * message's own text as its subject.
+   *
+   * Matched in order and CONSUMED, because labels are not unique: the Retry
+   * button sends "Retry that last step." verbatim every time, and pairing by
+   * label alone points every one of them at the newest hash.
+   */
+  function checkpointFor(el) {
+    var list = (S.checkpoints || []).slice().reverse();  // oldest first
+    var msgs = logEl ? logEl.querySelectorAll(".msg-user") : [];
+    var next = 0;
+    for (var i = 0; i < msgs.length; i++) {
+      var label = ckptLabel(msgText(msgs[i]));
+      var hit = "";
+      for (var j = next; j < list.length; j++) {
+        if (list[j].label === label) { hit = list[j].hash; next = j + 1; break; }
+      }
+      if (msgs[i] === el) return hit;
+    }
+    return "";
+  }
 
   /** The string a message was built from, never the string its DOM holds. */
   function msgText(el) {
@@ -1451,18 +1509,31 @@ function _sbRun() {
     var isUser = el.classList.contains("msg-user");
     var drafting = ($("draft").value || "").trim().length > 0;
     var html = "";
+    // Resolved once per open rather than once per row: it walks the transcript.
+    var hash = isUser ? checkpointFor(el) : "";
     for (var i = 0; i < MSG_ACTIONS.length; i++) {
       var a = MSG_ACTIONS[i];
       if (a[1] === "user" && !isUser) continue;
+      if (a[1] === "ai" && isUser) continue;
+      /* A turn with nothing snapshotted behind it cannot be rewound to, and an
+         inert row is worse than an absent one. Ask and Plan turns are never
+         snapshotted, nor is a turn with snapshotTurn off, nor anything past the
+         thirty the list stops at. */
+      if (a[0] === "rewind" && !hash) continue;
       /* REPLACING A HALF-WRITTEN DRAFT IS DESTROYING WORK, so the row says so
          before the click rather than after it. Same rule the mode sheet and the
          delete confirmations follow: the cost goes on the control. */
       var label = a[0] === "edit" && drafting ? "Replace draft and edit" : a[3];
-      html += '<button class="pop-row" role="menuitem" data-mm="' + a[0] + '">' +
+      html += '<button class="pop-row" role="menuitem" tabindex="-1" data-mm="' + a[0] + '"' +
+        (a[0] === "rewind" ? ' data-hash="' + esc(hash) + '"' : "") + ">" +
         icon(a[2], "ic-13") + '<span class="t">' + esc(label) + "</span></button>";
     }
     menu.innerHTML = html;
     menu._target = el;
+    /* Focusable only programmatically, so the menu can hand focus back to the
+       message rather than to <body> - where the next Tab would restart from the
+       top of the panel - without every message becoming a tab stop. */
+    if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "-1");
     // Where the transcript stood when this menu was anchored. The scroll
     // closer measures against it rather than trusting the event itself.
     menu._scrollAt = logEl.scrollTop;
@@ -1479,11 +1550,59 @@ function _sbRun() {
     var top = y + h > maxY ? Math.max(0, maxY - h - 4) : y;
     menu.style.left = left + "px";
     menu.style.top = top + "px";
+
+    /* role="menu" is a promise about the keyboard, and a11y.cjs exists because
+       role="tablist" was once declared without the contract that goes with it.
+       Focus enters here; msgMenuKeys carries the rest. */
+    var first = menu.querySelector(".pop-row");
+    if (first && first.focus) first.focus();
   }
 
-  function onMsgAction(action, el) {
+  /** Hide the menu, giving focus back to the message it belonged to. */
+  function closeMsgMenu(restoreFocus) {
+    var menu = $("msgMenu");
+    if (!menu || menu.hidden) return false;
+    menu.hidden = true;
+    var back = menu._target;
+    if (restoreFocus && back && back.focus) back.focus();
+    return true;
+  }
+
+  /** Arrows, Home/End and Tab inside the menu. Escape is handled at the top. */
+  function msgMenuKeys(e) {
+    var menu = $("msgMenu");
+    if (!menu || menu.hidden) return;
+    if (e.key === "Tab") {
+      e.preventDefault();
+      closeMsgMenu(true);
+      return;
+    }
+    var rows = [].slice.call(menu.querySelectorAll(".pop-row"));
+    if (!rows.length) return;
+    var at = rows.indexOf(document.activeElement);
+    var to;
+    if (e.key === "ArrowDown") to = at < 0 ? 0 : (at + 1) % rows.length;
+    else if (e.key === "ArrowUp") to = at <= 0 ? rows.length - 1 : at - 1;
+    else if (e.key === "Home") to = 0;
+    else if (e.key === "End") to = rows.length - 1;
+    else return;
+    e.preventDefault();
+    if (rows[to] && rows[to].focus) rows[to].focus();
+  }
+
+  function onMsgAction(action, el, hash) {
     var text = msgText(el);
     if (action === "copy") { post("copyText", { text: text }); return; }
+    if (action === "copyPlain") { post("copyText", { text: msgPlain(el) }); return; }
+    if (action === "rewind") {
+      /* The host names the files a restore would change and asks before doing
+         it. Posting the message the Control Center's checkpoint list already
+         posts is what gets that confirmation, rather than a second one written
+         here that could disagree with it. It restores FILES; the transcript is
+         left alone, which is what restore has always meant in this product. */
+      if (hash) post("restoreCheckpoint", { hash: hash });
+      return;
+    }
     if (action === "resend") { sendText(text); return; }
     if (action === "edit") {
       var draft = $("draft");
@@ -5537,6 +5656,7 @@ function _sbRun() {
     S.context = state.context;
     S.changes = state.changes || [];
     S.models = state.models || [];
+    S.checkpoints = state.checkpoints || [];
 
     S.sessionId = state.session ? state.session.id : null;
     S.title = state.session ? state.session.title : "";
@@ -6068,7 +6188,7 @@ function _sbRun() {
       var row = e.target.closest("[data-mm]");
       if (!row) return;
       var el = $("msgMenu")._target;
-      if (el) onMsgAction(row.getAttribute("data-mm"), el);
+      if (el) onMsgAction(row.getAttribute("data-mm"), el, row.getAttribute("data-hash") || "");
       // The document-level closer hides it a moment later, on the same click.
     });
 
@@ -6354,9 +6474,10 @@ function _sbRun() {
       /* Escape shuts the menu FIRST. Interrupting a turn because the user
          wanted to dismiss a menu is the wrong reading of one keystroke. */
       if (e.key === "Escape" && $("msgMenu") && !$("msgMenu").hidden) {
-        $("msgMenu").hidden = true;
+        closeMsgMenu(true);
         return;
       }
+      msgMenuKeys(e);
       if (e.key === "Escape" && S.running && $("qp").hidden) post("interrupt");
     });
 
@@ -6958,7 +7079,13 @@ function _sbRun() {
           m.path);
         break;
 
+      /* Kept rather than dropped: a message finds its checkpoint by matching
+         this list, and the host broadcasts it again after every restore, so the
+         row keeps pointing at a hash that still exists. */
       case "checkpointsListed":
+        S.checkpoints = m.checkpoints || [];
+        break;
+
       case "checkpointRestored":
       case "logLine":
       case "navigate":
