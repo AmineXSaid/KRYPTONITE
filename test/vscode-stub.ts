@@ -57,6 +57,12 @@ export const Uri = {
   joinPath: (base: any, ...parts: string[]) => Uri.file([base.fsPath, ...parts].join("/")),
 };
 
+/* Which keys were written with `ConfigurationTarget.Global`, so `inspect` can
+   tell a global value from a workspace one. The real API distinguishes them
+   and code branches on it; a stub that always said "workspace" made that
+   branch untestable. */
+const globalKeys = new Set<string>();
+
 const cfgStore = new Map<string, unknown>([
   ["profileDirectory", ".agent/endpoints"],
   ["skillsDirectory", ".agent/skills"],
@@ -67,12 +73,29 @@ const cfgStore = new Map<string, unknown>([
 
 /** Exposed so a case can set a setting the extension reads at activation. */
 export const __cfg = cfgStore;
+/* Exposed beside `__cfg` for the same reason: a case that plants or clears
+   settings has to be able to clear the scope record too, or the next case
+   inherits "this was set globally" from the previous one. Neither is cleared
+   by `reset()`, because settings outlive a window reload. */
+export const __globalKeys = globalKeys;
 
 export const workspace: any = {
   workspaceFolders: undefined,
   getConfiguration: (section?: string) => ({
     get: (k: string, d?: unknown) => (cfgStore.has(k) ? cfgStore.get(k) : d),
-    update: async (k: string, v: unknown) => { cfgStore.set(k, v); },
+    update: async (k: string, v: unknown, target?: number) => {
+      // `undefined` is how VS Code clears a setting, and it is different from
+      // writing the default: a stub that stored it would make "reverted" and
+      // "set to undefined" indistinguishable.
+      if (v === undefined) { cfgStore.delete(k); globalKeys.delete(k); return; }
+      cfgStore.set(k, v);
+      // Remember WHICH SCOPE it went to, so `inspect` can answer honestly.
+      // Without this every write looked like a workspace value and nothing
+      // that reads `globalValue` - the terminal theme's backup, for one -
+      // could be tested at all.
+      if (target === ConfigurationTarget.Global) globalKeys.add(k);
+      else globalKeys.delete(k);
+    },
     /**
      * The shape `WorkspaceConfiguration.inspect` returns, enough of it for the
      * Kryptonite-to-Genesis migration to run.
@@ -87,8 +110,11 @@ export const workspace: any = {
     inspect: (k: string) => ({
       key: section ? `${section}.${k}` : k,
       defaultValue: undefined,
-      globalValue: undefined,
-      workspaceValue: cfgStore.has(k) ? cfgStore.get(k) : undefined,
+      globalValue: globalKeys.has(k) ? cfgStore.get(k) : undefined,
+      // A value planted straight into `__cfg` carries no target and is still
+      // reported as a workspace value, which is what lets the migration test
+      // plant an old setting and watch it carried over.
+      workspaceValue: cfgStore.has(k) && !globalKeys.has(k) ? cfgStore.get(k) : undefined,
       workspaceFolderValue: undefined,
     }),
   }),

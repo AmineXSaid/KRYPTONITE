@@ -78,7 +78,7 @@ ok("every command title is prefixed Genesis",
    loosened to `>=`. 21 since `genesis.attachFromHost`, which keeps the host's
    file dialog reachable now that the composer's attach button opens a local
    picker instead. */
-ok("and there are still all twenty-one of them", cmds.length === 21, String(cmds.length));
+ok("and there are still all twenty-three of them", cmds.length === 23, String(cmds.length));
 // The IDs are a contract and must NOT have been renamed along with the titles.
 ok("but the command IDs are untouched, being a contract",
   cmds.every((c) => c.command.startsWith("genesis.")),

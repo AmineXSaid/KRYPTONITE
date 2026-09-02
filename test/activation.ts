@@ -103,6 +103,12 @@ async function main() {
        file on the remote machine that is outside the workspace - `@` covers
        the workspace and nothing beyond it. */
     "genesis.attachFromHost",
+    /* The panel's palette applied to the terminal beside it, and its undo.
+       Both are declared here rather than the count being loosened: this list
+       exists so a command cannot go missing unnoticed, and that only works
+       while it is exact. */
+    "genesis.applyTerminalTheme",
+    "genesis.revertTerminalTheme",
   ];
   for (const name of EXPECTED) {
     ck(recorded.commands.includes(name), `1.1 ${name} is registered`);

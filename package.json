@@ -105,6 +105,16 @@
         "category": "Genesis"
       },
       {
+        "command": "genesis.applyTerminalTheme",
+        "title": "Apply terminal theme",
+        "category": "Genesis"
+      },
+      {
+        "command": "genesis.revertTerminalTheme",
+        "title": "Revert terminal theme",
+        "category": "Genesis"
+      },
+      {
         "command": "genesis.attachFromHost",
         "title": "Attach file from the workspace machine",
         "category": "Genesis"
