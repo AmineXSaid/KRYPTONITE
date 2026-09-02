@@ -119,6 +119,72 @@ function ck(ok: boolean, label: string, detail = "") {
     "an unquoted glob on a write-capable program is not safe");
 }
 
+/* ── classify: discarding the working tree ────────────────────────────
+   The case most often missed, because none of these LOOK dangerous. They
+   were every one of them `write` until the rule that catches them, which
+   in full-auto meant they ran with no card and no way back. */
+{
+  const discards = [
+    "git checkout .",
+    "git checkout -- src/",
+    "git checkout -f",
+    "git restore .",
+    "git restore src/app.ts",
+    "git stash drop",
+    "git stash clear",
+    "git rm -r src",
+    "truncate -s 0 important.log",
+    "cp -f a b",
+    "mv -f a b",
+  ];
+  for (const c of discards) {
+    ck(classify(c) === "destructive", `discards work: ${c}`, classify(c));
+  }
+}
+
+/* ── classify: critical paths ─────────────────────────────────────────
+   These carry no `-rf`, so every flag-shaped rule misses them. The danger
+   is in the TARGET, which is why it is asked about separately. */
+{
+  const critical = [
+    "rmdir /usr",
+    "rm /etc",
+    "rm -r /",
+    "rm ~/notes.md",
+    "rm ~/.ssh/id_rsa",
+    "unlink ~/.bashrc",
+    "shred ../secrets",
+    "rm ../../etc/hosts",
+    "rm $HOME/x",
+    "rmdir C:\\Windows",
+  ];
+  for (const c of critical) {
+    ck(classify(c) === "destructive", `critical path: ${c}`, classify(c));
+  }
+}
+
+/* ── classify: the bar did NOT move on ordinary work ──────────────────
+   Overreach is not free. `destructive` can never be auto-approved, so
+   sweeping everyday commands in would rebuild exactly the prompt fatigue
+   the tier exists to remove. These must all stay approvable. */
+{
+  const ordinary = [
+    "npm install",
+    "npm ci",
+    "git add -A",
+    "git commit -m x",
+    "mkdir build",
+    "rm build/tmp.o",          // an ordinary file, ordinary removal
+    "git restore --staged",    // unstages only; the worktree is untouched
+    "git checkout -b feature", // creates a branch, discards nothing
+    "git stash",               // saving work is the opposite of losing it
+    "touch x",
+  ];
+  for (const c of ordinary) {
+    ck(classify(c) !== "destructive", `stays approvable: ${c}`, classify(c));
+  }
+}
+
 /* ── classify: unknown fails closed ──────────────────────────────────── */
 {
   ck(classify("some-unknown-binary --go") === "write",

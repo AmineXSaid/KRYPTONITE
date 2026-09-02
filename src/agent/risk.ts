@@ -75,8 +75,26 @@ const DESTRUCTIVE_SEGMENT: RegExp[] = [
   /^\s*git\b.*\bpush\b.*--force(?!-with-lease)/i,
   /^\s*git\b.*\bpush\b.*\s-f\b/i,
   /^\s*git\b.*\bbranch\b.*\s-D\b/i,
-  /^\s*git\b.*\bcheckout\b\s+--\s/i,
   /^\s*git\b.*\bfilter-branch\b/i,
+  /* Discarding the working tree, which is the case most often missed.
+   *
+   * `git checkout .` and `git restore .` throw away every uncommitted change
+   * in one word and print nothing on the way. They were `write` until this
+   * line, which meant full-auto ran them silently - the same loss as
+   * `reset --hard` with none of the vocabulary that makes it look dangerous.
+   *
+   * `restore --staged` alone only unstages, so it is spared; `restore` with a
+   * worktree target is not. `stash drop` and `stash clear` delete the very
+   * thing a cautious person made to avoid this. */
+  /^\s*git\b.*\bcheckout\b\s+(--\s|\.|\*)/i,
+  /^\s*git\b.*\bcheckout\b\s+(-f|--force)\b/i,
+  /^\s*git\b.*\brestore\b(?!.*--staged\s*$)/i,
+  /^\s*git\b.*\bstash\b\s+(drop|clear)\b/i,
+  /^\s*git\b.*\brm\b/i,
+  // Emptying a file in place. No flag reads as dangerous, and the content is
+  // gone the moment it returns.
+  /^\s*truncate\b.*\s-s\s*0\b/i,
+  /^\s*(cp|mv)\b.*\s(-f|--force)\b/i,
   // Filesystem and device level.
   /^\s*(sudo\s+)?(mkfs\S*|dd|shred|fdisk|parted|wipefs)\b/i,
   /^\s*(sudo\s+)?(chmod|chown)\b.*\s(-R|--recursive)\b/i,
@@ -92,6 +110,72 @@ const DESTRUCTIVE_SEGMENT: RegExp[] = [
   // Privilege escalation is never auto-approved, whatever follows it.
   /^\s*sudo\b/i,
 ];
+
+/**
+ * A removal aimed somewhere nothing should be removed from.
+ *
+ * The patterns above ask what FLAGS a command carries, and that is the wrong
+ * question for this case: `rmdir /usr` and `rm ~/.ssh/id_rsa` carry no `-rf`
+ * and were classified `write`, which in full-auto means they ran with no card.
+ * The danger is in the target, not the spelling.
+ *
+ * So this asks where the removal points, and treats these as critical:
+ *
+ *   /                     the filesystem root
+ *   /usr, /etc, /data …   any direct child of it
+ *   ~ and everything      the home directory
+ *   under it
+ *   C:\ , C:\Windows      a Windows drive root and its top level
+ *   .. and beyond         climbing out of the working directory
+ *
+ * The first, second, fourth and fifth mirror the rule Claude Code lets no
+ * allow-rule and no hook override, for the reason it states: a circuit breaker
+ * against the model being wrong, not a judgement about the user.
+ *
+ * The home rule is deliberately WIDER here than there, and the difference is
+ * Genesis's own recovery model. `ShadowRepo` snapshots the workspace, so a
+ * removal inside it has something to be restored from and a removal in `~` has
+ * nothing. `rm ~/notes.md` is one word, looks like nothing, and is final. When
+ * the workspace itself lives under `~` this costs a prompt on a file that was
+ * recoverable after all, which is the cheap side of the trade.
+ *
+ * Nothing is expanded or resolved: `~` is home whatever the shell would make
+ * of it, and a path is read as written. Guessing is not required - anything
+ * unrecognised stays `write` and simply asks.
+ */
+const CRITICAL_TARGET = [
+  // Absolute: the root itself, or one segment below it. `/usr/local/lib` is
+  // deep enough to be ordinary; `/usr` is not.
+  /^\/?$/,
+  /^\/[^/]+\/?$/,
+  // Home, and anything at all beneath it. See the note above on why this is
+  // wider than the rest: outside the workspace there is no checkpoint.
+  /^~($|[\\/])/,
+  /^\$HOME($|[\\/])/i,
+  // A Windows drive root and its top level.
+  /^[a-z]:[\\/]?$/i,
+  /^[a-z]:[\\/][^\\/]+[\\/]?$/i,
+  // Climbing out of the workspace. `.` and `./x` stay ordinary; `..` does not.
+  /^\.\.($|[\/\\])/,
+];
+
+/** Programs whose whole purpose is to remove what they are pointed at. */
+const REMOVER = /^\s*(sudo\s+)?(rm|rmdir|unlink|shred|trash)\b/i;
+
+/**
+ * Does this segment remove something at a path nothing should be removed from?
+ *
+ * Flags are stripped before the targets are read, so `-rf` neither triggers
+ * this nor hides from it - the question here is only where it points.
+ */
+function targetsCriticalPath(seg: string): boolean {
+  if (!REMOVER.test(seg)) return false;
+  const args = (seg.match(/"[^"]*"|'[^']*'|\S+/g) ?? [])
+    .slice(1)
+    .map((a) => a.replace(/^['"]|['"]$/g, ""))
+    .filter((a) => a && !a.startsWith("-"));
+  return args.some((a) => CRITICAL_TARGET.some((re) => re.test(a)));
+}
 
 /**
  * Commands that only report, and so never need a prompt.
@@ -158,6 +242,9 @@ export function segments(command: string): string[] {
 /** How much one already-split piece can cost. */
 function classifySegment(seg: string): Risk {
   if (DESTRUCTIVE_SEGMENT.some((re) => re.test(seg))) return "destructive";
+  // Asked separately because it reads the TARGET rather than the flags, which
+  // is the only way `rmdir /usr` is caught at all.
+  if (targetsCriticalPath(seg)) return "destructive";
 
   if (SAFE_SEGMENT.some((re) => re.test(seg))) {
     // A reader that has been handed the means to write is not a reader.
