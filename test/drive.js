@@ -291,13 +291,25 @@ const pasteTests = (async () => {
   ok("named as text", /pasted-\d+\.txt/.test(d.getElementById("attachStrip").textContent));
   ok("and the composer is left alone", draft.value === "");
 
-  // The picker's 10 MB limit applies here too; these bytes never pass through it.
-  const huge = { size: 11 * 1024 * 1024, type: "image/png", name: "big.png" };
+  /* THERE IS NO SIZE LIMIT, at the owner's instruction, and this used to pin
+     one: an 11 MB paste was refused with "The limit is 10 MB". The webview
+     carried its own copy of the host's cap, so a paste or a drop was still
+     refused after the host had stopped refusing - which is how half a limit
+     survives its own deletion.
+
+     The fixture went with it. It was `{ size, type, name }`, a plain object
+     that never reached FileReader because the size check rejected it first;
+     with the check gone it does reach it, and readAsDataURL throws on
+     anything that is not a real Blob. A stand-in that only works while the
+     code under test refuses to look at it is not a fixture. */
   const n = pillCount();
+  const huge = new w.File(["x".repeat(64 * 1024)], "big.png", { type: "image/png" });
   paste([fileItem(huge)]);
-  ok("an oversized paste says why",
-    await until(() => /10 MB/.test(d.getElementById("log").textContent)));
-  ok("and is refused", pillCount() === n);
+  ok("a large paste is attached rather than refused",
+    await until(() => pillCount() === n + 1), String(pillCount()));
+  ok("and nothing claims a limit",
+    !/limit is/i.test(d.getElementById("log").textContent),
+    d.getElementById("log").textContent.slice(0, 120));
 })();
 
 /* ── 6d. tool rows: filenames, previews, word-level edits ────────────── */
@@ -468,7 +480,21 @@ const pasteTests = (async () => {
   ok("attach button exists", !!clip);
   ok("attach button is NOT disabled", !clip.disabled);
   clip.click();
-  ok("clip posts attachFiles", sent.some(m => m.type === "attachFiles"));
+  /* THE LOCAL PICKER, not the host's dialog. This asserted `attachFiles`,
+     which reaches `showOpenDialog` on the EXTENSION HOST - and in a WSL, dev
+     container or SSH window that host is the remote machine, so the button
+     labelled "Upload from your computer" browsed a disk the user was not
+     sitting in front of.
+
+     The button opens a file input in the webview now, which runs in the
+     renderer and is therefore always on the user's own machine. So the
+     assertion inverts: pressing it must NOT ask the host, and there must be an
+     input for it to open. */
+  ok("clip does not ask the host to open its dialog",
+    !sent.some(m => m.type === "attachFiles"), JSON.stringify(sent.map(m => m.type)));
+  const local = d.getElementById("localPick");
+  ok("and a local file input exists for it to open", !!local && local.type === "file");
+  ok("and it takes more than one file", !!local && local.multiple === true);
 }
 
 /* ── 10. attachmentsReady renders pills ────────────────────────────── */
@@ -1307,10 +1333,24 @@ function composer(over) {
 const AGENTS = [
   { name: "reader", description: "Reads only.", model: "", memory: ".agent/memory/reader.md",
     tools: ["read_file", "search"], skills: [], allMcp: false,
-    mcp: [{ server: "filesystem", include: ["read_text_file"], exclude: [] }],
+    mcp: [{ server: "filesystem", include: ["read_text_file"], exclude: [], includeActive: true }],
     file: ".agent/agents/reader.md", active: false },
   { name: "wide", description: "Everything.", model: "gpt-4o", memory: "", tools: [], skills: [],
     allMcp: true, mcp: [], file: ".agent/agents/wide.md", active: false },
+  // A server named with an include list written and left empty: no tools at
+  // all. The row has to say so - it is the state the label used to get wrong.
+  { name: "sealed", description: "Names a server and no tools on it.", model: "", memory: "",
+    tools: [], skills: [], allMcp: false,
+    mcp: [{ server: "filesystem", include: [], exclude: [], includeActive: true }],
+    file: ".agent/agents/sealed.md", active: false },
+  // And the other empty case, which must NOT read the same: `filesystem: true`
+  // writes no include at all, so every tool is in scope and the row says only
+  // the server's name. Without a fixture for this the "(none)" branch could
+  // swallow it and no test would notice.
+  { name: "whole", description: "Names a server and every tool on it.", model: "", memory: "",
+    tools: [], skills: [], allMcp: false,
+    mcp: [{ server: "filesystem", include: [], exclude: [], includeActive: false }],
+    file: ".agent/agents/whole.md", active: false },
 ];
 {
   const { d, sent, inbound } = boot();
@@ -1335,13 +1375,30 @@ const AGENTS = [
   ok("AG the header offers New agent with the list still empty of rows",
     !!d.querySelector(".ag-top [data-ag=\"new\"]"));
   const rows = d.querySelectorAll(".ag-row");
-  ok("AG both agents are listed", rows.length === 2);
-  ok("AG the badge counts them", d.getElementById("agBadge").textContent === "2");
+  ok("AG every agent is listed", rows.length === 4);
+  ok("AG the badge counts them", d.getElementById("agBadge").textContent === "4");
   const readerRow = d.querySelector('[data-name="reader"]').closest(".ag-row");
   ok("AG a row names the agent", /reader/.test(readerRow.textContent));
   ok("AG and describes it", /Reads only/.test(readerRow.textContent));
   ok("AG and states its built-in scope", /2 built-in tools/.test(readerRow.textContent));
   ok("AG and which MCP servers it can reach", /MCP: filesystem \(1\)/.test(readerRow.textContent));
+  // Three states, and the third is the one that used to be drawn wrong. A bare
+  // server name means every tool; a count means those tools; "(none)" means an
+  // include list was written and left empty, which withholds all of them.
+  // Reading include.length alone drew that as unrestricted - the row telling
+  // the user the opposite of what their own file says.
+  {
+    const sealedRow = d.querySelector('[data-name="sealed"]').closest(".ag-row");
+    ok("AG an empty include is drawn as none, not as unrestricted",
+      /MCP: filesystem \(none\)/.test(sealedRow.textContent), sealedRow.textContent);
+    const wideRow = d.querySelector('[data-name="wide"]').closest(".ag-row");
+    ok("AG while an unscoped agent still says all MCP servers",
+      /all MCP servers/.test(wideRow.textContent), wideRow.textContent);
+    const wholeRow = d.querySelector('[data-name="whole"]').closest(".ag-row");
+    ok("AG and a server with no include written is drawn as just the server",
+      /MCP: filesystem(?!\s*\()/.test(wholeRow.textContent), wholeRow.textContent);
+    ok("AG not as none", !/filesystem \(none\)/.test(wholeRow.textContent), wholeRow.textContent);
+  }
   ok("AG and that it keeps a memory", /memory/.test(readerRow.textContent));
   ok("AG and names its file", /\.agent\/agents\/reader\.md/.test(readerRow.textContent));
   const wideRow = d.querySelector('[data-name="wide"]').closest(".ag-row");
@@ -1388,7 +1445,8 @@ const AGENTS = [
   ok("AG /agent is offered in the slash palette", !!qpRow);
   qpRow.click();
   const rows = d.querySelectorAll("#qp .qp-row");
-  ok("AG choosing it opens the agent list", rows.length === 3, String(rows.length));
+  // Every agent plus the "none" row.
+  ok("AG choosing it opens the agent list", rows.length === 5, String(rows.length));
   ok("AG with None first, so leaving is one click", /None/.test(rows[0].textContent));
   ok("AG the active one is ticked",
     !!d.querySelectorAll("#qp .qp-row")[2].querySelector(".qp-check svg"));

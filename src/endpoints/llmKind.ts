@@ -77,7 +77,7 @@ export function capabilitiesFor(kind: LlmKind): Record<string, unknown> {
     case "completion":
       // A FIM base model has no chat template and no tool grammar. Leaving
       // tools on produces a profile whose first agent turn is a 400.
-      return { tools: false, toolChoice: false, fim: true };
+      return { tools: false, fim: true };
     case "coding":
     case "chat":
     default:

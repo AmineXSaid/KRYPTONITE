@@ -154,7 +154,31 @@ console.log("\n──── syntax highlighting ────");
   ck(has(sh, "va", "$HOME"), "sh: variable");
   ck(has(sh, "va", "${USER}"), "sh: braced variable");
   ck(has(sh, "kw", "if"), "sh: keyword");
-  ck(has(sh, "kw", "echo"), "sh: builtin");
+  /* `echo` moved from `kw` to `cmd`, and this assertion moved with it rather
+     than being deleted: what it was reaching for is "a builtin is coloured",
+     and it still is - as a COMMAND, which is what it is. The keyword list is
+     shell SYNTAX now (if/then/for/while); echo, cd, export and the rest are
+     things you run, and colouring them as syntax while `npm` and `git` got
+     nothing at all was backwards. */
+  ck(has(sh, "cmd", "echo"), "sh: builtin is coloured as a command");
+
+  /* THE POINT OF THE cmd RULE. A command line's most important word is the
+     program being invoked, and before this none of them were tokens at all. */
+  const cmds = tk("npm run verify | grep -c PASS\ncd media && ./run.sh\n", "bash");
+  ck(has(cmds, "cmd", "npm"), "sh: the program being run is coloured");
+  ck(has(cmds, "cmd", "grep"), "sh: and so is one after a pipe");
+  ck(has(cmds, "cmd", "cd"), "sh: and one at the start of a later line");
+  ck(has(cmds, "cmd", "./run.sh"), "sh: a path-shaped command counts too");
+  // Arguments are not commands - only the head of each command position is.
+  ck(!has(cmds, "cmd", "run"), "sh: but its arguments are not");
+  ck(!has(cmds, "cmd", "verify"), "sh: nor the ones after them");
+  /* A fenced `bash` block usually holds a command AND its output. Matching any
+     word at line start painted PASS and FAIL as programs, which is why the
+     rule asks for lowercase or a path. */
+  ck(!has(cmds, "cmd", "PASS"), "sh: and shouted output is not mistaken for one");
+  // The prompt a pasted session carries must not hide the command behind it.
+  const prompt = tk("$ npm test\n", "bash");
+  ck(has(prompt, "cmd", "npm"), "sh: a command after a $ prompt is still a command");
   // One alternation scanned left to right means the earliest rule to claim a
   // span keeps it, so a variable written inside a double-quoted string is part
   // of the string. Nested highlighting would need a second pass; colouring the

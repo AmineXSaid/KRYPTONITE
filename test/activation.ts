@@ -14,6 +14,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { activate, deactivate } from "../src/extension";
+import { sidebarHtml, controlCenterHtml, browserHtml } from "../src/ui/shell";
 import * as extension from "../src/extension";
 import { recorded, reset, makeContext, __cfg } from "./vscode-stub";
 
@@ -92,6 +93,22 @@ async function main() {
     // Distinct from openBrowser: lands on the agent's view and starts
     // watching, which is what the model launching a browser calls for.
     "genesis.watchAgentBrowser",
+    /* The host's own file dialog. The composer's attach button no longer
+       calls it: `showOpenDialog` runs on the EXTENSION HOST, so in a WSL, dev
+       container or SSH window it browses the remote disk while the user is
+       sitting at a different machine. The button opens a file input in the
+       webview instead, which is always local.
+    
+       This keeps the dialog reachable, because it is still the only route to a
+       file on the remote machine that is outside the workspace - `@` covers
+       the workspace and nothing beyond it. */
+    "genesis.attachFromHost",
+    /* The panel's palette applied to the terminal beside it, and its undo.
+       Both are declared here rather than the count being loosened: this list
+       exists so a command cannot go missing unnoticed, and that only works
+       while it is exact. */
+    "genesis.applyTerminalTheme",
+    "genesis.revertTerminalTheme",
   ];
   for (const name of EXPECTED) {
     ck(recorded.commands.includes(name), `1.1 ${name} is registered`);
@@ -250,6 +267,76 @@ async function main() {
   fs.mkdirSync(path.join(skills, ".agent", "skills", "empty-dir"), { recursive: true });
   await activateIn(skills, "malformed skill");
   await deactivate();
+
+  /* ── the webview's content policy ──────────────────────────────────── */
+  //
+  // Asserted on the string the real builders produce, not in a browser. The
+  // policy is assembled from `webview.cspSource`, which only the editor can
+  // supply, so a harness that renders an approximation of it tests the
+  // approximation. What is worth pinning is structural, and a string is where
+  // that lives: this is the boundary that decides whether a page the browser
+  // surface frames can reach back into the extension's own document.
+  console.log("\n──── the webview content policy ────");
+  {
+    const origin = "vscode-resource://genesis";
+    const webview: any = {
+      cspSource: origin,
+      asWebviewUri: (u: any) => ({ toString: () => `${origin}/${u.fsPath}` }),
+    };
+    const extensionUri: any = { fsPath: EXT, path: EXT, scheme: "file", toString: () => EXT };
+    const policyOf = (html: string) =>
+      /content="([^"]*)"/.exec(
+        /<meta http-equiv="Content-Security-Policy"[^>]*>/.exec(html)?.[0] ?? ""
+      )?.[1] ?? "";
+
+    for (const [name, build] of [
+      ["sidebar", sidebarHtml],
+      ["control centre", controlCenterHtml],
+      ["browser", browserHtml],
+    ] as const) {
+      const html = build(webview, extensionUri);
+      const policy = policyOf(html);
+      ck(policy.length > 0, `1.1 the ${name} document carries a CSP`);
+      ck(/(^|;\s*)default-src 'none'/.test(policy), `1.1 ${name}: default-src is none`, policy);
+      ck(!/unsafe-eval/.test(policy), `1.1 ${name}: no unsafe-eval`);
+      // Scripts run by nonce and by nothing else. `'self'` or an origin here
+      // would let any file the extension ships execute, which is the whole
+      // reason the nonce exists.
+      const script = /script-src ([^;]*)/.exec(policy)?.[1]?.trim() ?? "";
+      ck(/^'nonce-[A-Za-z0-9]{32}'$/.test(script), `1.1 ${name}: script-src is one nonce`, script);
+      // And the nonce has to be the one the tags carry, or the document is
+      // strictly worse than having no policy: it looks protected and loads
+      // nothing.
+      const nonce = /'nonce-([A-Za-z0-9]+)'/.exec(script)?.[1] ?? "";
+      const tags = [...html.matchAll(/<script nonce="([^"]+)"/g)].map((m) => m[1]);
+      ck(tags.length > 0, `1.1 ${name}: the document has nonced scripts`, String(tags.length));
+      ck(
+        tags.every((t) => t === nonce),
+        `1.1 ${name}: every script tag carries the policy's nonce`,
+        [...new Set(tags)].join(", ")
+      );
+      // Fresh per document. A fixed nonce is a nonce in name only.
+      const again = /'nonce-([A-Za-z0-9]+)'/.exec(policyOf(build(webview, extensionUri)))?.[1];
+      ck(again !== nonce, `1.1 ${name}: a second build gets a different nonce`);
+      // Nothing may be fetched from the network. `connect-src` is absent, so
+      // `default-src 'none'` covers it - which is what stops a compromised
+      // panel posting anything it holds anywhere.
+      ck(!/connect-src/.test(policy), `1.1 ${name}: no connect-src is granted`);
+    }
+
+    // The browser surface is the documented exception and has to differ in
+    // exactly one direction. If frame-src ever leaks into the other two, a
+    // page could be framed inside the panel that talks to the extension.
+    const sidebarPolicy = policyOf(sidebarHtml(webview, extensionUri));
+    const browserPolicy = policyOf(browserHtml(webview, extensionUri));
+    ck(!/frame-src/.test(sidebarPolicy), "1.1 the sidebar frames nothing");
+    ck(/frame-src https: http:/.test(browserPolicy), "1.1 while the browser surface may frame a page");
+    ck(
+      !/script-src[^;]*https?:/.test(browserPolicy),
+      "1.1 and framing a page still grants it no script origin",
+      browserPolicy
+    );
+  }
 
   console.log("\n──── unhandled rejections ────");
   ck(unhandled.length === 0, "1.1 no unhandled rejection during any activation", unhandled.slice(0, 3).join(" | "));

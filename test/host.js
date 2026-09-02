@@ -259,25 +259,43 @@ const context = {
     // recordChange and reconcileChanges are `private` in TypeScript, which is
     // a compile-time claim only; this harness is JavaScript and drives them
     // directly, because the alternative is a live model turn.
+    //
+    // Both take the TURN that made the change, so a turn running in a
+    // conversation the user has switched away from files its writes under its
+    // own chat rather than under whichever one is on screen. The estimates it
+    // reconciles against git live on the turn for the same reason.
+    const turn = {
+      id: s.sessionId,
+      abort: new AbortController(),
+      history: s.history,
+      replay: [],
+      title: s.title,
+      steer: [],
+      steerFiles: [],
+      steerFilesInFlight: [],
+      estimate: new Map(),
+      finished: false,
+      discarded: false,
+    };
     ok("a fresh conversation has changed nothing", s.changedFiles().length === 0);
 
-    s.recordChange("src/a.ts", { change: "modified", added: 10, removed: 2 });
+    s.recordChange(turn, "src/a.ts", { change: "modified", added: 10, removed: 2 });
     ok("a write is recorded", s.changedFiles().length === 1);
     ok("with its counts", s.changedFiles()[0].added === 10 && s.changedFiles()[0].removed === 2);
     ok("and marked as an estimate", s.changedFiles()[0].exact === false);
 
-    s.recordChange("src/a.ts", { change: "modified", added: 5, removed: 1 });
+    s.recordChange(turn, "src/a.ts", { change: "modified", added: 5, removed: 1 });
     ok("a second write to one file stays one row", s.changedFiles().length === 1);
     ok("and accumulates", s.changedFiles()[0].added === 15 && s.changedFiles()[0].removed === 3);
 
-    s.recordChange("new.ts", { change: "created", added: 8, removed: 0 });
-    s.recordChange("new.ts", { change: "modified", added: 1, removed: 1 });
+    s.recordChange(turn, "new.ts", { change: "created", added: 8, removed: 0 });
+    s.recordChange(turn, "new.ts", { change: "modified", added: 1, removed: 1 });
     const created = s.changedFiles().find((f) => f.path === "new.ts");
     ok("a file created and then edited is still reported as created", created.change === "created");
 
     // git's numbers replace this turn's estimate rather than stacking on it.
     posted.length = 0;
-    s.reconcileChanges([{ file: "src/a.ts", added: 11, removed: 2 }, { file: "new.ts", added: 9, removed: 0 }]);
+    s.reconcileChanges(turn, [{ file: "src/a.ts", added: 11, removed: 2 }, { file: "new.ts", added: 9, removed: 0 }]);
     const exact = s.changedFiles().find((f) => f.path === "src/a.ts");
     ok("the exact count replaces the estimate", exact.added === 11 && exact.removed === 2);
     ok("and says so", exact.exact === true);
@@ -286,15 +304,15 @@ const context = {
 
     // A file written and then reverted inside the turn leaves no git row, and
     // must not leave a row in the panel either.
-    s.recordChange("scratch.tmp", { change: "created", added: 4, removed: 0 });
-    s.reconcileChanges([]);
+    s.recordChange(turn, "scratch.tmp", { change: "created", added: 4, removed: 0 });
+    s.reconcileChanges(turn, []);
     ok("a file reverted within the turn drops out of the list",
       !s.changedFiles().some((f) => f.path === "scratch.tmp"));
     ok("but files from earlier turns stay", s.changedFiles().length === 2);
 
     // A second turn's numbers add to what earlier turns already earned.
-    s.recordChange("src/a.ts", { change: "modified", added: 3, removed: 0 });
-    s.reconcileChanges([{ file: "src/a.ts", added: 4, removed: 1 }]);
+    s.recordChange(turn, "src/a.ts", { change: "modified", added: 3, removed: 0 });
+    s.reconcileChanges(turn, [{ file: "src/a.ts", added: 4, removed: 1 }]);
     const grown = s.changedFiles().find((f) => f.path === "src/a.ts");
     ok("a later turn adds to the running total", grown.added === 15 && grown.removed === 3);
 
@@ -304,7 +322,7 @@ const context = {
     ok("clearing announces it",
       posted.some((m) => m.type === "changesUpdated" && m.files.length === 0));
 
-    s.recordChange("x.ts", { change: "modified", added: 1, removed: 0 });
+    s.recordChange(turn, "x.ts", { change: "modified", added: 1, removed: 0 });
     const sync = await app.buildStateSync();
     ok("the change list is part of hydration", sync.changes.length === 1);
     posted.length = 0;
