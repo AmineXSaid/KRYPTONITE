@@ -519,9 +519,15 @@ export class App {
    */
   private async migrateFromKryptonite(): Promise<void> {
     const ws = this.context.workspaceState;
+    /* `activeAgent` is deliberately NOT in this list any more.
+     *
+     * The agent belongs to a conversation now and travels in its transcript.
+     * Carrying the old workspace-wide key across would restore exactly the
+     * behaviour that was wrong - one agent applied to every chat - on the
+     * first run after upgrading, which is the worst moment for it. */
     for (const key of [
       "uiConfig", "disabledSkills", "alwaysAllowedCommands",
-      "activeSessionId", "activeAgent",
+      "activeSessionId",
     ]) {
       if (ws.get(`genesis.${key}`) !== undefined) continue;
       const old = ws.get(`kryptonite.${key}`);
@@ -1792,19 +1798,38 @@ export class App {
    * global settings across every window is not what anyone means by it.
    */
   get activeAgentName(): string {
-    return this.context.workspaceState.get<string>("genesis.activeAgent", "") ?? "";
+    return this.session.agentName();
   }
 
-  activeAgent(): Agent | undefined {
-    const name = this.activeAgentName;
+  /**
+   * Turn a name into an agent, without any opinion about whose name it is.
+   *
+   * The half of the old `activeAgent()` worth keeping. That method did two
+   * jobs - hold the selection and resolve it - and holding it here is what
+   * made the selection global. A turn now resolves its own conversation's
+   * name through this.
+   */
+  agentByName(name: string): Agent | undefined {
     if (!name) return undefined;
     return this.agents.find((a) => a.name === name);
+  }
+
+  /** The agent of the conversation on screen. */
+  activeAgent(): Agent | undefined {
+    return this.agentByName(this.activeAgentName);
   }
 
   async setActiveAgent(name: string): Promise<void> {
     const next = this.agents.some((a) => a.name === name) ? name : "";
     this.invalidateMemorySnapshot();
-    await this.context.workspaceState.update("genesis.activeAgent", next);
+    /* Onto the conversation, not into workspace state.
+     *
+     * This wrote `genesis.activeAgent`, one string for the whole workspace, so
+     * every conversation resolved through it and choosing an agent for one
+     * chat chose it for all of them - including chats created later. The old
+     * key is deliberately left where it is rather than deleted: it is one dead
+     * string, and someone who downgrades gets their selection back. */
+    this.session.setAgent(next);
     this.broadcast({ type: "agentChanged", agent: next ? this.agentDto(this.activeAgent()!) : null });
     this.updateStatus();
     if (next) this.log("info", `Agent: ${next}.`);
@@ -1937,8 +1962,11 @@ export class App {
   }
 
   /** The MCP tool definitions the active agent is allowed to see. */
-  agentMcpTools(): ReturnType<McpRegistry["toolDefs"]> {
-    const agent = this.activeAgent();
+  agentMcpTools(who?: Agent): ReturnType<McpRegistry["toolDefs"]> {
+    // The caller's agent when it has one - a turn's gate must match the
+    // persona it is running under, and those are only the same agent while
+    // the user has not switched conversation mid-turn.
+    const agent = who ?? this.activeAgent();
     if (!agent) return this.mcp.toolDefs();
     return this.mcp.toolDefs((server, tool) => agentAllowsMcp(agent, server, tool));
   }

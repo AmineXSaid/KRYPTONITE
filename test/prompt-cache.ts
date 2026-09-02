@@ -180,6 +180,12 @@ const MEMORY_SECOND = "\nThe staging cluster is in eu-west-2.";
   /* ── 3. the next session picks it up ─────────────────────────────────── */
   console.log("\n──── and the next session sees it ────");
   app.session.newChat();
+  /* Chosen again, because an agent belongs to ONE CONVERSATION now.
+     It used to be a single workspace-wide value that a new chat inherited, so
+     this line did not need to exist. What is under test here is unchanged -
+     memory is snapshotted per session and re-read by the next one - and that
+     needs the new session to be held with the same agent. */
+  await app.setActiveAgent("scribe");
   seen.length = 0;
   await app.session.send("new conversation");
   const fresh = systemOf(seen.filter((b) => !isWarm(b)).pop());

@@ -3533,8 +3533,15 @@ function _sbRun() {
       // Two identical primary actions on one screen is not two chances to find
       // it - it is a moment spent working out whether they differ. The header's
       // copy stays, because it is the one that is always on screen.
+      /* "in this chat", because that is now the truth and it was not before.
+         The agent was one value for the whole workspace, so "reviewer is
+         active" was a statement about every conversation open and every one
+         created afterwards. It belongs to this conversation now, and a label
+         that does not say so invites the same wrong assumption. */
       html += '<div class="sk-foot"><span>' +
-        (S.activeAgent ? esc(S.activeAgent) + " is active" : "No agent - the default assistant") +
+        (S.activeAgent
+          ? esc(S.activeAgent) + " is active in this chat"
+          : "No agent in this chat - the default assistant") +
         "</span></div>";
     }
     if (S.agentWarnings.length) {
@@ -4251,7 +4258,8 @@ function _sbRun() {
       // "None" is a row rather than a separate control: leaving an agent is
       // exactly as common as entering one, and hiding the way out is how a
       // mode becomes a trap.
-      var out = [{ group: "Agents" }, { agent: "", desc: "No agent - the default assistant", active: !S.activeAgent }];
+      var out = [{ group: "Agents" },
+        { agent: "", desc: "No agent in this chat - the default assistant", active: !S.activeAgent }];
       for (var a = 0; a < S.agents.length; a++) {
         out.push({
           agent: S.agents[a].name,

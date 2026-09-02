@@ -1797,9 +1797,11 @@ function _run() {
       '<div class="row-actions" style="margin-bottom:9px">' +
       '<button class="btn" data-act="newAgent">New agent from template</button></div>' +
       '<div class="explainer"><code>/agent</code> in the composer, the command palette, and the ' +
-      "Agents tab all reach the same list. While an agent is active a bar under the tabs names it " +
-      "and states its scope. The count on the Agents tab is <i>files that failed to parse</i>, not " +
-      "agents, so it stays dark when nothing is wrong.</div></div>" +
+      "Agents tab all reach the same list. An agent belongs to ONE CONVERSATION: choosing one " +
+      "applies it to the chat you are in, other chats are unaffected, and a new chat starts with " +
+      "none. While one is active a bar under the tabs names it and states its scope. The count on " +
+      "the Agents tab is <i>files that failed to parse</i>, not agents, so it stays dark when " +
+      "nothing is wrong.</div></div>" +
 
       '<div class="block"><h4>On &ldquo;Hermes&rdquo;</h4>' +
       '<div class="explainer">There is one agent format, and it <i>is</i> Hermes Agent&rsquo;s: the ' +

@@ -253,6 +253,11 @@ const seen: Seen[] = [];
   /* ── 4. the next conversation picks the memory up ────────────────────── */
   const at = seen.length;
   app.session.newChat();
+  /* Chosen again: an agent belongs to ONE CONVERSATION now, so a new chat
+     starts with none rather than inheriting the last one. Without this the
+     prefix under test would differ by the whole persona and memory block
+     rather than by the memory entry this section is about. */
+  await app.setActiveAgent("scribe");
   await app.session.send("new conversation");
   const fresh = seen.slice(at).filter((s) => s.kind === "turn")[0];
   ck(

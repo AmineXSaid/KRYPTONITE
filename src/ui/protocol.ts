@@ -435,7 +435,7 @@ export interface StateSync {
   skillWarnings: string[];
   agents: AgentDto[];
   agentWarnings: string[];
-  /** Name of the active agent, or "" for none. */
+  /** Agent of the conversation on screen, or "" for none. */
   activeAgent: string;
   config: ConfigDto;
   tlsError: TlsErrorDto | null;
@@ -564,7 +564,14 @@ export interface CopyTextMsg { type: "copyText"; text: string }
 export interface NewEndpointMsg { type: "newEndpoint" }
 export interface SaveEndpointMsg { type: "saveEndpoint"; endpoint: EndpointForm }
 export interface DeleteEndpointMsg { type: "deleteEndpoint"; id: string }
-/** Speak as this agent, or as none when `name` is empty. */
+/**
+ * Speak as this agent IN THE CONVERSATION ON SCREEN, or as none when `name`
+ * is empty.
+ *
+ * Scoped to one conversation. It used to set a single workspace-wide value,
+ * so choosing an agent for one chat chose it for every other chat and every
+ * chat created afterwards.
+ */
 export interface SetAgentMsg { type: "setAgent"; name: string }
 /** Write `.agent/agents/<name>.md` from a template and open it. */
 export interface NewAgentMsg { type: "newAgent" }
@@ -821,11 +828,17 @@ export interface ProfilesReloadedOut { type: "profilesReloaded"; profiles: Profi
 export interface AgentsReloadedOut {
   type: "agentsReloaded";
   agents: AgentDto[];
-  /** Name of the active agent, or "" for none. */
+  /** Agent of the conversation on screen, or "" for none. */
   active: string;
   warnings: string[];
 }
-/** The active agent changed. `agent` is null when none is selected. */
+/**
+ * The agent of the conversation on screen changed. Null when it has none.
+ *
+ * Sent when one is chosen AND when the user switches conversation, since the
+ * agent travels with the conversation and the panel has no other way to learn
+ * it landed on a different one.
+ */
 export interface AgentChangedOut { type: "agentChanged"; agent: AgentDto | null }
 export interface SkillsReloadedOut {
   type: "skillsReloaded";

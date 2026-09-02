@@ -217,6 +217,23 @@ interface Conversation {
    * knows it. See ApprovalKind in agent/tools.ts.
    */
   alwaysAllow: Set<ApprovalKind>;
+  /**
+   * The agent this conversation is held with. Empty means none.
+   *
+   * THE AGENT USED TO BE ONE STRING FOR THE WHOLE WORKSPACE.
+   *
+   * `App.activeAgentName` read a single value out of workspace state and every
+   * turn in every conversation resolved through it, so selecting `reviewer` to
+   * read one diff silently made every chat opened afterwards a review. There
+   * was no way to have an agent in one conversation and not in another, which
+   * is the only thing anyone wants agents for.
+   *
+   * Here for the same reason everything else on this record is: a conversation
+   * switched away from keeps what belongs to it. A new conversation starts
+   * with none, deliberately - inheriting the last one used is how an agent
+   * ends up in a chat nobody chose it for, which is the bug.
+   */
+  agent: string;
   /** The checklist this conversation's turns have published. */
   todos: TodoDto[];
   /**
@@ -287,7 +304,13 @@ export class SessionController {
   private convo(id: string = this.sessionId): Conversation {
     let c = this.convos.get(id);
     if (!c) {
-      c = { changes: new Map(), queued: [], alwaysAllow: new Set(), todos: [], planSteps: [] };
+      c = {
+        changes: new Map(), queued: [], alwaysAllow: new Set(),
+        // No agent, always. See `agent` on Conversation for why this is not
+        // inherited from whatever was last selected.
+        agent: "",
+        todos: [], planSteps: [],
+      };
       this.convos.set(id, c);
     }
     return c;
@@ -354,6 +377,37 @@ export class SessionController {
   /** The turn running in the conversation currently on screen, if any. */
   private activeTurn(): LiveTurn | undefined {
     return this.live.get(this.sessionId);
+  }
+
+  /**
+   * The agent a conversation is held with, defaulting to the one on screen.
+   *
+   * Every surface that used to ask `App` for "the active agent" means this:
+   * the agent of the conversation being looked at. A turn asks with its own
+   * id instead, because a background turn belongs to the chat that started it
+   * and must not pick up whatever has since been selected somewhere else.
+   */
+  agentName(id: string = this.sessionId): string {
+    return this.convo(id).agent;
+  }
+
+  /**
+   * Choose the agent for the conversation on screen, and remember it.
+   *
+   * Persisted through the transcript rather than workspace state: it is a
+   * property of this conversation, it has to survive a reload with it, and a
+   * conversation that is deleted should take its agent with it.
+   *
+   * The save is skipped for a conversation with no messages yet - `save()`
+   * ignores an empty transcript - so picking an agent before typing is held in
+   * memory and written by the first turn, which is when the file appears.
+   */
+  setAgent(name: string): void {
+    this.convo().agent = name;
+    if (this.history.length) {
+      this.app.sessions.save(this.sessionId, this.history, this.title, name);
+      this.app.refreshSessions();
+    }
   }
 
   /** Files this conversation has changed, most recently written first. */
@@ -874,9 +928,15 @@ export class SessionController {
         ? this.app.shadow.snapshot(text.slice(0, 60)).catch(() => undefined)
         : Promise.resolve(undefined);
 
-    // Resolved once for the turn. An agent edited mid-turn should not change
-    // what the turn is allowed to do halfway through it.
-    const agent = this.app.activeAgent();
+    /* Resolved once for the turn, from THIS TURN'S conversation.
+     *
+     * Once for the turn because an agent edited mid-turn should not change
+     * what the turn is allowed to do halfway through it; from the turn's own
+     * conversation because this used to read one workspace-wide value, so
+     * every chat ran under whichever agent was selected last - and a
+     * background turn would have picked up an agent chosen in a different
+     * conversation after it started. */
+    const agent = this.app.agentByName(this.agentName(turn.id));
 
     const ctx: ToolContext = {
       root,
@@ -1079,7 +1139,10 @@ export class SessionController {
         userMessage: userMsg,
         signal: turn.abort.signal,
         phase,
-        mcpTools: this.app.agentMcpTools(),
+        // The turn's own agent, resolved above. Calling this with no argument
+        // re-read the workspace-wide selection, so a turn could be gated by
+        // one agent's MCP rules while running under another's persona.
+        mcpTools: this.app.agentMcpTools(agent),
         // One per conversation, minted lazily so a window where compaction is
         // off never builds one. It has to outlive the turn: the every-N-turns
         // pacing and the run of ineffective attempts are both counted over a
@@ -1781,12 +1844,15 @@ export class SessionController {
     // Without this the reopened conversation would carry the placeholder minted
     // in the constructor and the naming pass would rename an already-named chat.
     if (doc.title) this.title = doc.title;
+    // Absent on every transcript written before the agent was per-conversation,
+    // and absent means none - which is what those chats should reopen as.
+    this.convo(doc.id).agent = doc.agent ?? "";
   }
 
   /** Persist the transcript and tell every surface the list moved. */
   private persist(): void {
     if (!this.history.length) return;
-    this.app.sessions.save(this.sessionId, this.history, this.title);
+    this.app.sessions.save(this.sessionId, this.history, this.title, this.agentName());
     void this.app.rememberSession(this.sessionId);
     this.app.refreshSessions();
   }
@@ -1803,7 +1869,9 @@ export class SessionController {
     // would recreate the file the user just removed.
     if (turn.discarded) return;
     if (!turn.history.length) return;
-    this.app.sessions.save(turn.id, turn.history, turn.title);
+    // The TURN's conversation, not the one on screen - the same reason this
+    // method exists at all.
+    this.app.sessions.save(turn.id, turn.history, turn.title, this.agentName(turn.id));
     if (turn.id === this.sessionId) void this.app.rememberSession(turn.id);
     this.app.refreshSessions();
   }
@@ -2026,6 +2094,18 @@ export class SessionController {
      * They live on the `Conversation` record now, so switching simply reads a
      * different one and switching back finds everything where it was left. */
     this.app.todos = this.convo().todos;
+    /* The agent travels with the conversation, so switching has to say so.
+     *
+     * Nothing else tells the panel: `reset` broadcasts the queue and announces
+     * the title, and the full `stateSync` that carries `activeAgent` is not
+     * sent on a switch. Without this the bar under the tabs would keep naming
+     * the agent of the chat you just left, which is precisely the confusion
+     * the whole change exists to remove. */
+    const landed = this.app.agentByName(this.convo().agent);
+    this.app.broadcast({
+      type: "agentChanged",
+      agent: landed ? this.app.agentDto(landed) : null,
+    });
     this.broadcastQueue();
     this.app.lastContext = null;
     void this.app.rememberSession(this.sessionId);
@@ -2147,6 +2227,14 @@ export class SessionController {
     const running = this.live.get(doc.id);
     this.history = running ? running.history : doc.messages;
     this.sessionId = doc.id;
+    /* The agent this conversation was held with, back with it.
+     *
+     * Only when the record is fresh: a conversation with a turn in flight has
+     * a live record whose agent that turn is running under, and reading the
+     * file over it would change the persona mid-turn. `convos` is minted on
+     * demand, so "fresh" is "we have not seen this id since the window
+     * opened", which is exactly when the file is the better source. */
+    if (!this.convos.has(doc.id)) this.convo(doc.id).agent = doc.agent ?? "";
     this.reset(false, doc.title || this.app.sessions.nextUntitled());
   }
 
