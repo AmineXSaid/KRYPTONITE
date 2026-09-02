@@ -700,6 +700,64 @@ console.log("\n──── the send control ────");
   b.dom.window.close();
 }
 
+/* ── the agent button ───────────────────────────────────────────────────── */
+{
+  /* THE PICKER EXISTED; THE DOOR DID NOT.
+     The agent sheet has always been there and was reachable only by typing
+     `/agent`, so choosing an agent meant knowing the command or leaving the
+     composer for the Agents tab. This is the control that opens it from where
+     you type, and the state it has to carry is WHOSE agent it is - the whole
+     reason the old workspace-wide agent went unnoticed is that nothing near
+     the composer said which chat it applied to. */
+  const b = boot();
+  b.sync("ask");
+
+  const btn = () => b.d.getElementById("agentBtn");
+  ok("the composer offers an agent button", !!b.d.querySelector(".toolbar #agentBtn"));
+  /* A DIRECT CHILD OF THE TOOLBAR, next to the actions rather than inside
+     them. `.tb-actions` is pinned to the phase segment's row at 280px so a
+     wrap cannot orphan send, and a fourth plate in that group took it over the
+     width - which put attach and send on a row of their own with the left half
+     of the composer empty. `render.cjs` catches exactly that, so this pins the
+     placement that keeps it caught. */
+  ok("it is a direct child of the toolbar", !!b.d.querySelector(".toolbar > #agentBtn"));
+  ok("and not inside the actions group", !b.d.querySelector(".tb-actions #agentBtn"));
+  ok("sitting immediately before them, so it still reads as one run",
+    (btn().nextElementSibling || {}).className === "tb-actions",
+    (btn().nextElementSibling || {}).className);
+  ok("it draws the sparkle", !!btn().querySelector('use[href="#i-spark"]'));
+  ok("which is defined", /id="i-spark"/.test(SRC));
+
+  // Resting: no agent in this conversation.
+  ok("with no agent it rests", btn().getAttribute("data-on") === "0",
+    btn().getAttribute("data-on"));
+  ok("and says what it is for", /choose an agent/i.test(btn().title), btn().title);
+  ok("naming the scope, because that is what was invisible before",
+    /this chat/i.test(btn().title), btn().title);
+  ok("it has an accessible name of its own",
+    (btn().getAttribute("aria-label") || "").length > 8, btn().getAttribute("aria-label"));
+
+  ok("the sheet starts closed", b.d.getElementById("qp").hidden);
+  ok("clicking opens it", b.click("#agentBtn") && !b.d.getElementById("qp").hidden);
+
+  // Armed: an agent is set for this conversation.
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "agentChanged",
+    agent: { name: "reviewer", description: "Reads a diff.", tools: ["read_file"], mcp: [], file: "x.md" },
+  } }));
+  ok("with one set it arms", btn().getAttribute("data-on") === "1",
+    btn().getAttribute("data-on"));
+  ok("and names it in the tooltip", /reviewer/.test(btn().title), btn().title);
+  ok("…and in the accessible name", /reviewer/.test(btn().getAttribute("aria-label") || ""),
+    btn().getAttribute("aria-label"));
+  ok("while still saying other chats are unaffected",
+    /other chats/i.test(btn().title), btn().title);
+  /* The armed state is a paint, so it has to exist in the stylesheet or the
+     attribute above is bookkeeping nobody can see. */
+  ok("the armed state is drawn", /\.agent-btn\[data-on="1"\]/.test(CSS));
+  b.dom.window.close();
+}
+
 /* ── the permission card, and what "always" costs ───────────────────────── */
 {
   /* THE SAME LABEL FOR TWO DIFFERENT PROMISES.

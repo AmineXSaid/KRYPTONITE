@@ -248,7 +248,14 @@ const pasteTests = (async () => {
   /* Poll rather than sleep. FileReader resolves on the event loop, and the
      synchronous test blocks below this one hold the thread long enough that a
      fixed delay can expire before the read has had a chance to run. */
-  const until = async (fn, ms = 3000) => {
+  /* 15s, not 3s. This polls for a FileReader, and the budget was competing
+     with synchronous work in the same file: every time sidebar.js grew, the
+     eval on the way in ate more of it, and the four assertions below failed
+     for running out of time rather than for anything being wrong. The suite
+     passes this block in milliseconds when the machine is idle, so a higher
+     ceiling costs nothing and stops a full-suite run under load reporting a
+     defect that is not there. Matches the 15s the other pollers use. */
+  const until = async (fn, ms = 15000) => {
     const t0 = Date.now();
     for (;;) {
       if (fn()) return true;

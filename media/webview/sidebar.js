@@ -80,6 +80,32 @@ function _sbRun() {
        unchecked. 11x14 of ink, so it holds its shape at 15px. */
     '<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 2.9 4.4 6.1v5.6c0 4.4 3.1 8.1 7.6 9.4 4.5-1.3 7.6-5 7.6-9.4V6.1zM9.2 12.1l2 2 3.6-3.9" ' + S6R + ' stroke-width="1.5"/></symbol>' +
     '<symbol id="i-code" viewBox="0 0 24 24"><path d="M9.5 7.5L5 12l4.5 4.5M14.5 7.5L19 12l-4.5 4.5" ' + S6 + ' stroke-width="1.7"/></symbol>' +
+    /* The agent glyph: a four-point sparkle, large and small.
+     *
+     * Each point is a quadratic whose control point is the star's OWN CENTRE,
+     * which is what makes the sides concave rather than straight - a straight
+     * four-point star is a diamond with spikes and reads as a compass rose.
+     * The concavity is the whole shape, so it is not a number to tune.
+     *
+     * FILLED, unlike the stroked glyphs it sits beside in the toolbar. Drawn
+     * with a 1.5 stroke at the 13px that row uses, the concave sides close on
+     * each other and the star fills in to a blob - the shape survives only as
+     * ink. `i-stop` is filled for its own reasons, so this is not the first.
+     *
+     * Two stars, not the three the reference uses: at 13px the third lands
+     * inside the gap between the other two and the whole glyph muddies.
+     */
+    '<symbol id="i-spark" viewBox="0 0 24 24">' +
+      /* Placed so the PAIR is centred, not each star. Centring the large one
+         in the box and hanging the small one off its shoulder left the ink
+         weighted up and to the right, with dead space at the bottom left - at
+         13px, beside a shield and a clip that are both centred, that reads as
+         a misaligned button rather than as a composition. The two bounding
+         boxes together span 1.8-22 across and 2-21.7 down, so the mass sits on
+         the box centre. */
+      '<path fill="currentColor" d="M10 5.3Q10 13.5 18.2 13.5Q10 13.5 10 21.7Q10 13.5 1.8 13.5Q10 13.5 10 5.3Z"/>' +
+      '<path fill="currentColor" d="M17.8 2Q17.8 6.2 22 6.2Q17.8 6.2 17.8 10.4Q17.8 6.2 13.6 6.2Q17.8 6.2 17.8 2Z"/>' +
+    '</symbol>' +
     '<symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13.2 3L6 13.6h4.6L10.2 21 17.4 10.4h-4.6z" ' + S6 + ' stroke-width="1.5"/></symbol>' +
     '<symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" ' + S6 + ' stroke-width="1.5"/><path d="M3.5 12h17M12 3.5c-4.5 5-4.5 12 0 17 4.5-5 4.5-12 0-17z" ' + S6 + ' stroke-width="1.4"/></symbol>' +
     '<symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="12" rx="1.5" ' + S6 + ' stroke-width="1.5"/><path d="M9 20h6M12 16.5V20" ' + S6 + ' stroke-width="1.5"/></symbol>' +
@@ -1248,6 +1274,30 @@ function _sbRun() {
                 // which is what it always was underneath - a glyph, a tooltip
                 // and a sheet. Its label moves to the tooltip and the
                 // accessible name, both of which already carried it.
+                /* THE AGENT, REACHABLE FROM WHERE YOU TYPE.
+                 *
+                 * The picker this opens has existed all along and was reachable
+                 * only by typing `/agent` - so choosing one meant knowing the
+                 * command, or leaving the composer for the Agents tab. The
+                 * sheet is unchanged; this is the door.
+                 *
+                 * A DIRECT CHILD OF THE TOOLBAR, not a fourth member of
+                 * `.tb-actions`, which is where it started. That group is
+                 * pinned to the phase segment's row at 280px - the whole reason
+                 * it is a group is that a wrap must not orphan send - and a
+                 * fourth 30px plate plus its gap took it 36px over, which put
+                 * attach and send on a row of their own with the left half of
+                 * the composer empty. Out here it sits beside them when there
+                 * is room and rides down with the model button when there is
+                 * not; see the ordering rule in sidebar.css.
+                 *
+                 * It belongs next to the model on that second row anyway: the
+                 * model and the agent are both WHO you are talking to, while
+                 * shield, attach and send are things you DO. */
+                '<button class="tb-btn agent-btn" id="agentBtn" aria-haspopup="menu"' +
+                  ' title="Choose an agent for this chat">' +
+                  icon("i-spark", "ic-13") + '<span class="nm" id="agentName"></span>' +
+                '</button>' +
                 '<span class="tb-actions">' +
                   '<button class="tb-btn perm-btn" id="permBtn" aria-haspopup="menu" aria-expanded="false"' +
                     ' title="What the agent may do without asking">' +
@@ -1989,6 +2039,28 @@ function _sbRun() {
   function permIcon(mode) {
     for (var i = 0; i < PERMS.length; i++) if (PERMS[i][0] === mode) return PERMS[i][4];
     return PERMS[0][4];
+  }
+
+  /**
+   * The agent button, showing the agent of the conversation on screen.
+   *
+   * Says "this chat" in every string, deliberately. The agent used to be one
+   * value for the whole workspace and nothing near the composer said so, which
+   * is how it went unnoticed that choosing one for a diff review had made every
+   * later chat a review too. A control that names the scope cannot repeat that.
+   */
+  function renderAgentBtn() {
+    var btn = $("agentBtn");
+    if (!btn) return;
+    var name = S.activeAgent || "";
+    var nm = $("agentName");
+    if (nm) nm.textContent = name;
+    // Drives the dimmed resting state in CSS, the way permBtn's data-mode does.
+    btn.setAttribute("data-on", name ? "1" : "0");
+    btn.setAttribute("aria-label", name ? "Agent: " + name + ", in this chat" : "Choose an agent for this chat");
+    btn.title = name
+      ? name + " is answering in this chat. Other chats are unaffected."
+      : "Choose an agent for this chat. Other chats are unaffected.";
   }
 
   function renderPerm() {
@@ -3595,6 +3667,11 @@ function _sbRun() {
   }
 
   function renderAgentBar() {
+    // From in here rather than beside each of this function's three call
+    // sites: the bar and the button say the same fact, so one of them being
+    // repainted without the other is a bug waiting for someone to add a
+    // fourth caller.
+    renderAgentBtn();
     var bar = $("agentBar");
     var a = activeAgentDto();
     if (!a) { bar.hidden = true; return; }
@@ -4550,6 +4627,20 @@ function _sbRun() {
       '<span class="qp-scope-n">whole workspace</span></div>';
   }
 
+  /**
+   * Open the agent sheet.
+   *
+   * One function because there are two doors into it now - `/agent` and the
+   * toolbar button - and two copies of "set three flags and render" is how the
+   * two doors end up opening onto slightly different rooms.
+   */
+  function openAgentPicker() {
+    S.agentOpen = true;
+    S.modelOpen = false;
+    S.qpIndex = 0;
+    renderQuickPick();
+  }
+
   function renderQuickPick() {
     var qp = $("qp");
     var items = qpItems();
@@ -4732,7 +4823,7 @@ function _sbRun() {
       case "/export":
         draft.value = ""; post("exportChat", { scope: "current" }); break;
       case "/agent":
-        draft.value = ""; S.agentOpen = true; S.modelOpen = false; S.qpIndex = 0; renderQuickPick(); return;
+        draft.value = ""; openAgentPicker(); return;
       case "/review":
         draft.value = ""; sendText(REVIEW_PROMPT); break;
       case "/skills":
@@ -6563,6 +6654,10 @@ function _sbRun() {
     $("permBtn").addEventListener("click", function (e) {
       e.stopPropagation();
       togglePerm();
+    });
+    $("agentBtn").addEventListener("click", function (e) {
+      e.stopPropagation();
+      openAgentPicker();
     });
     $("permPop").addEventListener("click", function (e) {
       // The X, and the dimmed backdrop itself. A modal sheet that can only be

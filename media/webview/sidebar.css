@@ -2315,6 +2315,30 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    The class is still `.perm-btn` because the MODE rules below hang off it -
    the glyph's colour is the whole signal for which mode is armed, and that is
    the one thing this button does that attach and send do not. */
+/* THE AGENT BUTTON, the fourth member of that run.
+ *
+ * Same 30x30 plate and hairline as the other three, and the label is hidden
+ * for the same reason `.perm-btn`'s is: at the widths this panel actually
+ * gets, the glyph is the whole control and the name lives in the tooltip and
+ * the accessible name. The name is not lost - the bar under the tabs carries
+ * it in full whenever an agent is set.
+ *
+ * `data-on` rather than `aria-expanded`: this button opens the shared quick
+ * pick rather than a popover of its own, so what it has to show is whether an
+ * agent IS SET, not whether a sheet is open. Purple is the colour agents are
+ * everywhere else in the panel, so the armed button matches the bar it
+ * summons rather than inventing a second signal for the same fact.
+ */
+.agent-btn .nm { display: none; }
+.agent-btn .ic-13 { color: currentColor; flex: none; }
+.agent-btn:hover { background: var(--kx-hover); color: var(--kx-fg); }
+.agent-btn[data-on="1"] {
+  color: var(--kx-agent); border-color: color-mix(in srgb, var(--kx-agent) 38%, transparent);
+  background: color-mix(in srgb, var(--kx-agent) 12%, transparent);
+}
+@supports not (color: color-mix(in srgb, red 10%, transparent)) {
+  .agent-btn[data-on="1"] { color: var(--kx-agent); }
+}
 .perm-btn .nm { display: none; }
 .perm-btn .ic-13 { color: currentColor; flex: none; }
 .perm-btn:hover { background: var(--kx-hover); color: var(--kx-fg); }
@@ -3407,7 +3431,15 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   .seg { order: 0; }
   .perm-btn { order: 1; }
   .tb-actions { order: 2; }
-  #modelBtn { order: 3; flex: 1 1 100%; max-width: none; }
+  /* Down to the model's row, not squeezed onto the first one.
+     `.tb-actions` is pinned beside the phase segment so a wrap cannot orphan
+     send, and there is no room for another 30px plate up there at this width.
+     The second row has the whole composer to itself, and the model is the
+     control this one belongs beside anyway - both name who you are talking
+     to. Ordered before the model so the pair reads agent-then-model, the same
+     left-to-right it has when the toolbar is one row. */
+  #agentBtn { order: 3; }
+  #modelBtn { order: 4; flex: 1 1 100%; max-width: none; }
 }
 
 
