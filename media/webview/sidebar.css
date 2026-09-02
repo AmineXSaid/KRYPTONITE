@@ -182,6 +182,34 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   animation: g-drop 130ms cubic-bezier(.16, 1, .3, 1) both;
 }
 
+/* THE TRANSCRIPT'S CONTEXT MENU.
+ *
+ * Same vocabulary as `.popover` above - the near-solid ground with a blur under
+ * it, the hairline, the dialog shadow, the same entrance - because it is the
+ * same kind of object and inventing a second menu treatment would make the
+ * panel look like two products.
+ *
+ * One difference, and it is the whole reason this is not just `.popover`:
+ * position. A popover hangs off a button whose place is known at author time
+ * (`top: 38px; right: 10px`); this one hangs off a pointer, so it is fixed and
+ * its coordinates are set by openMsgMenu at open time - which is also where it
+ * is clamped, because at its narrowest this panel is about 200px and the menu
+ * is wider than that. */
+.ctx-menu {
+  position: fixed; z-index: 70; padding: 4px; min-width: 168px;
+  background: var(--kx-over);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--kx-line); border-radius: 4px;
+  box-shadow: 0 8px 24px var(--kx-shadow);
+  animation: g-drop 130ms cubic-bezier(.16, 1, .3, 1) both;
+}
+/* The rows are `.pop-row`, unchanged. The glyph is the quiet part: it is there
+   to make the row scannable, not to carry the meaning, which the label does. */
+.ctx-menu .pop-row .ic { flex: none; color: var(--kx-fg-3); }
+.ctx-menu .pop-row:hover .ic { color: var(--kx-fg-2); }
+.ctx-menu .pop-row:focus-visible { outline: 1px solid var(--kx-link); outline-offset: -1px; }
+
 /* ── how a menu arrives ────────────────────────────────────────────────────
  *
  * The mode sheet was the only thing in this panel that arrived rather than
@@ -292,6 +320,20 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 .hist-row:hover .hist-del, .hist-del:focus-visible { opacity: 1; }
 .hist-del:hover { color: var(--kx-error); background: var(--kx-hover); }
 
+/* Stop, for a conversation working in the background. It sits inboard of
+   Delete, and unlike Delete it is ALWAYS visible rather than revealed on
+   hover: it only exists on a row that is actually working, and a control for
+   stopping runaway work that you have to go looking for is not a control. */
+.hist-stop {
+  position: absolute; right: 30px; top: 50%; margin-top: -11px;
+  width: 22px; height: 22px; display: grid; place-items: center; border-radius: 4px;
+  color: var(--kx-fg-2);
+}
+.hist-stop:hover, .hist-stop:focus-visible { color: var(--kx-error); background: var(--kx-hover); }
+/* A working row carries two controls, so the title needs the room for both or
+   a long name runs underneath them. */
+.hist-row[data-run="1"] .pop-row { padding-right: 56px; }
+
 /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ tabs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 /* #5 â€” two tabs, 700 weight, violet underline. A failure shows a red count
@@ -386,7 +428,22 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
    doing. Left-aligned below the intro, because a list of things to click is
    read down its left edge and centring it makes every row start somewhere
    different. */
+/* CENTRED IN THE TRANSCRIPT, not just within itself.
+   
+   `justify-content: center` was already here and did nothing visible, because
+   it centres the welcome's children inside the welcome - and the welcome was
+   `min-height: 340px` inside a transcript up to 591px tall, so the block sat
+   at the top with a measured 237px of dead space under it and 14px over it.
+   Everything was centred inside a box that was not.
+   
+   `#log` is a scroll container and a block, so a flex child cannot grow in it.
+   It becomes a flex column only while it holds the welcome - which is the one
+   time the welcome is its only child, so nothing else can be affected by the
+   switch. `:has()` is already load-bearing in this file (see the disabled
+   composer's mirror), so this needs no new floor. */
+#log:has(> .welcome) { display: flex; flex-direction: column; }
 .welcome {
+  flex: 1;
   min-height: 340px; display: flex; flex-direction: column;
   /* Centred. Left-aligned, the mark and the wordmark sat against the panel's
      edge with the whole width of the screen empty beside them; a greeting is
@@ -394,6 +451,22 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   justify-content: center; align-items: center; text-align: center;
   padding: 24px 4px;
 }
+
+/* ONE COLUMN, so the block has an axis instead of five.
+   
+   The mark is 37px wide, the wordmark 71, the paragraph capped at 290, and the
+   lists took the full panel - 484px at a 520px dock. Five elements stacked
+   with five different widths do not read as a group, and the widest of them
+   grew every time the panel did while the narrowest never moved.
+   
+   340 is the width `.chips.resume` already uses for the same job on the same
+   screen, so the two states of this screen share a measure. `width: 100%` with
+   `max-width` rather than a fixed width, because below 340 the column is the
+   panel and must still shrink. */
+.welcome > * { width: 100%; max-width: 340px; }
+/* The mark and the wordmark size themselves; a 340px box around them would
+   stretch nothing but would break `align-items: center` for the SVG. */
+.welcome > svg, .welcome > .w-mark { width: auto; }
 /* Left-aligned, as the design draws it, and not only for fidelity: everything
    below the intro is a list of rows, and a centred mark above a left-aligned
    list gives the column two different axes. One edge, top to bottom. */
@@ -494,7 +567,10 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 }
 .welcome p {
   font-family: var(--kx-prose); font-size: 12.5px; line-height: 1.6;
-  color: var(--kx-fg-2); max-width: 290px; margin: 0 0 20px;
+  /* 290 was its own measure, narrower than the 340 column around it, so the
+     one paragraph on the screen was inset from everything above and below it
+     by 25px a side for no reason a reader could see. */
+  color: var(--kx-fg-2); margin: 0 0 20px;
   text-wrap: pretty;
 }
 .welcome .w-sec { width: 100%; margin-top: 22px; }
@@ -783,7 +859,13 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   color: var(--kx-fg-2);
   white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: auto;
 }
-.tool[data-error="1"] .term-block { border-left-color: var(--kx-error); }
+/* `:not(.cmd-in)` because a tool card holds TWO term-blocks now, and this
+   rule was written when it held one. Without it the failure red lands on the
+   command's rail as well as the output's - and what was run is still what was
+   run; it is the result that went wrong. Its specificity also beat the
+   command's own accent rail, so the split the rails exist to show disappeared
+   on exactly the cards where it matters most. */
+.tool[data-error="1"] .term-block:not(.cmd-in) { border-left-color: var(--kx-error); }
 
 /* â”€â”€ turn footer: hover actions + cost â”€â”€
    Copy / Retry / Branch appear at the end of a turn with elapsed time and
@@ -892,6 +974,34 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   color: var(--kx-fg-4); white-space: pre-wrap; overflow-wrap: anywhere;
 }
 
+/* ── the working, WHILE it is being written ──
+   The box is open and growing here, which is the whole point: a reasoning
+   model that streams its thinking should be watched, not summarised after the
+   fact behind a closed disclosure.
+   
+   The rail turns oxide so the difference between "still thinking" and "thought
+   about it" is visible at a glance without the section changing size, moving,
+   or competing with the answer for attention. */
+.think[data-live="1"] .think-body { border-left-color: var(--kx-accent); }
+.think[data-live="1"] .think-head .n { color: var(--kx-fg-3); }
+
+/* BOUNDED, and scrolled to its own tail.
+   
+   A reasoning model can spend thousands of words before the answer starts. Let
+   the box grow to all of them and the answer is pushed off the bottom of the
+   panel by the working that led to it, and the transcript scrolls under the
+   reader's eyes for the length of the turn. Capped, the newest thinking is
+   what shows - which is the part being written - and the whole of it is still
+   there to scroll or to reopen once the box seals.
+   
+   Following the tail is done in script, not here: `addThinking` sets
+   scrollTop after each chunk. There is no CSS that pins a scroll container to
+   its own bottom - `overflow-anchor` only decides whether Chromium COMPENSATES
+   for content inserted above the viewport, which is a different question. */
+.think[data-live="1"] .think-body {
+  max-height: 168px; overflow-y: auto;
+}
+
 .tool { margin-bottom: 0; }
 .tool-head {
   display: flex; align-items: center; gap: 8px; width: 100%;
@@ -951,6 +1061,38 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 /* The command itself is the one line in the card the user typed nothing of but
    is answerable for, so it gets foreground weight where output stays muted. */
 .cmd-in { color: var(--kx-fg); }
+
+/* ── INSIDE A TOOL CARD, THE COMMAND AND ITS OUTPUT ARE NOT OBJECTS ──
+   
+   `.term-block` gives a filled, bordered, rounded panel, which is right in the
+   transcript where a block of shell output is a THING the model produced and
+   sits among prose. Inside a tool card it is wrong twice over: the card is
+   already a bordered object, so this nested a dark box inside a dark box
+   inside a dark box, and the two panels made the command and its output look
+   like two unrelated artefacts rather than one exchange.
+   
+   A rail instead. No fill, no border, no corners - the indent carries the
+   structure and the colour of the rail says which half you are looking at:
+   oxide for what was RUN, a hairline for what came BACK. Same shape the rest
+   of this panel uses for the model's working (`.think-body`), and the same
+   shape Claude Code uses beside it, which is the point. */
+.tool-body .term-block {
+  background: none;
+  border: none;
+  border-left: 2px solid var(--kx-line);
+  border-radius: 0;
+  padding: 1px 0 1px 10px;
+  margin: 0;
+}
+/* The command gets the accent rail: it is the half that had an effect. */
+.tool-body .cmd-in { border-left-color: var(--kx-accent); }
+/* The failed-run rail lives with the other `.term-block` rules further up,
+   corrected there rather than duplicated here. */
+
+/* The command name, coloured like the thing it is: something being invoked.
+   `.tk-fn` is unused by the shell grammar, so this borrows the same "a call"
+   meaning without colliding with any other token in a shell line. */
+.tk-cmd { color: var(--kx-link); font-weight: 600; }
 .trunc-note {
   display: flex; align-items: center; gap: 6px; margin-top: 5px;
   font-size: 11px; color: var(--kx-warn);
@@ -1160,6 +1302,25 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   background: var(--kx-surface-2); font-family: var(--kx-mono); font-size: 10.5px;
 }
 .plan-foot { display: flex; gap: 7px; }
+/* A decided card keeps a row where its buttons were, so the transcript records
+   what was chosen instead of a card that silently lost its footer. Matches
+   .perm-done, which answers the same question for a permission. */
+.plan-done {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 11.5px; color: var(--kx-fg-2);
+}
+.plan-done svg { flex: none; color: var(--kx-accent); }
+/* Revealed only once Keep planning is pressed. The button it replaces is
+   removed rather than hidden, so the row never carries a dead control. */
+.plan-why-row { display: flex; gap: 7px; align-items: stretch; margin-top: 7px; min-width: 0; }
+.plan-why-row > .btn { flex: none; }
+.plan-why {
+  flex: 1 1 auto; min-width: 0;
+  background: var(--kx-surface-2);
+  border: 1px solid var(--kx-line); border-radius: 4px;
+  padding: 5px 8px; font-size: 12px;
+}
+.plan-why::placeholder { color: var(--kx-fg-3); }
 
 /* -- streaming indicator: the Genesis notch sweep --
  *
@@ -1278,8 +1439,22 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .to-latest:hover { color: var(--kx-fg); border-color: var(--kx-raised); }
 .to-latest:focus-visible { outline: 1px solid var(--kx-link); outline-offset: 2px; }
 .to-latest .ic { transform: rotate(0deg); }
-/* The transcript's own view is what it is positioned against. Without this the
-   pill would anchor to the panel and sit over the composer. */
+/* The transcript and the pill, and nothing else.
+   
+   This wrapper is what the pill is positioned against. It used to be
+   `#viewSession`, which also holds the tip strip and the composer - so
+   `bottom: 8px` put the pill 8px from the bottom of the COMPOSER, on top of
+   the phase segment. The rule that did it carried a comment saying this was
+   the fix for exactly that, which is how it survived: the claim was right
+   about the mechanism and wrong about which element bounds it.
+   
+   `min-height: 0` because it is a flex item that must be allowed to shrink
+   below its content - without it the transcript pushes the composer out of
+   the panel instead of scrolling. */
+.log-wrap {
+  position: relative;
+  flex: 1; min-height: 0; display: flex; flex-direction: column;
+}
 #viewSession { position: relative; }
 
 /* A failure is four things stacked, not one paragraph: what happened, what to
@@ -2120,22 +2295,20 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    those two from reading as one setting. The mockup sidesteps this by naming
    the mode "Manual" instead, but renaming a settings enum is a behaviour
    change, not a theme, so the icon carries it here. */
-.perm-btn {
-  display: flex; align-items: center; gap: 5px; flex: none;
-  min-height: 24px; padding: 0 7px; border-radius: 4px;
-  font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
-  letter-spacing: .12em; text-transform: uppercase; text-indent: .12em;
-  color: var(--kx-fg-3);
-  border: 1px solid transparent; background: none;
-  /* Sits immediately after the phase segment, and must not read as a fourth
-     phase. The gap does that work: the segment's own buttons are flush
-     against each other, so any space at all reads as "different control". */
-  margin-left: 3px;
-}
-/* The mode GLYPH is the thing that survives a narrow panel, so it is drawn at
-   a size that can carry the meaning on its own - 15px rather than 11. At 11 it
-   was a smudge next to a word doing all the work. */
-.perm-btn .ic-15 { color: currentColor; flex: none; }
+/* ONE OF THE THREE ACTION BUTTONS, at the owner's instruction.
+   
+   It used to sit on the left beside the model name as a labelled pill, with
+   its own padding, its own 24px min-height and a `margin-left` tuned to keep
+   it from reading as a fourth phase segment. Beside attach and send it needs
+   none of that: it takes `.tb-btn`'s 30x30 plate and hairline, and its label
+   moves to the tooltip and the accessible name, both of which already carried
+   it in full.
+   
+   The class is still `.perm-btn` because the MODE rules below hang off it -
+   the glyph's colour is the whole signal for which mode is armed, and that is
+   the one thing this button does that attach and send do not. */
+.perm-btn .nm { display: none; }
+.perm-btn .ic-13 { color: currentColor; flex: none; }
 .perm-btn:hover { background: var(--kx-hover); color: var(--kx-fg); }
 .perm-btn[aria-expanded="true"] { background: var(--kx-hover); border-color: var(--kx-line); }
 /* Only a mode that stops asking is coloured, and it is coloured on its OWN
@@ -2157,14 +2330,8 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   .perm-btn[data-mode="edits-auto"] { color: var(--kx-agent); }
   .perm-btn[data-mode="full-auto"] { color: var(--kx-error); }
 }
-/* Below ~330px the control row has to choose between wrapping onto a second
-   line and dropping a word. The word goes: the glyph carries the mode, the
-   tooltip and the accessible name carry the sentence, and the row stays one
-   line - which is worth more than the label on a panel this narrow. */
-@media (max-width: 330px) {
-  .perm-btn .nm { display: none; }
-  .perm-btn { padding: 0 5px; }
-}
+/* The narrow-width rule that dropped this button's label is gone: the label
+   is gone at every width now, so there is nothing left to take away. */
 
 
 /* Opens upward, over the transcript, anchored to the composer rather than to
@@ -3101,8 +3268,9 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    because the four controls need 319px of basis at a 380px panel and 64 put
    them one pixel over, which costs a whole row. */
 #modelBtn { flex: 6 1 56px; min-width: 0; max-width: 26ch; }
-.perm-btn { min-width: 0; flex: 0 1 auto; }
-.perm-btn .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The label-shrinking rules that lived here are gone with the label: the mode
+   button is a 30px icon in the action group now, the same at every width, so
+   there is nothing left for a breakpoint to take away from it. */
 
 /* ── Measure at wide widths ──
    The panel is draggable to ~900px and the transcript had no measure cap, so
@@ -3128,29 +3296,11 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    the phase segment's padding, both of which are declared further up; a
    media query does not raise specificity, so source order is the only
    thing that decides which wins. */
-/* NARROW: THE WORD GOES, THE GLYPH GROWS, THE CONTROL STAYS.
- *
- * Below 340px the control row cannot hold phase + model + mode + attach +
- * send at full width. Something has to give, and the choice is between
- * dropping a control off the row and dropping a LABEL. A missing control is
- * unreachable; a missing label is a glyph and a tooltip.
- *
- * So the mode button becomes icon-only and takes the same 30px square as
- * attach and send, which makes the end of the row three matching controls
- * rather than two and a stub. The glyph goes to 17px, because it is now the
- * whole message: a raised hand, angle brackets, or a bolt.
- *
- * The name is still announced - `aria-label` carries it, and the title carries
- * the full sentence - so nothing is lost to a screen reader, only to width. */
-@media (max-width: 400px) {
-  .perm-btn {
-    width: 30px; height: 30px; min-height: 0; padding: 0;
-    justify-content: center;
-    border-color: var(--kx-edge); background: var(--kx-surface-2);
-  }
-  .perm-btn .nm { display: none; }
-  .perm-btn .ic-15 { width: 17px; height: 17px; }
-}
+/* The mode button is icon-only at EVERY width now, not just below 500 - it
+   moved into the action group beside attach and send and took their geometry,
+   so the breakpoint that used to shrink it has nothing left to do. Its block
+   is gone rather than emptied; what still gives ground as the panel narrows is
+   the phase segment and the endpoint dot, below. */
 
 /* The phase segment gives up its side padding at 400, not at 330.
  *
@@ -3165,9 +3315,23 @@ ul.md-l li.md-task, ol.md-l li.md-task {
  * character is the same as showing no name. The 18px this releases takes it to
  * "claude-sonne…", which does distinguish.
  *
- * Above 400px nothing changes, so the mockup's 5px 7px segment is what a panel
- * at its drawn width still shows. */
-@media (max-width: 400px) {
+ * The threshold is 500, not 400, and that number is not a taste call - it is
+ * the width at which the model id stops needing the help. Below it the row
+ * cannot afford both the mode word and a readable model name; above it the
+ * model button reaches its 26ch cap with room over, so the segment and the
+ * mode label can have their padding back and cost nothing.
+ *
+ * At 400 the three of them released TOGETHER and the panel got worse as it got
+ * wider. Measured with `claude-sonnet-4-6` (17 characters):
+ *
+ *   400px  13/17    compact segment, icon-only mode
+ *   420px   5/17    <- both labels came back and took 46px off the model
+ *   460px  11/17
+ *   520px  17/17
+ *
+ * A control that degrades when the user drags the panel WIDER is not a
+ * tradeoff, it is a bug, and it is invisible to anyone testing at one width. */
+@media (max-width: 500px) {
   .seg button { padding: 5px 4px; }
   /* A GREEN dot is the absence of news, and at a narrow panel it is spending a
      character and a half of the model name to say nothing. The red one stays,
@@ -3185,53 +3349,57 @@ ul.md-l li.md-task, ol.md-l li.md-task {
      is left over anyway; the basis only decides whether the row wraps. */
   #modelBtn { flex-basis: 48px; }
 }
-/* THE WRAP, WHEN IT FINALLY COMES, PUTS THE MODEL ON THE SECOND ROW.
- *
- * Below about 265px the five controls genuinely do not fit, and something has
- * to go to a second line. Left to the natural order that was `.tb-actions` -
- * attach and send stranded on a row of their own, hugged to the right, with
- * the whole left half of the composer empty. The group was introduced so a
- * wrap would not orphan send by ITSELF; it stopped send being orphaned alone
- * and left the pair orphaned together.
- *
- * `order` sends the model button down instead. Row one keeps the three
- * controls that are pressed - phase, mode, send - and row two is the model
- * name at full width, which is the one item that gets BETTER for the space:
- * the whole id fits where a moment ago it was five characters and an ellipsis.
- *
- * The threshold is 350px, and it is set by LEGIBILITY rather than by the width
- * at which the row happens to break. Inline, the model button gets whatever is
- * left after four fixed controls: about 8 characters at 360px, 6 at 320, 3 at
- * 300. Eight is enough to tell claude-sonnet from claude-opus; six is not, and
- * three is a letter and an ellipsis. So the button stops competing for the row
- * at the width where competing stops paying, and takes a full line instead -
- * where the whole id fits with room over.
- *
- * Keyboard and screen-reader order are unchanged. `order` moves the paint, not
- * the DOM, and the visual sequence still reads left-to-right, top-to-bottom. */
-/* The model name gets a row to itself until the shared row can actually hold
-   it, which is not until about 500px.
+/* THE WRAP, WHEN IT FINALLY COMES, PUTS THE MODEL ON THE FIRST ROW.
+
+   Something has to give below 400px: five controls do not fit. Left to the
+   natural order the thing that broke away was `.tb-actions` - attach and send
+   stranded on a row of their own, hugged right, with the whole left half of
+   the composer empty. `order` moves the model button instead, because it is
+   the one item that gets BETTER for the space: the whole id fits where a
+   moment ago it was a few characters and an ellipsis.
+
+   The rule that does it is below. This note is here because the numbers in it
+   are the reason the threshold is 400 and not something rounder. */
+/* ONE ROW, AT EVERY WIDTH. The owner's call, made against rendered options.
    
-   This was 350, and the result was that the NARROWEST panel showed the model
-   name in full while every ordinary dock width truncated it. Measured with
-   `claude-sonnet-4-6`, which needs 122px:
+   The model button used to take a row of its own below 400px so the whole id
+   could be read. That kept the name but cost a second toolbar row (74px
+   against 39px) at every ordinary dock width, and the plate it needed in order
+   to still read as a button made a full-width bordered box sitting directly
+   under the placeholder - which reads as a second text field, not a control.
    
-     340px  17/17 characters   (its own row)
-     380px  10/17
-     420px   5/17              <- the worst case, just past the old breakpoint
-     460px  11/17
-     520px  17/17              (the row is finally wide enough)
+   So it stays inline and truncates. What it must NOT do is truncate from the
+   left: at 360px the row leaves it about 82px, which is seven characters, and
+   seven characters of `claude-sonnet-4-6` is "claude-" - a prefix every model
+   this extension is pointed at shares. `fitModelName` in sidebar.js keeps the
+   distinguishing TAIL instead, so the same seven characters say "…et-4-6"
+   rather than nothing. The full id is on the tooltip and the accessible name.
    
-   Five characters is "claud", which every model this extension is pointed at
-   begins with - a truncation that stops before the first distinguishing
-   character shows nothing at all. Below 500 the row cannot fit the segment
-   control, the permission button, three icon buttons AND a model id, so the
-   id takes the row it needs. */
-@media (max-width: 500px) {
+   No plate: inline between the segment control and the mode chip it is read as
+   part of that row, and a third bordered box there competes with two real
+   ones. */
+#modelBtn { justify-content: flex-start; }
+
+/* Below 330 the row genuinely cannot hold four controls plus a name, and
+   something has to break away. Left to the natural order that was
+   `.tb-actions` - attach and send stranded on a row of their own, hugged
+   right, with the whole left half of the composer empty. The group exists so
+   a wrap does not orphan send BY ITSELF; it stopped send being orphaned alone
+   and left the pair orphaned together.
+   
+   `order` sends the model button down instead: row one keeps the three
+   controls that get pressed, and the model takes the second row, where the
+   whole id fits where a moment ago it was an ellipsis and five characters.
+   
+   330, not 400. Above it everything fits on one line - the owner's call, made
+   against rendered options - and 260-300 is narrower than any practical
+   sidebar dock. Keyboard and screen-reader order are unchanged: `order` moves
+   the paint, not the DOM. */
+@media (max-width: 330px) {
   .seg { order: 0; }
   .perm-btn { order: 1; }
   .tb-actions { order: 2; }
-  #modelBtn { order: 3; flex: 1 1 100%; max-width: none; justify-content: center; }
+  #modelBtn { order: 3; flex: 1 1 100%; max-width: none; }
 }
 
 
@@ -3248,6 +3416,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    abruptness the entrance exists to remove. The fade is what is left of it. */
 @media (prefers-reduced-motion: reduce) {
   .qp,
+  .ctx-menu,
   .popover { animation: g-fade-in 110ms linear both; }
 }
 @keyframes g-fade-in { from { opacity: 0; } to { opacity: 1; } }
@@ -3266,7 +3435,18 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    display cut. JetBrains Mono's caps are drawn square enough to carry it, and
    dropping Michroma is what let the design go to one file. */
 .kx-wordmark { font-weight: 700; letter-spacing: .22em; font-size: 10.5px; }
-.w-mark { font-weight: 700; letter-spacing: .18em; font-size: 13px; }
+/* The identity block: the mark, then the wordmark under it.
+   
+   Both scale with the panel rather than sitting at one size, because this
+   screen is the whole panel at every dock width and a mark tuned for 360px is
+   lost at 520 and crowding at 280. The clamps keep the pair in proportion -
+   the wordmark is about a third of the mark's height at every step - and the
+   floor is the size they were before, so a narrow dock loses nothing. */
+.w-crystal { width: clamp(38px, 15vw, 64px); height: clamp(38px, 15vw, 64px); }
+.w-mark {
+  font-weight: 700; letter-spacing: .18em;
+  font-size: clamp(13px, 4.6vw, 19px);
+}
 
 /* The tab strip, rewritten.
    

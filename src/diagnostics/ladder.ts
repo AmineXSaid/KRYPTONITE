@@ -2,7 +2,7 @@ import * as dns from "node:dns/promises";
 import * as net from "node:net";
 import * as tls from "node:tls";
 import type { EndpointProfile } from "../endpoints/profile";
-import { buildTlsMaterial, buildTransport } from "../endpoints/transport";
+import { buildTlsMaterial, buildTransport, resolveProxy } from "../endpoints/transport";
 import { applyAuth } from "../endpoints/auth";
 import { EndpointClient } from "../providers/client";
 
@@ -130,7 +130,7 @@ export async function runLadder(
         fix: "Check your VPN, or add a hosts entry if this is an internal name.",
         ms,
       });
-      ["TCP", "TLS handshake", "Authentication", "Completion", "Streaming", "Tool calling"].forEach(skipRest);
+      ["TCP", "Proxy tunnel", "TLS handshake", "Authentication", "Completion", "Streaming", "Tool calling"].forEach(skipRest);
       return rungs;
     }
     push({ name: "DNS", status: "pass", detail: `${url.hostname} resolves to ${addrs!.map((a) => a.address).join(", ")}.`, ms });
@@ -161,7 +161,7 @@ export async function runLadder(
           : "A firewall is likely blocking the port, or you need a proxy. Set proxy.url.",
         ms,
       });
-      ["TLS handshake", "Authentication", "Completion", "Streaming", "Tool calling"].forEach(skipRest);
+      ["Proxy tunnel", "TLS handshake", "Authentication", "Completion", "Streaming", "Tool calling"].forEach(skipRest);
       return rungs;
     }
     push({
@@ -170,6 +170,113 @@ export async function runLadder(
       detail: `Socket open to ${target.hostname}:${tPort}. ${transport.report.join(" ")}`,
       ms,
     });
+  }
+
+  /* 3b. THE PROXY TUNNEL, WHICH HAD NO RUNG OF ITS OWN.
+   *
+   * The ladder went straight from "a socket opened to the proxy" to a TLS rung
+   * it SKIPS whenever a proxy is in play, and then to a completion attempt. So
+   * the single most common corporate failure - the proxy answering CONNECT
+   * with 407 because it wants credentials, or 403 because the host is not on
+   * its allowlist - surfaced as a completion failure with a network error
+   * underneath it, and the fix ("set proxy.auth") was named nowhere.
+   *
+   * A socket to the proxy proves the proxy is reachable. It proves nothing
+   * about whether it will carry us. This asks it. */
+  {
+    const proxyUrl = resolveProxy(profile);
+    if (!proxyUrl) {
+      push({
+        name: "Proxy tunnel",
+        status: "skipped",
+        detail: "No proxy is configured for this endpoint; the connection is direct.",
+        ms: 0,
+      });
+    } else {
+      const px = new URL(proxyUrl);
+      const pxPort = Number(px.port) || (px.protocol === "https:" ? 443 : 80);
+      const auth = profile.proxy?.auth ?? (px.username ? `${decodeURIComponent(px.username)}:${decodeURIComponent(px.password)}` : "");
+      const [line, err, ms] = await timed(
+        () =>
+          new Promise<string>((resolve, reject) => {
+            const s = net.connect({ host: px.hostname, port: pxPort });
+            let buf = "";
+            s.setTimeout(10_000);
+            s.once("connect", () => {
+              s.write(
+                `CONNECT ${url.hostname}:${port} HTTP/1.1\r\n` +
+                  `Host: ${url.hostname}:${port}\r\n` +
+                  (auth ? `Proxy-Authorization: Basic ${Buffer.from(auth).toString("base64")}\r\n` : "") +
+                  `\r\n`
+              );
+            });
+            s.on("data", (d) => {
+              buf += d.toString("latin1");
+              if (buf.includes("\r\n\r\n")) {
+                s.destroy();
+                resolve(buf.split("\r\n")[0]);
+              }
+            });
+            s.once("timeout", () => (s.destroy(), reject(new Error("the proxy did not answer CONNECT"))));
+            s.once("error", reject);
+            s.once("close", () => resolve(buf.split("\r\n")[0] ?? ""));
+          })
+      );
+      const status = Number(/\s(\d{3})\s/.exec(line ?? "")?.[1] ?? 0);
+      if (err || !status) {
+        push({
+          name: "Proxy tunnel",
+          status: "fail",
+          detail: `${proxyUrl} accepted a socket but did not answer CONNECT - ${
+            err ? (err as Error).message : "no status line"
+          }.`,
+          fix: "The address is reachable but is not behaving like an HTTP proxy. Check that " +
+            "proxy.url (or HTTPS_PROXY) points at the proxy port rather than at a gateway.",
+          ms,
+        });
+        ["TLS handshake", "Authentication", "Completion", "Streaming", "Tool calling"].forEach(skipRest);
+        return rungs;
+      }
+      if (status === 407) {
+        push({
+          name: "Proxy tunnel",
+          status: "fail",
+          detail: `${proxyUrl} answered 407 Proxy Authentication Required for ` +
+            `${url.hostname}:${port}${auth ? " - the credentials it was given were rejected" : ""}.`,
+          fix: auth
+            ? "The proxy credentials are wrong or the scheme is not Basic. Check proxy.auth, " +
+              "and whether this proxy expects NTLM or Kerberos - neither can be configured here, " +
+              "and the usual answer is a local proxy relay that speaks it on your behalf."
+            : 'Set proxy.auth: "user:password" in the profile, or put the credentials in the ' +
+              "proxy URL. Nothing is sent to the model endpoint; this header is for the proxy only.",
+          ms,
+        });
+        ["TLS handshake", "Authentication", "Completion", "Streaming", "Tool calling"].forEach(skipRest);
+        return rungs;
+      }
+      if (status !== 200) {
+        push({
+          name: "Proxy tunnel",
+          status: "fail",
+          detail: `${proxyUrl} refused to tunnel to ${url.hostname}:${port} - ${line}.`,
+          fix: status === 403
+            ? `The proxy is reachable and is refusing this destination. ${url.hostname} is ` +
+              "almost certainly not on its allowlist - that is a request for whoever runs it, " +
+              "not a setting here."
+            : "The proxy answered CONNECT with something other than 200. Its own logs will say " +
+              "why; the status above is what it told us.",
+          ms,
+        });
+        ["TLS handshake", "Authentication", "Completion", "Streaming", "Tool calling"].forEach(skipRest);
+        return rungs;
+      }
+      push({
+        name: "Proxy tunnel",
+        status: "pass",
+        detail: `${proxyUrl} tunnelled to ${url.hostname}:${port}${auth ? " with credentials" : ""}.`,
+        ms,
+      });
+    }
   }
 
   // 4. TLS - direct only. Reports the chain so you can see which root signed it.

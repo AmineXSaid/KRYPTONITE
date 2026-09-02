@@ -72,7 +72,13 @@ const cmds = pkg.contributes.commands;
 ok("every command title is prefixed Genesis",
   cmds.every((c) => c.title.startsWith("Genesis:") || !/kryptonite/i.test(c.title)),
   cmds.filter((c) => /kryptonite/i.test(c.title)).map((c) => c.title).join(", "));
-ok("and there are still all twenty of them", cmds.length === 20, String(cmds.length));
+/* The count is the point: this block is about a rename not silently DROPPING
+   a command, and only an exact number catches one that vanished while another
+   was added. So it is bumped deliberately when a command is added, never
+   loosened to `>=`. 21 since `genesis.attachFromHost`, which keeps the host's
+   file dialog reachable now that the composer's attach button opens a local
+   picker instead. */
+ok("and there are still all twenty-three of them", cmds.length === 23, String(cmds.length));
 // The IDs are a contract and must NOT have been renamed along with the titles.
 ok("but the command IDs are untouched, being a contract",
   cmds.every((c) => c.command.startsWith("genesis.")),

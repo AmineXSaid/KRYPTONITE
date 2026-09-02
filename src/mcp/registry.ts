@@ -21,17 +21,28 @@ type AnyClient = McpClient | McpHttpClient | McpSseClient;
  *         "approval": "ask"
  *       } } }
  *
- * `approval` and `readOnly` are the two additions. MCP has no notion of either.
+ * `approval` and `readOnly` are the two additions. MCP has no notion of
+ * `approval`, and its notion of read-only is not one that can be trusted here -
+ * see below.
  *
  * `approval` gates the call: this extension gates every side effect, and a tool
  * from a server it started is exactly the kind of side effect that needs one.
  *
- * `readOnly` is the user vouching for a server. MCP cannot declare a tool
- * read-only, so Ask and Plan withhold MCP entirely by default - which locks out
- * servers that genuinely only read. This flag lets the person who configured
- * the server say so, and is the ONLY thing that opens Ask/Plan to it. It is a
- * claim, not a proof: nothing here inspects what the server does, exactly as
- * nothing verifies that `approval: "auto"` is wise.
+ * `readOnly` is the user vouching for a server, and it is the ONLY thing that
+ * opens Ask/Plan to it. Ask and Plan withhold MCP entirely by default, which
+ * locks out servers that genuinely only read; this flag is how the person who
+ * configured one says so. It is a claim, not a proof: nothing here inspects
+ * what the server does, exactly as nothing verifies that `approval: "auto"` is
+ * wise.
+ *
+ * MCP does have a read-only signal of its own - `annotations.readOnlyHint` on
+ * each tool - and it is captured at discovery. It is not what opens Ask and
+ * Plan, and the reason is whose word it is: the hint is the server describing
+ * itself, so a server that means harm sets it and walks into the two modes
+ * built on nothing changing. Used the other way round it is genuinely useful,
+ * and that is what `readOnlyWarnings` does: when a server is vouched for but
+ * its own tools do not claim to be read-only, the two claims disagree and the
+ * user is told. That can only narrow trust, never widen it.
  */
 
 export const MCP_PREFIX = "mcp__";
@@ -265,8 +276,22 @@ export class McpRegistry {
    * Reload from disk and connect. Existing clients are stopped first so a reload
    * cannot leave orphaned child processes behind.
    */
+  /**
+   * Generation counter, so an overtaken reload cleans up after itself.
+   *
+   * `reload` stops everything and then repopulates `clients` by name. Two
+   * overlapping calls each spawned a full set of servers and the later `set`
+   * simply overwrote the earlier client objects - whose processes were then
+   * held by nobody and never stopped. App serialises reloads now; this is the
+   * second lock, because the registry is public and a caller elsewhere should
+   * not be able to leak a process tree by calling it twice.
+   */
+  private generation = 0;
+
   async reload(configFile: string, workspaceRoot: string): Promise<void> {
+    const gen = ++this.generation;
     await this.stopAll();
+    if (gen !== this.generation) return;
     this.configPresent = fs.existsSync(configFile);
     const { specs, warnings } = loadMcpConfig(configFile);
     this.warnings = warnings;
@@ -284,10 +309,62 @@ export class McpRegistry {
     await Promise.all(
       enabled.map(async (spec) => {
         const client = makeClient(spec, this.log);
+        if (gen !== this.generation) return;
         this.clients.set(spec.name, client);
         await client.start(workspaceRoot);
+        // A newer reload landed while this one was starting. Nothing else
+        // holds this client, so it stops here or its process outlives us.
+        if (gen !== this.generation) await client.stop();
       })
     );
+
+    // After readiness, not before: the check needs the tools the servers
+    // actually reported, which do not exist until the handshake is done.
+    for (const w of this.readOnlyWarnings()) this.log("warn", `MCP: ${w}`);
+  }
+
+  /**
+   * Servers vouched for as read-only whose own tools do not agree.
+   *
+   * `readOnly: true` is the user saying they looked at a server and it only
+   * reads. It is the one thing that opens Ask and Plan to that server's tools,
+   * and nothing verifies it - which is right, because the alternative is
+   * trusting the server's own account of itself.
+   *
+   * But the server does give an account of itself, per tool, as
+   * `annotations.readOnlyHint`, and that makes one useful comparison possible.
+   * When a vouched-for server exposes tools that do not claim to be read-only,
+   * two independent claims disagree, and the person who made the weaker one
+   * should hear about it. A `filesystem` server marked read-only because its
+   * name sounded harmless, still exposing `write_file`, is the case: Ask and
+   * Plan are now open to that write and nothing else would ever have said so.
+   *
+   * This can only narrow trust. Nothing here grants anything, `isReadOnly`
+   * keeps returning the user's claim untouched, and a server whose tools all
+   * claim read-only is not thereby vouched for - the hint never opens a gate,
+   * because a server that means harm sets it.
+   *
+   * A server that annotates nothing at all is not reported. Annotations are
+   * optional in the protocol and most servers omit them, so treating silence as
+   * disagreement would make this a warning about every workspace.
+   */
+  readOnlyWarnings(): string[] {
+    const out: string[] = [];
+    for (const c of this.clients.values()) {
+      if (c.state !== "ready" || !c.readOnly) continue;
+      const annotated = c.tools.some((t) => t.readOnlyHint === true);
+      if (!annotated) continue;
+      const writers = c.tools.filter((t) => t.readOnlyHint !== true).map((t) => t.name);
+      if (!writers.length) continue;
+      out.push(
+        `Server "${c.spec.name}" is marked readOnly, which opens it to Ask and Plan, but ` +
+          `${writers.length} of its ${c.tools.length} tools do not declare themselves ` +
+          `read-only: ${writers.slice(0, 6).join(", ")}` +
+          `${writers.length > 6 ? ", …" : ""}. Check that the mark is right, or scope the ` +
+          `agent to the tools you meant.`
+      );
+    }
+    return out;
   }
 
   async stopAll(): Promise<void> {
@@ -300,10 +377,13 @@ export class McpRegistry {
   async restart(name: string, workspaceRoot: string): Promise<void> {
     const existing = this.clients.get(name);
     if (!existing) return;
+    const gen = this.generation;
     await existing.stop();
+    if (gen !== this.generation) return; // a full reload overtook this
     const fresh = makeClient(existing.spec, this.log);
     this.clients.set(name, fresh);
     await fresh.start(workspaceRoot);
+    if (gen !== this.generation) await fresh.stop();
   }
 
   statuses(): McpServerStatus[] {

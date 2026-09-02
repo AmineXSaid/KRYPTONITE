@@ -149,12 +149,10 @@ export { secretKeyFor };
 const DRAFT_CAPS: Capabilities = {
   streaming: true,
   tools: true,
-  toolChoice: true,
   vision: false,
   systemRole: "message",
   contextWindow: 128000,
   maxOutputTokens: 4096,
-  tokenCounting: "heuristic",
   maxImageBytes: 1_500_000,
   parallelToolCalls: false,
   // A pre-save check probes reachability, not throughput. Caching is opt-in
@@ -206,7 +204,6 @@ export function draftProfile(form: EndpointForm): EndpointProfile {
     capabilities: DRAFT_CAPS,
     http2: form.http2 === true,
     timeoutMs,
-    retries: 0,
   };
 }
 

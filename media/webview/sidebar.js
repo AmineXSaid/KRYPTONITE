@@ -70,7 +70,15 @@ function _sbRun() {
     /* The three mode glyphs, lifted from the Genesis defs unchanged: an open
        palm for "stop and ask", angle brackets for "edits go through", a bolt
        for "decide for me". */
-    '<symbol id="i-hand" viewBox="0 0 24 24"><path d="M9 11.4V5.6a1.4 1.4 0 0 1 2.8 0v5.8m0 0V4.7a1.4 1.4 0 0 1 2.8 0v6.7m0 0V6.6a1.4 1.4 0 0 1 2.8 0V13c0 4.4-2.3 7.6-6.1 7.6S6.2 17.4 6.2 13v-2.1a1.4 1.4 0 0 1 2.8 0v.5" ' + S6 + ' stroke-width="1.5"/></symbol>' +
+    /* Manual mode's mark. It was a raised open palm, and it was the odd one
+       out three ways: a pictogram in a set whose other two members are
+       geometric (`<>` and a bolt); a "stop" gesture on a mode that does not
+       stop but ASKS; and, measured, an 8x13 bbox against the bolt's 9x14 and
+       the brackets' 11x7 - the thinnest ink of the three, which at the 15px
+       the composer draws it left a smudge rather than a shape.
+       A shield carrying a check is what Manual actually does: nothing passes
+       unchecked. 11x14 of ink, so it holds its shape at 15px. */
+    '<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 2.9 4.4 6.1v5.6c0 4.4 3.1 8.1 7.6 9.4 4.5-1.3 7.6-5 7.6-9.4V6.1zM9.2 12.1l2 2 3.6-3.9" ' + S6R + ' stroke-width="1.5"/></symbol>' +
     '<symbol id="i-code" viewBox="0 0 24 24"><path d="M9.5 7.5L5 12l4.5 4.5M14.5 7.5L19 12l-4.5 4.5" ' + S6 + ' stroke-width="1.7"/></symbol>' +
     '<symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13.2 3L6 13.6h4.6L10.2 21 17.4 10.4h-4.6z" ' + S6 + ' stroke-width="1.5"/></symbol>' +
     '<symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" ' + S6 + ' stroke-width="1.5"/><path d="M3.5 12h17M12 3.5c-4.5 5-4.5 12 0 17 4.5-5 4.5-12 0-17z" ' + S6 + ' stroke-width="1.4"/></symbol>' +
@@ -124,7 +132,7 @@ function _sbRun() {
   var RUNG_LABELS = {
     "Certificates and keys": "Config", "Profile": "Config", "DNS": "DNS", "TCP": "TCP",
     "TLS handshake": "TLS", "Authentication": "Auth", "Completion": "HTTP",
-    "Streaming": "Stream", "Tool calling": "Tools"
+    "Streaming": "Stream", "Tool calling": "Tools", "Proxy tunnel": "Proxy"
   };
 
   /* GitHub-flavoured callout kinds -> the glyph each one wears. */
@@ -506,10 +514,20 @@ function _sbRun() {
     "between|like|order|by|group|having|limit|offset|union|all|distinct|case|when|" +
     "then|else|end|primary|foreign|key|references|default|unique|constraint|cascade|" +
     "begin|commit|rollback|transaction|with|exists|any|asc|desc|count|sum|avg|min|max";
+  /* SHELL SYNTAX ONLY. The builtins that used to be in here - echo, cd, test,
+     printf, read, export, source, alias, set, unset, eval, trap, shopt - are
+     not syntax, they are THINGS YOU RUN, and they were being coloured as
+     keywords while `npm`, `git`, `ls` and `node` were coloured as nothing at
+     all. That is backwards: on a command line the program being invoked is
+     the most important word on the line, and which of them happens to be a
+     shell builtin is an implementation detail of the shell.
+     They fall through to the `cmd` rule below, which colours whatever sits in
+     command position - so they are still coloured, and now the same colour as
+     every other command. It also stops `--set` and `read-only` being tinted
+     mid-flag, which the old \b word match did. */
   var KW_SH =
-    "if|then|elif|else|fi|for|while|until|do|done|case|esac|in|function|return|local|" +
-    "export|source|alias|shift|exit|break|continue|set|unset|readonly|declare|eval|" +
-    "trap|echo|cd|test|printf|read|shopt";
+    "if|then|elif|else|fi|for|while|until|do|done|case|esac|in|function|return|" +
+    "local|break|continue";
 
   var KW_BAT =
     "set|setlocal|endlocal|echo|if|else|for|in|do|goto|call|exit|pause|shift|" +
@@ -581,6 +599,23 @@ function _sbRun() {
       ["st", /"(?:\\[\s\S]|[^"\\])*"|'[^']*'/],
       ["va", /\$(?:\{[^}\n]*\}|\(\(?|[\w]+|[@*#?$!0-9-])/],
       ["kw", new RegExp("\\b(?:" + KW_SH + ")\\b")],
+      /* THE COMMAND BEING RUN.
+      
+         After `kw`, so `if` and `for` stay syntax rather than being read as
+         programs; before `at`, so a command is never mistaken for a flag.
+      
+         Command position is the start of the line, or after a pipe, a
+         separator or a subshell - `npm test | grep -c PASS && ls` colours all
+         three. `$` is in the set because pasted terminal output almost always
+         carries the prompt, and without it `$ npm run verify` left `npm`
+         plain, which is the exact case this was reported for. */
+      /* Lowercase, `.` or `/` to start. A fenced `bash` block usually holds a
+         command AND its output, and matching any word at line start painted
+         `PASS`, `FAIL` and `WARN` as programs - which looks exactly as wrong
+         as it sounds. Commands are lowercase by convention (`npm`, `git`,
+         `ls`, `python3`) or a path (`./run.sh`, `/usr/bin/env`), so that is
+         what this asks for. */
+      ["cmd", /(?<=(?:^|[|&;($]|\n)\s*)[a-z_.\/][\w.+\/-]*/],
       ["at", /(?<=\s)--?[A-Za-z][\w-]*/],
       ["nu", /\b\d+\b/],
       ["pu", /[{}()[\];|&<>=!`]/],
@@ -1037,15 +1072,31 @@ function _sbRun() {
           // The conversation's name. Placeholder until the model has been asked
           // for a real one, so the strip never appears and disappears.
           '<div class="convo-title" id="convoTitle" hidden></div>' +
-          '<div id="log"></div>' +
-          /* Once you scroll up mid-stream, autoscroll stops following the
-             answer - correctly, because fighting the user is worse. But nothing
-             offered a way back: the reply kept growing below the fold with no
-             signal it had, and the only route down was scrolling by hand.
-             Shown only when it is true, so it costs no chrome the rest of the
-             time. */
-          '<button class="to-latest" id="toLatest" hidden>' +
-            icon("i-caret", "ic-11") + "<span>Jump to latest</span></button>" +
+          /* The pill is positioned against THIS, not against the view.
+          
+             It used to be an absolute child of `#viewSession` at `bottom: 8px`
+             - and `#viewSession` holds the composer as well as the transcript,
+             so "8px from the bottom" was 8px from the bottom of the COMPOSER.
+             Measured at a 360px panel: the transcript ended at y=418 and the
+             pill sat at 606-632, on top of a composer occupying 497-628,
+             covering the ACT button. The comment on `.to-latest` claimed this
+             wrapper's job was already being done by `#viewSession`; it was
+             not, and nothing rendered the two together to notice.
+          
+             It cannot go inside `#log` either: that is the scroll container,
+             and an absolutely positioned child of a scroller travels with the
+             content instead of staying at its foot. */
+          '<div class="log-wrap">' +
+            '<div id="log"></div>' +
+            /* Once you scroll up mid-stream, autoscroll stops following the
+               answer - correctly, because fighting the user is worse. But
+               nothing offered a way back: the reply kept growing below the fold
+               with no signal it had, and the only route down was scrolling by
+               hand. Shown only when it is true, so it costs no chrome the rest
+               of the time. */
+            '<button class="to-latest" id="toLatest" hidden>' +
+              icon("i-caret", "ic-11") + "<span>Jump to latest</span></button>" +
+          "</div>" +
           /* THE TRANSCRIPT IS NOT A LIVE REGION, AND USED TO BE ONE.
            *
            * `#log` carried aria-live="polite" - which sounds right and is the
@@ -1108,7 +1159,14 @@ function _sbRun() {
             '</div>' +
             '<div class="composer">' +
               '<div class="sel-pill" id="selPill" hidden>' + icon("i-file", "ic-13") +
-                '<span id="selText"></span><span class="sp"></span>' +
+                /* `ell` is not decoration here. Without it the span is a flex
+                   item at its default `min-width: auto`, so a long path cannot
+                   shrink: it pushed the row 153px past the composer, which
+                   CLIPS - and the dismiss button went with it. A selection on
+                   a deep path could not be cleared at any panel width, so it
+                   rode along with every message sent. The sibling ed-pill
+                   already carried this class; this one was missed. */
+                '<span class="ell" id="selText"></span><span class="sp"></span>' +
                 '<button class="tb-btn" id="selClear" title="Dismiss selection" aria-label="Dismiss selection" style="width:18px;height:18px">' + icon("i-x", "ic-9") + '</button>' +
               '</div>' +
               // The automatic one, above the attachments and visibly unlike
@@ -1165,28 +1223,56 @@ function _sbRun() {
                 // press send": what it may do, which model does it, and
                 // whether it will ask first. It used to sit under the box in a
                 // footer, which is where things go to be ignored.
-                '<button class="perm-btn" id="permBtn" aria-haspopup="menu" aria-expanded="false"' +
-                  ' title="What the agent may do without asking">' +
-                  icon("i-hand", "ic-15") + '<span class="nm" id="permName">Manual</span>' +
-                '</button>' +
                 '<span class="sp"></span>' +
-                // Attach and send. THERE IS NO `@` BUTTON, on purpose.
+                // Mode, attach and send. THERE IS NO `@` BUTTON, on purpose.
                 //
                 // It typed a single character into the box, which is a thing
                 // the keyboard already does and which the placeholder already
-                // teaches - "( / skills · @ files )". As a sixth control in a
+                // teaches - "( / skills · @ files )". As another control in a
                 // wrapping row it was the one that broke the line: the group
                 // orphaned onto a second row and sat right-aligned with the
                 // whole left half of the composer empty. The design's composer
                 // has five controls and this is the one it does not have.
                 //
-                // The pair is still a GROUP rather than two siblings, so a
-                // wrap at a narrow width moves them together instead of
-                // leaving send on a row by itself.
+                // These are a GROUP rather than siblings, so a wrap at a narrow
+                // width moves them together instead of leaving send on a row by
+                // itself.
+                //
+                // The MODE button joins them here, at the owner's instruction,
+                // and takes their geometry. It used to sit on the left beside
+                // the model name, where it was a labelled pill among labelled
+                // controls; here it is a 30px icon button in a run of three,
+                // which is what it always was underneath - a glyph, a tooltip
+                // and a sheet. Its label moves to the tooltip and the
+                // accessible name, both of which already carried it.
                 '<span class="tb-actions">' +
+                  '<button class="tb-btn perm-btn" id="permBtn" aria-haspopup="menu" aria-expanded="false"' +
+                    ' title="What the agent may do without asking">' +
+                    icon("i-shield", "ic-13") + '<span class="nm" id="permName">Manual</span>' +
+                  '</button>' +
                   '<button class="tb-btn" id="clipBtn" title="Upload from your computer - or drop files on the box" aria-label="Upload files from your computer">' + icon("i-clip", "ic-13") + '</button>' +
                   '<button id="sendBtn" data-ready="0" data-mode="send" title="Send" aria-label="Send">' + icon("i-up", "ic-13") + '</button>' +
                 '</span>' +
+                /* The local file picker.
+                
+                   `showOpenDialog` runs on the EXTENSION HOST. In a WSL, dev
+                   container, SSH or Codespaces window that host is the remote
+                   machine, so the dialog browses the remote filesystem and a
+                   file sitting on the user's own Desktop is unreachable
+                   through it - which is exactly what was reported.
+                
+                   The webview renderer is always LOCAL, on the machine with
+                   the screen and the mouse, so a plain file input here opens
+                   the user's own OS picker whatever the window is attached to.
+                   The bytes arrive in the page and take the same path a
+                   dropped or pasted file already takes.
+                
+                   Off-screen rather than `display: none`: a hidden input is
+                   not focusable and some engines refuse to open the picker for
+                   one that is not rendered. */
+                '<input type="file" id="localPick" multiple ' +
+                  'style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none" ' +
+                  'tabindex="-1" aria-hidden="true">' +
               '</div>' +
             '</div>' +
             // The mode picker is a sheet over the whole panel rather than a
@@ -1225,6 +1311,14 @@ function _sbRun() {
             '<div class="ag-body" id="agBody"></div>' +
           '</div>' +
         '</section>' +
+        /* The transcript's context menu.
+         *
+         * Outside the header on purpose: the document-level closer exempts
+         * `.kx-header` so a click inside the history popover does not shut it,
+         * and this menu wants the opposite - a click on one of its rows should
+         * run the action and then close it. Position is fixed and set at open
+         * time, so where it sits in the tree costs nothing. */
+        '<div class="ctx-menu" id="msgMenu" role="menu" hidden></div>' +
         '<section class="view" id="viewDiag" role="tabpanel" aria-labelledby="tabDiag" hidden>' +
           '<button class="cc-card" id="ccBtn">' + crystal(19) +
             '<span class="col"><span class="t">Control Center</span>' +
@@ -1299,8 +1393,116 @@ function _sbRun() {
   function closePops() {
     $("historyPop").hidden = true;
     $("morePop").hidden = true;
+    // The message menu closes with the rest. Two menus open at once is the bug
+    // a second closer would have introduced.
+    if ($("msgMenu")) $("msgMenu").hidden = true;
     $("histBtn").setAttribute("aria-expanded", "false");
     $("moreBtn").setAttribute("aria-expanded", "false");
+  }
+
+  /* ───────────────────── the message context menu ─────────────────────
+   *
+   * The transcript was the one surface here with no per-message actions at all.
+   * `turn-foot` is per TURN, sits at the end of it, and its Copy only ever took
+   * the assistant's answer - so there was no way to copy a question, and no way
+   * to reach an earlier turn's answer except by selecting it by hand in a 340px
+   * column.
+   *
+   * RIGHT-CLICK COSTS SOMETHING, AND COPY IS THE PRICE. A webview's right-click
+   * shows VS Code's own menu, which is where Copy lives; opening ours means
+   * preventDefault(), which takes that away. So Copy is a row here - not scope
+   * creep, but restoring the one capability the trigger removes. For the same
+   * reason a fenced code block is left alone entirely: it has its own copy
+   * button two pixels away, and selecting half a snippet is worth more there
+   * than any message-level action.
+   *
+   * `role` is which messages a row belongs on. Edit and Resend are meaningless
+   * on an answer - there is nothing to re-ask - so an answer offers the two
+   * that mean something and no more.
+   */
+  var MSG_ACTIONS = [
+    ["edit",   "user", "i-compose", "Edit"],
+    ["resend", "user", "i-up",      "Resend"],
+    ["attach", "both", "i-clip",    "Attach to composer"],
+    ["copy",   "both", "i-copy",    "Copy"]
+  ];
+
+  /** The string a message was built from, never the string its DOM holds. */
+  function msgText(el) {
+    if (el && typeof el._raw === "string") return el._raw;
+    // A message from a build before `_raw` existed on this side. Better than
+    // nothing, and wrong only about the newlines between multimodal blocks.
+    var t = el && el.querySelector(".u-text");
+    return (t || el || {}).textContent || "";
+  }
+
+  /** Where this message sits in the conversation, for naming an attachment. */
+  function msgIndex(el) {
+    var all = logEl.querySelectorAll(".msg-user, .msg-ai");
+    for (var i = 0; i < all.length; i++) if (all[i] === el) return i + 1;
+    return all.length + 1;
+  }
+
+  function openMsgMenu(el, x, y) {
+    // One closer owns every menu; opening this one shuts whatever else is up.
+    closePops();
+    var menu = $("msgMenu");
+    if (!menu) return;
+    var isUser = el.classList.contains("msg-user");
+    var drafting = ($("draft").value || "").trim().length > 0;
+    var html = "";
+    for (var i = 0; i < MSG_ACTIONS.length; i++) {
+      var a = MSG_ACTIONS[i];
+      if (a[1] === "user" && !isUser) continue;
+      /* REPLACING A HALF-WRITTEN DRAFT IS DESTROYING WORK, so the row says so
+         before the click rather than after it. Same rule the mode sheet and the
+         delete confirmations follow: the cost goes on the control. */
+      var label = a[0] === "edit" && drafting ? "Replace draft and edit" : a[3];
+      html += '<button class="pop-row" role="menuitem" data-mm="' + a[0] + '">' +
+        icon(a[2], "ic-13") + '<span class="t">' + esc(label) + "</span></button>";
+    }
+    menu.innerHTML = html;
+    menu._target = el;
+    // Where the transcript stood when this menu was anchored. The scroll
+    // closer measures against it rather than trusting the event itself.
+    menu._scrollAt = logEl.scrollTop;
+    menu.hidden = false;
+
+    /* Clamped to the panel, which at its narrowest is about 200px - narrower
+       than the menu itself is wide. Measured after unhiding, because a hidden
+       element has no size to measure. */
+    var w = menu.offsetWidth;
+    var h = menu.offsetHeight;
+    var maxX = window.innerWidth;
+    var maxY = window.innerHeight;
+    var left = x + w > maxX ? Math.max(0, maxX - w - 4) : x;
+    var top = y + h > maxY ? Math.max(0, maxY - h - 4) : y;
+    menu.style.left = left + "px";
+    menu.style.top = top + "px";
+  }
+
+  function onMsgAction(action, el) {
+    var text = msgText(el);
+    if (action === "copy") { post("copyText", { text: text }); return; }
+    if (action === "resend") { sendText(text); return; }
+    if (action === "edit") {
+      var draft = $("draft");
+      draft.value = text;
+      syncComposer();
+      draft.focus();
+      // The caret at the END, because this is a message to amend rather than
+      // one to retype from the top.
+      if (draft.setSelectionRange) draft.setSelectionRange(text.length, text.length);
+      return;
+    }
+    if (action === "attach") {
+      var isUser = el.classList.contains("msg-user");
+      var name = (isUser ? "question-" : "answer-") + msgIndex(el) + ".md";
+      if (addAttachment(textAttachment(name, text))) {
+        renderAttachments();
+        syncComposer();
+      }
+    }
   }
 
   /* Each row is one stored conversation. The message count and the active dot
@@ -1348,6 +1550,17 @@ function _sbRun() {
           '<span class="ell"><span class="t ell">' + esc(s.title) + '</span>' +
           '<span class="m">' + esc(s.when) + ' · ' + n + '</span></span>' +
         '</button>' +
+        // Stop, for a conversation that is working but is not the one on
+        // screen. The composer's Stop deliberately reaches only the visible
+        // turn, which left a backgrounded turn - one blocked on an approval
+        // nobody saw asked, or inside a long command - with no control
+        // anywhere that could reach it. This list is where those conversations
+        // are, so this is where the control belongs.
+        (s.running
+          ? '<button class="hist-stop" data-stop="' + esc(s.id) + '" title="Stop this turn" ' +
+              'aria-label="Stop the turn running in ' + esc(s.title) + '">' +
+              icon("i-stop", "ic-13") + "</button>"
+          : "") +
         '<button class="hist-del" data-del="' + esc(s.id) + '" title="Delete session" ' +
           'aria-label="Delete session">' + icon("i-trash", "ic-13") + '</button>' +
         '</div>';
@@ -1629,7 +1842,7 @@ function _sbRun() {
     // "ASK PLAN ACT ... ASK" the pair looks like one broken segmented control
     // with a stray fourth option. The design's own name for this mode is
     // Manual, which is both unambiguous and what the sheet already called it.
-    ["ask", "Manual", "Always ask before making changes", "Manual", "i-hand", "var(--kx-fg)"],
+    ["ask", "Manual", "Always ask before making changes", "Manual", "i-shield", "var(--kx-fg)"],
     ["edits-auto", "Accept edits", "File edits run automatically. Shell commands still ask.", "Edits", "i-code", "var(--kx-agent)"],
     /* "The agent handles permission decisions itself" was the mechanism, and the
        other two rows here name a consequence: "Always ask before making
@@ -1913,6 +2126,11 @@ function _sbRun() {
     return el;
   }
   function clearTranscript() {
+    /* Dropped, not sealed: the element is about to be removed from the DOM
+       with the rest of the transcript, and holding the reference would have
+       the next turn append its reasoning into a detached node - text written
+       to a box nobody can see. */
+    thinkEl = null;
     if (aiFrame) { cancelAnimationFrame(aiFrame); aiFrame = 0; }
     logEl.innerHTML = "";
     aiEl = null; streamEl = null; pendingTool = null; todoEl = null; toolGroup = null;
@@ -1939,10 +2157,18 @@ function _sbRun() {
     var spin = arriving !== false ? " spin-in" : "";
     clearTranscript();
     if (!S.workspace.open) {
+      /* A BUTTON, not only a sentence. This screen said the right thing and
+         offered no way to act on it, while the endpoint screen below it -
+         the second-most-likely first-run state - has offered two buttons all
+         along. Someone reading "open a folder" with nothing to press goes to
+         the menu bar if they know VS Code and to Settings if they do not. */
       logEl.appendChild(div("welcome",
         crystal(46, "crystal" + spin) +
         "<h2>Open a folder to use Genesis</h2>" +
-        "<p>Genesis reads endpoint profiles and skills from the folder you have open, and edits files inside it.</p>"));
+        "<p>Genesis reads endpoint profiles and skills from the folder you have open, and edits files inside it. It has nowhere to read from and nothing to edit until there is one.</p>" +
+        '<div class="chips">' +
+          '<button class="btn primary" data-act="openFolder">Open folder…</button>' +
+        '</div>'));
       return;
     }
     if (!hasEndpoint()) {
@@ -1985,12 +2211,27 @@ function _sbRun() {
      * so two of them read as eyes - and as eyes they were ugly. The mark is a
      * BEZEL: four notches on a ring, which is a thing that turns. So it turns,
      * once, a beat after the panel arrives, and then it is a logo again. */
-    var body = crystal(34, "crystal" + spin) +
+    /* 34 was too small to be the brand mark on the one screen that exists to
+       carry it: at 34px it read as an icon beside the wordmark rather than as
+       the thing the screen is built around, and the wordmark under it is only
+       19px tall - so the whole identity block was 56px in a 340px column.
+       56 gives the mark presence without crowding the column it sits in; the
+       CSS scales it down with the panel so a narrow dock does not have a mark
+       wider than the text under it. */
+    var body = crystal(56, "crystal w-crystal" + spin) +
       '<div class="w-mark">Genesis</div>' +
       '<p>' + (recent.length
         ? "Pick up where you left off, or start something new."
-        : "I read your workspace, propose edits as diffs, and never write a file " +
-          "until you accept it. Ask anything about this repository.") + "</p>";
+        /* This used to say "never write a file until you accept it", which is
+           the first sentence a new user reads and is not what happens: a write
+           lands on disk as soon as the approval card is answered, and the diff
+           card afterwards is a review with an undo behind it. In edits-auto or
+           full-auto, and after one "Always allow", there is no card at all.
+           The honest version is still the reassuring one - nothing happens
+           unasked, and every change is reviewable and revertible. */
+        : "I read your workspace and ask before I change anything. Every edit " +
+          "arrives as a diff you can review and undo. Ask anything about this " +
+          "repository.") + "</p>";
 
     // Openers. These were removed once for being invented examples about a
     // function nobody in the workspace has - and that objection was right about
@@ -2098,6 +2339,15 @@ function _sbRun() {
    */
   function userTurn(html, plain, att) {
     var msg = div("msg-user");
+    /* The text this turn was BUILT from, kept on the element.
+     *
+     * `.msg-ai` has carried `_raw` since streaming existed; this side threw
+     * `plain` away and nothing could get it back. Scraping the DOM is not the
+     * same string: a multimodal question joins its text blocks with newlines
+     * and drops its images, so textContent runs the blocks together and loses
+     * the breaks. Everything the context menu does - copy, resend, attach -
+     * wants the string the model was actually sent. */
+    msg._raw = plain;
     var body = div("u-body");
     var text = div("u-text", html);
     body.appendChild(text);
@@ -2338,6 +2588,13 @@ function _sbRun() {
 
   function appendAi(text) {
     if (!aiEl) {
+      /* The answer has started, so the working is finished. Sealing HERE
+         rather than only at turn end matters for the common shape: a model
+         thinks, answers, thinks again, answers again. Left open, the second
+         run of reasoning would append into the first box - above the first
+         answer - and the transcript would claim the model thought it all
+         before saying anything. */
+      sealThinking();
       // Prose after a run of tools ends the strip - the model has stopped
       // working and started explaining.
       closeToolGroup();
@@ -2367,6 +2624,7 @@ function _sbRun() {
    * without a trace and the answer to arrive in a fresh one.
    */
   function resetAi() {
+    sealThinking();
     if (!aiEl) return;
     if (aiFrame) { cancelAnimationFrame(aiFrame); aiFrame = null; }
     if (aiEl.parentNode) aiEl.parentNode.removeChild(aiEl);
@@ -2415,47 +2673,112 @@ function _sbRun() {
    * surprising and worth nothing the rest of the time, which is exactly the
    * shape of a disclosure.
    */
-  function addThinking(text) {
-    var t = String(text == null ? "" : text).trim();
-    if (!t) return;
-    // Captured before `aiEl` is dropped, because the insert below needs the
-    // answer element that is already on screen, and the next line is what
-    // forgets it.
-    var prior = aiEl && aiEl.parentNode === logEl ? aiEl : null;
-    // Not through `aiEl`: this is not the answer, and appending it there would
-    // put it back in the same paragraph flow it just came out of.
-    aiEl = null;
+  /* The live box, or null between turns. `addThinking` grows this rather than
+     making a new one per chunk; `sealThinking` closes it. */
+  var thinkEl = null;
 
-    var box = div("think");
+  function thinkWords(t) {
+    var w = t.trim() ? t.trim().split(/\s+/).length : 0;
+    return w + " word" + (w === 1 ? "" : "s");
+  }
+
+  /**
+   * Close the live thinking box: collapse it and give it its final count.
+   *
+   * Called when the answer starts and again at turn end, so a turn that never
+   * produced visible text still seals. Idempotent.
+   */
+  function sealThinking() {
+    if (!thinkEl) return;
+    var box = thinkEl;
+    thinkEl = null;
     box.setAttribute("data-open", "0");
-    var words = t.split(/\s+/).length;
-    box.innerHTML =
-      '<button class="think-head">' + icon("i-chev", "ic-9 chev") +
-        '<span class="n">Thought for ' + words + " word" + (words === 1 ? "" : "s") + "</span></button>" +
-      '<div class="think-body">' + esc(t) + "</div>";
-    box.querySelector(".think-head").addEventListener("click", function () {
-      box.setAttribute("data-open", box.getAttribute("data-open") === "1" ? "0" : "1");
-    });
+    box.setAttribute("data-live", "0");
+    box.querySelector(".think-head .n").textContent =
+      "Thought for " + thinkWords(box._raw || "");
+  }
 
-    // ABOVE the answer, never below it.
-    //
-    // Appending put the working after the prose it produced, because that is
-    // the order the events arrive in: several providers flush a reasoning
-    // summary only once the visible answer has started, so the transcript read
-    // "here is the answer... and here is the thinking that led to it", which is
-    // backwards and makes the disclosure look like an afterthought rather than
-    // a preamble.
-    //
-    if (prior) {
-      flushAi();
-      var stick = atBottom();
-      logEl.insertBefore(box, prior);
-      if (stick) scroll();
-      syncToLatest();
-    syncToLatest();
-    } else {
-      add(box);
+  function addThinking(text) {
+    var t = String(text == null ? "" : text);
+    if (!t.trim() && !thinkEl) return;
+
+    /* ONE BOX PER RUN OF THINKING, OPEN WHILE IT IS BEING WRITTEN.
+    
+       This used to build a fresh `.think` element on every reasoning event.
+       A model that streams its working in chunks - which is what a reasoning
+       model does - therefore produced one collapsed strip PER CHUNK, each
+       labelled "Thought for 4 words" as though it were a finished thought.
+       Measured against the shipped panel with five chunks: five boxes, and
+       `visibleChars: 0` at every step, because every one of them was closed.
+    
+       So while the model was thinking the user watched a stack of identical
+       grey strips accumulate, saw none of the reasoning, and then got the
+       whole answer at once. The panel had the text the entire time and was
+       hiding it behind five doors.
+    
+       Now: the box is created once, opens itself, and grows. The disclosure
+       still exists - it seals shut the moment the answer starts, which is
+       when the working stops being the interesting thing on screen - but
+       while the model IS thinking, its thinking is what you see. */
+    if (!thinkEl) {
+      // Captured before `aiEl` is dropped, because the insert below needs the
+      // answer element that is already on screen, and the next line is what
+      // forgets it.
+      var prior = aiEl && aiEl.parentNode === logEl ? aiEl : null;
+      // Not through `aiEl`: this is not the answer, and appending it there
+      // would put it back in the same paragraph flow it just came out of.
+      aiEl = null;
+
+      var box = div("think");
+      // Open, and marked live so the stylesheet can show it is still being
+      // written rather than presenting it as a finished disclosure.
+      box.setAttribute("data-open", "1");
+      box.setAttribute("data-live", "1");
+      box._raw = "";
+      box.innerHTML =
+        '<button class="think-head">' + icon("i-chev", "ic-9 chev") +
+          '<span class="n">Thinking\u2026</span></button>' +
+        '<div class="think-body"></div>';
+      box.querySelector(".think-head").addEventListener("click", function () {
+        box.setAttribute("data-open", box.getAttribute("data-open") === "1" ? "0" : "1");
+      });
+
+      // ABOVE the answer, never below it.
+      //
+      // Appending put the working after the prose it produced, because that is
+      // the order the events arrive in: several providers flush a reasoning
+      // summary only once the visible answer has started, so the transcript
+      // read "here is the answer... and here is the thinking that led to it",
+      // which is backwards and makes the disclosure look like an afterthought
+      // rather than a preamble.
+      if (prior) {
+        flushAi();
+        var stick = atBottom();
+        logEl.insertBefore(box, prior);
+        if (stick) scroll();
+        syncToLatest();
+      } else {
+        add(box);
+      }
+      thinkEl = box;
     }
+
+    thinkEl._raw += t;
+    /* textContent, not innerHTML: this is the model's raw working, it arrives
+       mid-token, and half a fence or a stray `<` must not become markup. It is
+       also the cheap paint - one text node replaced, no parse - which matters
+       because this runs on every chunk of a stream. */
+    var body = thinkEl.querySelector(".think-body");
+    var stick = atBottom();
+    body.textContent = thinkEl._raw;
+    /* The box is capped at 168px, so past that the newest thinking is below
+       its own fold. Follow it: the point of showing the working live is the
+       part being written, and a live region that stops at the first screenful
+       is back to showing nothing. No CSS does this - see the note in
+       sidebar.css - so it is set here, after the text lands. */
+    body.scrollTop = body.scrollHeight;
+    if (stick) scroll();
+    syncToLatest();
   }
 
   /** Freeze the group's counters. Safe to call when no group is open. */
@@ -2565,7 +2888,12 @@ function _sbRun() {
       // here. Shown even on failure, where "what was actually run" is the
       // first thing anyone checks.
       var cmd = div("term-block cmd-in");
-      cmd.textContent = String(args.command);
+      /* Highlighted, not `textContent`. This was the one place in the panel
+         showing a shell command with no colour at all - the command the user
+         is being asked to approve, in a card whose whole job is to say what
+         is about to run. `highlight()` escapes everything it emits, so its
+         output is safe as innerHTML. */
+      cmd.innerHTML = highlight(String(args.command), "sh");
       body.appendChild(ioRow("IN", cmd));
       if (text) body.appendChild(ioRow("OUT", resultBlock(text, name, args)));
     } else if (preview) body.appendChild(preview);
@@ -2983,7 +3311,15 @@ function _sbRun() {
     if (a.allMcp) parts.push("all MCP servers");
     else if (a.mcp && a.mcp.length) {
       parts.push("MCP: " + a.mcp.map(function (m) {
-        return m.include && m.include.length ? m.server + " (" + m.include.length + ")" : m.server;
+        // Three states. A count is "these tools"; a bare name is "all of them";
+        // "(none)" is an include list written and left empty, which withholds
+        // every tool on the server. Reading include.length alone drew that last
+        // case as unrestricted, which is the label agreeing with a bug rather
+        // than with the user's file.
+        if (!m.includeActive) return m.server;
+        return m.include && m.include.length
+          ? m.server + " (" + m.include.length + ")"
+          : m.server + " (none)";
       }).join(", "));
     } else parts.push("no MCP");
     if (a.skills && a.skills.length) parts.push(a.skills.length + " skills");
@@ -3342,9 +3678,29 @@ function _sbRun() {
     }
   }
 
+  /**
+   * Retire the buttons on every plan card already in the transcript.
+   *
+   * The host remembers exactly one plan - the last one proposed - so a card
+   * from an earlier round is a button that would run something other than what
+   * it lists. That is not hypothetical now that "Keep planning" asks for a
+   * re-plan: the second card arrives with the first still armed above it.
+   */
+  function retirePlans(label) {
+    var feet = logEl.querySelectorAll(".plan-card .plan-foot");
+    for (var i = 0; i < feet.length; i++) {
+      var foot = feet[i];
+      foot.className = "plan-done";
+      foot.innerHTML = '<span style="display:flex">' + icon("i-check", "ic-13") + "</span>" +
+        "<span>" + esc(label) + "</span>";
+    }
+  }
+
   function addPlan(m) {
     aiEl = null;
     closeToolGroup();
+    // Whatever is above this card can no longer be acted on.
+    retirePlans("Superseded by a newer plan");
     var steps = "";
     for (var i = 0; i < m.steps.length; i++) {
       steps += '<li><span class="n">' + (i + 1) + '</span><span>' + esc(m.steps[i]) + "</span></li>";
@@ -3356,15 +3712,64 @@ function _sbRun() {
       '<div class="plan-foot">' +
         '<button class="btn go" data-plan="run">Approve &amp; run</button>' +
         '<button class="btn" data-plan="keep">Keep planning</button></div>'));
+
+    // Replaces the footer with a stamp rather than removing it, so a decided
+    // card still says what was decided instead of quietly losing its buttons.
+    function settle(label) {
+      var foot = el.querySelector(".plan-foot");
+      if (!foot) return;
+      foot.className = "plan-done";
+      foot.innerHTML = '<span style="display:flex">' + icon("i-check", "ic-13") + "</span>" +
+        "<span>" + esc(label) + "</span>";
+    }
+
+    // The objection is read straight off the input at the moment it is sent and
+    // never mirrored into `S`. Its life is the card's life, which is right: a
+    // draft copied into state would outlive the conversation it belongs to and
+    // reappear somewhere it means nothing.
+    function decline() {
+      var box = el.querySelector(".plan-why");
+      if (!box) return;
+      var text = box.value.trim();
+      if (!text) return;
+      applyPhase("plan", true);
+      post("rejectPlan", { feedback: text });
+      settle("Kept planning");
+    }
+
     el.addEventListener("click", function (e) {
       var b = e.target.closest("[data-plan]");
       if (!b) return;
-      if (b.getAttribute("data-plan") === "run") {
+      var what = b.getAttribute("data-plan");
+      if (what === "run") {
         applyPhase("act", true);
         post("approvePlan");
+        settle("Approved · running");
+        return;
       }
+      if (what === "send") {
+        decline();
+        return;
+      }
+      // Keep planning opens the box rather than posting: nothing is typed until
+      // the user has committed to declining, which is also why the draft can
+      // never be caught by a re-render. Approve stays put beside it - opening
+      // the box must not be a one-way door out of approving.
       var foot = el.querySelector(".plan-foot");
-      if (foot) foot.remove();
+      if (!foot || el.querySelector(".plan-why")) return;
+      b.remove();
+      var row = div("plan-why-row",
+        '<input class="plan-why" type="text" placeholder="What should change?" ' +
+        'aria-label="Why this plan needs more work">' +
+        '<button class="btn" data-plan="send">Send</button>');
+      foot.parentNode.insertBefore(row, foot.nextSibling);
+      var box = row.querySelector(".plan-why");
+      box.addEventListener("keydown", function (ev) {
+        if (ev.key !== "Enter") return;
+        ev.preventDefault();
+        decline();
+      });
+      box.focus();
     });
   }
 
@@ -3427,6 +3832,10 @@ function _sbRun() {
   }
   function endStream() {
     flushAi();
+    /* A turn can end with the working still open - the model spent the whole
+       turn reasoning and produced no visible text, or it was interrupted. The
+       box must not be left saying "Thinking…" over a model that has stopped. */
+    sealThinking();
     if (S.timer) { clearInterval(S.timer); S.timer = null; }
     if (streamEl) { streamEl.remove(); streamEl = null; }
     S.gerund = "Thinking…";
@@ -3549,8 +3958,22 @@ function _sbRun() {
     // Every branch carries the prompt caret, including the blocked one. Putting
     // it on only some of them made the marker blink in and out as the phase
     // changed, which reads as a rendering bug rather than a prompt.
-    draft.placeholder = CARET + (blocked
-      ? "Configure an endpoint first…"
+    /* TWO DIFFERENT BLOCKERS, TWO DIFFERENT SENTENCES.
+     *
+     * `blocked` is `!workspace.open || !hasEndpoint()`, and both branches used
+     * to print "Configure an endpoint first…" - which names the fix for the
+     * second one. Someone who installs this and clicks the icon on VS Code's
+     * welcome screen, with no folder open, is told to go and configure an
+     * endpoint. There is nothing to configure: profiles are read from .agent/
+     * in the folder you have open, and there is no folder. Nothing on screen
+     * said the word "folder", so the next stop was Settings, and the next stop
+     * after that was uninstalling it. It is the most likely thing in this
+     * panel to happen to a new user, because it happens before they have done
+     * anything at all. */
+    draft.placeholder = CARET + (!S.workspace.open
+      ? "Open a folder to start…"
+      : blocked
+      ? "Add an endpoint to start…"
       : S.running
       ? "Queue another message…" + COMPOSER_HINT
       : S.phase === "plan"
@@ -4273,6 +4696,58 @@ function _sbRun() {
      on until it was nearly full. The usage is still tracked and still printed
      on each turn's footer line, which is where a figure belongs: attached to
      the turn that spent it, once, and not moving afterwards. */
+  /* The label the button WANTS to show, before it is cut to fit. Kept apart
+     from the DOM text because the fitter reads the element's own width to
+     decide the cut, and measuring a string against a box already containing a
+     truncated copy of itself converges on the wrong answer. */
+  var modelLabel = "No model";
+
+  /**
+   * Show the END of the model id when the whole of it will not fit.
+   *
+   * `text-overflow: ellipsis` cuts the tail, which is the wrong half here.
+   * Model ids share their prefixes - `claude-sonnet-4-6`, `claude-opus-4-1`,
+   * `openai/gpt-oss-20b` - so the row's narrowest case, about seven characters
+   * at a 360px panel, spends all seven on "claude-" and distinguishes nothing.
+   * Truncating before the first distinguishing character is the same as
+   * showing no name at all.
+   *
+   * Binary search rather than a character-width estimate: the face is
+   * proportional at some weights and the id carries digits, slashes and
+   * hyphens whose advances differ, so anything averaged is wrong by a
+   * character or two exactly when the budget is a character or two.
+   */
+  function fitModelName() {
+    var el = $("modelName");
+    if (!el) return;
+    el.textContent = modelLabel;
+    var room = el.clientWidth;
+    // Zero while the panel is hidden or not yet laid out. Leave the full text:
+    // a fit computed against no width would cut everything, and renderFooter
+    // runs again on the next state sync.
+    if (room <= 0 || el.scrollWidth <= room) return;
+
+    // Measured in a detached span carrying the element's own computed font, so
+    // the answer holds whatever the type system is doing today.
+    var probe = document.createElement("span");
+    probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;left:-9999px;font:" +
+      getComputedStyle(el).font;
+    document.body.appendChild(probe);
+    var fits = function (n) {
+      probe.textContent = "\u2026" + modelLabel.slice(modelLabel.length - n);
+      return probe.getBoundingClientRect().width <= room;
+    };
+    var lo = 0, hi = modelLabel.length;
+    while (lo < hi) {
+      var mid = Math.ceil((lo + hi) / 2);
+      if (fits(mid)) lo = mid; else hi = mid - 1;
+    }
+    probe.remove();
+    // Nothing fits, not even one character behind the ellipsis. Leave the full
+    // label and let the CSS clip it: a bare ellipsis names nothing at all.
+    el.textContent = lo > 0 ? "\u2026" + modelLabel.slice(modelLabel.length - lo) : modelLabel;
+  }
+
   function renderFooter() {
     var active = activeProfile();
     // Named here and not inline: it is the model button's tooltip that needs
@@ -4301,9 +4776,10 @@ function _sbRun() {
     // "Auto" when no profile is pinned and there is more than one to
     // choose from: the label has to say the choice is being made for you.
     var pinnedTo = (S.config && S.config.activeProfile) || "";
-    $("modelName").textContent = active
+    modelLabel = active
       ? (pinnedTo === "" && S.models.length > 1 ? "Auto · " + active.model : active.model)
       : "No model";
+    fitModelName();
     // THE MODEL FIRST, THEN THE ENDPOINT.
     //
     // This named only the endpoint. That was defensible while the button was
@@ -4985,7 +5461,29 @@ function _sbRun() {
 
   /* ───────────────────────── hydration ───────────────────────── */
 
+  /**
+   * The contract version this frontend was built against. See PROTOCOL_VERSION
+   * in src/ui/protocol.ts.
+   */
+  var PROTOCOL_VERSION = 1;
+  var versionWarned = false;
+
   function hydrate(state) {
+    /* The two halves ship together, so this normally never fires. It fires when
+       a webview outlives an extension update installed while VS Code is
+       running: the panel is restored against the new host, and every message
+       type it does not recognise is silently ignored while every field that
+       moved reads as undefined. That produced a plausible, stale, wrong panel
+       with nothing suggesting a reload. */
+    if (!versionWarned && state && typeof state.protocolVersion === "number" &&
+        state.protocolVersion !== PROTOCOL_VERSION) {
+      versionWarned = true;
+      addError({
+        message: "This panel is running an older build than the extension.",
+        fix: "Reload the window (Developer: Reload Window) so the panel and the extension " +
+             "match. Until then some things here may be out of date or missing."
+      });
+    }
     S.workspace = state.workspace;
     S.running = state.running;
     S.phase = state.phase;
@@ -4998,6 +5496,19 @@ function _sbRun() {
     S.activeAgent = state.activeAgent || "";
     S.mcp = state.mcp || { servers: [], warnings: [] };
     S.config = state.config;
+    /* The host has always sent `status` in the sync payload and this handler
+       has always dropped it, so `S.status` was written by exactly one message:
+       `statusChanged`. That is a PUSH, sent when the status changes - not when
+       a panel opens - so a webview built while the gateway was failing came up
+       with no status at all and renderFooter's `bad` was false. The health dot
+       sat green, and stayed green until the endpoint's state next CHANGED.
+
+       That is the one case the dot exists for. VS Code's status bar, which the
+       host renders from the same StatusDto, showed "ERROR - HTTP" the whole
+       time; the panel's own dot disagreed with it. Reloading the window - the
+       first thing anyone tries - reproduced it rather than clearing it, since
+       a reload is a fresh sync and no change. */
+    S.status = state.status || null;
     S.tlsError = state.tlsError;
     S.rungs = state.rungs || [];
     S.tracing = state.tracing;
@@ -5112,10 +5623,15 @@ function _sbRun() {
    * screenshot to disk first, finding it, and picking it. Ctrl+V puts it
    * straight into the composer.
    *
-   * The same limits as the picker apply, enforced here because these bytes
-   * never pass through it.
+   * There is no SIZE limit here, matching the host: the 10 MB cap this file
+   * carried was a second copy of the one removed from `attachUris`, so a file
+   * dropped or pasted was still refused after the host had stopped refusing
+   * it. Two copies of a limit is how half a limit survives its own deletion.
+   *
+   * The COUNT cap stays. It is not a size policy - it is what keeps one
+   * message from carrying forty files, which is a different failure and one
+   * the user can act on by sending twice.
    */
-  var ATTACH_MAX = 10 * 1024 * 1024;   // 10 MB, matching pickAndAttach
   var ATTACH_COUNT_MAX = 10;
   /* Characters past which pasted text becomes a file rather than composer
      content. A pasted log is something to hand over, not something to edit,
@@ -5133,6 +5649,29 @@ function _sbRun() {
     return "pasted-" + ++pasteSeq + "." + ext;
   }
 
+  /**
+   * A string as an attachment, in the shape the composer and the wire use.
+   *
+   * Lifted out of `onPaste`, which has turned a large text paste into a
+   * `text/plain` attachment since it shipped. Attaching a transcript message is
+   * that same operation with the message's text instead of the clipboard's, and
+   * two copies of a base64 encoder is how they stop agreeing.
+   *
+   * The host decodes it in `decodeTextAttachment` and inlines it as
+   * ``Attached file `name`:`` with its own 60,000-character cap, so nothing
+   * downstream needs to know where the text came from.
+   */
+  function textAttachment(name, text) {
+    var bytes = new TextEncoder().encode(text);
+    var b64 = "";
+    // Chunked, because String.fromCharCode.apply on a large array overflows
+    // the argument list.
+    for (var k = 0; k < bytes.length; k += 8192) {
+      b64 += String.fromCharCode.apply(null, bytes.subarray(k, k + 8192));
+    }
+    return { name: name, mediaType: "text/plain", data: btoa(b64), size: bytes.length };
+  }
+
   function addAttachment(a) {
     if (!S.attachments) S.attachments = [];
     if (S.attachments.length >= ATTACH_COUNT_MAX) {
@@ -5145,13 +5684,6 @@ function _sbRun() {
 
   /** Read a Blob into the base64 shape the host and the wire already use. */
   function readBlob(blob, name, done) {
-    if (blob.size > ATTACH_MAX) {
-      addError(
-        name + " is " + (blob.size / 1048576).toFixed(1) + " MB. The limit is 10 MB."
-      );
-      done(false);
-      return;
-    }
     var r = new FileReader();
     r.onload = function () {
       // readAsDataURL gives "data:<mime>;base64,<payload>"; the wire wants only
@@ -5251,6 +5783,19 @@ function _sbRun() {
   function wireDrop() {
     var composer = document.querySelector(".composer");
     if (!composer) return;
+    /* THE WHOLE PANEL IS THE DROP TARGET, not just the composer box.
+    
+       The listeners were bound to `.composer`, so a file let go anywhere else -
+       over the transcript, which is most of the panel and the obvious place to
+       aim at - hit the document guard below, was cancelled to stop the webview
+       navigating to it, and did nothing at all. Silently: no outline, no
+       error, no attachment. Aiming at a 90px box at the bottom of the panel is
+       a requirement nobody knows about until they miss.
+    
+       `#root` rather than `document`, so the drag still ends at the panel's
+       own bounds. The composer keeps the HIGHLIGHT, because that is where the
+       file is going and the outline is the answer to "will this land". */
+    var zone = document.getElementById("root") || composer;
 
     /* The document-wide guard.
      *
@@ -5282,16 +5827,16 @@ function _sbRun() {
       return false;
     };
 
-    composer.addEventListener("dragenter", function (e) {
+    zone.addEventListener("dragenter", function (e) {
       if (!carriesFiles(e)) return;
       depth++;
       composer.setAttribute("data-drop", "1");
     }, true);
-    composer.addEventListener("dragleave", function () {
+    zone.addEventListener("dragleave", function () {
       if (depth > 0) depth--;
       if (!depth) composer.removeAttribute("data-drop");
     }, true);
-    composer.addEventListener("dragover", function (e) {
+    zone.addEventListener("dragover", function (e) {
       if (!carriesFiles(e)) return;
       e.preventDefault();
       e.stopPropagation();
@@ -5299,7 +5844,7 @@ function _sbRun() {
       // the cursor to the one with a plus on it.
       if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
     }, true);
-    composer.addEventListener("drop", function (e) {
+    zone.addEventListener("drop", function (e) {
       e.preventDefault();
       e.stopPropagation();
       depth = 0;
@@ -5361,19 +5906,7 @@ function _sbRun() {
     var text = cd.getData("text/plain") || "";
     if (text.length > PASTE_AS_FILE) {
       e.preventDefault();
-      var bytes = new TextEncoder().encode(text);
-      var b64 = "";
-      // Chunked, because String.fromCharCode.apply on a large array overflows
-      // the argument list.
-      for (var k = 0; k < bytes.length; k += 8192) {
-        b64 += String.fromCharCode.apply(null, bytes.subarray(k, k + 8192));
-      }
-      var ok = addAttachment({
-        name: pasteName("text/plain"),
-        mediaType: "text/plain",
-        data: btoa(b64),
-        size: bytes.length,
-      });
+      var ok = addAttachment(textAttachment(pasteName("text/plain"), text));
       if (ok) {
         renderAttachments();
         syncComposer();
@@ -5430,6 +5963,15 @@ function _sbRun() {
       else if (a === "issue") post("openControlCenter", { section: "about" });
     });
     $("historyPop").addEventListener("click", function (e) {
+      var stop = e.target.closest("[data-stop]");
+      if (stop) {
+        // Nested inside the row like Delete is, so the load handler must not
+        // also fire on the way up and switch you into the chat you just
+        // stopped.
+        e.stopPropagation();
+        post("stopSession", { id: stop.getAttribute("data-stop") });
+        return;
+      }
       var del = e.target.closest("[data-del]");
       if (del) {
         /* Delete is nested inside the row, so the load handler must not also
@@ -5481,8 +6023,55 @@ function _sbRun() {
       if (b) applyPhase(b.getAttribute("data-phase"));
     });
 
+    /* RIGHT-CLICK ON A MESSAGE, AND ONLY ON A MESSAGE.
+     *
+     * Tool cards, diff cards, the error box and the welcome screen keep VS
+     * Code's own menu - and so does a fenced code block, checked first because
+     * it sits INSIDE `.msg-ai` and would otherwise be caught by it. */
+    logEl.addEventListener("contextmenu", function (e) {
+      if (e.target.closest(".cb")) return;
+      var el = e.target.closest(".msg-user, .msg-ai");
+      if (!el) return;
+      e.preventDefault();
+      /* The Menu key and Shift+F10 raise this event too, with clientX and
+         clientY both 0 - so a keyboard user would get the menu pinned to the
+         panel's top-left corner rather than to the message they are on. */
+      var x = e.clientX;
+      var y = e.clientY;
+      if (!x && !y && el.getBoundingClientRect) {
+        var r = el.getBoundingClientRect();
+        x = r.left + 8;
+        y = r.top + 8;
+      }
+      openMsgMenu(el, x, y);
+    });
+
+    $("msgMenu").addEventListener("click", function (e) {
+      var row = e.target.closest("[data-mm]");
+      if (!row) return;
+      var el = $("msgMenu")._target;
+      if (el) onMsgAction(row.getAttribute("data-mm"), el);
+      // The document-level closer hides it a moment later, on the same click.
+    });
+
     // The log's own scrolling is the only other thing that changes the answer.
     logEl.addEventListener("scroll", syncToLatest);
+    /* A menu anchored to a pointer position is wrong the instant the content
+       under it moves, and the transcript scrolls on its own while a turn
+       streams.
+       
+       MEASURED, NOT MERELY OBSERVED. Closing on the bare event was wrong and
+       the browser suite caught it: a scroll event queued just BEFORE the menu
+       opened - by the click's own scroll-into-view, or by a delta landing
+       mid-stream - is delivered at the next rendering opportunity, which is
+       after the contextmenu handler has run. The menu opened and vanished on
+       the same gesture. So this compares against the offset the menu was
+       anchored at and ignores anything that did not actually move. */
+    logEl.addEventListener("scroll", function () {
+      var menu = $("msgMenu");
+      if (!menu || menu.hidden) return;
+      if (Math.abs(logEl.scrollTop - (menu._scrollAt || 0)) > 4) menu.hidden = true;
+    });
     $("toLatest").addEventListener("click", function () {
       scroll();
       syncToLatest();
@@ -5532,6 +6121,7 @@ function _sbRun() {
       if (!act) return;
       var a = act.getAttribute("data-act");
       if (a === "doctor") { setTab("diagnostics"); openSection("secTls"); post("runTrace"); }
+      else if (a === "openFolder") post("openFolder");
       else if (a === "newEndpoint") post("newEndpoint");
       else if (a === "ccEndpoints") post("openControlCenter", { section: "endpoints" });
       else if (a === "history") {
@@ -5547,10 +6137,28 @@ function _sbRun() {
     });
 
     var draft = $("draft");
+    var warmed = false;
     draft.addEventListener("input", function () {
       syncComposer();
       detectQuickPick();
       renderDraftMirror();
+      /* Pay the connection, credential and prompt-cache costs of the next turn
+         while the user is still typing, rather than after they press Enter.
+
+         ON THE FIRST KEYSTROKE, NOT ON FOCUS. Warming builds the endpoint
+         client, and building one runs the profile's transform module and
+         spawns its `exec` credential helper - both of them programs named by
+         files in the open folder. Hanging that off `focus` meant clicking into
+         the text box was enough to run them, before the user had asked for
+         anything at all. Typing a character is a deliberate act; putting the
+         cursor somewhere is not.
+
+         Once per composer, because the host debounces but a message per
+         keystroke is still a message per keystroke. */
+      if (!warmed && draft.value.trim()) {
+        warmed = true;
+        post("warm");
+      }
       // Cheap, synchronous, and the whole reason a draft survives the view
       // being collapsed. See saveUiState.
       saveUiState();
@@ -5561,10 +6169,6 @@ function _sbRun() {
       $("draftMirror").scrollTop = draft.scrollTop;
     });
     draft.addEventListener("keydown", onDraftKey);
-    // Pay the connection, credential, and prompt-cache costs of the next turn
-    // while the user is still typing, instead of after they press Enter. The
-    // host debounces this and ignores it while a turn is running.
-    draft.addEventListener("focus", function () { post("warm"); });
 
     $("qp").addEventListener("click", function (e) {
       var b = e.target.closest("[data-i]");
@@ -5572,6 +6176,16 @@ function _sbRun() {
       S.qpIndex = Number(b.getAttribute("data-i"));
       acceptQuickPick();
     });
+    /* The panel is draggable, so the room the label has is not fixed at render
+       time. Without this the name is fitted once, to whatever width the panel
+       happened to have when the endpoint last changed, and dragging the panel
+       wider leaves it truncated while dragging it narrower overflows it.
+       Observed on the button rather than the window: the button's width is
+       what the fit is against, and it changes for reasons other than a window
+       resize - the mode label appearing at 500px takes 46px out of it. */
+    if (typeof ResizeObserver === "function") {
+      new ResizeObserver(function () { fitModelName(); }).observe($("modelBtn"));
+    }
     $("modelBtn").addEventListener("click", function (e) {
       e.stopPropagation();
       S.modelOpen = !S.modelOpen;
@@ -5579,8 +6193,37 @@ function _sbRun() {
       S.qpIndex = 0;
       renderQuickPick();
     });
+    /* THE LOCAL PICKER, not the host's dialog.
+    
+       This posted `attachFiles`, which reaches `showOpenDialog` on the
+       extension host. In a local window the two are the same thing. In a WSL,
+       dev container, SSH or Codespaces window they are not: the host is the
+       remote machine, the dialog browses the remote disk, and the button
+       labelled "Upload from your computer" could not reach the user's
+       computer. Reported from exactly that setup.
+    
+       The input runs in the renderer, which is always on the machine the user
+       is sitting at, so it opens their own OS picker in every window type.
+       Files on the REMOTE side are still reachable, and by a better route than
+       a dialog: `@` completes workspace paths, and the host reads them. */
     $("clipBtn").addEventListener("click", function () {
-      post("attachFiles");
+      var input = $("localPick");
+      // The value is cleared first so picking the SAME file twice in a row
+      // still fires `change`. Without it the second pick is silent, which
+      // reads as the button being broken.
+      input.value = "";
+      input.click();
+    });
+    $("localPick").addEventListener("change", function () {
+      var files = this.files;
+      if (!files || !files.length) return;
+      takeFiles(files, function () {
+        renderAttachments();
+        syncComposer();
+      });
+      // Released as soon as it is read: a file input holds a reference to
+      // every File it was given, and these are whole files in memory.
+      this.value = "";
     });
     // On the textarea rather than the document, so a paste into some other
     // field cannot silently become an attachment.
@@ -5690,6 +6333,12 @@ function _sbRun() {
     });
 
     document.addEventListener("keydown", function (e) {
+      /* Escape shuts the menu FIRST. Interrupting a turn because the user
+         wanted to dismiss a menu is the wrong reading of one keystroke. */
+      if (e.key === "Escape" && $("msgMenu") && !$("msgMenu").hidden) {
+        $("msgMenu").hidden = true;
+        return;
+      }
       if (e.key === "Escape" && S.running && $("qp").hidden) post("interrupt");
     });
 
@@ -6277,10 +6926,17 @@ function _sbRun() {
         /* This was in the do-nothing list, so "Export offline bundle" wrote a
            folder and the panel said nothing whatsoever - the command looked
            like it had failed. Same treatment the chat export gets, for the same
-           reason: what the user needs afterwards is the path. */
+           reason: what the user needs afterwards is the path.
+
+           It used to end "and no credentials", which was the same unchecked
+           claim the README made. The export scans what it copied now, so this
+           reports the count it was given. */
         addNotice("i-download",
           "Offline bundle written to " + m.path +
-          " - it holds this workspace's .agent configuration, and no credentials.",
+          (m.redactions
+            ? " - " + m.redactions + (m.redactions === 1 ? " credential was" : " credentials were") +
+              " found in this workspace's config and redacted from the copy. See its README."
+            : " - it holds this workspace's .agent configuration, scanned and clear of credentials."),
           m.path);
         break;
 
@@ -6288,6 +6944,23 @@ function _sbRun() {
       case "checkpointRestored":
       case "logLine":
       case "navigate":
+        break;
+
+      /* AN UNRECOGNISED MESSAGE IS A FACT, NOT A NO-OP.
+       *
+       * Both sides used to switch on `type` and fall off the end in silence,
+       * so a host newer than this cached document produced a control that did
+       * nothing at all: no error, no console line, nothing for a bug report to
+       * name. The `ready` handshake compares builds and says so properly; this
+       * is the backstop for anything that slips past it. */
+      default:
+        if (window.console && console.warn) {
+          console.warn(
+            "[genesis] the extension sent a message this panel does not handle: " + m.type +
+            ". This panel is build " + ((window.__kx && window.__kx.build) || "unknown") +
+            "; reload the window if controls are not responding."
+          );
+        }
         break;
     }
   });
@@ -6305,6 +6978,8 @@ function _sbRun() {
   renderEndpoints();
   renderSkills();
   syncComposer();
-  post("ready");
+  // The build this document was served from, so the host can say so if VS
+  // Code has handed the user a cached panel from before an update.
+  post("ready", { build: (window.__kx && window.__kx.build) || "" });
 })();
 } /* end _sbRun */

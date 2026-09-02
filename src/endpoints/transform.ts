@@ -7,6 +7,27 @@ import type { EndpointProfile } from "./profile";
  * The escape hatch. If a gateway is shaped in a way no adapter anticipates,
  * the profile points at a .js file in the workspace that reshapes the request
  * on the way out and the response on the way in. No PR to this repo required.
+ *
+ * A TRANSFORM IS ARBITRARY CODE RUNNING IN THE EXTENSION HOST.
+ *
+ * It is loaded with `node:vm`, and the narrow `require` below used to carry a
+ * comment saying transforms "don't need the filesystem or the network" - which
+ * reads as a claim that they cannot reach them. They can. `vm` is an isolation
+ * primitive, not a security boundary: the sandbox is handed real host objects
+ * (`Buffer`, `console`) and `Buffer.constructor.constructor("return process")()`
+ * walks straight back out to the host regardless of what `require` returns.
+ * Node's own documentation says so.
+ *
+ * The `require` gate is kept because it is genuinely useful - it turns an
+ * honest mistake into a clear error rather than a working dependency on
+ * something that will not be there on the next machine - but it is a
+ * guardrail, not a wall, and nothing here should be relied on to contain a
+ * hostile file.
+ *
+ * What actually contains this is VS Code's workspace trust: the manifest
+ * declares `untrustedWorkspaces.supported: false`, so Genesis does not run at
+ * all in a folder the user has not trusted. That is the boundary. This is a
+ * convenience layer inside it.
  */
 export interface Transform {
   transformRequest?: (body: any, profile: EndpointProfile) => any;
@@ -28,10 +49,17 @@ export function loadTransform(rel: string, workspaceRoot: string): Transform {
     URL,
     URLSearchParams,
     require: (id: string) => {
-      // Deliberately narrow. Transforms reshape JSON; they don't need the
-      // filesystem or the network.
+      // Deliberately narrow, as a guardrail rather than a wall - see the note
+      // at the top of this file about what `vm` does and does not contain. A
+      // transform that reaches for `fs` has almost always misunderstood the
+      // job, and a clear error here beats a working dependency that is absent
+      // on the next machine.
       if (["node:path", "path"].includes(id)) return path;
-      throw new Error(`Transforms may not require "${id}".`);
+      throw new Error(
+        `Transforms may not require "${id}". They reshape a JSON body and nothing else; ` +
+          `anything needing the filesystem or the network belongs in an exec credential ` +
+          `helper or a gateway in front of the endpoint.`
+      );
     },
   };
   try {
@@ -45,5 +73,43 @@ export function loadTransform(rel: string, workspaceRoot: string): Transform {
       `Transform ${path.basename(file)} exports neither transformRequest nor transformResponse.`
     );
   }
-  return t;
+  return guard(t, path.basename(file));
+}
+
+/** How long one transform call may take before it is treated as a hang. */
+const CALL_BUDGET_MS = 2000;
+
+/**
+ * Wrap the exported functions so one bad transform cannot take the host with it.
+ *
+ * `runInNewContext`'s `timeout` bounds the LOAD and nothing else. These
+ * functions are then called on every request and on every streamed frame, with
+ * no bound at all, on the extension host's only thread - so a loop in a
+ * transform wedged the whole window, with no message and no way back except
+ * killing VS Code. A synchronous call cannot be interrupted once it is running,
+ * so what this can do is notice and refuse to keep calling it: the first
+ * overrun turns the transform off for the rest of the session and says why.
+ */
+function guard(t: Transform, name: string): Transform {
+  let broken = "";
+  const wrap = <A extends any[], R>(fn: ((...a: A) => R) | undefined) => {
+    if (!fn) return undefined;
+    return (...args: A): R => {
+      if (broken) throw new Error(broken);
+      const t0 = Date.now();
+      const out = fn(...args);
+      const ms = Date.now() - t0;
+      if (ms > CALL_BUDGET_MS) {
+        broken =
+          `Transform ${name} took ${ms}ms for a single call and has been disabled for this ` +
+          `session. It runs on every request and on every streamed frame, on the same thread ` +
+          `as the editor. Fix the transform and reload the window.`;
+      }
+      return out;
+    };
+  };
+  return {
+    transformRequest: wrap(t.transformRequest),
+    transformResponse: wrap(t.transformResponse),
+  };
 }

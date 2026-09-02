@@ -634,10 +634,23 @@ console.log("\n──── the send control ────");
     /#root\s*\{[^}]*overflow:\s*hidden/.test(CSS));
 }
 
-/* ── files dropped on the composer ──────────────────────────────────────── */
+/* ── files dropped on the panel ─────────────────────────────────────────── */
 {
   console.log("\n──── drag and drop ────");
-  ok("the composer takes a drop", /composer\.addEventListener\("drop"/.test(SRC));
+  /* This read `composer.addEventListener("drop"` - a grep for one variable
+     name, which broke the moment the drop target was widened from the composer
+     box to the whole panel even though the behaviour it cares about got
+     BETTER. The name was never the invariant.
+
+     What matters is that a drop is handled somewhere, and that the target is
+     not the composer alone: a file let go over the transcript - most of the
+     panel, and the obvious place to aim - used to hit the document guard and
+     do nothing at all, silently. Whether the drop actually attaches the file
+     is tested for real, with a real DataTransfer and a real File, in
+     render.cjs 5x; this suite has no browser and can only read the source. */
+  ok("a drop is handled", /\.addEventListener\("drop"/.test(SRC));
+  ok("and the target is the panel, not just the composer box",
+    /var zone = document\.getElementById\("root"\)/.test(SRC), "drop zone");
   ok("and shows it is about to", /data-drop/.test(SRC) && /\.composer\[data-drop="1"\]/.test(CSS));
   // The load-bearing half: a webview's default action for a dropped file is to
   // navigate to it, which replaces the panel and loses the conversation.
@@ -645,8 +658,15 @@ console.log("\n──── the send control ────");
     /document\.addEventListener\("drop",\s*function[^)]*\)\s*\{\s*e\.preventDefault\(\)/.test(SRC));
   ok("and cancels dragover too, or drop never fires at all",
     /document\.addEventListener\("dragover",\s*function[^)]*\)\s*\{\s*e\.preventDefault\(\)/.test(SRC));
-  ok("the drop reuses the paste path's size and count caps",
+  ok("the drop reuses the paste path's reader and count cap",
     /function takeFiles[\s\S]{0,400}readBlob\(/.test(SRC));
+  /* And there is no SIZE cap on either path any more, at the owner's
+     instruction. This file's own wording said "size and count caps", which was
+     true of both halves until the host's 10 MB limit came out - and the
+     webview kept a second copy of that number, so a dropped file was still
+     refused after the host had stopped refusing it. */
+  ok("and no size cap survives in the webview",
+    !/ATTACH_MAX/.test(SRC), "ATTACH_MAX");
 }
 
 /* ── a conversation can be thrown away from the welcome screen ──────────── */
@@ -774,6 +794,250 @@ console.log("\n──── the send control ────");
   const cmd = [...b.d.querySelectorAll(".perm")].pop();
   ok("a command falls back to its payload", !!cmd.querySelector(".perm-cmd[style]"));
   ok("and draws no empty diff", !cmd.querySelector(".perm-diff"));
+  b.dom.window.close();
+}
+
+/* ── the message context menu ───────────────────────────────────────────── */
+/*
+ * The transcript was the one surface in the panel with no per-message actions
+ * at all. turn-foot is per TURN, sits at the end, and its Copy only ever took
+ * the assistant's answer - so there was no way to copy a question, and no way
+ * to reach an earlier turn's answer without selecting it by hand in a 340px
+ * column.
+ *
+ * Right-click was the chosen trigger, and it costs something: opening our menu
+ * means preventDefault(), which takes away VS Code's own menu - the one Copy
+ * normally lives in. So Copy has to be here, and a code block, which already
+ * has its own copy button and where native select-and-copy is the better tool,
+ * is deliberately left alone.
+ */
+{
+  const b = boot();
+  b.sync("ask");
+  const rc = (sel, x = 40, y = 60) => {
+    const el = b.d.querySelector(sel);
+    if (!el) return null;
+    const ev = new b.w.MouseEvent("contextmenu", {
+      bubbles: true, cancelable: true, clientX: x, clientY: y,
+    });
+    el.dispatchEvent(ev);
+    return ev;
+  };
+  const menu = () => b.d.getElementById("msgMenu");
+  const rows = () => [...b.d.querySelectorAll("#msgMenu [data-mm]")]
+    .map((r) => r.getAttribute("data-mm"));
+  const labels = () => [...b.d.querySelectorAll("#msgMenu [data-mm]")]
+    .map((r) => r.textContent.trim());
+
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "streamDelta", text: "The answer.",
+  } }));
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: { type: "turnEnd" } }));
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "steerAccepted", text: "the original question", files: [],
+  } }));
+
+  ok("the menu exists and starts closed", !!menu() && menu().hidden);
+
+  const ev = rc(".msg-user");
+  ok("right-clicking a question opens it", !!menu() && !menu().hidden);
+  // Both menus appearing at once is the failure this guards.
+  ok("and takes the native menu, rather than sitting under it",
+    !!ev && ev.defaultPrevented);
+  ok("a question offers all four actions",
+    rows().join(",") === "edit,resend,attach,copy", rows().join(","));
+
+  rc(".msg-ai");
+  ok("an answer offers only the two that mean anything on it",
+    rows().join(",") === "attach,copy", rows().join(","));
+  ok("no Edit on an answer", !rows().includes("edit"));
+
+  b.dom.window.close();
+}
+
+/* A code block keeps the native menu: it has its own copy button two pixels
+   away, and selecting part of a snippet is worth more there than a
+   message-level action. */
+{
+  const b = boot();
+  b.sync("ask");
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "streamDelta", text: "Here:\n\n```js\nconst a = 1;\n```\n",
+  } }));
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: { type: "turnEnd" } }));
+  const cb = b.d.querySelector(".msg-ai .cb");
+  ok("the answer really does hold a code block", !!cb);
+  const ev = new b.w.MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+  if (cb) cb.dispatchEvent(ev);
+  const cbMenu = b.d.getElementById("msgMenu");
+  ok("right-clicking a code block opens nothing", !cbMenu || cbMenu.hidden);
+  ok("and leaves the native menu alone", !ev.defaultPrevented);
+  b.dom.window.close();
+}
+
+/* Edit, Resend, Attach and Copy all end in the composer or the clipboard. */
+{
+  const b = boot();
+  b.sync("ask");
+  const rc = (sel) => {
+    const el = b.d.querySelector(sel);
+    el.dispatchEvent(new b.w.MouseEvent("contextmenu", {
+      bubbles: true, cancelable: true, clientX: 40, clientY: 60,
+    }));
+  };
+  const row = (name) => b.d.querySelector(`#msgMenu [data-mm="${name}"]`);
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "steerAccepted", text: "the original question", files: [],
+  } }));
+
+  rc(".msg-user");
+  ok("Edit is called Edit while the composer is empty",
+    !!row("edit") && row("edit").textContent.trim() === "Edit",
+    row("edit") && row("edit").textContent);
+  b.click('#msgMenu [data-mm="edit"]');
+  ok("and loads the message into the composer",
+    b.d.getElementById("draft").value === "the original question",
+    b.d.getElementById("draft").value);
+  const afterEdit = b.d.getElementById("msgMenu");
+  ok("closing the menu behind it", !!afterEdit && afterEdit.hidden);
+
+  /* A HALF-WRITTEN DRAFT IS WORK. Replacing it silently is the same class of
+     harm as any other unconfirmed destructive action, so the cost goes on the
+     row rather than being discovered after the click. */
+  b.d.getElementById("draft").value = "something I was already writing";
+  rc(".msg-user");
+  ok("with a draft present the row says what it will cost",
+    !!row("edit") && /replace draft/i.test(row("edit").textContent),
+    row("edit") && row("edit").textContent);
+
+  // Resend goes through the ordinary send path, so it queues, draws a bubble
+  // and clears attachments exactly as typing it would.
+  b.sent.length = 0;
+  b.click('#msgMenu [data-mm="resend"]');
+  const sends = b.sent.filter((m) => m.type === "sendMessage");
+  ok("Resend sends the message again",
+    sends.length === 1 && sends[0].text === "the original question",
+    JSON.stringify(sends));
+
+  // Attach reuses the pill the composer already draws for a pasted file.
+  rc(".msg-user");
+  b.click('#msgMenu [data-mm="attach"]');
+  ok("Attach puts a pill in the composer",
+    b.d.querySelectorAll(".att-pill").length === 1,
+    String(b.d.querySelectorAll(".att-pill").length));
+  const pillName = b.d.querySelector(".att-name");
+  ok("named for what it is",
+    !!pillName && /question/.test(pillName.textContent), pillName && pillName.textContent);
+  ok("and the strip is shown", !b.d.getElementById("attachStrip").hidden);
+  rc(".msg-user");
+  b.click('#msgMenu [data-mm="attach"]');
+  ok("attaching twice attaches twice - the pills are what will be sent",
+    b.d.querySelectorAll(".att-pill").length === 2);
+
+  b.sent.length = 0;
+  rc(".msg-user");
+  b.click('#msgMenu [data-mm="copy"]');
+  const copies = b.sent.filter((m) => m.type === "copyText");
+  ok("Copy reaches the host", copies.length === 1, JSON.stringify(b.sent));
+  ok("with the message's own text", copies[0] && copies[0].text === "the original question",
+    copies[0] && copies[0].text);
+  b.dom.window.close();
+}
+
+/* The text a message was BUILT from, not the text its DOM happens to hold.
+   A multimodal question joins its text blocks with newlines and drops the
+   images; textContent would run them together and lose the breaks. */
+{
+  const b = boot();
+  b.sync("ask");
+  // The array shape reaches the transcript through a REPLAYED conversation,
+  // which is the path that matters: an old chat reopened from the history
+  // popover has to offer the same actions as one typed a second ago.
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "sessionSwitched", id: "s2", title: "t", messages: [
+      { role: "user", content: [{ type: "text", text: "first" }, { type: "text", text: "second" }] },
+    ],
+  } }));
+  const msg = b.d.querySelector(".msg-user");
+  ok("a replayed multimodal question is drawn", !!msg);
+  if (msg) {
+    ok("its text is stored, not scraped", msg._raw === "first\nsecond", JSON.stringify(msg._raw));
+    ok("and the DOM alone would have lost the break",
+      msg.querySelector(".u-text").textContent !== msg._raw);
+  }
+  b.dom.window.close();
+}
+
+/* One closer owns every menu, and the pointer-anchored one cannot outlive the
+   position it was anchored to. */
+{
+  const b = boot();
+  b.sync("ask");
+  const rc = () => b.d.querySelector(".msg-user").dispatchEvent(
+    new b.w.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 60 }));
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "steerAccepted", text: "q", files: [],
+  } }));
+
+  const shut = () => {
+    const m = b.d.getElementById("msgMenu");
+    return !!m && m.hidden;
+  };
+  const open = () => {
+    const m = b.d.getElementById("msgMenu");
+    return !!m && !m.hidden;
+  };
+
+  rc();
+  ok("it opens before each of these", open());
+  b.d.dispatchEvent(new b.w.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  ok("Escape closes it", shut());
+
+  rc();
+  b.click("#histBtn");
+  ok("opening another menu closes it - two menus at once is the bug", shut());
+
+  /* Scrolling closes it - but only a scroll that MOVED something. A bare event
+     with the transcript still where the menu was anchored is the spurious one
+     the browser suite caught: the click's own scroll-into-view queues a scroll
+     that lands after the menu has opened, and closing on it made the menu open
+     and vanish on one gesture. */
+  const log = b.d.getElementById("log");
+  rc();
+  log.dispatchEvent(new b.w.Event("scroll"));
+  ok("a scroll that moved nothing leaves it alone", open());
+  log.scrollTop = 240;
+  log.dispatchEvent(new b.w.Event("scroll"));
+  ok("and a real one closes it, because what it was anchored to has moved", shut());
+  b.dom.window.close();
+}
+
+/* Clamped to the panel. jsdom has no layout, so the menu's measured size is
+   supplied here - the arithmetic is the thing under test, and the real
+   rendering is covered by test/render.cjs in a browser at 200%. */
+{
+  const b = boot();
+  b.sync("ask");
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "steerAccepted", text: "q", files: [],
+  } }));
+  const menu = b.d.getElementById("msgMenu");
+  if (menu) {
+    Object.defineProperty(menu, "offsetWidth", { value: 180, configurable: true });
+    Object.defineProperty(menu, "offsetHeight", { value: 120, configurable: true });
+  }
+  b.w.innerWidth = 200;
+  b.w.innerHeight = 400;
+
+  b.d.querySelector(".msg-user").dispatchEvent(new b.w.MouseEvent("contextmenu", {
+    bubbles: true, cancelable: true, clientX: 190, clientY: 380,
+  }));
+  const left = menu ? parseFloat(menu.style.left) : NaN;
+  const top = menu ? parseFloat(menu.style.top) : NaN;
+  ok("a menu opened at the right edge stays inside the panel",
+    left + 180 <= 200 && left >= 0, menu && `left ${menu.style.left}`);
+  ok("and one opened at the bottom flips up rather than clipping",
+    top + 120 <= 400 && top >= 0, menu && `top ${menu.style.top}`);
   b.dom.window.close();
 }
 

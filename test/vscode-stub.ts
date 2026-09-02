@@ -7,6 +7,7 @@
  * on is recorded here rather than stubbed to a constant, so a case can check
  * what the extension actually asked the editor to do.
  */
+import * as nodeFs from "node:fs";
 
 export const recorded = {
   info: [] as string[],
@@ -56,6 +57,12 @@ export const Uri = {
   joinPath: (base: any, ...parts: string[]) => Uri.file([base.fsPath, ...parts].join("/")),
 };
 
+/* Which keys were written with `ConfigurationTarget.Global`, so `inspect` can
+   tell a global value from a workspace one. The real API distinguishes them
+   and code branches on it; a stub that always said "workspace" made that
+   branch untestable. */
+const globalKeys = new Set<string>();
+
 const cfgStore = new Map<string, unknown>([
   ["profileDirectory", ".agent/endpoints"],
   ["skillsDirectory", ".agent/skills"],
@@ -66,12 +73,29 @@ const cfgStore = new Map<string, unknown>([
 
 /** Exposed so a case can set a setting the extension reads at activation. */
 export const __cfg = cfgStore;
+/* Exposed beside `__cfg` for the same reason: a case that plants or clears
+   settings has to be able to clear the scope record too, or the next case
+   inherits "this was set globally" from the previous one. Neither is cleared
+   by `reset()`, because settings outlive a window reload. */
+export const __globalKeys = globalKeys;
 
 export const workspace: any = {
   workspaceFolders: undefined,
   getConfiguration: (section?: string) => ({
     get: (k: string, d?: unknown) => (cfgStore.has(k) ? cfgStore.get(k) : d),
-    update: async (k: string, v: unknown) => { cfgStore.set(k, v); },
+    update: async (k: string, v: unknown, target?: number) => {
+      // `undefined` is how VS Code clears a setting, and it is different from
+      // writing the default: a stub that stored it would make "reverted" and
+      // "set to undefined" indistinguishable.
+      if (v === undefined) { cfgStore.delete(k); globalKeys.delete(k); return; }
+      cfgStore.set(k, v);
+      // Remember WHICH SCOPE it went to, so `inspect` can answer honestly.
+      // Without this every write looked like a workspace value and nothing
+      // that reads `globalValue` - the terminal theme's backup, for one -
+      // could be tested at all.
+      if (target === ConfigurationTarget.Global) globalKeys.add(k);
+      else globalKeys.delete(k);
+    },
     /**
      * The shape `WorkspaceConfiguration.inspect` returns, enough of it for the
      * Kryptonite-to-Genesis migration to run.
@@ -86,8 +110,11 @@ export const workspace: any = {
     inspect: (k: string) => ({
       key: section ? `${section}.${k}` : k,
       defaultValue: undefined,
-      globalValue: undefined,
-      workspaceValue: cfgStore.has(k) ? cfgStore.get(k) : undefined,
+      globalValue: globalKeys.has(k) ? cfgStore.get(k) : undefined,
+      // A value planted straight into `__cfg` carries no target and is still
+      // reported as a workspace value, which is what lets the migration test
+      // plant an old setting and watch it carried over.
+      workspaceValue: cfgStore.has(k) && !globalKeys.has(k) ? cfgStore.get(k) : undefined,
       workspaceFolderValue: undefined,
     }),
   }),
@@ -100,7 +127,28 @@ export const workspace: any = {
   onDidChangeConfiguration: () => new Disposable(),
   openTextDocument: async (u: any) => ({ uri: u, getText: () => "" }),
   findFiles: async () => [],
-  fs: { readFile: async () => new Uint8Array() },
+  /* Reads the real file, because the real API does.
+  
+     This returned an empty Uint8Array, which is a stub that cannot fail: every
+     caller got zero bytes and every assertion about what was READ passed
+     trivially. The attachment path is entirely about bytes - size, media type,
+     whether an archive can be opened - and none of it was reachable from a
+     suite until this told the truth.
+  
+     `stat` is here for the same reason: `attachPaths` asks whether a dropped
+     path is a directory, and a stub that always says "file" cannot exercise
+     the branch that exists to say so. */
+  fs: {
+    readFile: async (u: any) => {
+      const p = String(u?.fsPath ?? u);
+      return new Uint8Array(nodeFs.readFileSync(p));
+    },
+    stat: async (u: any) => {
+      const p = String(u?.fsPath ?? u);
+      const st = nodeFs.statSync(p);
+      return { type: st.isDirectory() ? 2 : 1, size: st.size, ctime: 0, mtime: 0 };
+    },
+  },
   registerTextDocumentContentProvider: (scheme: string) => {
     recorded.schemes.push(scheme);
     return new Disposable();
@@ -195,6 +243,11 @@ export class EventEmitter<T> {
   }
 }
 
+/* The real enum's values, not invented ones: `attachPaths` compares
+   `stat.type === FileType.Directory`, so a stub whose Directory is not 2
+   makes every dropped folder look like a file. */
+export const FileType = { Unknown: 0, File: 1, Directory: 2, SymbolicLink: 64 };
+
 export const DiagnosticSeverity = { Error: 0, Warning: 1, Information: 2, Hint: 3 };
 
 export const commands: any = {
@@ -207,7 +260,10 @@ export const commands: any = {
   },
 };
 
-export const env: any = { clipboard: { writeText: async () => {} } };
+/* `remoteName` is undefined in a local window and a string like "wsl" in a
+   remote one. The stub defaults to local and lets a case set it, because the
+   attachment path branches on it. */
+export const env: any = { clipboard: { writeText: async () => {} }, remoteName: undefined };
 /** Used by installWatcher(); its absence is why activation died with a root. */
 export class RelativePattern {
   constructor(public base: unknown, public pattern: string) {}

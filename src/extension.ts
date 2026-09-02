@@ -6,6 +6,7 @@ import { BrowserPanel } from "./ui/browser";
 import { ProposedContent, QuickEdit } from "./ui/quickEdit";
 import { registerEditorFeatures } from "./providers/editorFeatures";
 import { registerCommitMessage } from "./providers/commitMessage";
+import { applyTerminalTheme, revertTerminalTheme } from "./theme/terminal";
 import { registerInlineCompletion } from "./providers/inlineCompletion";
 import type { CcSection } from "./ui/protocol";
 
@@ -81,6 +82,46 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // bound to a key and closed without reaching for the mouse.
     vscode.commands.registerCommand("genesis.closeBrowser", () => {
       BrowserPanel.close();
+    }),
+
+    /* The panel's palette, on the terminal beside it.
+    
+       The two are docked side by side and the terminal runs whatever ANSI
+       colours the workbench theme ships, so they do not read as one product.
+       Everything applied here is derived from `media/webview/tokens.css` - the
+       same file the panel is drawn from - so the terminal cannot drift away
+       from it. See src/theme/palette.ts for what has to be derived and why. */
+    vscode.commands.registerCommand("genesis.applyTerminalTheme", async () => {
+      const n = await applyTerminalTheme(context);
+      void vscode.window.showInformationMessage(
+        `Genesis: applied ${n.colors} terminal colours and ${n.fonts} font settings. ` +
+          "Run \u201cRevert terminal theme\u201d to undo."
+      );
+    }),
+
+    vscode.commands.registerCommand("genesis.revertTerminalTheme", async () => {
+      const undone = await revertTerminalTheme(context);
+      void vscode.window.showInformationMessage(
+        undone
+          ? "Genesis: terminal theme reverted."
+          : "Genesis: no terminal theme to revert - nothing was applied."
+      );
+    }),
+
+    /* The HOST'S file dialog, which the composer's attach button no longer
+       uses.
+    
+       That button now opens a file input in the webview, because the webview
+       renderer runs on the user's own machine while `showOpenDialog` runs on
+       the extension host - and in a WSL, dev container or SSH window those are
+       different computers, so the dialog could not reach the user's own disk.
+    
+       This dialog is still the only way to reach a file on the REMOTE machine
+       that is outside the workspace, which `@` does not cover, so it keeps a
+       route rather than being deleted with the button that used to call it. */
+    vscode.commands.registerCommand("genesis.attachFromHost", async () => {
+      await vscode.commands.executeCommand("genesis.focusSidebar");
+      await instance.pickAndAttach();
     }),
 
     vscode.commands.registerCommand("genesis.newChat", async () => {
