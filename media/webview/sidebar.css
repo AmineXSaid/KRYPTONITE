@@ -858,7 +858,13 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   color: var(--kx-fg-2);
   white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: auto;
 }
-.tool[data-error="1"] .term-block { border-left-color: var(--kx-error); }
+/* `:not(.cmd-in)` because a tool card holds TWO term-blocks now, and this
+   rule was written when it held one. Without it the failure red lands on the
+   command's rail as well as the output's - and what was run is still what was
+   run; it is the result that went wrong. Its specificity also beat the
+   command's own accent rail, so the split the rails exist to show disappeared
+   on exactly the cards where it matters most. */
+.tool[data-error="1"] .term-block:not(.cmd-in) { border-left-color: var(--kx-error); }
 
 /* â”€â”€ turn footer: hover actions + cost â”€â”€
    Copy / Retry / Branch appear at the end of a turn with elapsed time and
@@ -1079,11 +1085,8 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 /* The command gets the accent rail: it is the half that had an effect. */
 .tool-body .cmd-in { border-left-color: var(--kx-accent); }
-/* A failed run recolours the OUTPUT rail, not the command's - what was run is
-   still what was run, and it is the result that went wrong. */
-.tool[data-error="1"] .tool-body .term-block:not(.cmd-in) {
-  border-left-color: var(--kx-error);
-}
+/* The failed-run rail lives with the other `.term-block` rules further up,
+   corrected there rather than duplicated here. */
 
 /* The command name, coloured like the thing it is: something being invoked.
    `.tk-fn` is unused by the shell grammar, so this borrows the same "a call"
