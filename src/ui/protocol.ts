@@ -219,6 +219,19 @@ export interface ConfigDto {
    */
   extensionVersion: string;
   /**
+   * The remote authority this window is attached to - "wsl", "dev-container",
+   * "ssh-remote", "codespaces" - or null when the extension host runs on the
+   * same machine as the UI.
+   *
+   * The panel needs it for one reason: `showOpenDialog` runs on the EXTENSION
+   * HOST, so in a remote window it browses the remote filesystem. A user
+   * sitting in front of a Windows machine with the code in WSL cannot reach
+   * their own Desktop through it. The webview renderer is always local, so a
+   * file input there is the route to the user's own disk - and the panel has
+   * to know which case it is in to say so.
+   */
+  remoteName: string | null;
+  /**
    * Shell commands the user has said "always allow" to, in full.
    *
    * WHOLE COMMAND LINES, matched exactly. The grant used to be keyed on the

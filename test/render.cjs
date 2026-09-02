@@ -1913,6 +1913,155 @@ function contrast(a, b) {
     await c2.close();
   }
 
+  /* ── 5v. mode, attach and send are one group of matching buttons ───── */
+  {
+    // The mode button moved from the left of the row - where it was a labelled
+    // pill among labelled controls - into the action group, at the owner's
+    // instruction, taking the same geometry as attach and send.
+    for (const width of [300, 360, 420, 520, 700]) {
+      const { ctx, page } = await open(width, {});
+      const m = await page.evaluate(() => {
+        const ids = ["permBtn", "clipBtn", "sendBtn"];
+        const box = (id) => {
+          const e = document.getElementById(id);
+          const r = e.getBoundingClientRect();
+          return { id, w: Math.round(r.width), h: Math.round(r.height),
+                   top: Math.round(r.top), inGroup: !!e.closest(".tb-actions") };
+        };
+        const b = ids.map(box);
+        // Hit-tested, because a control that is the right size in the right
+        // place and covered by something else is still unusable.
+        const hit = ids.map((id) => {
+          const e = document.getElementById(id);
+          const r = e.getBoundingClientRect();
+          const at = document.elementFromPoint(
+            Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2));
+          return !!at && (at === e || e.contains(at));
+        });
+        return { b, hit, label: getComputedStyle(document.getElementById("permName")).display };
+      });
+      ok(`the mode button sits with attach and send at ${width}px`,
+        m.b.every((x) => x.inGroup), JSON.stringify(m.b));
+      // Same dimensions - the whole point of the move. Compared against each
+      // other rather than against a literal, so a change to .tb-btn's size
+      // moves all three together instead of failing here.
+      const [perm, clip, send] = m.b;
+      ok(`the three are the same size at ${width}px`,
+        perm.w === clip.w && clip.w === send.w &&
+        perm.h === clip.h && clip.h === send.h, JSON.stringify(m.b));
+      ok(`and sit on one line at ${width}px`,
+        perm.top === clip.top && clip.top === send.top, JSON.stringify(m.b));
+      ok(`and all three are clickable at ${width}px`,
+        m.hit.every(Boolean), JSON.stringify({ hit: m.hit, b: m.b }));
+      // It is an icon button now, at every width - the label it used to show
+      // above 500px would make it wider than the two beside it.
+      ok(`the mode label is off at ${width}px`, m.label === "none", m.label);
+      await ctx.close();
+    }
+
+    // The mode is still ANNOUNCED, which is what the label was carrying. A
+    // glyph plus a colour is nothing to a screen reader.
+    const { ctx, page } = await open(420, {});
+    const named = await page.evaluate(() => {
+      const b = document.getElementById("permBtn");
+      return { title: b.title, aria: b.getAttribute("aria-label"),
+               text: (document.getElementById("permName") || {}).textContent };
+    });
+    /* The tooltip is written by renderPerm from the mode table, so it says
+       "Manual - Always ask before making changes" rather than the static
+       markup's wording. What has to hold is that it names the MODE and says
+       what that mode does - the two things the visible label used to carry
+       and no longer can. */
+    ok("the mode button's tooltip names the mode",
+      /manual/i.test(named.title), JSON.stringify(named));
+    ok("and says what that mode does",
+      named.title.replace(/manual/i, "").trim().length > 10, JSON.stringify(named));
+    ok("and the accessible name names it too",
+      /manual/i.test(named.aria || ""), JSON.stringify(named));
+    ok("and the mode name is still in the DOM for a screen reader",
+      /manual/i.test(named.text || ""), JSON.stringify(named));
+    await ctx.close();
+  }
+
+  /* ── 5w. attach reaches the LOCAL machine, not the extension host ───── */
+  {
+    // `showOpenDialog` runs on the extension host. In a WSL, dev container,
+    // SSH or Codespaces window that host is the remote machine, so the dialog
+    // browses the remote disk and a file on the user's own Desktop cannot be
+    // attached through it. Reported from exactly that setup.
+    //
+    // The webview renderer is always local, so a file input here opens the
+    // user's own OS picker whatever the window is attached to.
+    const { ctx, page } = await open(420, {});
+    const input = await page.evaluate(() => {
+      const el = document.getElementById("localPick");
+      if (!el) return { missing: true };
+      const cs = getComputedStyle(el);
+      return {
+        tag: el.tagName, type: el.type, multiple: el.multiple,
+        // display:none / visibility:hidden inputs are not focusable and some
+        // engines refuse to open a picker for one, so the offscreen trick has
+        // to survive: it must be rendered, just not seen.
+        display: cs.display, visibility: cs.visibility,
+      };
+    });
+    ok("the panel carries a local file input", !input.missing, JSON.stringify(input));
+    ok("and it accepts more than one file", input.multiple === true, JSON.stringify(input));
+    ok("and it is rendered, not display:none, so the picker will open",
+      input.display !== "none" && input.visibility !== "hidden", JSON.stringify(input));
+
+    // The consequence: pressing attach must NOT ask the host to open its
+    // dialog, because that dialog is on the wrong machine.
+    await page.evaluate(() => { window.__sent.length = 0; });
+    await page.click("#clipBtn");
+    await page.waitForTimeout(150);
+    const sent = await page.evaluate(() => window.__sent.map((m) => m.type));
+    ok("pressing attach does not route to the host's dialog",
+      !sent.includes("attachFiles"), JSON.stringify(sent));
+    await ctx.close();
+  }
+
+  /* ── 5x. a file can be dropped anywhere on the panel ────────────────── */
+  {
+    // The drop listeners were bound to `.composer`, so a file let go over the
+    // transcript - most of the panel, and the obvious place to aim - hit the
+    // document guard that stops the webview navigating to the file, and did
+    // nothing. Silently: no outline, no error, no attachment.
+    const { ctx, page } = await open(420, {});
+    const r = await page.evaluate(() => {
+      // A real DataTransfer carrying a real File, so this exercises the same
+      // path an OS drag takes rather than a shape invented for the test.
+      const dt = new DataTransfer();
+      dt.items.add(new File(["hello from the desktop"], "notes.txt", { type: "text/plain" }));
+      const log = document.getElementById("log");
+      const fire = (el, type) => {
+        const ev = new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt });
+        el.dispatchEvent(ev);
+        return ev;
+      };
+      fire(log, "dragenter");
+      const over = fire(log, "dragover");
+      const lit = document.querySelector('.composer[data-drop="1"]') !== null;
+      fire(log, "drop");
+      return {
+        // A cancelled dragover is what tells the OS the drop will be accepted.
+        accepted: over.defaultPrevented,
+        // The composer still carries the highlight, because that is where the
+        // file is going even when the pointer is over the transcript.
+        highlighted: lit,
+      };
+    });
+    ok("a drag over the transcript is accepted", r.accepted === true, JSON.stringify(r));
+    ok("and the composer shows where it will land", r.highlighted === true, JSON.stringify(r));
+    // FileReader is async, so the attachment lands a tick later.
+    await page.waitForTimeout(300);
+    const got = await page.evaluate(() =>
+      [...document.querySelectorAll("#attachStrip [data-att-rm]")].length ||
+      document.querySelectorAll("#attachStrip .att").length);
+    ok("and the file dropped on the transcript is actually attached", got > 0, String(got));
+    await ctx.close();
+  }
+
   /* ── 6. the session list, as the reference draws it ────────────────── */
   {
     const { ctx, page } = await open(400, {

@@ -93,6 +93,16 @@ async function main() {
     // Distinct from openBrowser: lands on the agent's view and starts
     // watching, which is what the model launching a browser calls for.
     "genesis.watchAgentBrowser",
+    /* The host's own file dialog. The composer's attach button no longer
+       calls it: `showOpenDialog` runs on the EXTENSION HOST, so in a WSL, dev
+       container or SSH window it browses the remote disk while the user is
+       sitting at a different machine. The button opens a file input in the
+       webview instead, which is always local.
+    
+       This keeps the dialog reachable, because it is still the only route to a
+       file on the remote machine that is outside the workspace - `@` covers
+       the workspace and nothing beyond it. */
+    "genesis.attachFromHost",
   ];
   for (const name of EXPECTED) {
     ck(recorded.commands.includes(name), `1.1 ${name} is registered`);

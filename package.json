@@ -105,6 +105,11 @@
         "category": "Genesis"
       },
       {
+        "command": "genesis.attachFromHost",
+        "title": "Attach file from the workspace machine",
+        "category": "Genesis"
+      },
+      {
         "command": "genesis.newChat",
         "title": "New chat",
         "category": "Genesis"

@@ -634,10 +634,23 @@ console.log("\n──── the send control ────");
     /#root\s*\{[^}]*overflow:\s*hidden/.test(CSS));
 }
 
-/* ── files dropped on the composer ──────────────────────────────────────── */
+/* ── files dropped on the panel ─────────────────────────────────────────── */
 {
   console.log("\n──── drag and drop ────");
-  ok("the composer takes a drop", /composer\.addEventListener\("drop"/.test(SRC));
+  /* This read `composer.addEventListener("drop"` - a grep for one variable
+     name, which broke the moment the drop target was widened from the composer
+     box to the whole panel even though the behaviour it cares about got
+     BETTER. The name was never the invariant.
+
+     What matters is that a drop is handled somewhere, and that the target is
+     not the composer alone: a file let go over the transcript - most of the
+     panel, and the obvious place to aim - used to hit the document guard and
+     do nothing at all, silently. Whether the drop actually attaches the file
+     is tested for real, with a real DataTransfer and a real File, in
+     render.cjs 5x; this suite has no browser and can only read the source. */
+  ok("a drop is handled", /\.addEventListener\("drop"/.test(SRC));
+  ok("and the target is the panel, not just the composer box",
+    /var zone = document\.getElementById\("root"\)/.test(SRC), "drop zone");
   ok("and shows it is about to", /data-drop/.test(SRC) && /\.composer\[data-drop="1"\]/.test(CSS));
   // The load-bearing half: a webview's default action for a dropped file is to
   // navigate to it, which replaces the panel and loses the conversation.
@@ -645,8 +658,15 @@ console.log("\n──── the send control ────");
     /document\.addEventListener\("drop",\s*function[^)]*\)\s*\{\s*e\.preventDefault\(\)/.test(SRC));
   ok("and cancels dragover too, or drop never fires at all",
     /document\.addEventListener\("dragover",\s*function[^)]*\)\s*\{\s*e\.preventDefault\(\)/.test(SRC));
-  ok("the drop reuses the paste path's size and count caps",
+  ok("the drop reuses the paste path's reader and count cap",
     /function takeFiles[\s\S]{0,400}readBlob\(/.test(SRC));
+  /* And there is no SIZE cap on either path any more, at the owner's
+     instruction. This file's own wording said "size and count caps", which was
+     true of both halves until the host's 10 MB limit came out - and the
+     webview kept a second copy of that number, so a dropped file was still
+     refused after the host had stopped refusing it. */
+  ok("and no size cap survives in the webview",
+    !/ATTACH_MAX/.test(SRC), "ATTACH_MAX");
 }
 
 /* ── a conversation can be thrown away from the welcome screen ──────────── */

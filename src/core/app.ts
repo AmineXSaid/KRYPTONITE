@@ -2139,6 +2139,8 @@ export class App {
       editorContext: this.cfg().get<boolean>("editorContext", true),
       readOutsideWorkspace: this.cfg().get<boolean>("readOutsideWorkspace", true),
       extensionVersion: String(this.context.extension.packageJSON.version ?? "0.0.0"),
+      // undefined when the window is local; the authority name otherwise.
+      remoteName: vscode.env.remoteName ?? null,
       alwaysAllowedCommands: [...this.alwaysAllowedCommands],
       ui: { ...this.uiConfig },
     };

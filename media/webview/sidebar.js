@@ -1196,28 +1196,56 @@ function _sbRun() {
                 // press send": what it may do, which model does it, and
                 // whether it will ask first. It used to sit under the box in a
                 // footer, which is where things go to be ignored.
-                '<button class="perm-btn" id="permBtn" aria-haspopup="menu" aria-expanded="false"' +
-                  ' title="What the agent may do without asking">' +
-                  icon("i-shield", "ic-15") + '<span class="nm" id="permName">Manual</span>' +
-                '</button>' +
                 '<span class="sp"></span>' +
-                // Attach and send. THERE IS NO `@` BUTTON, on purpose.
+                // Mode, attach and send. THERE IS NO `@` BUTTON, on purpose.
                 //
                 // It typed a single character into the box, which is a thing
                 // the keyboard already does and which the placeholder already
-                // teaches - "( / skills · @ files )". As a sixth control in a
+                // teaches - "( / skills · @ files )". As another control in a
                 // wrapping row it was the one that broke the line: the group
                 // orphaned onto a second row and sat right-aligned with the
                 // whole left half of the composer empty. The design's composer
                 // has five controls and this is the one it does not have.
                 //
-                // The pair is still a GROUP rather than two siblings, so a
-                // wrap at a narrow width moves them together instead of
-                // leaving send on a row by itself.
+                // These are a GROUP rather than siblings, so a wrap at a narrow
+                // width moves them together instead of leaving send on a row by
+                // itself.
+                //
+                // The MODE button joins them here, at the owner's instruction,
+                // and takes their geometry. It used to sit on the left beside
+                // the model name, where it was a labelled pill among labelled
+                // controls; here it is a 30px icon button in a run of three,
+                // which is what it always was underneath - a glyph, a tooltip
+                // and a sheet. Its label moves to the tooltip and the
+                // accessible name, both of which already carried it.
                 '<span class="tb-actions">' +
+                  '<button class="tb-btn perm-btn" id="permBtn" aria-haspopup="menu" aria-expanded="false"' +
+                    ' title="What the agent may do without asking">' +
+                    icon("i-shield", "ic-13") + '<span class="nm" id="permName">Manual</span>' +
+                  '</button>' +
                   '<button class="tb-btn" id="clipBtn" title="Upload from your computer - or drop files on the box" aria-label="Upload files from your computer">' + icon("i-clip", "ic-13") + '</button>' +
                   '<button id="sendBtn" data-ready="0" data-mode="send" title="Send" aria-label="Send">' + icon("i-up", "ic-13") + '</button>' +
                 '</span>' +
+                /* The local file picker.
+                
+                   `showOpenDialog` runs on the EXTENSION HOST. In a WSL, dev
+                   container, SSH or Codespaces window that host is the remote
+                   machine, so the dialog browses the remote filesystem and a
+                   file sitting on the user's own Desktop is unreachable
+                   through it - which is exactly what was reported.
+                
+                   The webview renderer is always LOCAL, on the machine with
+                   the screen and the mouse, so a plain file input here opens
+                   the user's own OS picker whatever the window is attached to.
+                   The bytes arrive in the page and take the same path a
+                   dropped or pasted file already takes.
+                
+                   Off-screen rather than `display: none`: a hidden input is
+                   not focusable and some engines refuse to open the picker for
+                   one that is not rendered. */
+                '<input type="file" id="localPick" multiple ' +
+                  'style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none" ' +
+                  'tabindex="-1" aria-hidden="true">' +
               '</div>' +
             '</div>' +
             // The mode picker is a sheet over the whole panel rather than a
@@ -5464,10 +5492,15 @@ function _sbRun() {
    * screenshot to disk first, finding it, and picking it. Ctrl+V puts it
    * straight into the composer.
    *
-   * The same limits as the picker apply, enforced here because these bytes
-   * never pass through it.
+   * There is no SIZE limit here, matching the host: the 10 MB cap this file
+   * carried was a second copy of the one removed from `attachUris`, so a file
+   * dropped or pasted was still refused after the host had stopped refusing
+   * it. Two copies of a limit is how half a limit survives its own deletion.
+   *
+   * The COUNT cap stays. It is not a size policy - it is what keeps one
+   * message from carrying forty files, which is a different failure and one
+   * the user can act on by sending twice.
    */
-  var ATTACH_MAX = 10 * 1024 * 1024;   // 10 MB, matching pickAndAttach
   var ATTACH_COUNT_MAX = 10;
   /* Characters past which pasted text becomes a file rather than composer
      content. A pasted log is something to hand over, not something to edit,
@@ -5520,13 +5553,6 @@ function _sbRun() {
 
   /** Read a Blob into the base64 shape the host and the wire already use. */
   function readBlob(blob, name, done) {
-    if (blob.size > ATTACH_MAX) {
-      addError(
-        name + " is " + (blob.size / 1048576).toFixed(1) + " MB. The limit is 10 MB."
-      );
-      done(false);
-      return;
-    }
     var r = new FileReader();
     r.onload = function () {
       // readAsDataURL gives "data:<mime>;base64,<payload>"; the wire wants only
@@ -5626,6 +5652,19 @@ function _sbRun() {
   function wireDrop() {
     var composer = document.querySelector(".composer");
     if (!composer) return;
+    /* THE WHOLE PANEL IS THE DROP TARGET, not just the composer box.
+    
+       The listeners were bound to `.composer`, so a file let go anywhere else -
+       over the transcript, which is most of the panel and the obvious place to
+       aim at - hit the document guard below, was cancelled to stop the webview
+       navigating to it, and did nothing at all. Silently: no outline, no
+       error, no attachment. Aiming at a 90px box at the bottom of the panel is
+       a requirement nobody knows about until they miss.
+    
+       `#root` rather than `document`, so the drag still ends at the panel's
+       own bounds. The composer keeps the HIGHLIGHT, because that is where the
+       file is going and the outline is the answer to "will this land". */
+    var zone = document.getElementById("root") || composer;
 
     /* The document-wide guard.
      *
@@ -5657,16 +5696,16 @@ function _sbRun() {
       return false;
     };
 
-    composer.addEventListener("dragenter", function (e) {
+    zone.addEventListener("dragenter", function (e) {
       if (!carriesFiles(e)) return;
       depth++;
       composer.setAttribute("data-drop", "1");
     }, true);
-    composer.addEventListener("dragleave", function () {
+    zone.addEventListener("dragleave", function () {
       if (depth > 0) depth--;
       if (!depth) composer.removeAttribute("data-drop");
     }, true);
-    composer.addEventListener("dragover", function (e) {
+    zone.addEventListener("dragover", function (e) {
       if (!carriesFiles(e)) return;
       e.preventDefault();
       e.stopPropagation();
@@ -5674,7 +5713,7 @@ function _sbRun() {
       // the cursor to the one with a plus on it.
       if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
     }, true);
-    composer.addEventListener("drop", function (e) {
+    zone.addEventListener("drop", function (e) {
       e.preventDefault();
       e.stopPropagation();
       depth = 0;
@@ -6023,8 +6062,37 @@ function _sbRun() {
       S.qpIndex = 0;
       renderQuickPick();
     });
+    /* THE LOCAL PICKER, not the host's dialog.
+    
+       This posted `attachFiles`, which reaches `showOpenDialog` on the
+       extension host. In a local window the two are the same thing. In a WSL,
+       dev container, SSH or Codespaces window they are not: the host is the
+       remote machine, the dialog browses the remote disk, and the button
+       labelled "Upload from your computer" could not reach the user's
+       computer. Reported from exactly that setup.
+    
+       The input runs in the renderer, which is always on the machine the user
+       is sitting at, so it opens their own OS picker in every window type.
+       Files on the REMOTE side are still reachable, and by a better route than
+       a dialog: `@` completes workspace paths, and the host reads them. */
     $("clipBtn").addEventListener("click", function () {
-      post("attachFiles");
+      var input = $("localPick");
+      // The value is cleared first so picking the SAME file twice in a row
+      // still fires `change`. Without it the second pick is silent, which
+      // reads as the button being broken.
+      input.value = "";
+      input.click();
+    });
+    $("localPick").addEventListener("change", function () {
+      var files = this.files;
+      if (!files || !files.length) return;
+      takeFiles(files, function () {
+        renderAttachments();
+        syncComposer();
+      });
+      // Released as soon as it is read: a file input holds a reference to
+      // every File it was given, and these are whole files in memory.
+      this.value = "";
     });
     // On the textarea rather than the document, so a paste into some other
     // field cannot silently become an attachment.

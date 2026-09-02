@@ -234,7 +234,10 @@ export const commands: any = {
   },
 };
 
-export const env: any = { clipboard: { writeText: async () => {} } };
+/* `remoteName` is undefined in a local window and a string like "wsl" in a
+   remote one. The stub defaults to local and lets a case set it, because the
+   attachment path branches on it. */
+export const env: any = { clipboard: { writeText: async () => {} }, remoteName: undefined };
 /** Used by installWatcher(); its absence is why activation died with a root. */
 export class RelativePattern {
   constructor(public base: unknown, public pattern: string) {}

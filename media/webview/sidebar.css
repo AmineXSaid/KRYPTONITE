@@ -2235,22 +2235,20 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    those two from reading as one setting. The mockup sidesteps this by naming
    the mode "Manual" instead, but renaming a settings enum is a behaviour
    change, not a theme, so the icon carries it here. */
-.perm-btn {
-  display: flex; align-items: center; gap: 5px; flex: none;
-  min-height: 24px; padding: 0 7px; border-radius: 4px;
-  font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
-  letter-spacing: .12em; text-transform: uppercase; text-indent: .12em;
-  color: var(--kx-fg-3);
-  border: 1px solid transparent; background: none;
-  /* Sits immediately after the phase segment, and must not read as a fourth
-     phase. The gap does that work: the segment's own buttons are flush
-     against each other, so any space at all reads as "different control". */
-  margin-left: 3px;
-}
-/* The mode GLYPH is the thing that survives a narrow panel, so it is drawn at
-   a size that can carry the meaning on its own - 15px rather than 11. At 11 it
-   was a smudge next to a word doing all the work. */
-.perm-btn .ic-15 { color: currentColor; flex: none; }
+/* ONE OF THE THREE ACTION BUTTONS, at the owner's instruction.
+   
+   It used to sit on the left beside the model name as a labelled pill, with
+   its own padding, its own 24px min-height and a `margin-left` tuned to keep
+   it from reading as a fourth phase segment. Beside attach and send it needs
+   none of that: it takes `.tb-btn`'s 30x30 plate and hairline, and its label
+   moves to the tooltip and the accessible name, both of which already carried
+   it in full.
+   
+   The class is still `.perm-btn` because the MODE rules below hang off it -
+   the glyph's colour is the whole signal for which mode is armed, and that is
+   the one thing this button does that attach and send do not. */
+.perm-btn .nm { display: none; }
+.perm-btn .ic-13 { color: currentColor; flex: none; }
 .perm-btn:hover { background: var(--kx-hover); color: var(--kx-fg); }
 .perm-btn[aria-expanded="true"] { background: var(--kx-hover); border-color: var(--kx-line); }
 /* Only a mode that stops asking is coloured, and it is coloured on its OWN
@@ -2272,14 +2270,8 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   .perm-btn[data-mode="edits-auto"] { color: var(--kx-agent); }
   .perm-btn[data-mode="full-auto"] { color: var(--kx-error); }
 }
-/* Below ~330px the control row has to choose between wrapping onto a second
-   line and dropping a word. The word goes: the glyph carries the mode, the
-   tooltip and the accessible name carry the sentence, and the row stays one
-   line - which is worth more than the label on a panel this narrow. */
-@media (max-width: 330px) {
-  .perm-btn .nm { display: none; }
-  .perm-btn { padding: 0 5px; }
-}
+/* The narrow-width rule that dropped this button's label is gone: the label
+   is gone at every width now, so there is nothing left to take away. */
 
 
 /* Opens upward, over the transcript, anchored to the composer rather than to
@@ -3102,8 +3094,9 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    because the four controls need 319px of basis at a 380px panel and 64 put
    them one pixel over, which costs a whole row. */
 #modelBtn { flex: 6 1 56px; min-width: 0; max-width: 26ch; }
-.perm-btn { min-width: 0; flex: 0 1 auto; }
-.perm-btn .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The label-shrinking rules that lived here are gone with the label: the mode
+   button is a 30px icon in the action group now, the same at every width, so
+   there is nothing left for a breakpoint to take away from it. */
 
 /* ── Measure at wide widths ──
    The panel is draggable to ~900px and the transcript had no measure cap, so
@@ -3129,32 +3122,11 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    the phase segment's padding, both of which are declared further up; a
    media query does not raise specificity, so source order is the only
    thing that decides which wins. */
-/* NARROW: THE WORD GOES, THE GLYPH GROWS, THE CONTROL STAYS.
- *
- * Below 340px the control row cannot hold phase + model + mode + attach +
- * send at full width. Something has to give, and the choice is between
- * dropping a control off the row and dropping a LABEL. A missing control is
- * unreachable; a missing label is a glyph and a tooltip.
- *
- * So the mode button becomes icon-only and takes the same 30px square as
- * attach and send, which makes the end of the row three matching controls
- * rather than two and a stub. The glyph goes to 17px, because it is now the
- * whole message: a raised hand, angle brackets, or a bolt.
- *
- * The name is still announced - `aria-label` carries it, and the title carries
- * the full sentence - so nothing is lost to a screen reader, only to width. */
-/* 500, not 400. See the note on the phase segment below: these two
-   breakpoints and the model button's are one decision, and splitting them is
-   what produced a panel that got WORSE as it got wider. */
-@media (max-width: 500px) {
-  .perm-btn {
-    width: 30px; height: 30px; min-height: 0; padding: 0;
-    justify-content: center;
-    border-color: var(--kx-edge); background: var(--kx-surface-2);
-  }
-  .perm-btn .nm { display: none; }
-  .perm-btn .ic-15 { width: 17px; height: 17px; }
-}
+/* The mode button is icon-only at EVERY width now, not just below 500 - it
+   moved into the action group beside attach and send and took their geometry,
+   so the breakpoint that used to shrink it has nothing left to do. Its block
+   is gone rather than emptied; what still gives ground as the panel narrows is
+   the phase segment and the endpoint dot, below. */
 
 /* The phase segment gives up its side padding at 400, not at 330.
  *

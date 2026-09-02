@@ -291,13 +291,25 @@ const pasteTests = (async () => {
   ok("named as text", /pasted-\d+\.txt/.test(d.getElementById("attachStrip").textContent));
   ok("and the composer is left alone", draft.value === "");
 
-  // The picker's 10 MB limit applies here too; these bytes never pass through it.
-  const huge = { size: 11 * 1024 * 1024, type: "image/png", name: "big.png" };
+  /* THERE IS NO SIZE LIMIT, at the owner's instruction, and this used to pin
+     one: an 11 MB paste was refused with "The limit is 10 MB". The webview
+     carried its own copy of the host's cap, so a paste or a drop was still
+     refused after the host had stopped refusing - which is how half a limit
+     survives its own deletion.
+
+     The fixture went with it. It was `{ size, type, name }`, a plain object
+     that never reached FileReader because the size check rejected it first;
+     with the check gone it does reach it, and readAsDataURL throws on
+     anything that is not a real Blob. A stand-in that only works while the
+     code under test refuses to look at it is not a fixture. */
   const n = pillCount();
+  const huge = new w.File(["x".repeat(64 * 1024)], "big.png", { type: "image/png" });
   paste([fileItem(huge)]);
-  ok("an oversized paste says why",
-    await until(() => /10 MB/.test(d.getElementById("log").textContent)));
-  ok("and is refused", pillCount() === n);
+  ok("a large paste is attached rather than refused",
+    await until(() => pillCount() === n + 1), String(pillCount()));
+  ok("and nothing claims a limit",
+    !/limit is/i.test(d.getElementById("log").textContent),
+    d.getElementById("log").textContent.slice(0, 120));
 })();
 
 /* ── 6d. tool rows: filenames, previews, word-level edits ────────────── */
@@ -468,7 +480,21 @@ const pasteTests = (async () => {
   ok("attach button exists", !!clip);
   ok("attach button is NOT disabled", !clip.disabled);
   clip.click();
-  ok("clip posts attachFiles", sent.some(m => m.type === "attachFiles"));
+  /* THE LOCAL PICKER, not the host's dialog. This asserted `attachFiles`,
+     which reaches `showOpenDialog` on the EXTENSION HOST - and in a WSL, dev
+     container or SSH window that host is the remote machine, so the button
+     labelled "Upload from your computer" browsed a disk the user was not
+     sitting in front of.
+
+     The button opens a file input in the webview now, which runs in the
+     renderer and is therefore always on the user's own machine. So the
+     assertion inverts: pressing it must NOT ask the host, and there must be an
+     input for it to open. */
+  ok("clip does not ask the host to open its dialog",
+    !sent.some(m => m.type === "attachFiles"), JSON.stringify(sent.map(m => m.type)));
+  const local = d.getElementById("localPick");
+  ok("and a local file input exists for it to open", !!local && local.type === "file");
+  ok("and it takes more than one file", !!local && local.multiple === true);
 }
 
 /* ── 10. attachmentsReady renders pills ────────────────────────────── */

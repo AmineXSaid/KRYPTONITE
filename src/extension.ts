@@ -83,6 +83,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       BrowserPanel.close();
     }),
 
+    /* The HOST'S file dialog, which the composer's attach button no longer
+       uses.
+    
+       That button now opens a file input in the webview, because the webview
+       renderer runs on the user's own machine while `showOpenDialog` runs on
+       the extension host - and in a WSL, dev container or SSH window those are
+       different computers, so the dialog could not reach the user's own disk.
+    
+       This dialog is still the only way to reach a file on the REMOTE machine
+       that is outside the workspace, which `@` does not cover, so it keeps a
+       route rather than being deleted with the button that used to call it. */
+    vscode.commands.registerCommand("genesis.attachFromHost", async () => {
+      await vscode.commands.executeCommand("genesis.focusSidebar");
+      await instance.pickAndAttach();
+    }),
+
     vscode.commands.registerCommand("genesis.newChat", async () => {
       instance.session.newChat();
       await vscode.commands.executeCommand("genesis.focusSidebar");
