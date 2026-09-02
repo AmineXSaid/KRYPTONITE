@@ -559,6 +559,53 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
   font-family: var(--kx-mono); font-size: 11px; line-height: 1.65;
   white-space: pre-wrap; overflow-x: auto; max-height: 240px; overflow-y: auto;
 }
+/* A copyable template: a header row naming the file, and the copy button.
+   
+   The button is IN the row rather than floating over the block, because `.pre`
+   scrolls in both axes - an absolutely-positioned button over it is clear only
+   for content that happens to wrap before reaching it, and any line can be
+   scrolled under it by hand. This is the same treatment the transcript's code
+   blocks already use (`.cb` / `.cb-h` in sidebar.css), so copy works the same
+   way on both surfaces. */
+.pre-wrap {
+  margin: 0; border: 1px solid var(--kx-line); border-radius: 4px;
+  overflow: hidden; background: var(--kx-surface-2);
+}
+.pre-h {
+  display: flex; align-items: center; gap: 8px;
+  padding: 3px 6px 3px 10px;
+  border-bottom: 1px solid var(--kx-line);
+}
+/* The filename, so the row says what the block IS as well as offering to copy
+   it - "SKILL.md" answers the question the guide's prose has to spend a
+   sentence on. `min-width: 0` because it is a flex item that may need to
+   ellipsise before the button gives up any width. */
+.pre-l {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--kx-mono); font-size: 9px; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--kx-fg-2);
+}
+/* The block inside a wrapper has the wrapper's border and corners already. */
+.pre-wrap .pre { border-radius: 0; background: none; }
+.pre-copy {
+  margin-left: auto; flex: none;
+  padding: 3px 8px; border-radius: 4px;
+  background: var(--kx-surface-4); border: 1px solid var(--kx-line);
+  color: var(--kx-fg-2);
+  font-family: var(--kx-mono); font-size: 9px; letter-spacing: .1em;
+  text-transform: uppercase; text-indent: .1em;
+  /* 24px is the floor for a pointer target and 9px type does not reach it on
+     its own; the padding above puts it at 24 exactly. */
+  min-height: 24px;
+  transition: background .14s ease, color .14s ease, border-color .14s ease;
+}
+.pre-copy:hover { background: var(--kx-line); color: var(--kx-fg); }
+.pre-copy:focus-visible { outline: 1px solid var(--kx-link); outline-offset: 1px; }
+/* The confirmation. Oxide is the panel's "this worked" colour everywhere else,
+   and the word changes too - a colour alone is not a message to anyone who
+   cannot separate these two hues. */
+.pre-copy[data-done="1"] { color: var(--kx-accent); border-color: var(--kx-accent); }
+
 .ok-mark { color: var(--kx-accent); display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; }
 .empty { font-size: 11.5px; color: var(--kx-fg-2); }
 .warn-line { font-size: 11px; color: var(--kx-warn); margin-top: 6px; }

@@ -28,10 +28,27 @@ export interface AppliedAuth {
   report: string[];
 }
 
+/**
+ * Ceiling for a credential helper and a token exchange.
+ *
+ * Neither used to have one that mattered. The exchange `request` passed no
+ * signal and no timeout at all, and `complete()` awaits this BEFORE it checks
+ * whether the turn was aborted - so an IdP stalling behind a corporate proxy
+ * left a turn hanging with the panel showing an idle composer, because Stop
+ * had already cleared the running flag and broadcast turnEnd. The profile's
+ * own `timeoutMs` is the right bound: it is what the user set for "how long is
+ * this endpoint allowed to take".
+ */
+function authTimeout(profile: EndpointProfile): number {
+  const t = Number(profile.timeoutMs);
+  return Number.isFinite(t) && t > 0 ? t : 120_000;
+}
+
 export async function applyAuth(
   profile: EndpointProfile,
   dispatcher: Dispatcher,
-  secrets: (k: string) => string | undefined
+  secrets: (k: string) => string | undefined,
+  signal?: AbortSignal
 ): Promise<AppliedAuth> {
   const spec: AuthSpec = profile.auth ?? { kind: "none" };
   const headers: Record<string, string> = {};
@@ -73,9 +90,23 @@ export async function applyAuth(
       const { command, args = [], ttlSeconds = 300 } = spec.exec!;
       let stdout: string;
       try {
-        ({ stdout } = await pexecFile(command, args, { timeout: 30_000 }));
+        ({ stdout } = await pexecFile(command, args, {
+          timeout: Math.min(30_000, authTimeout(profile)),
+          signal,
+        }));
       } catch (e: any) {
-        throw new Error(`Credential helper "${command}" failed: ${e.stderr || e.message}`);
+        /* THE HELPER'S STDERR IS NOT SAFE TO REPEAT VERBATIM.
+         *
+         * This interpolated `e.stderr` straight into a message that reaches
+         * the transcript, the output channel and the diagnostics panel - and
+         * credential helpers print credentials. `az account get-access-token`,
+         * `gcloud auth print-access-token` and every wrapper script around
+         * them will echo a token, a full command line, or a refresh token on
+         * the paths where they fail. Only the last couple of lines are worth
+         * anything for diagnosis, and anything token-shaped is masked. */
+        throw new Error(
+          `Credential helper "${command}" failed: ${redactSecrets(String(e.stderr || e.message))}`
+        );
       }
       const token = stdout.trim();
       if (!token) throw new Error(`Credential helper "${command}" printed nothing.`);
@@ -112,16 +143,27 @@ export async function applyAuth(
           ),
         },
         body: encoding === "form" ? new URLSearchParams(body).toString() : JSON.stringify(body),
+        // Bounded and cancellable. Without these an IdP that stops responding
+        // hung the turn indefinitely, and Stop could not reach it.
+        signal,
+        headersTimeout: authTimeout(profile),
+        bodyTimeout: authTimeout(profile),
       });
       const text = await res.body.text();
       if (res.statusCode >= 400) {
-        throw new Error(`Token exchange returned ${res.statusCode}: ${text.slice(0, 400)}`);
+        // Redacted: an OAuth error body echoes the request it rejected, which
+        // for a client_credentials exchange is the client secret.
+        throw new Error(
+          `Token exchange returned ${res.statusCode}: ${redactSecrets(text).slice(0, 400)}`
+        );
       }
       let json: any;
       try {
         json = JSON.parse(text);
       } catch {
-        throw new Error(`Token exchange returned a non-JSON body: ${text.slice(0, 200)}`);
+        throw new Error(
+          `Token exchange returned a non-JSON body: ${redactSecrets(text).slice(0, 200)}`
+        );
       }
       const token = dig(json, ex.tokenPath ?? "access_token");
       if (typeof token !== "string" || !token) {
@@ -138,6 +180,27 @@ export async function applyAuth(
     }
   }
   return { headers, report };
+}
+
+/**
+ * Mask anything token-shaped before it reaches a log, a panel or a transcript.
+ *
+ * Deliberately blunt. This runs on text from an identity provider or a
+ * credential helper - text we did not write and cannot parse reliably - and
+ * the cost of over-masking a diagnostic string is a worse error message, while
+ * the cost of under-masking it is a live credential in a bug report.
+ */
+export function redactSecrets(text: string): string {
+  return String(text ?? "")
+    // JSON and form fields whose name says what they hold.
+    .replace(
+      /("?)(access_token|refresh_token|id_token|client_secret|assertion|password|api[_-]?key)\1\s*[:=]\s*"?([^"'&,\s}]+)"?/gi,
+      (_m, q, key) => `${q}${key}${q}: "[redacted]"`
+    )
+    // Bearer values and long opaque blobs (JWTs, sk-… keys, base64 secrets).
+    .replace(/\bBearer\s+[\w.\-~+/]+=*/gi, "Bearer [redacted]")
+    .replace(/\beyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]*/g, "[redacted-jwt]")
+    .replace(/\b(sk|pk|ghp|gho|ghs|xox[abps])-[A-Za-z0-9_-]{12,}/g, "[redacted]");
 }
 
 export function clearAuthCache(): void {

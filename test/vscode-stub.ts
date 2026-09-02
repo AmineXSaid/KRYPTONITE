@@ -7,6 +7,7 @@
  * on is recorded here rather than stubbed to a constant, so a case can check
  * what the extension actually asked the editor to do.
  */
+import * as nodeFs from "node:fs";
 
 export const recorded = {
   info: [] as string[],
@@ -100,7 +101,28 @@ export const workspace: any = {
   onDidChangeConfiguration: () => new Disposable(),
   openTextDocument: async (u: any) => ({ uri: u, getText: () => "" }),
   findFiles: async () => [],
-  fs: { readFile: async () => new Uint8Array() },
+  /* Reads the real file, because the real API does.
+  
+     This returned an empty Uint8Array, which is a stub that cannot fail: every
+     caller got zero bytes and every assertion about what was READ passed
+     trivially. The attachment path is entirely about bytes - size, media type,
+     whether an archive can be opened - and none of it was reachable from a
+     suite until this told the truth.
+  
+     `stat` is here for the same reason: `attachPaths` asks whether a dropped
+     path is a directory, and a stub that always says "file" cannot exercise
+     the branch that exists to say so. */
+  fs: {
+    readFile: async (u: any) => {
+      const p = String(u?.fsPath ?? u);
+      return new Uint8Array(nodeFs.readFileSync(p));
+    },
+    stat: async (u: any) => {
+      const p = String(u?.fsPath ?? u);
+      const st = nodeFs.statSync(p);
+      return { type: st.isDirectory() ? 2 : 1, size: st.size, ctime: 0, mtime: 0 };
+    },
+  },
   registerTextDocumentContentProvider: (scheme: string) => {
     recorded.schemes.push(scheme);
     return new Disposable();
@@ -194,6 +216,11 @@ export class EventEmitter<T> {
     this.handlers.length = 0;
   }
 }
+
+/* The real enum's values, not invented ones: `attachPaths` compares
+   `stat.type === FileType.Directory`, so a stub whose Directory is not 2
+   makes every dropped folder look like a file. */
+export const FileType = { Unknown: 0, File: 1, Directory: 2, SymbolicLink: 64 };
 
 export const DiagnosticSeverity = { Error: 0, Warning: 1, Information: 2, Hint: 3 };
 

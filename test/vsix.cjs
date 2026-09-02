@@ -1,6 +1,9 @@
 /**
  * Validates the built ARCHIVE, which is the one thing nothing else can see.
  *
+ * @requires-package - it unpacks the built .vsix, so `npm run package`
+ * has to have run. `npm run test:package` does both.
+ *
  * test/packaging.cjs is the companion to this and runs first: it reasons about
  * the source tree and .vscodeignore, and catches the failures that stop `vsce`
  * from producing an archive at all. This one opens the archive it produced.

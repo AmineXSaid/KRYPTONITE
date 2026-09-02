@@ -2,7 +2,7 @@
   "name": "genesis",
   "displayName": "Genesis",
   "description": "A coding agent for endpoints that don't behave. mTLS, corporate CAs, token exchange, air-gapped.",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "publisher": "MohamedAmineSaid",
   "author": {
     "name": "Mohamed Amine Said",
@@ -13,6 +13,12 @@
   "engines": {
     "vscode": "^1.104.0",
     "node": ">=20"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Genesis runs what the workspace tells it to: .agent/mcp.json spawns processes, a wire: raw profile loads a JavaScript transform into the extension host, and an endpoint profile can point at any URL. None of that is safe to do for a folder you have not opened deliberately, so the extension stays off until the workspace is trusted."
+    }
   },
   "repository": {
     "type": "git",
@@ -26,9 +32,33 @@
     "Programming Languages",
     "Other"
   ],
+  "keywords": [
+    "ai",
+    "agent",
+    "llm",
+    "mcp",
+    "openai",
+    "anthropic",
+    "ollama",
+    "self-hosted",
+    "air-gapped",
+    "mtls",
+    "proxy",
+    "local-llm"
+  ],
   "activationEvents": [
     "onStartupFinished"
   ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Genesis executes what is in the open folder. An endpoint profile can name a transform module (arbitrary JavaScript, run before the first request) or an `exec` credential helper (a command, spawned to fetch a token), and .agent/mcp.json names programs to launch. None of that is safe to run from a repository you have not read, so Genesis stays off in Restricted Mode."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "Genesis reads profiles, skills and agents from disk and confines the agent's writes to a real workspace folder, so it needs a filesystem rather than a virtual one."
+    }
+  },
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -174,6 +204,28 @@
           "default": ".agent/instructions.md",
           "markdownDescription": "Workspace-relative markdown file whose contents are prepended to every system prompt, for conventions that must hold on every turn. Absent is fine and is not warned about. Skills are the on-demand equivalent; this is the always-on one. Capped at 16,000 characters, with the truncation stated to the model."
         },
+        "genesis.microCompact": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Condense old exchanges into a short summary instead of dropping them when the context window fills.\n\nWithout this, a long run silently loses its own beginning: the oldest turns are shifted off and replaced by a note telling the model to ask if it needs them, which it cannot - they are gone. With it, an exchange is summarised by a second, cheaper model and the summary stays in the conversation.\n\n**Off by default, and that is a real trade rather than caution**. Absorbing an exchange rewrites the middle of the prompt, and the middle of the prompt is inside the cached prefix - so this buys window headroom by giving up prompt-cache hits. Worth it when the alternative is losing the turns; not worth it on a conversation that was never going to fill the window.\n\nName the summariser with `#genesis.microCompactProfile#`; it is never chosen for you, and it needs a context window of at least 64,000 tokens. Without one this stays off and says so in the log; nothing fails."
+        },
+        "genesis.microCompactProfile": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Which endpoint profile condenses old exchanges when `#genesis.microCompact#` is on. Name it by its `name:` field.\n\n**Micro-compaction does not run until this is set**, and there is deliberately no automatic choice. Condensing means sending part of the conversation - including file contents and command output the agent read - to a second endpoint, and which endpoint that is should be a decision rather than a guess. Picking one automatically would quietly route a local-only workspace's code to whatever cloud profile happened to be configured beside it.\n\nThe profile needs a context window of at least 64,000 tokens; a smaller one is refused and the log says so. A cheap `kind: chat` model is the right choice: condensing is the least demanding thing a model can be asked to do, and pointing it at a reasoning profile spends a thinking budget on paraphrase."
+        },
+        "genesis.microCompactEveryNTurns": {
+          "type": "number",
+          "default": 1,
+          "minimum": 1,
+          "markdownDescription": "How often micro-compaction may absorb an exchange, in turns. At most one exchange is ever condensed per attempt. Raise it to rewrite the prompt less often, which costs less cache; lower it to reclaim room faster. Hermes's `micro_compact_every_n_turns`."
+        },
+        "genesis.microCompactDefragThresholdTokens": {
+          "type": "number",
+          "default": 2000,
+          "minimum": 200,
+          "markdownDescription": "How many reclaimable tokens have to be sitting in the compactable middle of a conversation before summarising one is worth a request. Below this, the summary call costs more than the room it wins back. Hermes's `micro_compact_defrag_threshold_tokens`."
+        },
         "genesis.editorContext": {
           "type": "boolean",
           "default": true,
@@ -297,17 +349,14 @@
     "typecheck": "tsc --noEmit",
     "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node18",
     "watch": "npm run build -- --sourcemap --watch",
-    "test:bundle": "esbuild test/activation.ts test/send-path.ts test/plan-handoff.ts test/skill-bounds.ts test/text-tool-protocol.ts test/tools.ts test/mcp-transport.ts test/mcp-images.ts test/image-endpoint.ts test/tool-images.ts test/instructions.ts test/editor-context.ts test/reply.ts test/reply-loop.ts test/untrusted.ts test/interrupt.ts test/mcp-live.ts test/capabilities.ts test/browser.ts test/cdp.ts test/browser-vision.ts test/browser-actions.ts test/browser-agent.ts test/browser-profile.ts test/search.ts test/one-shot.ts test/editor-features.ts test/completion.ts test/background-turns.ts test/mcp-script.ts test/agents.ts test/agent-gate.ts test/llm-kind.ts test/at-picker.ts --bundle --outdir=dist --out-extension:.js=.cjs --format=cjs --platform=node --target=node20 --alias:vscode=./test/vscode-stub.ts",
-    "pretest": "npm run build && npm run test:bundle",
-    "test": "node test/contrast.cjs && node test/a11y.cjs && node test/failure.cjs && node test/naming.cjs && node test/brand.cjs && node test/packaging.cjs && node test/fonts.cjs && node test/markdown-render.cjs && node test/mcp-render.cjs && node test/browser-ui.cjs && node test/control-center.cjs && node test/aura.cjs && node test/phases.cjs && node test/plan-handoff.cjs && node test/composer.cjs && node test/llm-kind-ui.cjs && node test/slash.cjs && node test/drive.js && node test/host.js && node dist/activation.cjs && node dist/send-path.cjs && node dist/plan-handoff.cjs && node dist/skill-bounds.cjs && node dist/text-tool-protocol.cjs && node dist/tools.cjs && node dist/mcp-transport.cjs && node dist/mcp-images.cjs && node dist/image-endpoint.cjs && node dist/tool-images.cjs && node dist/instructions.cjs && node dist/editor-context.cjs && node dist/reply.cjs && node dist/reply-loop.cjs && node dist/untrusted.cjs && node dist/interrupt.cjs && node dist/mcp-live.cjs && node dist/capabilities.cjs && node dist/browser.cjs && node dist/cdp.cjs && node dist/browser-vision.cjs && node dist/browser-actions.cjs && node dist/browser-agent.cjs && node dist/browser-profile.cjs && node dist/search.cjs && node dist/one-shot.cjs && node dist/editor-features.cjs && node dist/completion.cjs && node dist/background-turns.cjs && node dist/mcp-script.cjs && node dist/agents.cjs && node dist/agent-gate.cjs && node dist/llm-kind.cjs && node dist/at-picker.cjs",
-    "test:live": "esbuild test/attachment-e2e.ts test/skill-gating-live.ts --bundle --outdir=dist --out-extension:.js=.cjs --format=cjs --platform=node --target=node20 && node dist/attachment-e2e.cjs && node dist/skill-gating-live.cjs",
-    "test:mcp": "npm install --no-save @modelcontextprotocol/server-filesystem @modelcontextprotocol/server-memory && esbuild test/mcp-e2e.ts --bundle --outdir=dist --out-extension:.js=.cjs --format=cjs --platform=node --target=node20 && node dist/mcp-e2e.cjs",
-    "verify": "npm run typecheck && npm test",
+    "pretest": "npm run build",
+    "test": "node test/run.js",
+    "test:live": "node test/run.js attachment-e2e skill-gating-live --include-tagged",
+    "test:mcp": "npm install --no-save @modelcontextprotocol/server-filesystem @modelcontextprotocol/server-memory && node test/run.js mcp-e2e --include-tagged",
+    "test:package": "npm run package && node test/run.js vsix render mentions activate-vsix --include-tagged",
+    "verify": "npm run typecheck && npm test && npm run test:package",
     "vscode:prepublish": "npm run build",
-    "package": "vsce package --no-dependencies && node test/vsix.cjs && node test/render.cjs && node test/mentions.cjs",
-    "test:vsix": "node test/vsix.cjs",
-    "test:render": "node test/render.cjs"
-  },
+    "package": "vsce package --no-dependencies"  },
   "dependencies": {
     "undici": "^6.19.8",
     "yaml": "^2.5.0"

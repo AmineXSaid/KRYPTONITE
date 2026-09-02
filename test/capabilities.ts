@@ -84,11 +84,27 @@ const read = () => fs.readFileSync(file, "utf8");
   {
     // A string value must not be written as a bare word that YAML reads as
     // something else.
-    setCapabilities(file, { systemRole: "top-level", tokenCounting: "api" });
+    setCapabilities(file, { systemRole: "top-level", promptCaching: "anthropic" });
     const p = loadProfile(file);
     ck(p.capabilities.systemRole === "top-level", "a hyphenated string round-trips",
       String(p.capabilities.systemRole));
-    ck(p.capabilities.tokenCounting === "api", "and a plain one");
+    ck(p.capabilities.promptCaching === "anthropic", "and a plain one");
+  }
+  {
+    // Settings that were removed are swallowed, not rejected. A profile
+    // someone wrote when `toolChoice` and `tokenCounting` existed - both were
+    // in the generated template - must keep working after they were deleted,
+    // or a tidy-up turns into an endpoint that stops connecting on upgrade.
+    write("name: gw\nwire: openai\nbaseUrl: https://x\nmodel: m\n" +
+      "capabilities:\n  toolChoice: true\n  tokenCounting: heuristic\n  vision: true\n");
+    const p = loadProfile(file);
+    ck(p.capabilities.vision === true, "a retired setting does not stop the file loading");
+    // It survives into the parsed object and is read by nothing, which is the
+    // point: a key that was removed has to be inert, not fatal. Rejecting it
+    // would turn deleting a dead field into an endpoint that stops connecting
+    // for everyone who ever wrote it down.
+    ck((p.capabilities as any).toolChoice === true, "it is simply inert");
+    ck(p.capabilities.contextWindow > 0, "and the rest of the block still applies");
   }
   {
     // No capabilities block at all: one gets created rather than nothing

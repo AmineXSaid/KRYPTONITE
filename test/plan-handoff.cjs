@@ -12,7 +12,7 @@
  * the first, because the host remembers exactly one plan - so a stale card's
  * Approve would run steps other than the ones it lists.
  *
- * Run: node test/plan-handoff.cjs
+ * Run: node test/run.js plan-handoff
  */
 const fs = require("node:fs");
 const path = require("node:path");

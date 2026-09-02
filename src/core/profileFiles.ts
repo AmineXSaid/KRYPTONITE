@@ -115,7 +115,6 @@ export function renderProfileYaml(form: EndpointForm): string {
     lines.push(`# chatPath: /v1/chat/completions   # only when the gateway prefixes its routes`);
   }
   lines.push(`timeoutMs: ${form.timeoutMs && form.timeoutMs > 0 ? Math.round(form.timeoutMs) : 120000}`);
-  lines.push(`retries: 2`);
   if (form.http2) {
     lines.push(`http2: true                       # this gateway needs HTTP/2`);
   } else {
@@ -207,7 +206,6 @@ export function renderProfileYaml(form: EndpointForm): string {
   lines.push(`  systemRole: message             # message | top-level | prepend-user`);
   lines.push(`  contextWindow: ${local ? 32768 : 128000}`);
   lines.push(`  maxOutputTokens: ${seeded.maxOutputTokens ?? 4096}`);
-  lines.push(`  tokenCounting: heuristic        # api | heuristic`);
   lines.push(`  maxImageBytes: 1500000          # base64 image bytes per request; oldest dropped first`);
   lines.push(`  parallelToolCalls: false`);
   if (seeded.fim === true) {

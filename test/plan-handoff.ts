@@ -16,9 +16,7 @@
  * the host does *before* the request goes out, and the user message is pushed
  * into history first, so no server is needed to read it back.
  *
- * Run: npx esbuild test/plan-handoff.ts --bundle --outfile=dist/plan-handoff.cjs \
- *        --format=cjs --platform=node --target=node20 --alias:vscode=./test/vscode-stub.ts
- *      node dist/plan-handoff.cjs
+ * Run: node test/run.js plan-handoff
  */
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -64,9 +62,15 @@ async function boot() {
   return { app, out };
 }
 
-/** Stand in for a plan turn having finished. Same field the card is built from. */
+/**
+ * Stand in for a plan turn having finished in the visible conversation.
+ *
+ * Written onto the same `Conversation` record the plan block fills in, which is
+ * where per-conversation state lives - a plan finishing in a chat the user has
+ * switched away from is filed under that chat, not this one.
+ */
 function propose(app: App, steps: string[]): void {
-  (app.session as any).planSteps = steps;
+  (app.session as any).convo().planSteps = steps;
 }
 
 const todoEvents = (out: OutboundMessage[]) =>

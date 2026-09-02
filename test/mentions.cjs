@@ -1,6 +1,9 @@
 /**
  * `/` and `@` in the composer, typed as real keystrokes into the shipped panel.
  *
+ * @requires-package - it drives the panel out of the built .vsix, so the
+ * archive has to exist. `npm run test:package` builds it and runs this.
+ *
  * These two are the only text the composer INTERPRETS rather than sends, which
  * makes them the two places where a silent regression costs the most: a `/`
  * that stops opening looks exactly like a user who has not discovered it, and

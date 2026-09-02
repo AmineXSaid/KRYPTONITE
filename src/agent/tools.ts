@@ -106,8 +106,42 @@ export function unifiedPatch(before: string, after: string, rel: string, context
   );
 }
 
+/**
+ * What kind of side effect an approval is being asked about.
+ *
+ * THIS EXISTS BECAUSE THE ANSWER USED TO BE DERIVED FROM THE PROSE.
+ *
+ * `requestApproval` classified a request by testing whether its human-readable
+ * summary began with "Run:". Everything else - a fetch, a web search, an MCP
+ * call, an image generation, and every browser action including `eval`, whose
+ * summary begins "Run JavaScript in the page" and therefore does NOT begin
+ * "Run:" - fell into the same bucket as a file edit. So `approvalMode:
+ * edits-auto`, and a single click of "Always allow" on a one-line edit, both
+ * silently granted arbitrary JavaScript execution in a browser holding the
+ * user's live logins, unrestricted network egress, and every MCP side effect,
+ * for the rest of the session.
+ *
+ * The kind is now stated by the call site, which is the only place that knows
+ * it, and the summary goes back to being what it was always meant to be: text
+ * for a person to read.
+ */
+export type ApprovalKind = "edit" | "command" | "network" | "mcp" | "browser";
+
 export interface ToolContext {
   root: string;
+  /**
+   * Aborted when the user stops the turn.
+   *
+   * Nothing here took a signal, so Stop reached the model request and stopped
+   * there: a `run_command` already running carried on to its own timeout - up
+   * to ten minutes - holding the loop inside `await invoke(call)` the whole
+   * time. The install kept going, its output was thrown away, and it was still
+   * holding the lockfile when the user retried.
+   *
+   * Optional, so every offline harness and every caller that predates it keeps
+   * working; absent means "nothing will interrupt this".
+   */
+  signal?: AbortSignal;
   /**
    * Whether READS may leave the workspace root. Writes never may, whatever
    * this says. See `readable()` for what "may" costs.
@@ -126,7 +160,16 @@ export interface ToolContext {
    * diff card uses, so approving an edit and reviewing one look alike - which
    * they should, being the same information at two moments.
    */
-  approve: (summary: string, detail?: string, patch?: string) => Promise<boolean>;
+  approve: (
+    summary: string,
+    detail?: string,
+    patch?: string,
+    /**
+     * Absent means "command" - the most restrictive bucket - so a call site
+     * that forgets to say gets the strongest gate rather than the weakest.
+     */
+    kind?: ApprovalKind
+  ) => Promise<boolean>;
   /**
    * A file on disk changed. `change` is absent only for callers that do not
    * track line counts, which is every offline harness and nothing in the
@@ -203,6 +246,27 @@ export interface ToolContext {
     action: string,
     args: Record<string, unknown>
   ) => Promise<string | { text: string; images?: ToolImage[] }>;
+  /**
+   * The active agent's memory file, and what it is allowed to weigh.
+   *
+   * Structural and optional for the same reason as everything above it: this
+   * module is imported by the agent loop and by the offline harness, and
+   * neither should have to know about the agents loader. Absent means no cap,
+   * which is the right answer for every caller with no agent selected - the
+   * file being guarded is that agent's, and there is not one.
+   *
+   * `refusal` is supplied rather than composed here because the wording
+   * belongs with the other refusals the agent produces, next to
+   * `agentRefusal`, so they stay in one voice.
+   */
+  memory?: {
+    /** Absolute path of the file the cap applies to. */
+    path: string;
+    /** Characters. A write that would leave the file larger than this is refused. */
+    cap: number;
+    /** What the model is told, given the size the write would have produced. */
+    refusal: (size: number) => string;
+  };
 }
 
 /** An image a tool hands back to the model. `data` is base64, no data: prefix. */
@@ -243,12 +307,91 @@ export interface ToolResult {
  * works, and falls back to the lexical result when nothing on the path exists
  * yet.
  */
+/**
+ * Is `child` inside `parent`?
+ *
+ * THE BOUNDARY HAS TO BE A SEPARATOR, AND ON WINDOWS IT ALSO HAS TO IGNORE
+ * CASE.
+ *
+ * The separator half was fixed a while ago: `abs.startsWith(root)` is a string
+ * comparison pretending to be a path comparison, and with a root of
+ * `/work/proj` it admitted `/work/proj-secrets/id_rsa`.
+ *
+ * The case half was not. Windows paths are case-insensitive, and VS Code hands
+ * back a drive letter whose case depends on how the folder was opened - so
+ * `C:\Work\Proj` and `c:\work\proj\file.ts` are the same location and
+ * different strings. Compared exactly, a file the user is looking at is judged
+ * to be OUTSIDE the workspace: refused for writes, and for reads either
+ * refused or, with `readOutsideWorkspace` on, sent down the wrong branch and
+ * checked against the credential-store list instead of being admitted
+ * outright. Nothing in the suite runs on Windows, so it held there.
+ *
+ * POSIX is left case-sensitive, because on POSIX two paths differing in case
+ * genuinely are two different files and folding them would widen the boundary
+ * rather than fix it.
+ */
+function contains(parent: string, child: string): boolean {
+  const fold = (p: string) => (process.platform === "win32" ? p.toLowerCase() : p);
+  const a = fold(parent);
+  const b = fold(child);
+  return b === a || b.startsWith(a.endsWith(path.sep) ? a : a + path.sep);
+}
+
+/**
+ * Would this write burst the active agent's memory cap?
+ *
+ * Returns the refusal to send back, or undefined to let the write proceed.
+ *
+ * Two things make this narrower than it first looks, and both are deliberate.
+ * It applies only to the one file the active agent declared as its memory -
+ * every other file in the workspace is the user's business and has no budget.
+ * And a write that leaves the file no larger than it already is always passes,
+ * even when the result is still over the cap. Without that second rule a file
+ * that had grown past the cap by any route - written before the cap existed,
+ * edited by hand, carried in from another checkout - could never be edited
+ * back under it, and the refusal would be a trap rather than an instruction.
+ */
+/**
+ * Are these two paths the same file?
+ *
+ * A lexical comparison is not enough, and the gap was reachable: `writable()`
+ * hands back a lexically resolved path, so a symlink inside the workspace
+ * pointing at the memory file compared unequal to it and the cap did not
+ * apply. Writing through the alias grew a 100-character budget to 500. Nothing
+ * about it is an escape - the write was always inside the workspace and always
+ * allowed - but the cap exists to make an agent curate, and one it can step
+ * around by writing through another name is not a cap.
+ *
+ * `realpathSync` is what closes it, and it throws on anything that does not
+ * exist yet - which is the ordinary case for a memory file on a first run - so
+ * each side falls back to its lexical form independently.
+ */
+function sameFile(a: string, b: string): boolean {
+  const real = (p: string) => {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  return real(a) === real(b);
+}
+
+function memoryCapRefusal(
+  ctx: ToolContext,
+  abs: string,
+  before: string,
+  after: string
+): string | undefined {
+  const mem = ctx.memory;
+  if (!mem || !sameFile(abs, mem.path)) return undefined;
+  if (after.length <= mem.cap || after.length <= before.length) return undefined;
+  return mem.refusal(after.length);
+}
+
 function writable(root: string, p: string): string {
   const base = path.resolve(root);
   const abs = path.resolve(base, p ?? ".");
-  const contains = (parent: string, child: string) =>
-    child === parent || child.startsWith(parent.endsWith(path.sep) ? parent : parent + path.sep);
-
   if (!contains(base, abs)) throw new Error(`Path ${p} is outside the workspace.`);
 
   let probe = abs;
@@ -331,19 +474,15 @@ const SECRET_FILES = new Set([
 export function mentionable(root: string, rel: string): { abs: string } | { refused: string } {
   const base = path.resolve(root);
   const abs = path.resolve(base, rel);
-  const inside = abs === base ||
-    abs.startsWith(base.endsWith(path.sep) ? base : base + path.sep);
-  if (!inside) return { refused: `${rel} is outside the workspace` };
+  if (!contains(base, abs)) return { refused: `${rel} is outside the workspace` };
 
   // Symlinks are resolved before judging, so a link named innocuously cannot
   // point at a key. A path that does not exist is judged lexically and will be
   // dropped by the caller's stat anyway.
   let real = abs;
   try { real = fs.realpathSync(abs); } catch { /* judge the lexical path */ }
-  if (real !== abs) {
-    const insideReal = real === base ||
-      real.startsWith(base.endsWith(path.sep) ? base : base + path.sep);
-    if (!insideReal) return { refused: `${rel} is a link out of the workspace` };
+  if (real !== abs && !contains(base, real)) {
+    return { refused: `${rel} is a link out of the workspace` };
   }
 
   const segs = real.split(path.sep).filter(Boolean);
@@ -360,9 +499,6 @@ export function mentionable(root: string, rel: string): { abs: string } | { refu
 function readable(ctx: { root: string; readOutsideWorkspace?: boolean }, p: string): string {
   const base = path.resolve(ctx.root);
   const abs = path.resolve(base, p ?? ".");
-  const contains = (parent: string, child: string) =>
-    child === parent || child.startsWith(parent.endsWith(path.sep) ? parent : parent + path.sep);
-
   if (contains(base, abs)) return writable(ctx.root, p);
 
   if (!ctx.readOutsideWorkspace) {
@@ -389,6 +525,75 @@ function readable(ctx: { root: string; readOutsideWorkspace?: boolean }, p: stri
     }
   }
   return real;
+}
+
+/**
+ * How long a single `search` may spend before it gives up and says so.
+ *
+ * Generous, because a legitimate search of a large tree is worth waiting for,
+ * and short enough that nobody concludes the editor has hung.
+ */
+const SEARCH_BUDGET_MS = 10_000;
+
+/**
+ * Is this pattern shaped like one that backtracks exponentially?
+ *
+ * Returns the reason it was refused, or undefined.
+ *
+ * The dangerous shape is a repetition wrapped around another repetition over
+ * an overlapping character set - `(a+)+`, `(\s*\w+)+`, `(\w|\d)*$` - where
+ * the engine has exponentially many ways to divide the same input between the
+ * two. Against a non-matching line of a few hundred characters that is enough
+ * to hang the process for longer than anyone will wait.
+ *
+ * This is a shape check, not a proof: it cannot catch every catastrophic
+ * pattern and it will refuse a handful of harmless ones. That trade is right
+ * here because the cost of a false positive is a rewritten pattern, and the
+ * cost of a false negative is a frozen extension host - which takes every
+ * other extension in the window with it, and takes Stop with it too, because
+ * Stop is a message a frozen host cannot process.
+ */
+export function catastrophicShape(pattern: string): string | undefined {
+  if (typeof pattern !== "string") return undefined;
+  // A quantified group whose body itself contains an unbounded quantifier.
+  // The body match is deliberately non-greedy and bounded so this check
+  // cannot itself be the slow thing.
+  if (/\((?![?]:)?[^()]{0,200}?[*+][^()]{0,200}?\)\s*[*+]/.test(pattern)) {
+    return "it repeats a group that already repeats.";
+  }
+  if (/\((?![?]:)?[^()]{0,200}?[*+][^()]{0,200}?\)\s*\{\d+,\s*\}/.test(pattern)) {
+    return "it repeats a group that already repeats.";
+  }
+  /* `(a|a)*`, `(a|ab)+`: a repeated alternation whose branches can match the
+   * same text, so the engine has more than one way to divide the input.
+   *
+   * Branches that cannot overlap - `(foo|bar)+`, `(?:get|set)\s+\w+` - are
+   * common and perfectly safe, so the test is whether two branches could start
+   * with the same character rather than merely that an alternation is there. */
+  const alt = /\((?:\?:)?([^()]{1,200})\)\s*[*+]/.exec(pattern);
+  if (alt && alt[1].includes("|") && branchesOverlap(alt[1].split("|"))) {
+    return "it repeats an alternation whose branches can match the same text.";
+  }
+  return undefined;
+}
+
+/**
+ * Could two of these alternation branches begin with the same character?
+ *
+ * A class or escape (`\w`, `\d`, `.`, `[a-z]`) is treated as matching
+ * anything, which is the conservative direction: it means `(\w|\d)+` is
+ * flagged, and it is - `\d` is a subset of `\w`, so every digit run has
+ * exponentially many splits.
+ */
+function branchesOverlap(branches: string[]): boolean {
+  const firsts = branches.map((b) => {
+    const t = b.replace(/^\^+/, "");
+    if (!t) return "*";              // an empty branch matches everywhere
+    if (t[0] === "\\" || t[0] === "[" || t[0] === ".") return "*";
+    return t[0];
+  });
+  if (firsts.some((f) => f === "*")) return true;
+  return new Set(firsts).size !== firsts.length;
 }
 
 /** Skip anything that is not plausibly text, so a search never scans a binary. */
@@ -802,7 +1007,9 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
         const preview = JSON.stringify(args ?? {});
         const ok = await ctx.approve(
           `Call MCP tool ${name}`,
-          preview.length > 2000 ? preview.slice(0, 2000) + "…" : preview
+          preview.length > 2000 ? preview.slice(0, 2000) + "…" : preview,
+          undefined,
+          "mcp"
         );
         if (!ok) return { content: "The user declined this MCP tool call.", isError: true };
       }
@@ -866,10 +1073,15 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
             // card falls back to showing the new content, as it always did.
           }
         }
+        // Ahead of the approval: a write that is going to be refused must not
+        // first interrupt the user to ask about it.
+        const capped = memoryCapRefusal(ctx, abs, before, String(args.content ?? ""));
+        if (capped) return { content: capped, isError: true };
         const ok = await ctx.approve(
           `${existed ? "Overwrite" : "Create"} ${args.path}`,
           args.content.slice(0, 2000),
-          existed && before ? unifiedPatch(before, args.content, args.path) : undefined
+          existed && before ? unifiedPatch(before, args.content, args.path) : undefined,
+          "edit"
         );
         if (!ok) return { content: "The user declined this edit.", isError: true };
         fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -913,10 +1125,13 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
         const after = all
           ? before.split(args.old_text).join(args.new_text)
           : before.replace(args.old_text, args.new_text);
+        const cappedEdit = memoryCapRefusal(ctx, abs, before, after);
+        if (cappedEdit) return { content: cappedEdit, isError: true };
         const ok = await ctx.approve(
           `Edit ${args.path}${all && count > 1 ? ` (${count} occurrences)` : ""}`,
           `- ${args.old_text}\n+ ${args.new_text}`,
-          unifiedPatch(before, after, args.path)
+          unifiedPatch(before, after, args.path),
+          "edit"
         );
         if (!ok) return { content: "The user declined this edit.", isError: true };
         fs.writeFileSync(abs, after, "utf8");
@@ -978,10 +1193,40 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
           let flags = "g";
           if (args.case_insensitive) flags += "i";
           if (args.multiline) flags += "s";
+          /* A PATTERN THE MODEL WROTE, RUN ON THE EXTENSION HOST THREAD.
+           *
+           * `re.exec` is synchronous and uncancellable, and JavaScript's
+           * engine backtracks: a pattern like `(\s*\w+)+$` against a long line
+           * takes exponential time. Nothing here could stop it, so the host
+           * froze - taking every other extension in the window with it, and
+           * taking Stop with it too, because Stop is a message a frozen host
+           * cannot process.
+           *
+           * Node has no regex timeout, so the shape is rejected before it
+           * runs. This is a guard against the accident, which is what actually
+           * happens: a model reaching for a "words" pattern and writing a
+           * nested quantifier. */
+          const risk = catastrophicShape(args.pattern);
+          if (risk) {
+            return {
+              content:
+                `That pattern is refused: ${risk} Patterns of this shape can take exponential ` +
+                `time on an ordinary file, and the search runs in the editor's own process. ` +
+                `Rewrite it without the nested repetition - "(\\s*\\w+)+" is almost always ` +
+                `meant as "[\\s\\w]+".`,
+              isError: true,
+            };
+          }
           re = new RegExp(args.pattern, flags);
         } catch (e: any) {
           return { content: `Invalid pattern: ${e.message}`, isError: true };
         }
+        /* And a wall-clock budget for everything else. A pattern that is not
+         * catastrophic can still be slow across a large tree, and a search
+         * that returns "I looked at 8,000 files and ran out of time" is worth
+         * far more than one that never returns. */
+        const deadline = Date.now() + SEARCH_BUDGET_MS;
+        let outOfTime = false;
 
         const from = readable(ctx, args.path ?? ".");
         const globRe = args.glob ? globToRe(args.glob) : undefined;
@@ -997,6 +1242,9 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
         let truncated = false;
 
         const scan = (abs: string, rel: string) => {
+          // Checked per file rather than per match: a single `exec` cannot be
+          // interrupted, so this bounds how many of them are started.
+          if (Date.now() > deadline) { outOfTime = true; return; }
           if (BINARY_EXT.has(path.extname(abs).toLowerCase())) return;
           let buf: Buffer;
           try { buf = fs.readFileSync(abs); } catch { return; }
@@ -1067,33 +1315,39 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
               if (!globRe.test(globBare ? name : rel)) return;
             }
             scan(abs, rel);
+            if (outOfTime) return false;
             return files.length < limit || mode === "content";
           });
         }
 
+        const timeNote = outOfTime
+          ? `\n\n[Stopped after ${Math.round(SEARCH_BUDGET_MS / 1000)}s; not every file was ` +
+            `searched. Narrow the pattern or pass a glob.]`
+          : "";
+
         if (mode === "files_with_matches") {
           const shown = files.slice(0, limit);
           return {
-            content: shown.join("\n") ||
-              "No matches." + (files.length > limit ? `\n\n[${files.length} files; showing ${limit}.]` : ""),
+            content: (shown.join("\n") ||
+              "No matches.") + (files.length > limit ? `\n\n[${files.length} files; showing ${limit}.]` : "") + timeNote,
           };
         }
         if (mode === "count") {
-          if (!counts.length) return { content: "No matches." };
+          if (!counts.length) return { content: "No matches." + timeNote };
           const total = counts.reduce((s, c) => s + c[1], 0);
           return {
             content:
               counts.slice(0, limit).map(([f, c]) => `${c}\t${f}`).join("\n") +
-              `\n\n[${total} matches across ${counts.length} file(s).]`,
+              `\n\n[${total} matches across ${counts.length} file(s).]` + timeNote,
           };
         }
-        if (!lines.length) return { content: "No matches." };
+        if (!lines.length) return { content: "No matches." + timeNote };
         return {
           content:
             lines.join("\n") +
             (truncated || lines.length >= limit
               ? `\n\n[Truncated at ${limit} lines. Narrow the pattern, pass a glob, or raise head_limit.]`
-              : ""),
+              : "") + timeNote,
         };
       }
 
@@ -1101,30 +1355,59 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
         if (typeof args.command !== "string" || !args.command.trim()) {
           return { content: "command is required.", isError: true };
         }
-        const ok = await ctx.approve(`Run: ${args.command}`, args.reason);
+        const ok = await ctx.approve(`Run: ${args.command}`, args.reason, undefined, "command");
         if (!ok) return { content: "The user declined to run that command.", isError: true };
         const timeout = Math.max(1_000, Math.min(args.timeout_ms ?? 120_000, 600_000));
+        const MAX_BUFFER = 4 * 1024 * 1024;
         try {
           const { stdout, stderr } = await pexec(args.command, {
             cwd: ctx.root,
             shell: true,
             timeout,
-            maxBuffer: 4 * 1024 * 1024,
+            maxBuffer: MAX_BUFFER,
+            // Stop now actually stops the process, rather than releasing the
+            // composer and leaving it running for another nine minutes.
+            signal: ctx.signal,
+            killSignal: "SIGTERM",
           } as any);
           return { content: (stdout + (stderr ? "\n" + stderr : "")).slice(0, 30_000) || "(no output)" };
         } catch (e: any) {
+          const partial = `${(e.stdout ?? "") + (e.stderr ?? "")}`.slice(0, 30_000);
+          // The user pressed Stop. Said as its own outcome so the model does
+          // not read it as the command having failed on its own merits and
+          // helpfully try again.
+          if (ctx.signal?.aborted || e?.name === "AbortError") {
+            return {
+              content: `The user stopped this command before it finished.\n${partial}`,
+              isError: true,
+            };
+          }
+          /* THREE WAYS A CHILD DIES, AND THEY USED TO READ AS ONE.
+           *
+           * Node sets `killed: true` when `maxBuffer` is exceeded as well as
+           * when the timeout fires, so a verbose build producing more than
+           * 4 MB was reported to both the model and the user as "Command timed
+           * out after 120000ms and was killed" - which sent both of them off
+           * to raise a timeout that had nothing to do with it. */
+          if (e?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
+            return {
+              content:
+                `The command produced more than ${Math.round(MAX_BUFFER / 1024 / 1024)} MB of ` +
+                `output and was killed. It did not time out. Re-run it writing to a file, or ` +
+                `narrow what it prints.\n${partial}`,
+              isError: true,
+            };
+          }
           // A timeout kill arrives as a signal with no exit code, and reporting
           // it as "Exit undefined" tells the model nothing it can act on.
           if (e?.killed || e?.signal) {
             return {
-              content:
-                `Command timed out after ${timeout}ms and was killed.\n` +
-                `${(e.stdout ?? "") + (e.stderr ?? "")}`.slice(0, 30_000),
+              content: `Command timed out after ${timeout}ms and was killed.\n${partial}`,
               isError: true,
             };
           }
           return {
-            content: `Exit ${e.code}\n${(e.stdout ?? "") + (e.stderr ?? "")}`.slice(0, 30_000),
+            content: `Exit ${e.code}\n${partial}`,
             isError: true,
           };
         }
@@ -1199,7 +1482,12 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
           eval: `Run JavaScript in the page: ${String(args?.expression ?? "").slice(0, 120)}`,
         };
         if (gated[action]) {
-          const ok = await ctx.approve(gated[action]!, "The browser is driven by the model.");
+          const ok = await ctx.approve(
+            gated[action]!,
+            "The browser is driven by the model.",
+            undefined,
+            "browser"
+          );
           if (!ok) return { content: "The user declined that browser action.", isError: true };
         }
 
@@ -1225,7 +1513,9 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
         // came from the model rather than from the user.
         const ok = await ctx.approve(
           `Search the web for ${JSON.stringify(query)}`,
-          "Queries the configured search provider over HTTP on the active endpoint's connection."
+          "Queries the configured search provider over HTTP on the active endpoint's connection.",
+          undefined,
+          "network"
         );
         if (!ok) return { content: "The user declined that search.", isError: true };
 
@@ -1246,7 +1536,12 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
         // model rather than the user, so it goes through the same gate as a
         // shell command. The full URL is shown because that is the thing being
         // approved.
-        const ok = await ctx.approve(`Fetch ${raw}`, "Reads the page as text. No cookies are sent.");
+        const ok = await ctx.approve(
+          `Fetch ${raw}`,
+          "Reads the page as text. No cookies are sent.",
+          undefined,
+          "network"
+        );
         if (!ok) return { content: "The user declined that fetch.", isError: true };
         try {
           const p = await ctx.fetchUrl(raw, args?.links === true);
@@ -1276,7 +1571,9 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
 
         const ok = await ctx.approve(
           `Generate an image with ${ctx.image.model}`,
-          `${prompt}\n\n→ ${wanted}`
+          `${prompt}\n\n→ ${wanted}`,
+          undefined,
+          "network"
         );
         if (!ok) return { content: "The user declined image generation.", isError: true };
 
