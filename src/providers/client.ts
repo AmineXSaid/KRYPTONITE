@@ -1197,17 +1197,21 @@ function openAiStream(onReasoning?: () => void): StreamDecoder {
       yield { type: "tool_call", toolCall: { id: slot.id, name: slot.name, arguments: safeJson(slot.args) } };
     }
     pending.clear();
-    // The working, on its own channel. This used to be yielded as `text`,
-    // which is how four paragraphs of "the user provided X, which could
-    // be..." ended up in the transcript looking like the reply - on every
-    // step of an agentic turn, since a step that calls a tool produces
-    // reasoning and no content by definition.
-    //
-    // Still emitted rather than dropped: a turn that spent its whole budget
-    // reasoning and said nothing is otherwise a blank bubble, which is
-    // indistinguishable from a broken endpoint. The surface decides how
-    // loudly to show it; that is not this layer's call.
-    if (reasoning.trim()) yield { type: "reasoning", text: reasoning.trim() };
+    /* Anything the gateway reported as working but never streamed.
+     *
+     * Reasoning is emitted from the delta branch now, as it arrives, so in the
+     * ordinary case this is empty by the time we get here. It stays because
+     * some gateways report the whole of it once on the terminal frame instead
+     * of streaming it, and dropping that would show nothing at all for a turn
+     * that was entirely working - a blank bubble, indistinguishable from a
+     * broken endpoint.
+     *
+     * Kept off the `text` channel either way. Yielding it as text is how four
+     * paragraphs of "the user provided X, which could be..." ended up in the
+     * transcript looking like the reply, on every step of an agentic turn:
+     * a step that calls a tool produces reasoning and no content by definition.
+     */
+    if (reasoning.trim()) yield { type: "reasoning", text: reasoning };
     reasoning = "";
   }
 
@@ -1260,8 +1264,26 @@ function openAiStream(onReasoning?: () => void): StreamDecoder {
       // spent its whole budget reasoning rendered as an empty reply, and the
       // streaming probe reported "the model produced no visible output" against
       // a model that was working perfectly.
-      if (typeof d.reasoning_content === "string" && d.reasoning_content) {
-        reasoning += d.reasoning_content;
+      /* Emitted AS IT ARRIVES, not accumulated and flushed at the end.
+       *
+       * This used to append to a local that `drain` released on
+       * `finish_reason`, so a model that thought for thirty seconds showed
+       * nothing at all and then produced its whole working in one frame. The
+       * panel has a live box built to be written into - it simply never
+       * received more than one event to write.
+       *
+       * Two spellings, because the wire never settled on one: DeepSeek and
+       * the models following it use `reasoning_content`, OpenRouter and
+       * several gateways use `reasoning`. Reading only the first meant
+       * reasoning was invisible on the endpoints most likely to be proxying
+       * a reasoning model.
+       */
+      const workingChunk =
+        (typeof d.reasoning_content === "string" && d.reasoning_content) ||
+        (typeof d.reasoning === "string" && d.reasoning) ||
+        "";
+      if (workingChunk) {
+        yield { type: "reasoning", text: workingChunk };
         // Once per turn, not once per delta: capability detection reads this as
         // "did this request reason", not "how much".
         if (!toldReasoning) {
@@ -1334,6 +1356,19 @@ function anthropicStream(): StreamDecoder {
         break;
       case "content_block_delta":
         if (json.delta?.type === "text_delta") yield { type: "text", text: json.delta.text };
+        /* Extended thinking, which this decoder used to drop on the floor.
+         *
+         * Only `text_delta` and `input_json_delta` were read, so a model
+         * thinking on the Anthropic wire produced no reasoning event at all -
+         * not a late one, not a buffered one, none. The working was on the
+         * wire and simply never left this function.
+         *
+         * `signature_delta` is deliberately NOT forwarded: it is the
+         * cryptographic signature over the thinking block, not text, and
+         * showing it would put base64 in the panel's working box. */
+        if (json.delta?.type === "thinking_delta" && json.delta.thinking) {
+          yield { type: "reasoning", text: json.delta.thinking };
+        }
         if (json.delta?.type === "input_json_delta") {
           const slot = blocks.get(json.index);
           if (slot) slot.args += json.delta.partial_json;

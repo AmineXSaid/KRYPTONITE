@@ -35,7 +35,9 @@ import * as http from "node:http";
 import * as os from "node:os";
 import * as path from "node:path";
 import { runAgent, AgentEvent } from "../src/agent/loop";
-import { EndpointClient, __anthropicStreamForTest, CompletionEvent } from "../src/providers/client";
+import {
+  EndpointClient, __anthropicStreamForTest, __openAiStreamForTest, CompletionEvent,
+} from "../src/providers/client";
 import { loadProfile } from "../src/endpoints/profile";
 import type { ToolContext } from "../src/agent/tools";
 
@@ -364,6 +366,75 @@ function cleanup(dir: string): void {
       flushed.some((e) => e.type === "tool_call" && e.toolCall!.name === "read_file"),
       "an unclosed anthropic tool_use block is flushed at end of stream"
     );
+  }
+
+  /* ── the working, AS IT ARRIVES ──────────────────────────────────────
+   *
+   * Reasoning was accumulated in a local and released once, on
+   * `finish_reason`. A model that thought for thirty seconds therefore showed
+   * nothing at all and then produced its whole working in a single event -
+   * the panel has a live box built to be written into, and it was only ever
+   * handed one thing to write.
+   *
+   * Driven at the decoder, because "one event per chunk" is a property of the
+   * decoder: a test that goes through a turn sees the concatenated text either
+   * way and cannot tell the two apart. */
+  {
+    const dec = __openAiStreamForTest();
+    const out: CompletionEvent[] = [];
+    const frame = (delta: any) => {
+      for (const e of dec.push({ choices: [{ delta, index: 0 }] })) out.push(e);
+    };
+    frame({ reasoning_content: "First " });
+    frame({ reasoning_content: "second " });
+    frame({ reasoning_content: "third." });
+
+    const think = out.filter((e) => e.type === "reasoning");
+    ck(think.length === 3, "reasoning is emitted per chunk, not banked to the end",
+      `${think.length} event(s)`);
+    ck(think.map((e) => e.text).join("") === "First second third.",
+      "and the chunks still concatenate to the whole working",
+      think.map((e) => e.text).join(""));
+    ck(!out.some((e) => e.type === "text"),
+      "and none of it reaches the answer's channel");
+  }
+
+  {
+    /* The same field under its other name. OpenRouter and several gateways
+       send `reasoning`; reading only `reasoning_content` meant the working was
+       invisible on exactly the endpoints most likely to be proxying a
+       reasoning model. */
+    const dec = __openAiStreamForTest();
+    const out: CompletionEvent[] = [];
+    for (const e of dec.push({ choices: [{ delta: { reasoning: "thinking aloud" }, index: 0 }] })) {
+      out.push(e);
+    }
+    ck(out.some((e) => e.type === "reasoning" && e.text === "thinking aloud"),
+      "`reasoning` is read as well as `reasoning_content`",
+      JSON.stringify(out));
+  }
+
+  {
+    /* Anthropic extended thinking, which this decoder dropped entirely: only
+       `text_delta` and `input_json_delta` were read, so no reasoning event was
+       produced at all - not a late one, not a buffered one, none. */
+    const dec = __anthropicStreamForTest();
+    const out: CompletionEvent[] = [];
+    const push = (o: any) => { for (const e of dec.push(o)) out.push(e); };
+    push({ type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "Let me " } });
+    push({ type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "check." } });
+    push({ type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: "AbCdEf123==" } });
+    push({ type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "Here goes." } });
+
+    const think = out.filter((e) => e.type === "reasoning");
+    ck(think.length === 2, "anthropic thinking_delta reaches the panel at all",
+      `${think.length} event(s)`);
+    ck(think.map((e) => e.text).join("") === "Let me check.",
+      "…in order, one event per delta", think.map((e) => e.text).join(""));
+    ck(!out.some((e) => /AbCdEf123/.test(String((e as any).text ?? ""))),
+      "and the block's signature is never shown as working");
+    ck(out.some((e) => e.type === "text" && e.text === "Here goes."),
+      "while the answer still arrives on its own channel");
   }
 
   server.close();

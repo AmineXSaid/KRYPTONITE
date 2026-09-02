@@ -1009,7 +1009,18 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
         // so it cannot reach the transcript the next turn is billed for, and
         // the panel can show it as quietly as it likes.
         if (ev.type === "reasoning") {
-          if (ev.text?.trim()) yield { type: "reasoning", text: ev.text };
+          /* Non-EMPTY, not non-blank.
+           *
+           * This tested `.trim()`, which was right while reasoning arrived as
+           * one finished block: a block of pure whitespace is nothing worth
+           * showing. Per-chunk it is wrong, and destructively so - the chunk
+           * carrying the newline between two paragraphs of working trims to
+           * "" and was dropped, so the paragraphs ran together and the live
+           * box showed one unbroken wall of text.
+           *
+           * A box is still only OPENED by something with content in it; the
+           * panel makes that call in `addThinking`, which is where it belongs. */
+          if (ev.text) yield { type: "reasoning", text: ev.text };
           continue;
         }
         if (ev.type === "text") {
