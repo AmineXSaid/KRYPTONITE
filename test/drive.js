@@ -1512,9 +1512,16 @@ const AGENTS = [
     "the model thinking again": { type: "thinking", text: "reconsidering" },
   };
 
+  /* ONE window for every case, not one each.
+     `boot()` evals the whole sidebar synchronously, and six of those block the
+     event loop for longer than the paste block above allows its FileReader -
+     so booting per case failed four assertions in an unrelated test that had
+     simply run out of budget while waiting its turn. A fresh `stateSync`
+     re-hydrates and clears the log, which is all the isolation each case
+     needs. */
+  const { d, inbound } = boot();
   for (const [what, msg] of Object.entries(interruptions)) {
-    const { d, inbound } = boot();
-    inbound(STATE());
+    inbound(STATE({ session: { id: "s-" + what, title: "t", messages: [] } }));
     inbound({ type: "streamDelta", text: LONG });
     // Nothing has been painted yet: the reveal is paced and no frame has run.
     inbound(msg);
@@ -1526,8 +1533,7 @@ const AGENTS = [
      when the answer starts. A box labelled "Thought for 27 words" that shows
      nine of them is the same bug wearing the other hat. */
   {
-    const { d, inbound } = boot();
-    inbound(STATE());
+    inbound(STATE({ session: { id: "s-working", title: "t", messages: [] } }));
     const WORKING = "I should check whether the index is rebuilt in place or " +
       "swapped, because only one of those is safe to interrupt halfway.";
     inbound({ type: "thinking", text: WORKING });
