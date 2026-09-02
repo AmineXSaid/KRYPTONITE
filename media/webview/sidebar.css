@@ -1054,6 +1054,41 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 /* The command itself is the one line in the card the user typed nothing of but
    is answerable for, so it gets foreground weight where output stays muted. */
 .cmd-in { color: var(--kx-fg); }
+
+/* ── INSIDE A TOOL CARD, THE COMMAND AND ITS OUTPUT ARE NOT OBJECTS ──
+   
+   `.term-block` gives a filled, bordered, rounded panel, which is right in the
+   transcript where a block of shell output is a THING the model produced and
+   sits among prose. Inside a tool card it is wrong twice over: the card is
+   already a bordered object, so this nested a dark box inside a dark box
+   inside a dark box, and the two panels made the command and its output look
+   like two unrelated artefacts rather than one exchange.
+   
+   A rail instead. No fill, no border, no corners - the indent carries the
+   structure and the colour of the rail says which half you are looking at:
+   oxide for what was RUN, a hairline for what came BACK. Same shape the rest
+   of this panel uses for the model's working (`.think-body`), and the same
+   shape Claude Code uses beside it, which is the point. */
+.tool-body .term-block {
+  background: none;
+  border: none;
+  border-left: 2px solid var(--kx-line);
+  border-radius: 0;
+  padding: 1px 0 1px 10px;
+  margin: 0;
+}
+/* The command gets the accent rail: it is the half that had an effect. */
+.tool-body .cmd-in { border-left-color: var(--kx-accent); }
+/* A failed run recolours the OUTPUT rail, not the command's - what was run is
+   still what was run, and it is the result that went wrong. */
+.tool[data-error="1"] .tool-body .term-block:not(.cmd-in) {
+  border-left-color: var(--kx-error);
+}
+
+/* The command name, coloured like the thing it is: something being invoked.
+   `.tk-fn` is unused by the shell grammar, so this borrows the same "a call"
+   meaning without colliding with any other token in a shell line. */
+.tk-cmd { color: var(--kx-link); font-weight: 600; }
 .trunc-note {
   display: flex; align-items: center; gap: 6px; margin-top: 5px;
   font-size: 11px; color: var(--kx-warn);

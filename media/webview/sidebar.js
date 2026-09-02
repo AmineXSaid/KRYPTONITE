@@ -514,10 +514,20 @@ function _sbRun() {
     "between|like|order|by|group|having|limit|offset|union|all|distinct|case|when|" +
     "then|else|end|primary|foreign|key|references|default|unique|constraint|cascade|" +
     "begin|commit|rollback|transaction|with|exists|any|asc|desc|count|sum|avg|min|max";
+  /* SHELL SYNTAX ONLY. The builtins that used to be in here - echo, cd, test,
+     printf, read, export, source, alias, set, unset, eval, trap, shopt - are
+     not syntax, they are THINGS YOU RUN, and they were being coloured as
+     keywords while `npm`, `git`, `ls` and `node` were coloured as nothing at
+     all. That is backwards: on a command line the program being invoked is
+     the most important word on the line, and which of them happens to be a
+     shell builtin is an implementation detail of the shell.
+     They fall through to the `cmd` rule below, which colours whatever sits in
+     command position - so they are still coloured, and now the same colour as
+     every other command. It also stops `--set` and `read-only` being tinted
+     mid-flag, which the old \b word match did. */
   var KW_SH =
-    "if|then|elif|else|fi|for|while|until|do|done|case|esac|in|function|return|local|" +
-    "export|source|alias|shift|exit|break|continue|set|unset|readonly|declare|eval|" +
-    "trap|echo|cd|test|printf|read|shopt";
+    "if|then|elif|else|fi|for|while|until|do|done|case|esac|in|function|return|" +
+    "local|break|continue";
 
   var KW_BAT =
     "set|setlocal|endlocal|echo|if|else|for|in|do|goto|call|exit|pause|shift|" +
@@ -589,6 +599,23 @@ function _sbRun() {
       ["st", /"(?:\\[\s\S]|[^"\\])*"|'[^']*'/],
       ["va", /\$(?:\{[^}\n]*\}|\(\(?|[\w]+|[@*#?$!0-9-])/],
       ["kw", new RegExp("\\b(?:" + KW_SH + ")\\b")],
+      /* THE COMMAND BEING RUN.
+      
+         After `kw`, so `if` and `for` stay syntax rather than being read as
+         programs; before `at`, so a command is never mistaken for a flag.
+      
+         Command position is the start of the line, or after a pipe, a
+         separator or a subshell - `npm test | grep -c PASS && ls` colours all
+         three. `$` is in the set because pasted terminal output almost always
+         carries the prompt, and without it `$ npm run verify` left `npm`
+         plain, which is the exact case this was reported for. */
+      /* Lowercase, `.` or `/` to start. A fenced `bash` block usually holds a
+         command AND its output, and matching any word at line start painted
+         `PASS`, `FAIL` and `WARN` as programs - which looks exactly as wrong
+         as it sounds. Commands are lowercase by convention (`npm`, `git`,
+         `ls`, `python3`) or a path (`./run.sh`, `/usr/bin/env`), so that is
+         what this asks for. */
+      ["cmd", /(?<=(?:^|[|&;($]|\n)\s*)[a-z_.\/][\w.+\/-]*/],
       ["at", /(?<=\s)--?[A-Za-z][\w-]*/],
       ["nu", /\b\d+\b/],
       ["pu", /[{}()[\];|&<>=!`]/],
@@ -2861,7 +2888,12 @@ function _sbRun() {
       // here. Shown even on failure, where "what was actually run" is the
       // first thing anyone checks.
       var cmd = div("term-block cmd-in");
-      cmd.textContent = String(args.command);
+      /* Highlighted, not `textContent`. This was the one place in the panel
+         showing a shell command with no colour at all - the command the user
+         is being asked to approve, in a card whose whole job is to say what
+         is about to run. `highlight()` escapes everything it emits, so its
+         output is safe as innerHTML. */
+      cmd.innerHTML = highlight(String(args.command), "sh");
       body.appendChild(ioRow("IN", cmd));
       if (text) body.appendChild(ioRow("OUT", resultBlock(text, name, args)));
     } else if (preview) body.appendChild(preview);
