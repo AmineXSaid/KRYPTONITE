@@ -532,6 +532,14 @@ export interface StopSessionMsg { type: "stopSession"; id: string }
 export interface NewChatMsg { type: "newChat" }
 export interface SetPhaseMsg { type: "setPhase"; phase: Phase }
 export interface ApprovePlanMsg { type: "approvePlan" }
+/**
+ * The plan was declined, and this is why.
+ *
+ * Sent instead of `approvePlan` when the user keeps planning. The feedback is
+ * what they typed into the plan card; it is sent as a plan-phase turn, so the
+ * phase does not move. An empty string is not sent at all.
+ */
+export interface RejectPlanMsg { type: "rejectPlan"; feedback: string }
 export interface ResolvePermissionMsg {
   type: "resolvePermission";
   id: string;
@@ -661,7 +669,7 @@ export type InboundMessage =
   | ReadyMsg | SendMessageMsg | AttachFilesMsg | AttachPathsMsg | WarmMsg | McpOpenConfigMsg
   | ListModelsMsg | HealthCheckMsg | InterruptMsg | StopSessionMsg | OpenFolderMsg
   | NewChatMsg | SetPhaseMsg
-  | ApprovePlanMsg | ResolvePermissionMsg | ResolveDiffMsg | SelectModelMsg
+  | ApprovePlanMsg | RejectPlanMsg | ResolvePermissionMsg | ResolveDiffMsg | SelectModelMsg
   | RunTraceMsg | SaveCaBundleMsg | BrowseCaBundleMsg | UseSystemTrustMsg
   | CopyTextMsg | NewEndpointMsg | SaveEndpointMsg | DeleteEndpointMsg
   | ToggleSkillMsg | ReloadSkillsMsg | ReloadProfilesMsg | SetConfigMsg

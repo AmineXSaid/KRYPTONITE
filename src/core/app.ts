@@ -2528,8 +2528,33 @@ export class App {
         this.phase = "act";
         this.broadcast({ type: "phaseChanged", phase: "act" });
         this.updateStatus();
-        await this.session.send("Approved - run the plan.");
+        // The session owns the plan's steps, so it owns seeding the todo list
+        // and wording the message. This case owns the phase, which the session
+        // has no business moving.
+        await this.session.approvePlan();
         return;
+
+      case "rejectPlan": {
+        // Normalised rather than trusted, like `setPhase` above. Only an
+        // actual string counts: coercing whatever arrived would turn a
+        // malformed message into a turn that sends the model "42". An empty
+        // objection is not a turn either - saying nothing is better than
+        // spending a request to tell the model nothing.
+        const feedback = typeof msg.feedback === "string" ? msg.feedback.trim() : "";
+        if (!feedback) return;
+        // Forced back to plan rather than assumed to be there, and this is the
+        // half that matters. The plan card is a DOM node that outlives the
+        // phase segment: the user can flip the segment to Act by hand and then
+        // press "Keep planning" on a card still sitting in the transcript.
+        // `send` reads the phase at the top of the turn, so without this a
+        // button labelled Keep planning would run with write tools - breaking
+        // the one promise the read-only phases exist to make.
+        this.phase = "plan";
+        this.broadcast({ type: "phaseChanged", phase: "plan" });
+        this.updateStatus();
+        await this.session.rejectPlan(feedback);
+        return;
+      }
 
       case "resolvePermission":
         await this.session.resolvePermission(msg.id, msg.decision);
@@ -2970,9 +2995,17 @@ export class App {
        * off the end in silence. The `ready` handshake catches most of that
        * case and says so properly; this is the backstop, and it is the line
        * that turns "the button does nothing" into something a bug report can
-       * name. */
+       * name.
+       *
+       * The binding below is what makes the compiler prove it. `msg` narrows
+       * to `never` here only once every member of `InboundMessage` has a case,
+       * so a new message type whose handler is forgotten stops the build
+       * instead of shipping a button that posts into nothing. It costs one
+       * line and catches at compile time the half of this problem the warning
+       * below can only report at runtime. */
       default: {
-        const unknown = msg as { type?: unknown };
+        const unhandled: never = msg;
+        const unknown = unhandled as { type?: unknown };
         this.log(
           "warn",
           `The ${source} panel sent "${String(unknown?.type)}", which this build does not ` +

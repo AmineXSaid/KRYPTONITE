@@ -973,8 +973,13 @@ function walkFiles(
 // CHANGED: added. Models get the schema wrong often enough that the card would
 // otherwise render blank rows or an unbounded list. Coerce rather than reject:
 // a slightly wrong todo list is still useful, a hard failure is not.
+//
+// Exported because the approved-plan handoff seeds the same list from a plan's
+// steps rather than from a tool call, and a second set of caps that drifted
+// from these would be a todo card that behaved differently depending on who
+// filled it in.
 const VALID_STATUS: TodoStatus[] = ["pending", "in_progress", "completed"];
-function normaliseTodos(raw: unknown): TodoItem[] {
+export function normaliseTodos(raw: unknown): TodoItem[] {
   if (!Array.isArray(raw)) return [];
   return raw
     .slice(0, 20)

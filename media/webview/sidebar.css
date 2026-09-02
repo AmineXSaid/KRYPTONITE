@@ -1263,6 +1263,25 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   background: var(--kx-surface-2); font-family: var(--kx-mono); font-size: 10.5px;
 }
 .plan-foot { display: flex; gap: 7px; }
+/* A decided card keeps a row where its buttons were, so the transcript records
+   what was chosen instead of a card that silently lost its footer. Matches
+   .perm-done, which answers the same question for a permission. */
+.plan-done {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 11.5px; color: var(--kx-fg-2);
+}
+.plan-done svg { flex: none; color: var(--kx-accent); }
+/* Revealed only once Keep planning is pressed. The button it replaces is
+   removed rather than hidden, so the row never carries a dead control. */
+.plan-why-row { display: flex; gap: 7px; align-items: stretch; margin-top: 7px; min-width: 0; }
+.plan-why-row > .btn { flex: none; }
+.plan-why {
+  flex: 1 1 auto; min-width: 0;
+  background: var(--kx-surface-2);
+  border: 1px solid var(--kx-line); border-radius: 4px;
+  padding: 5px 8px; font-size: 12px;
+}
+.plan-why::placeholder { color: var(--kx-fg-3); }
 
 /* -- streaming indicator: the Genesis notch sweep --
  *
