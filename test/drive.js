@@ -1033,7 +1033,16 @@ function composer(over) {
       ok("EP Load marks itself busy", load.getAttribute("data-busy") === "1");
       const hint = d.getElementById("fModelHint");
       ok("EP a spinner is shown while waiting", !!hint && !!hint.querySelector("svg.kx-spin"));
-      ok("EP the spinner has three arcs", !!hint && hint.querySelectorAll("svg.kx-spin circle").length === 3);
+      // One track and one arc travelling it, which is the panel's own working
+      // mark. It was three concentric arcs in three hues on three coprime
+      // periods; inside 13px that is under two pixels between strokes and
+      // reads as jitter rather than as motion. The count is pinned because a
+      // third circle creeping back is exactly how that regresses.
+      ok("EP the spinner is one arc on one track",
+        !!hint && hint.querySelectorAll("svg.kx-spin circle").length === 2);
+      ok("EP the track is drawn behind the arc",
+        !!hint && !!hint.querySelector("svg.kx-spin circle.kx-track") &&
+        !!hint.querySelector("svg.kx-spin circle.kx-arc"));
 
       inbound({ type: "modelsListed", models: ["meta/llama-3.1-8b-instruct", "minimaxai/minimax-m3"], listed: 101 });
       ok("EP busy clears on answer", load.getAttribute("data-busy") !== "1");

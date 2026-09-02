@@ -110,6 +110,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 .ic-15 { width: 15px; height: 15px; }
 .ic-14 { width: 14px; height: 14px; }
 .ic-18 { width: 18px; height: 18px; }
+.ic-22 { width: 22px; height: 22px; }
 .sp { flex: 1; }
 .mono { font-family: var(--kx-mono); }
 .tnum { font-variant-numeric: tabular-nums; }
@@ -1551,7 +1552,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .ag-wrap { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
 .ag-top {
   display: flex; align-items: center; gap: 9px; flex: none;
-  padding: 9px 14px; border-bottom: 1px solid var(--kx-line);
+  padding: 11px 14px; border-bottom: 1px solid var(--kx-line);
   /* The list scrolls under this, so it cannot be a wash like every other
      surface: it has to stop what is behind it. Near-opaque black plus a blur
      does that without naming the ground - the blur is what makes it safe if
@@ -1563,11 +1564,13 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   backdrop-filter: blur(10px);
 }
 .ag-top .lbl { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
-.ag-body { flex: 1; min-height: 0; }
-.ag-empty { padding: 10px 14px 12px; font-size: 12px; color: var(--kx-fg-2); line-height: 1.55; }
-.ag-empty p { margin: 0 0 10px; }
-.ag-empty code { font-family: var(--kx-mono); font-size: 11px; color: var(--kx-fg); }
-.ag-row { padding: 8px 14px; border-bottom: 1px solid var(--kx-line); }
+/* A flex column, and not only a flex ITEM. `.tab-empty` inside it asks for
+   `flex: 1` so it can centre in whatever height is left under the header;
+   given a block parent there is no axis to grow along, and the empty state
+   collapsed back to a paragraph at the top of the tab - the exact layout it
+   was written to replace. */
+.ag-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.ag-row { padding: 9px 14px; border-bottom: 1px solid var(--kx-line); }
 .ag-row[data-on="1"] { background: var(--kx-agent-wash); }
 .ag-head { display: flex; align-items: center; gap: 7px; }
 .ag-head .ic { flex: none; color: var(--kx-fg-3); }
@@ -2498,6 +2501,13 @@ ul.md-l li.md-task, ol.md-l li.md-task {
  * Rows are separated by the .06 hairline rather than boxed, so a list of
  * servers reads as one object. The 3px status rail that used to lead each row
  * is gone - see `.mcp-row`.
+ *
+ * THE GUTTER IS 14px, which is the panel's and was this tab's alone at 16.
+ * Every other surface sits at 14 - the agent bar and the phase banner
+ * directly above these rows, the Agents tab, the diagnostics cards and
+ * section heads - so the two pixels showed up as the whole tab stepping
+ * sideways when you switched to it, and as the MCP rows failing to line up
+ * with the bar sitting on top of them.
  */
 .mcp-wrap { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
 /* The row wraps, and its two groups are what wrap.
@@ -2508,9 +2518,26 @@ ul.md-l li.md-task, ol.md-l li.md-task {
  * actions are a GROUP held right by `margin-left: auto` rather than pushed by
  * a flex-grow spacer, because a spacer is itself a wrappable item and becomes
  * an empty row of its own the moment the line breaks. */
+/* IT STAYS PUT, because the Agents tab's does and they are the same header.
+ *
+ * This one was `flex: none` and nothing else, so on a list of six servers -
+ * each of which can open a stderr log inline - Reload and Edit config scrolled
+ * off the top and the way to fix a broken server was to scroll back up to find
+ * it. The Agents tab solved this correctly one section down; the two tabs now
+ * behave identically, which also means switching between them no longer moves
+ * the header.
+ *
+ * The ground is near-opaque rather than a wash for the reason `.ag-top` gives:
+ * rows pass underneath it, so it has to stop what is behind it, and the blur
+ * is what makes that safe if the .96 ever shows through. */
 .mcp-head {
   display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
-  padding: 12px 16px 10px; flex: none;
+  padding: 11px 14px; flex: none;
+  border-bottom: 1px solid var(--kx-line);
+  position: sticky; top: 0; z-index: 2;
+  background: rgba(9, 9, 11, .96);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
 }
 /* One caption, so "· 4 configured" cannot break between the dot and the word. */
 .mcp-cap { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
@@ -2606,15 +2633,42 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   font-size: 11px; color: var(--kx-fg-3); line-height: 1.4;
 }
 .f-hint[data-err="1"] { color: var(--kx-warn); }
-.f-hint .kx-spin { flex: none; }
-/* Three arcs from the palette, each at its own speed, so the mark reads as
-   working rather than merely rotating. */
-.kx-spin .a1 { transform-origin: 50% 50%; animation: kxspin 1.1s linear infinite; }
-.kx-spin .a2 { transform-origin: 50% 50%; animation: kxspin 1.7s linear infinite reverse; }
-.kx-spin .a3 { transform-origin: 50% 50%; animation: kxspin 2.6s linear infinite; }
+/* ── the waiting mark ──────────────────────────────────────────────────────
+   One arc travelling one faint track, in the panel's own vocabulary - the
+   same figure `liveMark` draws for a background conversation. It replaced
+   three concentric arcs in three hues on three coprime periods, which inside
+   13px was under two pixels of gap between strokes, one muddy colour, and
+   three unrelated speeds reading as jitter.
+
+   THE ARC'S LENGTH IS WHAT STOPS IT LOOKING FROZEN, not a second ring. 2πr at
+   r=9 is 56.5, and the dash runs between 9 of that and 30 of it - a sixth of
+   the circle to a little over half - so no two frames of a turn look alike.
+
+   The two periods are exactly 2:1. Coprime periods were the old mark's whole
+   idea and they are what made it read as noise; a whole ratio gives the same
+   never-quite-repeating figure a rhythm, with the arc at its longest at the
+   same two points of every turn. */
+.kx-spin { flex: none; }
+.kx-spin .kx-track { fill: none; stroke: var(--kx-link); stroke-opacity: .24; }
+.kx-spin .kx-arc {
+  fill: none; stroke: var(--kx-link);
+  stroke-dasharray: 14 43;
+  transform-origin: 50% 50%;
+  animation: kxspin 1.15s linear infinite, kxdraw 2.3s ease-in-out infinite;
+}
 @keyframes kxspin { to { transform: rotate(360deg); } }
+@keyframes kxdraw {
+  0%, 100% { stroke-dasharray: 9 48; }
+  50%      { stroke-dasharray: 30 27; }
+}
+/* Motion off: a three-quarter arc, held still. Not `animation: none` on a
+   FULL ring - a closed circle is the shape every progress control uses for
+   "finished", and the one thing this mark must never say while waiting is
+   that the wait is over. */
 @media (prefers-reduced-motion: reduce) {
-  .kx-spin .a1, .kx-spin .a2, .kx-spin .a3 { animation: none; }
+  .kx-spin .kx-arc { animation: none; stroke-dasharray: 42 15; }
+}
+@media (prefers-reduced-motion: reduce) {
   .btn[data-busy="1"]::after { animation: none; left: 0; width: 100%; opacity: .5; }
 }
 
@@ -2635,9 +2689,6 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .mcp-head .btn:hover:not(:disabled) {
   color: var(--kx-link); border-color: var(--kx-link);
 }
-/* The empty state's single call to action carries the interaction colour;
-   the header pair stays quiet so they do not compete. */
-.mcp-empty .btn.primary { height: 26px; padding: 0 14px; }
 
 /* NO RAIL.
  *
@@ -2652,10 +2703,13 @@ ul.md-l li.md-task, ol.md-l li.md-task {
  * the connected case, which is the only state worth marking at the row level. */
 .mcp-row {
   display: grid; grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center; gap: 10px; padding: 11px 16px;
+  align-items: center; gap: 10px; padding: 11px 14px;
   border-top: 1px solid var(--kx-hairline);
   transition: background .12s ease;
 }
+/* The header carries a divider now, so the first row's own would draw a second
+   line one pixel under it. */
+.mcp-head + .mcp-row { border-top: none; }
 /* MCP status colours are the mockup's, not an invention.
  *
  * The mockup's server list assigns green-400 to a connected server and
@@ -2735,7 +2789,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 
 /* Chips are capped in the renderer; the tail carries the rest in its tooltip. */
-.mcp-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 16px 12px; }
+.mcp-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 14px 12px; }
 /* A chip is a tool the model gained from a server, and its colour says what
    that tool can do rather than which server it came from. Read-only takes the
    information blue; anything that writes takes the attention amber. Scanning
@@ -2780,7 +2834,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 
 /* A failure is an object with actions, not a red line of text. */
 .mcp-err {
-  margin: 0 16px 12px; padding: 10px 12px;
+  margin: 0 14px 12px; padding: 10px 12px;
   border-left: 2px solid var(--kx-error);
   background: var(--kx-surface); border-radius: 0 4px 4px 0;
 }
@@ -2798,19 +2852,67 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 
 .mcp-foot {
   margin-top: auto; flex: none;
-  display: flex; align-items: center; gap: 8px; padding: 10px 16px;
+  display: flex; align-items: center; gap: 8px; padding: 10px 14px;
   border-top: 1px solid var(--kx-hairline);
   font-family: var(--kx-mono); font-size: 11px; color: var(--kx-fg-2);
 }
 .mcp-foot .bad { display: flex; align-items: center; gap: 5px; color: var(--kx-error); }
 
-.mcp-empty { padding: 4px 16px 16px; }
-.mcp-empty p { font-size: 12.5px; line-height: 1.6; color: var(--kx-fg-2); margin-bottom: 8px; }
-.mcp-empty p.s { font-size: 11.5px; color: var(--kx-fg-3); }
-.mcp-empty code {
-  font-family: var(--kx-mono); font-size: 11px; color: var(--kx-fg-2);
-  background: var(--kx-surface-2); padding: 1px 5px; border-radius: 4px;
+/* â”€â”€ "there is nothing here yet", on the MCP and Agents tabs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ *
+ * Both tabs used to answer that question the same wrong way: a paragraph
+ * pinned under the header at the panel's full width, with a button loose
+ * beneath it and the remaining four fifths of the screen blank. Two separate
+ * problems, and the second is the one that is actually felt.
+ *
+ * MEASURE. Prose set to the panel's full width is one 90-character line at
+ * 400px and a 130-character line on a dragged-out sidebar, which is roughly
+ * twice the length the eye can return from without losing the row. Held to
+ * 300px it is the same three lines the welcome screen sets.
+ *
+ * WEIGHT. A screen whose entire content sits in its top 90 pixels reads as a
+ * page that failed to finish loading, not as a page with nothing on it. The
+ * content has to occupy the space it is given, which means centring in it.
+ *
+ * The panel already had this pattern, on the welcome screen - centred column,
+ * a mark to look at, prose to a measure, one action - so this is that pattern
+ * reused rather than a third design. Three "nothing yet" screens, one shape.
+ */
+.tab-empty {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center; text-align: center;
+  gap: 9px; padding: 28px 22px 44px;
 }
+/* The mark is a plate rather than a bare glyph: an icon alone at this size
+   floats, and the ring gives the column something to centre on. Stone, not
+   colour - nothing has gone wrong here, and an accent would say it had. */
+.te-mark {
+  display: grid; place-items: center; flex: none;
+  width: 44px; height: 44px; border-radius: 50%;
+  color: var(--kx-fg-3);
+  background: var(--kx-surface);
+  border: 1px solid var(--kx-line);
+  margin-bottom: 3px;
+}
+.te-t {
+  margin: 0; font-family: var(--kx-ui); font-size: 12.5px; font-weight: 600;
+  color: var(--kx-fg);
+}
+/* The prose face, at the welcome screen's measure. `text-wrap: pretty` is
+   what stops the last line being one orphaned word under a centred block,
+   which is the failure mode centred text has and left-aligned text does not. */
+.te-s {
+  margin: 0; max-width: 300px;
+  font-family: var(--kx-prose); font-size: 11.5px; line-height: 1.65;
+  color: var(--kx-fg-2); text-wrap: pretty;
+}
+.te-s code {
+  font-family: var(--kx-mono); font-size: 10.5px; color: var(--kx-fg-2);
+  background: var(--kx-surface-2); padding: 1px 5px; border-radius: 4px;
+  overflow-wrap: anywhere;
+}
+.tab-empty .btn { margin-top: 7px; height: 27px; padding: 0 15px; }
 
 /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ diagnostics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
@@ -3086,11 +3188,26 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   font-size: 11px; color: var(--kx-fg-2);
 }
 .warn-line { margin-top: 6px; font-size: 11px; color: var(--kx-warn); }
+/* On the MCP tab the warning sits between the header and the first row rather
+   than at the end of a padded list, so it needs the tab's own gutter and no
+   top margin. This was an inline `style=` on the element. */
+#mcpBody .warn-line { margin-top: 0; padding: 0 14px 10px; }
 
 /* The Agents footer is appended after the padded list container, not inside
    it, so it started flush at x=0 and pushed its "New agent" button past the
-   panel's right edge at 420px. Give it the section's own gutter. */
-#viewAgents .sk-foot { padding: 0 14px 12px; }
+   panel's right edge at 420px. Give it the section's own gutter.
+
+   AND PIN IT, the way `.mcp-foot` is pinned. It used to sit directly under the
+   last agent with a divider above it and then a screen of nothing below, so
+   the same summary line took a different shape on each of the two list tabs -
+   floating on one, a footer on the other. `margin-top: auto` inside
+   `.ag-body`'s flex column is what makes it the footer it reads as. */
+#viewAgents .sk-foot {
+  margin-top: auto; flex: none;
+  padding: 10px 14px;
+  border-top: 1px solid var(--kx-hairline);
+  font-family: var(--kx-mono);
+}
 
 /* The Panel C todo treatment lives with the rest of the todo rules, near the
    top of this file, not here. It was written twice - once as a border-left

@@ -71,13 +71,13 @@
     return '<svg class="' + (cls || "ic") + '" aria-hidden="true"><use href="#' + id + '"/></svg>';
   }
 
-  /** Three arcs on their own periods, matching the rest of the extension. */
+  /** One arc travelling one track. See the note in sidebar.js. */
   function spinner(size) {
     var s = size || 13;
-    return '<svg class="kx-spin" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
-      '<circle class="a1" cx="12" cy="12" r="10" stroke="var(--kx-accent)" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="16 47"/>' +
-      '<circle class="a2" cx="12" cy="12" r="6.5" stroke="var(--kx-agent)" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="10 31"/>' +
-      '<circle class="a3" cx="12" cy="12" r="3" stroke="var(--kx-active)" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="5 14"/>' +
+    return '<svg class="kx-spin" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" ' +
+      'fill="none" aria-hidden="true">' +
+      '<circle class="kx-track" cx="12" cy="12" r="9" stroke-width="2.6"/>' +
+      '<circle class="kx-arc" cx="12" cy="12" r="9" stroke-width="2.6" stroke-linecap="round"/>' +
       "</svg>";
   }
 

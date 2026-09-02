@@ -29,6 +29,51 @@
   state, where it would outlive the conversation it belongs to.
 
 ### Fixed
+- **The waiting mark was the busiest thing in a quiet panel.** It was three
+  concentric arcs, in three palette hues, on three coprime periods — 1.1s,
+  1.7s, 2.6s — chosen so the figure would never repeat, on the reasoning that
+  one rotating ring reads as a stalled image. At the size it is actually drawn,
+  12 to 13 pixels, none of that survived: three rings inside 13px leaves under
+  two pixels between strokes, three hues at that width smear into one muddy
+  colour, and three unrelated speeds read as jitter rather than as motion.
+
+  It is one arc travelling one faint track now — which is not a new idea, it is
+  `liveMark`'s, the mark a conversation working in the background already
+  wears. The two "something is happening" indicators finally speak one
+  language. The stalled-image worry is real and is answered by the arc's
+  **length** rather than by more rings: it breathes between a sixth of the
+  circle and a little over half while it travels, so no two frames of a turn
+  look alike. The two periods are exactly 2:1 — coprime periods were the old
+  mark's whole idea and were what made it read as noise.
+
+  Reduced motion holds a three-quarter arc rather than `animation: none`. The
+  old rule froze three dashed rings mid-turn, which looks like a broken render;
+  and a **closed** ring is what every progress control on earth uses for
+  "finished", which is the one thing a waiting mark must not say.
+
+- **The MCP and Agents tabs answered "there is nothing here" badly, and
+  differently from each other.** Both put a paragraph at the panel's full width
+  under the header with a button loose beneath it, and left the remaining four
+  fifths of the tab blank. Two problems. Prose set to the full panel is a
+  90-character line at 400px and a 130-character one on a dragged-out sidebar —
+  roughly twice the length the eye returns from reliably. And a screen whose
+  entire content sits in its top 90 pixels does not read as a page with nothing
+  on it yet; it reads as a page that failed to load.
+
+  The panel already had the answer on its welcome screen — centred column, a
+  mark to look at, prose held to a measure, one action — so both tabs use that
+  now, and the three "nothing yet" screens in the extension are one screen.
+
+  Three inconsistencies between the two tabs went with it, all of them visible
+  as things that move when you switch tab. The MCP header **scrolled away**
+  while the Agents header stayed put, so on a list of six servers the way to
+  fix a broken one was to scroll back up to find Reload. The MCP tab sat at a
+  **16px gutter** and every other surface in the panel — the agent bar and
+  phase banner directly above its own rows, the Agents tab, the diagnostics
+  cards — sits at 14. And the Agents tab's summary line floated under the last
+  row with a screen of nothing below it, where the MCP tab's identical line is
+  pinned to the bottom. One shape each now.
+
 - **"Keep planning" can no longer run with write tools.** The plan card is a
   node in the transcript and outlives the phase segment above it, so the phase
   at the moment the button is pressed is whatever the user last selected — and
