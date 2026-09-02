@@ -2,7 +2,59 @@
 
 ## Unreleased
 
+### Added
+- **An approved plan now becomes the todo list.** The plan card has always
+  parsed the fenced `plan` block into steps, and `update_todos` has always
+  backed a todo card, but the two shipped in 0.2.0 as separate features and
+  were never connected. Approving sent the fixed string `Approved - run the
+  plan.` and dropped the steps on the floor: Act re-derived the build order
+  from the prose above it, and nothing tied what it built to what was agreed.
+  The steps now seed the todo list *and* are restated in the message Act
+  receives. Plan phase was already given `update_todos` on the grounds that
+  "a plan that can track its own steps is more useful than one that cannot"
+  — this is the other half of that sentence.
+
+  The list is seeded through `normaliseTodos`, the same 20-item, 200-character
+  caps the tool itself uses, so a card filled in by a plan cannot behave
+  differently from one filled in by the model. A plan that produced no fenced
+  block seeds nothing and sends the old string unchanged — plan phase can call
+  `update_todos`, so an empty seed would wipe a list the model had built.
+
+- **"Keep planning" now asks what is wrong.** It removed the plan card's
+  footer and posted nothing at all, so the single most useful signal in the
+  loop — why the user turned the plan down — was discarded. It now reveals a
+  box, and what is typed is sent as a plan-phase turn. Approve stays beside it,
+  so opening the box is not a one-way door out of approving, and the text is
+  read off the input at the moment it is sent rather than mirrored into panel
+  state, where it would outlive the conversation it belongs to.
+
 ### Fixed
+- **"Keep planning" can no longer run with write tools.** The plan card is a
+  node in the transcript and outlives the phase segment above it, so the phase
+  at the moment the button is pressed is whatever the user last selected — and
+  `send` reads the phase at the top of the turn. Declining a plan after
+  flipping the segment to Act by hand would have started a write-enabled turn
+  from a button whose entire meaning is "do not build this yet". Declining now
+  forces the phase back to plan, the way approving forces it to act.
+
+- **A superseded plan card can no longer run the wrong plan.** The host
+  remembers exactly one plan, so once "Keep planning" made re-planning a
+  first-class flow, a second card arrived with the first still armed — and
+  approving the older one would have run the newer one's steps. Earlier cards
+  are stamped when a new plan arrives. Decided cards now keep a line saying
+  what was chosen instead of quietly losing their buttons, matching what a
+  resolved permission does.
+
+- **A plan proposed in a conversation you have left is no longer approvable.**
+  The steps are remembered under the same gate the card is drawn under, and
+  cleared with the conversation alongside the todo list.
+
+- **A webview message with no handler is now a build failure.** `dispatch`
+  had no `default` arm and `InboundMessage` had no exhaustiveness check, so a
+  new message type whose `case` was forgotten produced a button that posted
+  into nothing — no error, no log, just a control that silently did not work.
+  Every member is handled today, so the check costs nothing and stops the next
+  one from slipping through.
 - **The controls whose border IS the control now have a visible one.** Measured
   on the shipped panel, the composer's outline sat at **1.47:1** against the
   ground and every outlined button — send, attach, mode, the phase segment, and

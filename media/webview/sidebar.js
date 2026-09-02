@@ -3336,9 +3336,29 @@ function _sbRun() {
     }
   }
 
+  /**
+   * Retire the buttons on every plan card already in the transcript.
+   *
+   * The host remembers exactly one plan - the last one proposed - so a card
+   * from an earlier round is a button that would run something other than what
+   * it lists. That is not hypothetical now that "Keep planning" asks for a
+   * re-plan: the second card arrives with the first still armed above it.
+   */
+  function retirePlans(label) {
+    var feet = logEl.querySelectorAll(".plan-card .plan-foot");
+    for (var i = 0; i < feet.length; i++) {
+      var foot = feet[i];
+      foot.className = "plan-done";
+      foot.innerHTML = '<span style="display:flex">' + icon("i-check", "ic-13") + "</span>" +
+        "<span>" + esc(label) + "</span>";
+    }
+  }
+
   function addPlan(m) {
     aiEl = null;
     closeToolGroup();
+    // Whatever is above this card can no longer be acted on.
+    retirePlans("Superseded by a newer plan");
     var steps = "";
     for (var i = 0; i < m.steps.length; i++) {
       steps += '<li><span class="n">' + (i + 1) + '</span><span>' + esc(m.steps[i]) + "</span></li>";
@@ -3350,15 +3370,64 @@ function _sbRun() {
       '<div class="plan-foot">' +
         '<button class="btn go" data-plan="run">Approve &amp; run</button>' +
         '<button class="btn" data-plan="keep">Keep planning</button></div>'));
+
+    // Replaces the footer with a stamp rather than removing it, so a decided
+    // card still says what was decided instead of quietly losing its buttons.
+    function settle(label) {
+      var foot = el.querySelector(".plan-foot");
+      if (!foot) return;
+      foot.className = "plan-done";
+      foot.innerHTML = '<span style="display:flex">' + icon("i-check", "ic-13") + "</span>" +
+        "<span>" + esc(label) + "</span>";
+    }
+
+    // The objection is read straight off the input at the moment it is sent and
+    // never mirrored into `S`. Its life is the card's life, which is right: a
+    // draft copied into state would outlive the conversation it belongs to and
+    // reappear somewhere it means nothing.
+    function decline() {
+      var box = el.querySelector(".plan-why");
+      if (!box) return;
+      var text = box.value.trim();
+      if (!text) return;
+      applyPhase("plan", true);
+      post("rejectPlan", { feedback: text });
+      settle("Kept planning");
+    }
+
     el.addEventListener("click", function (e) {
       var b = e.target.closest("[data-plan]");
       if (!b) return;
-      if (b.getAttribute("data-plan") === "run") {
+      var what = b.getAttribute("data-plan");
+      if (what === "run") {
         applyPhase("act", true);
         post("approvePlan");
+        settle("Approved · running");
+        return;
       }
+      if (what === "send") {
+        decline();
+        return;
+      }
+      // Keep planning opens the box rather than posting: nothing is typed until
+      // the user has committed to declining, which is also why the draft can
+      // never be caught by a re-render. Approve stays put beside it - opening
+      // the box must not be a one-way door out of approving.
       var foot = el.querySelector(".plan-foot");
-      if (foot) foot.remove();
+      if (!foot || el.querySelector(".plan-why")) return;
+      b.remove();
+      var row = div("plan-why-row",
+        '<input class="plan-why" type="text" placeholder="What should change?" ' +
+        'aria-label="Why this plan needs more work">' +
+        '<button class="btn" data-plan="send">Send</button>');
+      foot.parentNode.insertBefore(row, foot.nextSibling);
+      var box = row.querySelector(".plan-why");
+      box.addEventListener("keydown", function (ev) {
+        if (ev.key !== "Enter") return;
+        ev.preventDefault();
+        decline();
+      });
+      box.focus();
     });
   }
 

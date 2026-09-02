@@ -6,7 +6,7 @@ import type { Msg } from "../providers/client";
 import { runAgent } from "../agent/loop";
 import { isUntitled, titleFrom, sanitizeTitle } from "../core/sessions";
 import type { FileChange, ToolContext, TodoItem, ToolImage } from "../agent/tools";
-import { mentionable } from "../agent/tools";
+import { mentionable, normaliseTodos } from "../agent/tools";
 import { agentAllowsMcp, agentRefusal } from "../agents/loader";
 import { parseQualified } from "../mcp/registry";
 import { fetchPage, normaliseUrl } from "../browser/fetchPage";
@@ -149,6 +149,20 @@ export class SessionController {
    * when the turn ends, instead of being added on top of it.
    */
   private turnEstimate = new Map<string, { added: number; removed: number }>();
+
+  /**
+   * The steps of the plan currently awaiting a decision.
+   *
+   * The plan card renders these, but the card is DOM and the host cannot read
+   * it back - so approving a plan used to hand Act nothing but a fixed string
+   * and leave it to re-derive the build order from prose. Held here so
+   * `approvePlan` can seed the todo list and restate the steps in the message
+   * Act receives.
+   *
+   * Belongs to the conversation, so `reset` clears it: approving in a chat you
+   * have switched to must not run the plan from the one you left.
+   */
+  private planSteps: string[] = [];
 
   /**
    * The conversation's name.
@@ -945,6 +959,11 @@ export class SessionController {
       // turn finished in the background has to have one to replay.
       if (body) this.emit(turn, { type: "streamDelta", text: body });
       if (steps.length) {
+        // Held for the approval that may follow, under the same gate `show`
+        // uses. The card's buttons act on the conversation that is on screen,
+        // so a plan turn finishing in one the user has switched away from must
+        // not leave its steps behind for them to approve.
+        if (turn.id === this.sessionId) this.planSteps = steps;
         this.show(turn, {
           type: "planProposed",
           meta: `${steps.length} steps · read-only research done`,
@@ -1552,6 +1571,9 @@ export class SessionController {
     this.broadcastQueue();
     this.turnEstimate.clear();
     this.app.todos = [];
+    // The plan awaiting a decision belongs to the conversation it was proposed
+    // in, for the same reason the todo list does.
+    this.planSteps = [];
     this.app.lastContext = null;
     void this.app.rememberSession(this.sessionId);
     this.announce(title);
@@ -1559,6 +1581,62 @@ export class SessionController {
     // nothing; when it is something, the composer has to come back up in the
     // running state or Stop is unreachable for a turn that is plainly moving.
     this.adopt();
+  }
+
+  /**
+   * Run the plan the user just approved.
+   *
+   * Two things travel with the approval, and neither used to. The steps become
+   * the todo list, so execution is tracked against what was actually agreed
+   * rather than against whatever the model decides to file later; and they are
+   * restated in the message, so Act reads the build order instead of hunting
+   * for it in the prose above.
+   *
+   * The seed is written the way `reset` writes the clear - `app.todos` plus a
+   * direct broadcast - because `emit` needs a live turn and approval happens
+   * between turns. `app.todos` is what `buildStateSync` hydrates from, so the
+   * list survives a webview reload even though the plan card does not.
+   */
+  async approvePlan(): Promise<void> {
+    // Taken and cleared together: pressing Approve twice must not re-seed a
+    // plan that is already running.
+    const steps = this.planSteps;
+    this.planSteps = [];
+
+    // Nothing to seed and nothing to restate. Not merely a shortcut: plan phase
+    // may call `update_todos`, so a plan that produced no fenced block may still
+    // have left a real list behind, and seeding an empty one would wipe it.
+    if (!steps.length) {
+      await this.send(approvalMessage([]));
+      return;
+    }
+
+    // Through the tool's own normaliser rather than a second set of caps - a
+    // todo card that behaved differently depending on whether the model or the
+    // plan filled it in would be a bug nobody would think to look for.
+    const todos: TodoDto[] = normaliseTodos(
+      steps.map((content) => ({ content, status: "pending" })),
+    );
+    this.app.todos = todos;
+    this.app.broadcast({ type: "todosUpdated", todos });
+
+    // The message is built from the normalised list, not the raw one. Built
+    // from `steps` instead, a plan longer than the cap would instruct Act to
+    // work through more steps than the todo card can hold.
+    await this.send(approvalMessage(todos.map((t) => t.content)));
+  }
+
+  /**
+   * Keep planning, and say what is wrong with this one.
+   *
+   * The objection is sent as an ordinary plan-phase turn - it is a request for
+   * a better plan, which is exactly what plan phase is for. The steps are
+   * dropped first: the plan on screen has been declined, and a re-plan that
+   * produces no fenced block must not leave the rejected one approvable.
+   */
+  async rejectPlan(feedback: string): Promise<void> {
+    this.planSteps = [];
+    await this.send(feedback);
   }
 
   newChat(): void {
@@ -1675,6 +1753,32 @@ export class SessionController {
  * ignores it produces no steps, and the whole reply falls through as prose -
  * degraded, but never lost.
  */
+/**
+ * What Act is told when a plan is approved.
+ *
+ * The old message was the bare "Approved - run the plan." Nothing else crossed
+ * the boundary, so Act had to find the build order in the prose of a reply that
+ * was written for a person to read, and nothing anchored what it built to what
+ * the user actually agreed to. Restating the steps costs a few dozen tokens and
+ * removes that search entirely.
+ *
+ * Pure and exported so the wording can be tested without standing up a session.
+ * No steps - a model that ignored the fenced-block contract - falls back to the
+ * old string exactly, because a plan that produced none is one where there is
+ * nothing to restate.
+ */
+export function approvalMessage(steps: string[]): string {
+  if (!steps.length) return "Approved - run the plan.";
+  const list = steps.map((s, i) => `${i + 1}. ${s}`).join("\n");
+  return [
+    "Approved - run the plan. The build order is:",
+    "",
+    list,
+    "",
+    "These are already on the todo list; call update_todos to mark progress as you go.",
+  ].join("\n");
+}
+
 export function extractPlan(raw: string): { body: string; steps: string[] } {
   const match = raw.match(/```plan\s*\n([\s\S]*?)```/);
   if (!match) return { body: raw.trim(), steps: [] };
