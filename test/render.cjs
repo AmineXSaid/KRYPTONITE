@@ -2062,6 +2062,231 @@ function contrast(a, b) {
     await ctx.close();
   }
 
+  /* ── 5y. the command in a tool card, painted and unharmed ──────────── */
+  {
+    /* THIS SECTION EXISTS BECAUSE THE IN ROW BECAME innerHTML.
+    
+       It used to be `cmd.textContent = args.command`, which cannot inject
+       anything no matter what the string holds. It is now
+       `cmd.innerHTML = highlight(...)`, which is only safe while `highlight`
+       escapes every byte it emits - both the spans it builds and the text it
+       skips over. That is a claim about a regex-driven tokeniser, and
+       `markdown-render.cjs` checks it against a copy of the function lifted
+       out of source. This checks the SHIPPED panel, with a real DOM, because
+       "it escaped in a string comparison" and "it did not become an element"
+       are different questions.
+    
+       A command reaches here from the model. It is exactly the string an
+       attacker controls if they control the model's output. */
+    const open2 = async (command, result, isError) => {
+      const { ctx, page } = await open(460, {});
+      const send = (d) => page.evaluate(
+        (m) => window.dispatchEvent(new MessageEvent("message", { data: m })), d);
+      await send({ type: "toolStart", tool: { name: "run_command", args: { command } } });
+      await page.waitForTimeout(60);
+      await send({ type: "toolEnd", tool: {
+        name: "run_command", args: { command }, result, isError: !!isError } });
+      await page.waitForTimeout(200);
+      await page.evaluate(() => {
+        const h = document.querySelector(".tool .tool-head");
+        if (h) h.click();
+      });
+      await page.waitForTimeout(200);
+      return { ctx, page };
+    };
+
+    const HOSTILE = [
+      'echo "<img src=x onerror=alert(1)>"',
+      'git commit -m "</span><script>alert(1)</script>"',
+      "ls && echo '<b>bold</b>' > /tmp/x",
+      'curl "https://x/?a=1&b=2" -H "X-Y: <z>"',
+      // A closing span in the middle of a token, which is the shape that
+      // breaks a tokeniser that concatenates without escaping.
+      'npm run "</span></span>oops"',
+    ];
+    for (const command of HOSTILE) {
+      const { ctx, page } = await open2(command, "done");
+      const m = await page.evaluate(() => {
+        const el = document.querySelector(".cmd-in");
+        if (!el) return { missing: true };
+        return {
+          text: el.textContent,
+          // Elements the payload tried to create. Counted inside the card
+          // rather than the document, so a legitimate <span> elsewhere is not
+          // mistaken for a break-out.
+          scripts: el.querySelectorAll("script,img,iframe,object,embed").length,
+          // Only the tokeniser's own spans may exist in here.
+          foreign: [...el.querySelectorAll("*")]
+            .filter((n) => n.tagName !== "SPAN" || !/^tk-/.test(n.className)).length,
+        };
+      });
+      ok(`a hostile command creates no elements: ${command.slice(0, 34)}`,
+        !m.missing && m.scripts === 0, JSON.stringify(m));
+      ok("and nothing but the tokeniser's own spans",
+        m.foreign === 0, JSON.stringify(m));
+      /* THE ROUND TRIP, which is the assertion that catches both failures at
+         once: markup injected would ADD characters, and a regex whose matches
+         overlap would silently LOSE them. Byte-for-byte or it is wrong. */
+      ok("and the command reads back exactly as it was given",
+        m.text === command, JSON.stringify({ got: m.text, want: command }));
+      await ctx.close();
+    }
+
+    /* The corpus. Real command shapes, checked for the same round trip and for
+       the command name actually being painted in the shipped panel - which is
+       a different thing from `highlight()` returning a span in a unit test. */
+    const CORPUS = [
+      ["npm run verify", ["npm"], ["run", "verify"]],
+      ["cd media/webview && npm test | grep -c PASS", ["cd", "npm", "grep"], ["media/webview"]],
+      ["./scripts/build.sh --watch", ["./scripts/build.sh"], []],
+      ["git log --oneline -3; ls -la", ["git", "ls"], []],
+      ["python3 -m pytest -q", ["python3"], []],
+      ["docker compose up -d && docker ps", ["docker"], ["compose", "up"]],
+    ];
+    for (const [command, wantCmd, wantPlain] of CORPUS) {
+      const { ctx, page } = await open2(command, "ok");
+      const m = await page.evaluate(() => {
+        const el = document.querySelector(".cmd-in");
+        return {
+          text: el.textContent,
+          cmds: [...el.querySelectorAll(".tk-cmd")].map((n) => n.textContent),
+          // Everything the tokeniser coloured, whatever the class.
+          painted: [...el.querySelectorAll("[class^=tk-]")].map((n) => n.textContent),
+        };
+      });
+      ok(`"${command}" reads back exactly`, m.text === command,
+        JSON.stringify({ got: m.text }));
+      for (const c of wantCmd) {
+        ok(`  and paints "${c}" as a command`, m.cmds.includes(c), JSON.stringify(m.cmds));
+      }
+      for (const p of wantPlain) {
+        ok(`  and does not paint "${p}" as one`, !m.cmds.includes(p), JSON.stringify(m.cmds));
+      }
+      await ctx.close();
+    }
+
+    /* The command's colour has to be READABLE where it actually sits.
+    
+       The token behind `.tk-cmd` is checked against the panel ground by
+       contrast.cjs, but that is not where this lands: the boxes are gone, so
+       the command sits on the tool card's own surface, which is a wash over
+       whatever the workbench is showing through. Composited, not declared -
+       so it is measured in the page rather than computed from a token. */
+    {
+      const { ctx, page } = await open2("npm run verify", "ok");
+      const r = await page.evaluate(() => {
+        const span = document.querySelector(".cmd-in .tk-cmd");
+        if (!span) return { missing: true };
+        const rgb = (s) => (s.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+        // Walk up for the first ancestor that actually paints, which is what
+        // the eye sees behind the text.
+        let el = span.parentElement, bg = null;
+        while (el) {
+          const c = getComputedStyle(el).backgroundColor;
+          const p = (c.match(/[\d.]+/g) || []).map(Number);
+          if (p.length >= 3 && (p.length < 4 || p[3] > 0)) { bg = c; break; }
+          el = el.parentElement;
+        }
+        const lum = (c) => {
+          const [r, g, b] = rgb(c).map((v) => {
+            const s = v / 255;
+            return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+          });
+          return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        };
+        const fg = getComputedStyle(span).color;
+        const [hi, lo] = [lum(fg), lum(bg || "rgb(24,24,24)")].sort((a, b) => b - a);
+        return { fg, bg, weight: getComputedStyle(span).fontWeight,
+                 ratio: (hi + 0.05) / (lo + 0.05) };
+      });
+      ok("the command colour is measurable", !r.missing, JSON.stringify(r));
+      /* 4.5:1. This is not an accent or a rail - it is the text of the command
+         the user is being asked to approve, so it is body text and takes the
+         body-text bar. */
+      ok("and reaches 4.5:1 where it is actually painted",
+        r.ratio >= 4.5, `${(r.ratio || 0).toFixed(2)}:1 (${r.fg} on ${r.bg})`);
+      await ctx.close();
+    }
+  }
+
+  /* ── 5z. the tool card is rails, not nested boxes ───────────────────── */
+  {
+    /* Reported against a screenshot: a filled, bordered, rounded panel inside
+       a bordered card inside a bordered card. `.term-block` earns that
+       treatment in the transcript, where it is an object among prose; inside
+       a tool card it is the card's own content, and the nesting made the
+       command and its result read as two unrelated artefacts. */
+    const { ctx, page } = await open(460, {});
+    const send = (d) => page.evaluate(
+      (m) => window.dispatchEvent(new MessageEvent("message", { data: m })), d);
+    await send({ type: "toolStart", tool: { name: "run_command", args: { command: "npm test" } } });
+    await page.waitForTimeout(60);
+    await send({ type: "toolEnd", tool: {
+      name: "run_command", args: { command: "npm test" }, result: "3 passed", isError: false } });
+    await page.waitForTimeout(200);
+    await page.evaluate(() => document.querySelector(".tool .tool-head").click());
+    await page.waitForTimeout(200);
+
+    const m = await page.evaluate(() => {
+      const pick = (sel) => {
+        const el = document.querySelector(sel);
+        if (!el) return null;
+        const cs = getComputedStyle(el);
+        return {
+          bg: cs.backgroundColor, radius: cs.borderTopLeftRadius,
+          top: cs.borderTopWidth, right: cs.borderRightWidth, bottom: cs.borderBottomWidth,
+          left: cs.borderLeftWidth, leftColor: cs.borderLeftColor,
+        };
+      };
+      const inRow = pick(".tool-body .cmd-in");
+      const outRow = pick(".tool-body .term-block:not(.cmd-in)");
+      // The transcript's own block must KEEP its panel - the change was scoped
+      // to inside a tool card, and a rule that leaked would flatten every
+      // fenced shell block in the conversation too.
+      return { inRow, outRow };
+    });
+    const transparent = (c) => /rgba\(0, 0, 0, 0\)|transparent/.test(c);
+    for (const [name, r] of [["command", m.inRow], ["output", m.outRow]]) {
+      ok(`the ${name} row has no fill`, !!r && transparent(r.bg), JSON.stringify(r));
+      ok(`and no box around it`, !!r &&
+        r.top === "0px" && r.right === "0px" && r.bottom === "0px", JSON.stringify(r));
+      ok(`and no rounded corners`, !!r && r.radius === "0px", JSON.stringify(r));
+      ok(`but keeps its rail`, !!r && parseFloat(r.left) >= 2, JSON.stringify(r));
+    }
+    // The rails are not decoration: their colour is what says which half is
+    // which, now that the boxes are gone and both halves are plain text.
+    ok("the two rails are different colours, or the split says nothing",
+      m.inRow.leftColor !== m.outRow.leftColor,
+      `${m.inRow.leftColor} vs ${m.outRow.leftColor}`);
+    await ctx.close();
+
+    // A FAILED run recolours the output rail, not the command's: what was run
+    // is still what was run, and it is the result that went wrong.
+    const { ctx: c2, page: p2 } = await open(460, {});
+    const s2 = (d) => p2.evaluate(
+      (mm) => window.dispatchEvent(new MessageEvent("message", { data: mm })), d);
+    await s2({ type: "toolStart", tool: { name: "run_command", args: { command: "npm test" } } });
+    await p2.waitForTimeout(60);
+    await s2({ type: "toolEnd", tool: {
+      name: "run_command", args: { command: "npm test" }, result: "1 failed", isError: true } });
+    await p2.waitForTimeout(200);
+    await p2.evaluate(() => document.querySelector(".tool .tool-head").click());
+    await p2.waitForTimeout(200);
+    const bad = await p2.evaluate(() => {
+      const c = document.querySelector(".tool-body .cmd-in");
+      const o = document.querySelector(".tool-body .term-block:not(.cmd-in)");
+      const err = getComputedStyle(document.documentElement).getPropertyValue("--kx-error").trim();
+      const probe = document.createElement("span");
+      probe.style.color = err; document.body.appendChild(probe);
+      const errRgb = getComputedStyle(probe).color; probe.remove();
+      return { cmd: getComputedStyle(c).borderLeftColor,
+               out: getComputedStyle(o).borderLeftColor, errRgb };
+    });
+    ok("a failed run turns the OUTPUT rail red", bad.out === bad.errRgb, JSON.stringify(bad));
+    ok("and leaves the command's rail alone", bad.cmd !== bad.errRgb, JSON.stringify(bad));
+    await c2.close();
+  }
+
   /* ── 6. the session list, as the reference draws it ────────────────── */
   {
     const { ctx, page } = await open(400, {
