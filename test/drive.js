@@ -1481,6 +1481,63 @@ const AGENTS = [
 }
 
 // The clipboard block is async because FileReader is; everything else has
+/* ── the reply that stopped in the middle ─────────────────────────
+
+   Prose is revealed from a buffer, deliberately BEHIND arrival, so there is
+   almost always text received but not yet painted. Every card that interrupts
+   prose - a diff, a plan, a todo list, a permission request, a tool call -
+   used to begin with a bare `aiEl = null`, which dropped the element and with
+   it everything still outstanding. The text had arrived and was simply never
+   drawn.
+
+   `flushAi` existed and was called in three places out of seventeen. One of
+   the three could never have run at all: `addThinking` set `aiEl = null` and
+   then called `flushAi()`, which opens with `if (!aiEl) return`.
+
+   Each case below streams a long reply and then interrupts it. What is being
+   asserted is only that every word survives. */
+{
+  const LONG = "The migration runs in three phases, and each one has to finish " +
+    "before the next begins, otherwise the indexes are rebuilt against rows " +
+    "that are still moving and the whole thing has to be started again.";
+
+  const interruptions = {
+    "a diff card": { type: "diffPending", turnId: "t1", file: "a.ts",
+      added: 1, removed: 0, patch: "@@ -1 +1 @@\n-a\n+b", truncated: false },
+    "a plan": { type: "planProposed", meta: "3 steps", steps: ["one", "two", "three"] },
+    "a todo list": { type: "todosUpdated",
+      todos: [{ content: "first", status: "in_progress" }] },
+    "a permission card": { type: "permissionRequest", id: "p9",
+      summary: "Run: npm test", risk: "write" },
+    "the model thinking again": { type: "thinking", text: "reconsidering" },
+  };
+
+  for (const [what, msg] of Object.entries(interruptions)) {
+    const { d, inbound } = boot();
+    inbound(STATE());
+    inbound({ type: "streamDelta", text: LONG });
+    // Nothing has been painted yet: the reveal is paced and no frame has run.
+    inbound(msg);
+    ok("every word survives " + what,
+      d.getElementById("log").textContent.indexOf("started again") !== -1);
+  }
+
+  /* And the same for the working, which is revealed the same way and sealed
+     when the answer starts. A box labelled "Thought for 27 words" that shows
+     nine of them is the same bug wearing the other hat. */
+  {
+    const { d, inbound } = boot();
+    inbound(STATE());
+    const WORKING = "I should check whether the index is rebuilt in place or " +
+      "swapped, because only one of those is safe to interrupt halfway.";
+    inbound({ type: "thinking", text: WORKING });
+    inbound({ type: "streamDelta", text: "Here is the answer." });
+    const think = d.querySelector(".think .think-body");
+    ok("the working is painted in full before it seals",
+      !!think && think.textContent.indexOf("safe to interrupt halfway") !== -1);
+  }
+}
+
 // already run by the time this executes.
 pasteTests
   .catch((e) => failures.push("clipboard block threw: " + (e && e.message)))

@@ -2132,6 +2132,10 @@ function _sbRun() {
        to a box nobody can see. */
     thinkEl = null;
     if (aiFrame) { cancelAnimationFrame(aiFrame); aiFrame = 0; }
+    // The working has its own reveal loop, and it needs cancelling for the
+    // same reason: a frame that fires after this paints into a node that has
+    // been detached from the document.
+    if (thinkFrame) { cancelAnimationFrame(thinkFrame); thinkFrame = 0; }
     logEl.innerHTML = "";
     aiEl = null; streamEl = null; pendingTool = null; todoEl = null; toolGroup = null;
   }
@@ -2452,10 +2456,36 @@ function _sbRun() {
    * few frames instead of crawling, while a genuine token stream still reveals
    * smoothly. `_done` marks the end of the turn: once set, the last frame
    * reveals whatever is left so nothing is ever stranded unpainted.
+   *
+   * PACED BY TIME, NOT BY FRAME. The floor used to be "2 characters per
+   * frame", which is not a speed: it is 120 chars/sec on a 60Hz display and
+   * 240 on a 120Hz one, so the same reply typed at two different rates
+   * depending on the monitor. Worse, 120 chars/sec is far slower than any
+   * gateway delivers, so the backlog grew all turn and the reveal ran visibly
+   * behind the model - the stutter being fixed here.
    */
   var aiFrame = 0;
-  var TYPE_MIN = 2;      // chars per frame at the tail, so short replies still type
-  var TYPE_DIVISOR = 9;  // larger backlog reveals proportionally faster
+  /* Floor speed, characters per second. Fast enough to keep up with a real
+     stream, slow enough that a short reply still visibly types. */
+  var TYPE_CPS = 320;
+  /* Fraction of the outstanding backlog to clear each frame on top of the
+     floor, so a burst drains in a few frames rather than crawling. */
+  var TYPE_DIVISOR = 8;
+  /* Minimum gap between FULL markdown re-parses, in ms.
+   *
+   * The cheap path writes one text node and is used whenever the tail is
+   * still plain prose. When it is not - a fence is open, a list or table is
+   * being built - the only correct paint is a full `md()` and an innerHTML
+   * swap, and that was running on every frame. Measured against a realistic
+   * reply, the expensive branch is taken for 52% of paints, not the "handful
+   * of times per reply" the note above this claims: at 60fps that is ~30
+   * whole-message re-parses a second, each one O(n) over everything received
+   * so far, and each one destroying the nodes a selection is anchored in.
+   *
+   * 60ms is ~16 re-parses a second, which still reads as continuous typing
+   * and takes the cost off the frame budget. `_done` bypasses it, so the
+   * finished message is always exactly correct. */
+  var REPARSE_MS = 60;
 
   /**
    * Everything after the last blank line, which is the part still being written.
@@ -2510,6 +2540,15 @@ function _sbRun() {
       return;
     }
 
+    /* The expensive path, rate-limited. See REPARSE_MS.
+     *
+     * Skipping a re-parse means `_shown` does not advance, so the characters
+     * are not lost - they are painted by the next frame that is allowed to
+     * parse. `_done` never waits: the last paint of a turn must be exact. */
+    var now = Date.now();
+    if (!aiEl._done && aiEl._lastParse && now - aiEl._lastParse < REPARSE_MS) return;
+    aiEl._lastParse = now;
+
     aiEl.innerHTML = md(text);
     aiEl._shown = next;
     aiEl._tail = null;
@@ -2544,10 +2583,19 @@ function _sbRun() {
     if (!aiEl) return;
     var full = aiEl._raw || "";
     var shown = aiEl._shown || 0;
-    if (shown >= full.length) return;
+    if (shown >= full.length) { aiEl._last = 0; return; }
+
+    // Elapsed since the previous frame, so the reveal runs at the same speed
+    // on any display. Clamped: a backgrounded webview can hand back a gap of
+    // several seconds, which would dump the whole reply in one frame.
+    var now = Date.now();
+    var dt = aiEl._last ? Math.min(now - aiEl._last, 100) : 16;
+    aiEl._last = now;
 
     var backlog = full.length - shown;
-    var step = aiEl._done ? backlog : Math.max(TYPE_MIN, Math.ceil(backlog / TYPE_DIVISOR));
+    var step = aiEl._done
+      ? backlog
+      : Math.max(1, Math.ceil((TYPE_CPS * dt) / 1000), Math.ceil(backlog / TYPE_DIVISOR));
     var next = Math.min(full.length, shown + step);
 
     var stick = atBottom();
@@ -2555,7 +2603,9 @@ function _sbRun() {
     if (stick) scroll();
     syncToLatest();
 
-    if (next < full.length) aiFrame = requestAnimationFrame(typeStep);
+    // `aiEl._shown`, not `next`: a throttled re-parse leaves `_shown` where it
+    // was, and the loop has to keep running until it actually catches up.
+    if ((aiEl._shown || 0) < full.length) aiFrame = requestAnimationFrame(typeStep);
   }
 
   /** Reveal everything immediately. Used at turn end and before reordering. */
@@ -2564,6 +2614,34 @@ function _sbRun() {
     if (!aiEl) return;
     aiEl._done = true;
     paintAi();
+  }
+
+  /**
+   * Stop writing into the current answer bubble, having first painted it.
+   *
+   * THE REPLY THAT STOPPED IN THE MIDDLE.
+   *
+   * `aiEl = null` appeared at seventeen places - every card that interrupts
+   * prose: a diff, a plan, a todo list, a permission request, a tool group -
+   * and `flushAi()` at three. Everywhere else the assignment simply dropped
+   * the element while `_raw` still held text past `_shown`, and that text was
+   * never painted by anything. It had arrived, it was in memory, and it was
+   * discarded.
+   *
+   * The typewriter is what made it constant rather than rare: it reveals
+   * BEHIND arrival by design, so there is nearly always a backlog outstanding
+   * at the moment a tool call lands, and the faster the gateway the more of
+   * the reply was lost. The symptom is a reply that stops mid-sentence with
+   * no error and nothing in the log.
+   *
+   * So detaching is one operation, and it paints first. `resetAi` is the one
+   * deliberate exception - it discards because what is on screen turned out to
+   * be a `<think>` prefill being taken off screen, which is the opposite
+   * intention and says so there.
+   */
+  function detachAi() {
+    flushAi();
+    aiEl = null;
   }
 
   /**
@@ -2676,6 +2754,8 @@ function _sbRun() {
   /* The live box, or null between turns. `addThinking` grows this rather than
      making a new one per chunk; `sealThinking` closes it. */
   var thinkEl = null;
+  /** The working's own reveal loop. Paced by `thinkStep`, like the answer. */
+  var thinkFrame = 0;
 
   function thinkWords(t) {
     var w = t.trim() ? t.trim().split(/\s+/).length : 0;
@@ -2691,6 +2771,17 @@ function _sbRun() {
   function sealThinking() {
     if (!thinkEl) return;
     var box = thinkEl;
+    /* Painted in full before it is sealed, for the same reason the answer is.
+       The box reveals behind arrival now, so at the moment the answer starts
+       there is normally a backlog outstanding, and closing without this would
+       seal a box whose last sentence had never been drawn - and would then
+       label it with a word count it did not show. */
+    if (thinkFrame) { cancelAnimationFrame(thinkFrame); thinkFrame = 0; }
+    var body = box.querySelector(".think-body");
+    if (body) body.textContent = box._raw || "";
+    box._shown = (box._raw || "").length;
+    box._done = true;
+
     thinkEl = null;
     box.setAttribute("data-open", "0");
     box.setAttribute("data-live", "0");
@@ -2725,16 +2816,30 @@ function _sbRun() {
       // answer element that is already on screen, and the next line is what
       // forgets it.
       var prior = aiEl && aiEl.parentNode === logEl ? aiEl : null;
-      // Not through `aiEl`: this is not the answer, and appending it there
-      // would put it back in the same paragraph flow it just came out of.
-      aiEl = null;
+      /* Painted BEFORE it is forgotten, which is the order that was wrong.
+       *
+       * The `flushAi()` below, inside `if (prior)`, was written for exactly
+       * this case and could never once have run: `flushAi` opens with
+       * `if (!aiEl) return`, and `aiEl` had already been set to null here, two
+       * dozen lines above it. So a model that answered and then thought again
+       * lost whatever of the first answer had not yet been revealed.
+       *
+       * Not through `aiEl` afterwards: the box is not the answer, and
+       * appending it there would put it back in the same paragraph flow it
+       * just came out of. */
+      detachAi();
 
       var box = div("think");
       // Open, and marked live so the stylesheet can show it is still being
       // written rather than presenting it as a finished disclosure.
       box.setAttribute("data-open", "1");
       box.setAttribute("data-live", "1");
+      // `_raw` is everything received, `_shown` how much has been revealed -
+      // the same pair the answer bubble keeps, read by `thinkStep`.
       box._raw = "";
+      box._shown = 0;
+      box._done = false;
+      box._last = 0;
       box.innerHTML =
         '<button class="think-head">' + icon("i-chev", "ic-9 chev") +
           '<span class="n">Thinking\u2026</span></button>' +
@@ -2752,7 +2857,7 @@ function _sbRun() {
       // which is backwards and makes the disclosure look like an afterthought
       // rather than a preamble.
       if (prior) {
-        flushAi();
+        // Already painted, by the `detachAi()` above.
         var stick = atBottom();
         logEl.insertBefore(box, prior);
         if (stick) scroll();
@@ -2764,13 +2869,46 @@ function _sbRun() {
     }
 
     thinkEl._raw += t;
-    /* textContent, not innerHTML: this is the model's raw working, it arrives
-       mid-token, and half a fence or a stray `<` must not become markup. It is
-       also the cheap paint - one text node replaced, no parse - which matters
-       because this runs on every chunk of a stream. */
-    var body = thinkEl.querySelector(".think-body");
+    thinkEl._done = false;
+    if (!thinkFrame) thinkFrame = requestAnimationFrame(thinkStep);
+  }
+
+  /**
+   * The working, revealed at the same pace as the answer.
+   *
+   * The box painted `_raw` whole on every chunk, so how the thinking appeared
+   * was entirely the gateway's frame size: one that streams token by token
+   * typed, and one that sends a paragraph per frame produced a paragraph per
+   * frame. Now both type, and the working and the answer that follows it move
+   * at one speed.
+   *
+   * `textContent`, never innerHTML: this is raw working, it arrives mid-token,
+   * and half a fence or a stray `<` must not become markup. It is also the
+   * cheap paint - one text node, no parse - so unlike the answer there is
+   * nothing here to rate-limit.
+   */
+  function thinkStep() {
+    thinkFrame = 0;
+    var el = thinkEl;
+    if (!el) return;
+    var full = el._raw || "";
+    var shown = el._shown || 0;
+    if (shown >= full.length) { el._last = 0; return; }
+
+    var now = Date.now();
+    var dt = el._last ? Math.min(now - el._last, 100) : 16;
+    el._last = now;
+
+    var backlog = full.length - shown;
+    var step = el._done
+      ? backlog
+      : Math.max(1, Math.ceil((TYPE_CPS * dt) / 1000), Math.ceil(backlog / TYPE_DIVISOR));
+    var next = Math.min(full.length, shown + step);
+
+    var body = el.querySelector(".think-body");
     var stick = atBottom();
-    body.textContent = thinkEl._raw;
+    body.textContent = full.slice(0, next);
+    el._shown = next;
     /* The box is capped at 168px, so past that the newest thinking is below
        its own fold. Follow it: the point of showing the working live is the
        part being written, and a live region that stops at the first screenful
@@ -2779,6 +2917,8 @@ function _sbRun() {
     body.scrollTop = body.scrollHeight;
     if (stick) scroll();
     syncToLatest();
+
+    if (next < full.length) thinkFrame = requestAnimationFrame(thinkStep);
   }
 
   /** Freeze the group's counters. Safe to call when no group is open. */
@@ -2828,7 +2968,7 @@ function _sbRun() {
   }
 
   function toolStart(name, args) {
-    aiEl = null;
+    detachAi();
     var g = openToolGroup();
     var el = toolCard(name, args);
     g.querySelector(".tool-group-body").appendChild(el);
@@ -3237,7 +3377,7 @@ function _sbRun() {
   }
 
   function addDiff(m) {
-    aiEl = null;
+    detachAi();
     closeToolGroup();
     var body = diffRows(m.patch);
 
@@ -3587,13 +3727,13 @@ function _sbRun() {
       '<ul class="todo-list">' + items + "</ul>";
 
     if (todoEl) { todoEl.innerHTML = html; return; }
-    aiEl = null;
+    detachAi();
     closeToolGroup();
     todoEl = add(div("card", html));
   }
 
   function addPermission(m) {
-    aiEl = null;
+    detachAi();
     closeToolGroup();
     // The one interruption that is genuinely an interruption: the turn has
     // stopped and is waiting on an answer nobody has been told is wanted.
@@ -3715,7 +3855,7 @@ function _sbRun() {
   }
 
   function addPlan(m) {
-    aiEl = null;
+    detachAi();
     closeToolGroup();
     // Whatever is above this card can no longer be acted on.
     retirePlans("Superseded by a newer plan");
@@ -4479,7 +4619,7 @@ function _sbRun() {
             : "No skills enabled. Add a SKILL.md under .agent/skills/.") +
           "\n\nCommands\n\n" +
           CMDS.map(function (c) { return c[0] + "  -  " + c[1]; }).join("\n");
-        aiEl = null;
+        detachAi();
         add(div("note-box", esc(text)));
         break;
       }
@@ -4525,7 +4665,7 @@ function _sbRun() {
       return;
     }
     addUser(trimmed, S.attachments);
-    aiEl = null;
+    detachAi();
     // One verb per turn, held for its whole length.
     S.idleVerb = pickVerb(S.phase);
     S.gerund = S.idleVerb;
@@ -4569,7 +4709,7 @@ function _sbRun() {
     // failure is the worst possible moment to throw on the failure renderer.
     var e = typeof m === "string" ? { message: m } : (m || {});
     var message = e.message || "Something went wrong.";
-    aiEl = null;
+    detachAi();
     closeToolGroup();
     announce(message);
 
@@ -4617,7 +4757,7 @@ function _sbRun() {
    * afterwards. This stays in the transcript, and its path opens the file.
    */
   function addNotice(iconId, text, openPath) {
-    aiEl = null;
+    detachAi();
     closeToolGroup();
     var box = div("ok-box", icon(iconId, "ic-13") + "<span>" + esc(text) + "</span>");
     if (openPath) {
@@ -4639,7 +4779,7 @@ function _sbRun() {
    * generation had failed when it had not.
    */
   function addImage(m) {
-    aiEl = null;
+    detachAi();
     closeToolGroup();
     var card = div("gen-img");
     // A button, not an anchor: the click opens an editor tab through the host,
@@ -6664,7 +6804,7 @@ function _sbRun() {
         S.running = false;
         endStream();
         endTurn();
-        aiEl = null;
+        detachAi();
         pendingTool = null;
         syncComposer();
         // The one announcement a turn earns. The reply itself is navigable in
@@ -6866,7 +7006,7 @@ function _sbRun() {
         S.title = m.title || "";
         S.running = false;
         endStream();
-        aiEl = null;
+        detachAi();
         todoEl = null;
         S.todos = [];
         S.context = null;
