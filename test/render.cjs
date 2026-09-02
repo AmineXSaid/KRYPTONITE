@@ -1752,6 +1752,167 @@ function contrast(a, b) {
     }
   }
 
+  /* ── 5t. the welcome screen is centred, and is one column ──────────── */
+  {
+    // `.welcome` already carried `justify-content: center`, and it did nothing
+    // visible: it centres the welcome's CHILDREN inside the welcome, and the
+    // welcome was `min-height: 340px` inside a transcript up to 591px tall. So
+    // the block sat at the top with a measured 237px of dead space beneath it
+    // and 14px above. Everything was centred inside a box that was not.
+    const sessions = [
+      { id: "a", title: "can you explain this code?", count: 4, when: "1m ago" },
+      { id: "b", title: "why dlc? here and what used for?", count: 9, when: "3d ago" },
+    ];
+    for (const width of [300, 360, 420, 520]) {
+      const { ctx, page } = await open(width, { sessions, session: { id: "s1", title: "", messages: [] } });
+      /* Taller than open()'s 640, deliberately. The reported bug is dead space
+         BELOW the block, which only exists when the block fits - at 640 the
+         welcome overflows at every width and the scroll branch below passes
+         without testing anything. 900 is an ordinary editor height and it is
+         the shape the screenshot showed. */
+      await page.setViewportSize({ width, height: 900 });
+      await page.waitForTimeout(250);
+      const m = await page.evaluate(() => {
+        const wel = document.querySelector(".welcome");
+        if (!wel) return { missing: true };
+        const w = wel.getBoundingClientRect();
+        const log = document.getElementById("log").getBoundingClientRect();
+        const kids = [...wel.children].map((e) => e.getBoundingClientRect());
+        const mid = (w.left + w.right) / 2;
+        return {
+          above: Math.round(w.top - log.top),
+          below: Math.round(log.bottom - w.bottom),
+          widest: Math.max(...kids.map((r) => Math.round(r.width))),
+          // Every child's own centre against the block's centre. Geometry, so
+          // a child that is centred by luck of its content still counts.
+          offsets: kids.map((r) => Math.round((r.left + r.right) / 2 - mid)),
+          // Whether the transcript is scrolling. When it is, the content is
+          // taller than the panel and there is no vertical centring to do -
+          // asking for symmetric space then is asking for the block to be
+          // clipped at both ends.
+          scrolls: document.getElementById("log").scrollHeight >
+                   document.getElementById("log").clientHeight + 1,
+        };
+      });
+      ok(`the welcome screen renders at ${width}px`, !m.missing, JSON.stringify(m));
+      /* The consequence, not the rule: dead space below the block IS the
+         "not centred" that was reported - 237px of it, against 14px above.
+      
+         Two cases, and only one of them is about centring. When the content
+         fits, the space above and below must match. When it does not - a
+         narrow dock in a short panel, where the list alone is taller than the
+         transcript - there is nothing to centre, and what matters instead is
+         that it SCROLLS rather than being clipped. Asserting symmetry in that
+         case would be asking for the block to be cut off at both ends. */
+      if (m.scrolls) {
+        ok(`the welcome scrolls rather than clipping when it does not fit at ${width}px`,
+          m.below <= 0 && m.above >= 0, JSON.stringify(m));
+      } else {
+        ok(`the welcome block is vertically centred in the transcript at ${width}px`,
+          Math.abs(m.above - m.below) <= 16, JSON.stringify(m));
+      }
+      ok(`and every element is centred on the same axis at ${width}px`,
+        m.offsets.every((o) => Math.abs(o) <= 1), JSON.stringify(m));
+      // One column. The lists used to take the full panel - 484px at a 520px
+      // dock - under a 290px paragraph and a 71px wordmark, so five stacked
+      // elements had five different widths and the widest grew every time the
+      // panel did.
+      ok(`the column is capped rather than growing with the panel at ${width}px`,
+        m.widest <= 340, JSON.stringify(m));
+      await ctx.close();
+    }
+
+    // The mark: bigger, and scaled to the panel rather than fixed. It was 34px
+    // on the one screen that exists to carry it, with a 19px wordmark under
+    // it - a 56px identity block in a 340px column.
+    const sizes = {};
+    for (const width of [300, 420, 520]) {
+      const { ctx, page } = await open(width, { session: { id: "s1", title: "", messages: [] } });
+      sizes[width] = await page.evaluate(() => {
+        const mark = document.querySelector(".welcome .w-crystal");
+        const word = document.querySelector(".welcome .w-mark");
+        const wel = document.querySelector(".welcome").getBoundingClientRect();
+        const m = mark ? mark.getBoundingClientRect() : null;
+        return {
+          mark: m ? Math.round(m.width) : 0,
+          word: word ? Math.round(word.getBoundingClientRect().width) : 0,
+          // A mark wider than the column it sits in is the failure mode of
+          // scaling it up, so this is measured rather than assumed.
+          fits: !!m && m.width <= wel.width,
+        };
+      });
+      await ctx.close();
+    }
+    ok("the welcome mark is bigger than the 34px it was",
+      sizes[420].mark > 34, JSON.stringify(sizes));
+    ok("and it scales with the panel rather than sitting at one size",
+      sizes[520].mark > sizes[300].mark, JSON.stringify(sizes));
+    ok("and it never outgrows the column at any width",
+      Object.values(sizes).every((s) => s.fits), JSON.stringify(sizes));
+    ok("and the wordmark grows with it, so the pair stays in proportion",
+      sizes[520].word > sizes[300].word, JSON.stringify(sizes));
+  }
+
+  /* ── 5u. the permission glyphs are a set, and all three paint ──────── */
+  {
+    // Manual's mark was a raised open palm, and it was the odd one out three
+    // ways: a pictogram among geometric marks, a "stop" gesture on a mode that
+    // does not stop but ASKS, and - measured - the thinnest ink of the three,
+    // which at the 15px the composer draws it left a smudge rather than a
+    // shape. It is a shield with a check now.
+    //
+    // A `<use href="#missing">` fails SILENTLY - empty shadow tree, no error,
+    // no console message - so a rename that missed a call site would ship an
+    // invisible icon. getBBox() is the only thing that catches it.
+    const { ctx, page } = await open(420, {});
+    await page.click("#permBtn");
+    await page.waitForTimeout(650);
+    const rows = await page.evaluate(() => {
+      return [...document.querySelectorAll(".perm-row")].map((r) => {
+        const svg = r.querySelector("svg");
+        const use = r.querySelector("use");
+        const bb = svg && svg.getBBox ? svg.getBBox() : null;
+        return {
+          href: use ? use.getAttribute("href") : null,
+          w: bb ? Math.round(bb.width) : 0,
+          h: bb ? Math.round(bb.height) : 0,
+          colour: svg ? getComputedStyle(svg).color : "",
+        };
+      });
+    });
+    ok("the mode sheet offers three modes", rows.length === 3, JSON.stringify(rows));
+    for (const r of rows) {
+      // Ink, not presence. This is the assertion the silent <use> failure
+      // needs: a symbol that does not exist renders a 0x0 box and no error.
+      ok(`${r.href} actually paints`, r.w > 0 && r.h > 0, JSON.stringify(r));
+      // At 15px in the composer, a glyph thinner than this is a smudge. The
+      // palm measured 8 wide; the shield measures 11.
+      ok(`${r.href} carries enough ink to read at 15px`, r.w >= 9, JSON.stringify(r));
+    }
+    ok("Manual is no longer the raised palm",
+      rows[0].href === "#i-shield", JSON.stringify(rows));
+    // The three are coloured differently on purpose - cream, purple, red - and
+    // that is the whole signal for which mode is armed. Identical colours
+    // would make the sheet three rows of the same thing.
+    ok("the three modes are told apart by colour as well as by name",
+      new Set(rows.map((r) => r.colour)).size === 3, JSON.stringify(rows.map((r) => r.colour)));
+    await ctx.close();
+
+    // And the composer button carries the same mark, so the sheet and the
+    // control that opens it do not disagree about which mode is on.
+    const { ctx: c2, page: p2 } = await open(420, {});
+    const btn = await p2.evaluate(() => {
+      const use = document.querySelector("#permBtn use");
+      const svg = document.querySelector("#permBtn svg");
+      const bb = svg && svg.getBBox ? svg.getBBox() : null;
+      return { href: use ? use.getAttribute("href") : null, w: bb ? Math.round(bb.width) : 0 };
+    });
+    ok("the composer button shows the same glyph as the sheet",
+      btn.href === "#i-shield", JSON.stringify(btn));
+    ok("and it paints there too", btn.w > 0, JSON.stringify(btn));
+    await c2.close();
+  }
+
   /* ── 6. the session list, as the reference draws it ────────────────── */
   {
     const { ctx, page } = await open(400, {

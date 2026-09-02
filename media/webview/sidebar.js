@@ -70,7 +70,15 @@ function _sbRun() {
     /* The three mode glyphs, lifted from the Genesis defs unchanged: an open
        palm for "stop and ask", angle brackets for "edits go through", a bolt
        for "decide for me". */
-    '<symbol id="i-hand" viewBox="0 0 24 24"><path d="M9 11.4V5.6a1.4 1.4 0 0 1 2.8 0v5.8m0 0V4.7a1.4 1.4 0 0 1 2.8 0v6.7m0 0V6.6a1.4 1.4 0 0 1 2.8 0V13c0 4.4-2.3 7.6-6.1 7.6S6.2 17.4 6.2 13v-2.1a1.4 1.4 0 0 1 2.8 0v.5" ' + S6 + ' stroke-width="1.5"/></symbol>' +
+    /* Manual mode's mark. It was a raised open palm, and it was the odd one
+       out three ways: a pictogram in a set whose other two members are
+       geometric (`<>` and a bolt); a "stop" gesture on a mode that does not
+       stop but ASKS; and, measured, an 8x13 bbox against the bolt's 9x14 and
+       the brackets' 11x7 - the thinnest ink of the three, which at the 15px
+       the composer draws it left a smudge rather than a shape.
+       A shield carrying a check is what Manual actually does: nothing passes
+       unchecked. 11x14 of ink, so it holds its shape at 15px. */
+    '<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 2.9 4.4 6.1v5.6c0 4.4 3.1 8.1 7.6 9.4 4.5-1.3 7.6-5 7.6-9.4V6.1zM9.2 12.1l2 2 3.6-3.9" ' + S6R + ' stroke-width="1.5"/></symbol>' +
     '<symbol id="i-code" viewBox="0 0 24 24"><path d="M9.5 7.5L5 12l4.5 4.5M14.5 7.5L19 12l-4.5 4.5" ' + S6 + ' stroke-width="1.7"/></symbol>' +
     '<symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13.2 3L6 13.6h4.6L10.2 21 17.4 10.4h-4.6z" ' + S6 + ' stroke-width="1.5"/></symbol>' +
     '<symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" ' + S6 + ' stroke-width="1.5"/><path d="M3.5 12h17M12 3.5c-4.5 5-4.5 12 0 17 4.5-5 4.5-12 0-17z" ' + S6 + ' stroke-width="1.4"/></symbol>' +
@@ -1190,7 +1198,7 @@ function _sbRun() {
                 // footer, which is where things go to be ignored.
                 '<button class="perm-btn" id="permBtn" aria-haspopup="menu" aria-expanded="false"' +
                   ' title="What the agent may do without asking">' +
-                  icon("i-hand", "ic-15") + '<span class="nm" id="permName">Manual</span>' +
+                  icon("i-shield", "ic-15") + '<span class="nm" id="permName">Manual</span>' +
                 '</button>' +
                 '<span class="sp"></span>' +
                 // Attach and send. THERE IS NO `@` BUTTON, on purpose.
@@ -1779,7 +1787,7 @@ function _sbRun() {
     // "ASK PLAN ACT ... ASK" the pair looks like one broken segmented control
     // with a stray fourth option. The design's own name for this mode is
     // Manual, which is both unambiguous and what the sheet already called it.
-    ["ask", "Manual", "Always ask before making changes", "Manual", "i-hand", "var(--kx-fg)"],
+    ["ask", "Manual", "Always ask before making changes", "Manual", "i-shield", "var(--kx-fg)"],
     ["edits-auto", "Accept edits", "File edits run automatically. Shell commands still ask.", "Edits", "i-code", "var(--kx-agent)"],
     /* "The agent handles permission decisions itself" was the mechanism, and the
        other two rows here name a consequence: "Always ask before making
@@ -2148,7 +2156,14 @@ function _sbRun() {
      * so two of them read as eyes - and as eyes they were ugly. The mark is a
      * BEZEL: four notches on a ring, which is a thing that turns. So it turns,
      * once, a beat after the panel arrives, and then it is a logo again. */
-    var body = crystal(34, "crystal" + spin) +
+    /* 34 was too small to be the brand mark on the one screen that exists to
+       carry it: at 34px it read as an icon beside the wordmark rather than as
+       the thing the screen is built around, and the wordmark under it is only
+       19px tall - so the whole identity block was 56px in a 340px column.
+       56 gives the mark presence without crowding the column it sits in; the
+       CSS scales it down with the panel so a narrow dock does not have a mark
+       wider than the text under it. */
+    var body = crystal(56, "crystal w-crystal" + spin) +
       '<div class="w-mark">Genesis</div>' +
       '<p>' + (recent.length
         ? "Pick up where you left off, or start something new."

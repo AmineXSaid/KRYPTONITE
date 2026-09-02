@@ -427,7 +427,22 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
    doing. Left-aligned below the intro, because a list of things to click is
    read down its left edge and centring it makes every row start somewhere
    different. */
+/* CENTRED IN THE TRANSCRIPT, not just within itself.
+   
+   `justify-content: center` was already here and did nothing visible, because
+   it centres the welcome's children inside the welcome - and the welcome was
+   `min-height: 340px` inside a transcript up to 591px tall, so the block sat
+   at the top with a measured 237px of dead space under it and 14px over it.
+   Everything was centred inside a box that was not.
+   
+   `#log` is a scroll container and a block, so a flex child cannot grow in it.
+   It becomes a flex column only while it holds the welcome - which is the one
+   time the welcome is its only child, so nothing else can be affected by the
+   switch. `:has()` is already load-bearing in this file (see the disabled
+   composer's mirror), so this needs no new floor. */
+#log:has(> .welcome) { display: flex; flex-direction: column; }
 .welcome {
+  flex: 1;
   min-height: 340px; display: flex; flex-direction: column;
   /* Centred. Left-aligned, the mark and the wordmark sat against the panel's
      edge with the whole width of the screen empty beside them; a greeting is
@@ -435,6 +450,22 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   justify-content: center; align-items: center; text-align: center;
   padding: 24px 4px;
 }
+
+/* ONE COLUMN, so the block has an axis instead of five.
+   
+   The mark is 37px wide, the wordmark 71, the paragraph capped at 290, and the
+   lists took the full panel - 484px at a 520px dock. Five elements stacked
+   with five different widths do not read as a group, and the widest of them
+   grew every time the panel did while the narrowest never moved.
+   
+   340 is the width `.chips.resume` already uses for the same job on the same
+   screen, so the two states of this screen share a measure. `width: 100%` with
+   `max-width` rather than a fixed width, because below 340 the column is the
+   panel and must still shrink. */
+.welcome > * { width: 100%; max-width: 340px; }
+/* The mark and the wordmark size themselves; a 340px box around them would
+   stretch nothing but would break `align-items: center` for the SVG. */
+.welcome > svg, .welcome > .w-mark { width: auto; }
 /* Left-aligned, as the design draws it, and not only for fidelity: everything
    below the intro is a list of rows, and a centred mark above a left-aligned
    list gives the column two different axes. One edge, top to bottom. */
@@ -535,7 +566,10 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 }
 .welcome p {
   font-family: var(--kx-prose); font-size: 12.5px; line-height: 1.6;
-  color: var(--kx-fg-2); max-width: 290px; margin: 0 0 20px;
+  /* 290 was its own measure, narrower than the 340 column around it, so the
+     one paragraph on the screen was inset from everything above and below it
+     by 25px a side for no reason a reader could see. */
+  color: var(--kx-fg-2); margin: 0 0 20px;
   text-wrap: pretty;
 }
 .welcome .w-sec { width: 100%; margin-top: 22px; }
@@ -3255,7 +3289,18 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    display cut. JetBrains Mono's caps are drawn square enough to carry it, and
    dropping Michroma is what let the design go to one file. */
 .kx-wordmark { font-weight: 700; letter-spacing: .22em; font-size: 10.5px; }
-.w-mark { font-weight: 700; letter-spacing: .18em; font-size: 13px; }
+/* The identity block: the mark, then the wordmark under it.
+   
+   Both scale with the panel rather than sitting at one size, because this
+   screen is the whole panel at every dock width and a mark tuned for 360px is
+   lost at 520 and crowding at 280. The clamps keep the pair in proportion -
+   the wordmark is about a third of the mark's height at every step - and the
+   floor is the size they were before, so a narrow dock loses nothing. */
+.w-crystal { width: clamp(38px, 15vw, 64px); height: clamp(38px, 15vw, 64px); }
+.w-mark {
+  font-weight: 700; letter-spacing: .18em;
+  font-size: clamp(13px, 4.6vw, 19px);
+}
 
 /* The tab strip, rewritten.
    
