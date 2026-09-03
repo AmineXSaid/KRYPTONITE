@@ -1067,23 +1067,23 @@ function _sbRun() {
               '<span class="t">Author &amp; report an issue</span></button>' +
           '</div>' +
         '</header>' +
-        '<div class="phase-banner" id="phaseBanner" data-phase="plan" hidden>' +
-          '<span class="dot"></span><span class="lbl" id="phaseBannerLbl">Plan phase</span>' +
-          '<span class="sub" id="phaseBannerSub">reads and plans · no edits applied</span>' +
-        '</div>' +
-        // Only drawn while an agent is actually selected. A permanent chip in
-        // the composer toolbar would cost a row of chrome on every panel to
-        // say "none" almost all of the time; this says nothing until there is
-        // something to say, and then says the whole of it - who is answering
-        // and what it can reach.
-        '<div class="agent-bar" id="agentBar" hidden>' +
-          '<span class="dot"></span>' +
-          '<span class="nm" id="agentBarName"></span>' +
-          '<span class="sub ell" id="agentBarScope"></span>' +
-          '<button class="tb-btn" id="agentLeave" title="Stop using this agent" ' +
-            'aria-label="Stop using this agent">' + icon("i-x", "ic-9") + '</button>' +
-        '</div>' +
-        '<section class="view" id="viewSession" role="tabpanel" aria-labelledby="tabSession">' +
+        /* NO PHASE BANNER AND NO AGENT BAR HERE ANY MORE.
+         *
+         * Those were two full-width strips between the tabs and the transcript,
+         * and between them they cost ~55px of every panel to state two facts.
+         * Both facts still show, in places that cost no row at all:
+         *
+         *   the phase  -> the rail down this view's left edge, painted from
+         *                 `data-phase` below (see #viewSession::before in the
+         *                 CSS), plus the composer's Ask/Plan/Act segment, which
+         *                 is the WRITTEN answer the colour must not be alone in
+         *                 giving.
+         *   the agent  -> the composer's agent button, which already opens the
+         *                 picker and now carries the name beside its glyph.
+         *
+         * The rail also fixes something the banner never could: it is visible at
+         * every scroll position, where the banner only sat at the top. */
+        '<section class="view" id="viewSession" role="tabpanel" aria-labelledby="tabSession" data-phase="act">' +
           // The conversation's name. Placeholder until the model has been asked
           // for a real one, so the strip never appears and disappears.
           '<div class="convo-title" id="convoTitle" hidden></div>' +
@@ -1830,32 +1830,43 @@ function _sbRun() {
     // host would still happily run a write in.
     if (PHASE_CYCLE.indexOf(phase) === -1) phase = "act";
     S.phase = phase;
+    var view = $("viewSession");
     var segs = $("phaseSeg").querySelectorAll("[data-phase]");
     for (var i = 0; i < segs.length; i++) {
       var on = segs[i].getAttribute("data-phase") === phase;
       segs[i].setAttribute("data-on", on ? "1" : "0");
       segs[i].setAttribute("aria-checked", on ? "true" : "false");
     }
-    /* One banner, two read-only phases. Both make the same promise - nothing in
-       the workspace changes - and saying it twice in two colours would be two
-       ways to read one fact.
-
-       This was written TWICE, from two `var banner` declarations in the same
-       function: once off PHASE_INFO and once off a pair of inline literals
-       saying the same thing. Two copies of one string is how they stop being
-       one string, so PHASE_INFO is the only one left. Ask's line carries a
-       promise Plan's does not - no plan either - which is the whole difference
-       between the two, and it lives in that table. */
+    /* THE RAIL, WHERE THE BANNER USED TO BE.
+     *
+     * One attribute drives the stripe down the view's left edge (see
+     * `#viewSession::before`). It replaces a full-width strip that cost a row
+     * and only appeared at the top of the transcript; the rail costs no row and
+     * is in view at every scroll position.
+     *
+     * ALL THREE PHASES PAINT IT, where the banner deliberately showed nothing
+     * in Act. That reversal is the point rather than an oversight: the banner
+     * was a disclosure - "something is being withheld" - so Act, which withholds
+     * nothing, had nothing to say. The rail is not a disclosure, it is a mode
+     * indicator, and Act is the mode most worth being able to notice, because
+     * it is the one that edits the workspace. Costing nothing, it can say so.
+     *
+     * COLOUR IS NOT ALONE IN CARRYING THIS. The composer's Ask/Plan/Act segment
+     * is on screen whenever the rail is, lit and `aria-checked` on the live
+     * phase, and each segment's tooltip states what the phase does. The rail is
+     * decorative reinforcement - a ::before with no node and no aria - so a
+     * viewer who cannot separate the three hues loses nothing but a convenience.
+     * The announce below is what a screen reader gets in the banner's place. */
+    view.setAttribute("data-phase", phase);
     var info = PHASE_INFO[phase];
-    var banner = $("phaseBanner");
-    banner.hidden = !info;
-    if (info) {
-      banner.setAttribute("data-phase", phase);
-      $("phaseBannerLbl").textContent = info.lbl;
-      $("phaseBannerSub").textContent = info.sub;
-    }
     syncComposer();
-    if (!silent) post("setPhase", { phase: phase });
+    /* Only on a real change the user did not make by reading a segment: `silent`
+       marks the host echoing state back, which would otherwise announce the
+       phase twice on every restore. */
+    if (!silent) {
+      announce(info ? info.lbl + " - " + info.sub : "Act phase - full tools, makes changes");
+      post("setPhase", { phase: phase });
+    }
   }
 
   /**
@@ -2072,8 +2083,16 @@ function _sbRun() {
     // Drives the dimmed resting state in CSS, the way permBtn's data-mode does.
     btn.setAttribute("data-on", name ? "1" : "0");
     btn.setAttribute("aria-label", name ? "Agent: " + name + ", in this chat" : "Choose an agent for this chat");
+    /* THE SCOPE MOVED HERE when the bar under the tabs was removed. That strip
+       was the only thing stating what the agent can actually reach - its tools,
+       its MCP servers, its skills - and dropping it without rehoming the line
+       would have left the panel unable to answer "what can this thing do?"
+       anywhere outside the Agents tab. */
+    var a = name ? activeAgentDto() : null;
+    var scope = a ? agentScope(a) : "";
     btn.title = name
-      ? name + " is answering in this chat. Other chats are unaffected."
+      ? name + " is answering in this chat. Other chats are unaffected." +
+        (scope ? "\n" + scope : "")
       : "Choose an agent for this chat. Other chats are unaffected.";
   }
 
@@ -3681,21 +3700,6 @@ function _sbRun() {
       if (S.agents[i].name === S.activeAgent) return S.agents[i];
     }
     return null;
-  }
-
-  function renderAgentBar() {
-    // From in here rather than beside each of this function's three call
-    // sites: the bar and the button say the same fact, so one of them being
-    // repainted without the other is a bug waiting for someone to add a
-    // fourth caller.
-    renderAgentBtn();
-    var bar = $("agentBar");
-    var a = activeAgentDto();
-    if (!a) { bar.hidden = true; return; }
-    bar.hidden = false;
-    $("agentBarName").textContent = a.name;
-    $("agentBarScope").textContent = agentScope(a);
-    $("agentBarScope").title = a.description || agentScope(a);
   }
 
   /** The Agents section in the Diagnostics tab. */
@@ -5956,7 +5960,7 @@ function _sbRun() {
     renderEndpoints();
     renderSkills();
     renderAgents();
-    renderAgentBar();
+    renderAgentBtn();
     renderMcp();
     renderMcpCount();
     renderHistory();
@@ -6777,7 +6781,10 @@ function _sbRun() {
       if (e.key === "Escape" && S.running && $("qp").hidden) post("interrupt");
     });
 
-    $("agentLeave").addEventListener("click", function () { post("setAgent", { name: "" }); });
+    /* The bar's "stop using this agent" x is gone with the bar. Clearing is not
+       lost: the agent picker this button opens leads with a "No agent - the
+       default assistant" row, and choosing the agent that is already active
+       toggles it off (see the setAgent post in the quick-pick handler). */
     // On the wrapper rather than the list: the header's New agent button is a
     // sibling of the list, and it is the one control that has to work when the
     // list is empty.
@@ -7317,7 +7324,7 @@ function _sbRun() {
         S.agentWarnings = m.warnings || [];
         S.activeAgent = m.active || "";
         renderAgents();
-        renderAgentBar();
+        renderAgentBtn();
         break;
 
       case "agentChanged":
@@ -7326,7 +7333,7 @@ function _sbRun() {
           S.agents[ai].active = S.agents[ai].name === S.activeAgent;
         }
         renderAgents();
-        renderAgentBar();
+        renderAgentBtn();
         break;
 
       case "skillsReloaded":

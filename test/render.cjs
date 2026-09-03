@@ -808,7 +808,7 @@ function contrast(a, b) {
       // The panel header's icon buttons are excluded on purpose: they are
       // borderless and carry their own optical inset, which is a different
       // measurement from a bordered control's box.
-      document.querySelectorAll("#viewAgents button, .agent-bar button").forEach((b) => {
+      document.querySelectorAll("#viewAgents button").forEach((b) => {
         const r = b.getBoundingClientRect();
         if (!r.width || !r.height) return;
         const gap = Math.round(w - r.right);

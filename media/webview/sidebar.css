@@ -432,37 +432,56 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   .kx-header { padding-left: 8px; }
 }
 
-/* Shown for both read-only phases, Ask and Plan - hidden in Act, where
-   nothing is withheld. Colour comes from data-phase rather than a default,
-   so neither phase is "the" banner colour and the other an override. */
-/* Kept to a single short line, like the header and the tip strip: the padding
-   is trimmed, the label holds its line and the sentence beside it truncates
-   rather than wrapping to a second row that doubles the strip's height. */
-.phase-banner {
-  flex: none; display: flex; align-items: center; gap: 8px; padding: 4px 14px;
-  background: var(--kx-surface);
-  border-bottom: 1px solid var(--kx-line);
-}
-.phase-banner .dot { width: 6px; height: 6px; flex: none; border-radius: 50%; }
-.phase-banner .lbl {
-  flex: none; white-space: nowrap;
-  font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
-}
-/* The banner takes the phase's own colour, so the strip and the segment that
-   turned it on are visibly the same fact rather than two unrelated markers. */
-.phase-banner .sub {
-  min-width: 0; flex: 1; font-size: 11.5px; color: var(--kx-fg-2);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.phase-banner[data-phase="ask"] .dot { background: var(--kx-ask); }
-.phase-banner[data-phase="ask"] .lbl { color: var(--kx-ask); }
-.phase-banner[data-phase="plan"] .dot { background: var(--kx-phase-plan); }
-/* The dot is a 6px fill and may be the mockup's purple exactly; the label is
-   text on --kx-bg, where that purple sits at 4.11, so the label lifts one
-   step to purple-300. */
-.phase-banner[data-phase="plan"] .lbl { color: var(--kx-plan-fg); }
-
 .view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+/* ── THE PHASE RAIL ────────────────────────────────────────────────────────
+ * The live phase, as the session view's own left edge.
+ *
+ * This replaces a full-width banner that sat between the tabs and the
+ * transcript. The strip cost a row of every panel to carry one word, and it
+ * only ever said it at the TOP - scroll into a long answer and the thing
+ * telling you the model could not edit anything had scrolled away with it.
+ * The rail costs no row and cannot scroll away: it is painted on the view, so
+ * it stands beside the transcript AND the composer at every scroll position.
+ *
+ * A ::before rather than a border, deliberately. A border-left would push the
+ * whole session view 3px right, and the transcript, the composer and the
+ * change tray would each need their left padding shaved by 3 to line back up
+ * with the tab strip above them. An absolutely positioned stripe takes no part
+ * in layout at all, so nothing below it moves. It sits over the view's first
+ * 3px, which nothing occupies - `#log` carries 14px of padding and the
+ * composer 16 - and it is `pointer-events: none` so it can never eat a click
+ * meant for the transcript underneath.
+ *
+ * ALL THREE PHASES, including Act. The banner showed nothing in Act on the
+ * grounds that a disclosure has nothing to disclose when nothing is withheld.
+ * A mode indicator is the opposite case: Act is the phase that edits the
+ * workspace, so it is the one most worth being able to see at a glance, and at
+ * zero rows it can afford to say so. The hues are the segment's own fills, so
+ * the rail and the lit segment read as one fact in two places.
+ *
+ * NOT THE ONLY CARRIER OF THIS FACT. Colour alone would fail a viewer who
+ * cannot separate blue, purple and amber, so the rail is reinforcement, never
+ * the sole signal: the composer's Ask/Plan/Act segment is on screen whenever
+ * the rail is, lit and aria-checked on the live phase with a tooltip stating
+ * what it does, and applyPhase announces the change to a screen reader. The
+ * rail is a pseudo-element with no node and no aria precisely so assistive
+ * tech is told this once, by the control, rather than twice. */
+#viewSession { position: relative; }
+#viewSession::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  z-index: 4; pointer-events: none;
+  background: var(--kx-phase-act);
+  transition: background .18s ease;
+}
+#viewSession[data-phase="ask"]::before  { background: var(--kx-phase-ask); }
+#viewSession[data-phase="plan"]::before { background: var(--kx-phase-plan); }
+#viewSession[data-phase="act"]::before  { background: var(--kx-phase-act); }
+/* The hue swap is information, not decoration, so it still happens - what goes
+   is the crossfade between the two colours. */
+@media (prefers-reduced-motion: reduce) {
+  #viewSession::before { transition: none; }
+}
 
 /* The conversation's name, under the tabs and above the transcript it labels.
    Text cut, not display: the display cut belongs to the wordmark alone. */
@@ -1576,46 +1595,17 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .tool-actions .btn { display: inline-flex; align-items: center; gap: 5px; }
 
 /* -------------------------- agents --------------------------
-   The bar is drawn only while an agent is selected, so an unused feature
-   costs no vertical space at all. */
-/* 14px on the right, matching the left and matching `.ag-row` below.
-   It was 8, so the bar's stop control sat six pixels proud of "New agent" and
-   every "Open" directly beneath it - two right-aligned controls in one column,
-   out of line by enough to see. */
-/* A COMPACT CHIP, not a full-width strip. It used to span the panel like the
-   phase banner above it, which spent a whole edge-to-edge row to name one
-   agent. It is only as wide as it needs now: left-aligned, rounded, sized to
-   its content and capped so a long scope truncates inside it rather than
-   stretching the chip across the panel. The full-width bottom rule is gone
-   with the full width - the margin around the chip is the separation now. */
-.agent-bar {
-  flex: none; align-self: flex-start; max-width: calc(100% - 28px);
-  display: inline-flex; align-items: center; gap: 7px;
-  margin: 6px 14px; padding: 3px 5px 3px 10px;
-  background: var(--kx-surface);
-  border: 1px solid var(--kx-line); border-radius: 999px;
-  font-family: var(--kx-ui); font-size: 11.5px;
-  min-width: 0;
-}
-/* Purple, which the design gives to agents. The comment here used to say
-   "teal, the palette's MCP colour", and was wrong twice over: the value is not
-   teal, and reasoning from MCP is what once painted a connected SERVER purple.
-   The hue is right for the reason it was chosen wrongly - an agent is borrowed
-   capability - and the pink and amber are spoken for by Plan and Ask, where a
-   second meaning would read as a phase the composer does not have. */
-.agent-bar .dot {
-  width: 6px; height: 6px; flex: none; border-radius: 50%;
-  background: var(--kx-agent);
-}
-.agent-bar .nm { flex: none; font-weight: 600; color: var(--kx-agent); }
-.agent-bar .sub { min-width: 0; flex: 1; color: var(--kx-fg-2); font-family: var(--kx-mono); font-size: 10.5px; }
-/* The leave control shrinks to sit inside the chip - a small bare × rather than
-   the composer's 30px plated button. */
-.agent-bar .tb-btn {
-  flex: none; width: 18px; height: 18px; background: none; border: none;
-  border-radius: 999px; color: var(--kx-fg-3);
-}
-.agent-bar .tb-btn:hover { background: var(--kx-hover); color: var(--kx-fg); }
+   THE BAR THAT USED TO BE HERE IS GONE.
+
+   It was a strip under the tabs naming the active agent and its scope, and it
+   duplicated a control that already existed: the composer's agent button opens
+   the picker, and now carries the name too (see `.agent-btn` below). One fact
+   stated in two places costs a row of every panel to say the same thing twice,
+   and the strip was the copy that could not also be clicked to change it.
+
+   Nothing it carried was dropped - the name moved onto that button's label, the
+   scope onto its tooltip, and its "stop using this agent" x onto the picker's
+   own "No agent" row. */
 
 /* ── the Agents tab ──────────────────────────────────────────────────────
    Same shape as the MCP tab: a sticky header carrying the count and the one
@@ -2428,19 +2418,21 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    The class is still `.perm-btn` because the MODE rules below hang off it -
    the glyph's colour is the whole signal for which mode is armed, and that is
    the one thing this button does that attach and send do not. */
-/* THE AGENT BUTTON, the fourth member of that run.
+/* THE AGENT BUTTON, the fourth member of that run - and, since the bar under
+ * the tabs was removed, the only thing on screen that names the agent.
  *
- * Same 30x30 plate and hairline as the other three, and the label is hidden
- * for the same reason `.perm-btn`'s is: at the widths this panel actually
- * gets, the glyph is the whole control and the name lives in the tooltip and
- * the accessible name. The name is not lost - the bar under the tabs carries
- * it in full whenever an agent is set.
+ * IT KEEPS ITS LABEL WHEN AN AGENT IS SET, and only then. The comment here used
+ * to justify hiding the name unconditionally with "the bar under the tabs
+ * carries it in full", which stopped being true the moment that bar went: a
+ * lone purple glyph says THAT an agent is answering and never WHICH, and the
+ * name would have survived only in a tooltip nobody hovers. So the button grows
+ * from a 30px plate into a labelled pill exactly when it has a name to give,
+ * and stays a bare glyph the rest of the time, which is most of the time.
  *
  * `data-on` rather than `aria-expanded`: this button opens the shared quick
  * pick rather than a popover of its own, so what it has to show is whether an
  * agent IS SET, not whether a sheet is open. Purple is the colour agents are
- * everywhere else in the panel, so the armed button matches the bar it
- * summons rather than inventing a second signal for the same fact.
+ * everywhere else in the panel.
  */
 .agent-btn .nm { display: none; }
 .agent-btn .ic-13 { color: currentColor; flex: none; }
@@ -2448,9 +2440,31 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .agent-btn[data-on="1"] {
   color: var(--kx-agent); border-color: color-mix(in srgb, var(--kx-agent) 38%, transparent);
   background: color-mix(in srgb, var(--kx-agent) 12%, transparent);
+  /* `.tb-btn` is a fixed 30px grid cell; a labelled pill is an auto-width row.
+     min-width keeps it on the same 30px module as attach and send when the name
+     is very short. */
+  width: auto; min-width: 30px; padding: 0 9px 0 8px;
+  display: flex; align-items: center; gap: 5px;
+}
+.agent-btn[data-on="1"] .nm {
+  display: block; max-width: 118px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase;
 }
 @supports not (color: color-mix(in srgb, red 10%, transparent)) {
   .agent-btn[data-on="1"] { color: var(--kx-agent); }
+}
+/* Below this the control row cannot hold a fifth label, so the name sheds the
+   way `.perm-btn`'s does and the glyph carries the state alone - the tooltip
+   and the accessible name still have it in full. This is the one width where
+   the old bar genuinely did more, and the row staying on one line is worth
+   more than the name at a dock this narrow. */
+@media (max-width: 400px) {
+  .agent-btn[data-on="1"] {
+    width: 30px; min-width: 0; padding: 0; display: grid; place-items: center;
+  }
+  .agent-btn[data-on="1"] .nm { display: none; }
 }
 .perm-btn .nm { display: none; }
 .perm-btn .ic-13 { color: currentColor; flex: none; }

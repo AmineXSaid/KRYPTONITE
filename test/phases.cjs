@@ -48,9 +48,10 @@ const TOKENS = fs.readFileSync(path.join(ROOT, "media/webview/tokens.css"), "utf
     context: null, models: [], logs: [], session: { id: "s", title: "t", messages: [] },
   } });
   const send = (m) => w.dispatchEvent(new w.MessageEvent("message", { data: m }));
-  // Scoped to the segment: the banner carries a data-phase of its own, and an
-  // unscoped query finds that instead.
+  // Scoped to the segment: the session view carries a data-phase of its own -
+  // the one that paints the rail - and an unscoped query finds that instead.
   const seg = (p) => d.querySelector(`#phaseSeg [data-phase="${p}"]`);
+  const railPhase = () => d.getElementById("viewSession").getAttribute("data-phase");
   const on = (p) => seg(p) && seg(p).getAttribute("data-on") === "1";
 
   send(state("act"));
@@ -64,21 +65,29 @@ const TOKENS = fs.readFileSync(path.join(ROOT, "media/webview/tokens.css"), "utf
   ok("ordered least destructive first", order.join(",") === "ask,plan,act", order.join(","));
 
   ok("Act is selected", on("act") && !on("ask") && !on("plan"));
-  ok("and the banner is hidden while acting", d.getElementById("phaseBanner").hidden);
+  // The banner that used to sit here showed NOTHING in Act. The rail that
+  // replaced it paints all three, and Act is the phase most worth seeing at a
+  // glance, because it is the one that edits the workspace.
+  ok("and the rail is painted in Act too", railPhase() === "act", railPhase());
 
   send(state("ask"));
   ok("Ask can be selected", on("ask") && !on("act"));
-  const banner = d.getElementById("phaseBanner");
-  ok("the banner appears in Ask", !banner.hidden);
-  ok("and says which phase it is", /Ask phase/.test(banner.textContent), banner.textContent.trim());
-  // Ask promises one thing more than Plan does: no plan either. That is the
-  // only difference between the two read-only phases worth announcing.
-  ok("and what that promises", /no edits, no plan/i.test(banner.textContent));
-  ok("carrying the phase for styling", banner.getAttribute("data-phase") === "ask");
+  ok("and the rail follows the phase", railPhase() === "ask", railPhase());
+  // The rail is a colour, so the WRITTEN answer has to come from the control:
+  // the lit segment is what a screen reader is told, and what a viewer who
+  // cannot separate the three hues reads instead.
+  ok("the segment is the written answer", seg("ask").getAttribute("aria-checked") === "true");
+  ok("and the others say they are not", seg("act").getAttribute("aria-checked") === "false");
 
   send(state("plan"));
-  ok("Plan still works", on("plan") && !d.getElementById("phaseBanner").hidden);
-  ok("with its own wording", /Plan phase/.test(d.getElementById("phaseBanner").textContent));
+  ok("Plan still works", on("plan") && railPhase() === "plan");
+  ok("and Plan's segment is the checked one", seg("plan").getAttribute("aria-checked") === "true");
+
+  // Ask promises one thing more than Plan does: no plan either. That is the
+  // only difference between the two read-only phases worth announcing, and it
+  // is what applyPhase now announces in the banner's place.
+  ok("Ask's extra promise is still written down", /no edits, no plan/i.test(src));
+  ok("and Plan's own wording with it", /reads and plans/i.test(src));
 
   dom.window.close();
 }
@@ -100,10 +109,19 @@ const TOKENS = fs.readFileSync(path.join(ROOT, "media/webview/tokens.css"), "utf
     new Set(fills).size === 3, fills.join(","));
   ok("the label on a filled segment is ink, not another accent",
     /\.seg button\[data-on="1"\]\s*\{[^}]*var\(--kx-on-accent\)/.test(CSS));
-  ok("Ask still has its own text token for the banner",
+  ok("Ask still has its own text token",
     /--kx-ask:\s*#[0-9a-f]{6}/i.test(TOKENS));
-  ok("the banner takes the phase colour too",
-    /\.phase-banner\[data-phase="ask"\][^}]*var\(--kx-ask\)/.test(CSS));
+  // The rail takes the segment's own fills, so the stripe and the lit segment
+  // are one fact in two places rather than two colours for one mode.
+  for (const ph of ["ask", "plan", "act"]) {
+    ok(`the rail paints ${ph} from its phase token`,
+      new RegExp(`#viewSession\\[data-phase="${ph}"\\]::before\\s*\\{[^}]*var\\(--kx-phase-${ph}\\)`).test(CSS));
+  }
+  // It must not take part in layout, or every element below it shifts 3px.
+  ok("and the rail is out of the layout",
+    /#viewSession::before\s*\{[^}]*position:\s*absolute/.test(CSS));
+  ok("and cannot eat a click",
+    /#viewSession::before\s*\{[^}]*pointer-events:\s*none/.test(CSS));
 }
 
 /* ── the promise ────────────────────────────────────────────────────────── */
