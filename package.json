@@ -17,7 +17,11 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": false,
-      "description": "Genesis runs what the workspace tells it to: .agent/mcp.json spawns processes, a wire: raw profile loads a JavaScript transform into the extension host, and an endpoint profile can point at any URL. None of that is safe to do for a folder you have not opened deliberately, so the extension stays off until the workspace is trusted."
+      "description": "Genesis executes what is in the open folder. An endpoint profile can name a transform module (arbitrary JavaScript, run before the first request) or an `exec` credential helper (a command, spawned to fetch a token), and .agent/mcp.json names programs to launch. None of that is safe to run from a repository you have not read, so Genesis stays off in Restricted Mode."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "Genesis reads profiles, skills and agents from disk and confines the agent's writes to a real workspace folder, so it needs a filesystem rather than a virtual one."
     }
   },
   "repository": {
@@ -49,16 +53,6 @@
   "activationEvents": [
     "onStartupFinished"
   ],
-  "capabilities": {
-    "untrustedWorkspaces": {
-      "supported": false,
-      "description": "Genesis executes what is in the open folder. An endpoint profile can name a transform module (arbitrary JavaScript, run before the first request) or an `exec` credential helper (a command, spawned to fetch a token), and .agent/mcp.json names programs to launch. None of that is safe to run from a repository you have not read, so Genesis stays off in Restricted Mode."
-    },
-    "virtualWorkspaces": {
-      "supported": false,
-      "description": "Genesis reads profiles, skills and agents from disk and confines the agent's writes to a real workspace folder, so it needs a filesystem rather than a virtual one."
-    }
-  },
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -327,6 +321,11 @@
           ],
           "default": "persistent",
           "markdownDescription": "`persistent` keeps the agent browser's cookies and history between launches, so a login it performs survives closing the window. `fresh` starts from an empty temp profile every time, which is the old behaviour. Neither affects bot detection."
+        },
+        "genesis.browserAutoDownload": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Fetch a browser when this machine has none.\n\nGenesis drives the Chrome, Edge, Brave or Chromium the machine already has, and looks on the Windows host when running under WSL. Where there is nothing to drive - a dev container, most often - it fetches Chrome for Testing once into global storage, about 150 MB, over the active endpoint's own connection so it inherits your CA and proxy.\n\nTurn this off for installs that must never fetch a binary. `fetch_url` reads pages without any browser either way."
         }
       }
     },
@@ -376,7 +375,8 @@
     "test:package": "npm run package && node test/run.js vsix render mentions activate-vsix --include-tagged",
     "verify": "npm run typecheck && npm test && npm run test:package",
     "vscode:prepublish": "npm run build",
-    "package": "vsce package --no-dependencies"  },
+    "package": "vsce package --no-dependencies"
+  },
   "dependencies": {
     "undici": "^6.19.8",
     "yaml": "^2.5.0"

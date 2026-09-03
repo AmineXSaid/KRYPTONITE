@@ -295,6 +295,7 @@ const REAL_CONFIG_KEYS = new Set([
   // launched rather than how the panel draws itself, and someone who wants a
   // visible browser wants it in every window.
   "browserHeaded",
+  "browserAutoDownload",
   "editorContext",
 ]);
 
@@ -545,7 +546,8 @@ export class App {
     if (typeof oldCfg.inspect !== "function") return;
     for (const key of [
       "profileDirectory", "skillsDirectory", "instructionsFile", "editorContext",
-      "readOutsideWorkspace", "browserHeaded", "activeProfile", "approvalMode",
+      "readOutsideWorkspace", "browserHeaded", "browserAutoDownload",
+      "activeProfile", "approvalMode",
       "caBundlePath", "codeLens", "codeActions", "inlineCompletion",
       "searchProvider", "searchApiKey", "searchEngineId", "browserProfile",
     ]) {
@@ -1458,6 +1460,27 @@ export class App {
   }
 
   /**
+   * Where a fetched browser lives. One directory per version.
+   *
+   * globalStorage, not the workspace: it is 150-300 MB of binary that belongs
+   * to the machine, not to any one repository, and fetching it again for every
+   * checkout would be absurd.
+   */
+  browserCacheDir(): string {
+    return path.join(this.context.globalStorageUri.fsPath, "browsers");
+  }
+
+  /**
+   * The client the active profile talks through, for anything that should
+   * take the same road the model's own traffic takes - the corporate CA, the
+   * CONNECT proxy, the client certificate.
+   */
+  activeClient(): EndpointClient | undefined {
+    const p = this.activeProfile();
+    return p ? this.clientFor(p) : undefined;
+  }
+
+  /**
    * Put the browser panel on screen, beside the editor.
    *
    * Called when the agent starts a browser, because "launch the browser" that
@@ -2164,6 +2187,7 @@ export class App {
       profileDirectory: this.cfg().get<string>("profileDirectory", ".agent/endpoints"),
       skillsDirectory: this.cfg().get<string>("skillsDirectory", ".agent/skills"),
       browserHeaded: this.cfg().get<boolean>("browserHeaded", false),
+      browserAutoDownload: this.cfg().get<boolean>("browserAutoDownload", true),
       editorContext: this.cfg().get<boolean>("editorContext", true),
       readOutsideWorkspace: this.cfg().get<boolean>("readOutsideWorkspace", true),
       extensionVersion: String(this.context.extension.packageJSON.version ?? "0.0.0"),

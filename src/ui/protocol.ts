@@ -207,6 +207,8 @@ export interface ConfigDto {
   skillsDirectory: string;
   /** Show the agent's browser in a real window rather than running it headless. */
   browserHeaded: boolean;
+  /** Fetch a browser when the extension host's machine has none. */
+  browserAutoDownload: boolean;
   /** Send what is on screen with each message. */
   editorContext: boolean;
   /**
@@ -964,6 +966,15 @@ export interface EndpointChangedOut {
 export interface StatusChangedOut { type: "statusChanged"; status: StatusDto }
 export interface LogLineOut { type: "logLine"; line: LogLine }
 export interface NavigateOut { type: "navigate"; section: CcSection }
+/**
+ * A browser is being fetched, and how far along it is.
+ *
+ * The download is 150 MB and happens once, on whatever machine the extension
+ * host runs on - which in a dev container has no browser at all. Silence for
+ * a minute and a half reads as a hung tool call, so the panel says what is
+ * happening. An empty `message` means it is over, one way or the other.
+ */
+export interface BrowserProvisioningOut { type: "browserProvisioning"; message: string }
 export interface FileResultsOut { type: "fileResults"; query: string; files: FileHitDto[] }
 /** One message waiting for the running turn to finish. */
 export interface QueuedItemDto {
@@ -1062,7 +1073,7 @@ export type OutboundMessage =
   | EditorContextChangedOut
   | CheckpointsListedOut | CheckpointRestoredOut | BundleExportedOut | ChatExportedOut
   | ConfigChangedOut | PhaseChangedOut | EndpointChangedOut | StatusChangedOut
-  | LogLineOut | NavigateOut | FileResultsOut | QueueChangedOut | CaBundlePickedOut
+  | LogLineOut | NavigateOut | FileResultsOut | BrowserProvisioningOut | QueueChangedOut | CaBundlePickedOut
   | EndpointCheckStartedOut | EndpointCheckRungOut | EndpointCheckDoneOut
   | SessionTitledOut | McpChangedOut | ModelsListedOut
   | InputAcceptedOut | SteerAcceptedOut | HealthResultOut | HealthStartedOut;

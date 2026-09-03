@@ -7484,6 +7484,23 @@ function _sbRun() {
 
       case "checkpointRestored":
       case "logLine":
+      case "browserProvisioning": {
+        /* One line that updates in place, not a message per step.
+         *
+         * The fetch is 150 MB and reports every ten percent; eleven notices in
+         * the transcript for one browser is the flood this avoids. An empty
+         * message means it finished - one way or the other - and the line
+         * goes. */
+        var prov = logEl.querySelector(".prov-note");
+        if (!m.message) { if (prov) prov.remove(); break; }
+        if (!prov) {
+          prov = div("prov-note", icon("i-globe", "ic-11") + '<span class="t"></span>');
+          add(prov);
+        }
+        prov.querySelector(".t").textContent = m.message;
+        break;
+      }
+
       case "navigate":
         break;
 

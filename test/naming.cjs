@@ -162,6 +162,11 @@ console.log("──── sentence case, which this file is pointed at and did n
 const PROPER = new Set([
   // The product, its surfaces, and the things it talks to.
   "Genesis", "Control", "Center", "VS", "Code", "Chromium", "Claude", "Desktop",
+  // "Chrome for Testing" is Google's product name for the automation build, and
+  // it is what someone would search for. The cost of exempting the word is that
+  // a stray Title-Case "Testing" elsewhere would pass; the alternative is a
+  // description that will not lead anyone to the thing it describes.
+  "Chrome", "Testing", "Edge", "Brave",
   // Acronyms and protocol names, which are not Title Case even when they look it.
   "MCP", "TLS", "SSL", "DNS", "TCP", "HTTP", "HTTPS", "JSON", "YAML", "URL",
   "API", "CA", "SNI", "SSE", "CDP", "FIM", "IDE", "OS", "UI", "AI", "LLM",
@@ -263,8 +268,21 @@ ok("and it only writes when the destination is empty, so it cannot clobber",
 console.log("──── the old browser override still works ────");
 ok("GENESIS_BROWSER is read first",
   /env\.GENESIS_BROWSER \|\| env\.KRYPTONITE_BROWSER/.test(read("src/browser/cdp.ts")));
+/* The message names the variable, wherever the source happens to wrap.
+ *
+ * This matched `set GENESIS_BROWSER to its executable` as one literal, which
+ * is a claim about where a string concatenation breaks rather than about what
+ * the user reads. Reflowing the sentence - the same words, one `+` earlier -
+ * failed it. The contract is that a person told "no browser" is told the name
+ * of the override in the same breath, so that is what is checked: the source's
+ * string joins are collapsed first. */
+const joined = (p) => read(p).replace(/"\s*\+\s*"/g, "");
 ok("and the message tells you the new name",
-  /set GENESIS_BROWSER to its executable/.test(read("src/ui/session.ts")));
+  /set GENESIS_BROWSER to its executable/.test(joined("src/ui/session.ts")));
+// And the module that does the fetching says it too, for the platforms where
+// there is no build to fetch.
+ok("as does the one that goes looking for a browser to fetch",
+  /GENESIS_BROWSER/.test(joined("src/browser/provision.ts")));
 
 if (failures.length) for (const f of failures) console.log("FAIL  " + f);
 console.log(`\n──── ${pass} passed, ${failures.length} failed ────`);

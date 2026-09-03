@@ -10,7 +10,8 @@ import { mentionable, normaliseTodos } from "../agent/tools";
 import { agentAllowsMcp, agentMemoryFull, agentRefusal, MAX_MEMORY_CHARS } from "../agents/loader";
 import { parseQualified } from "../mcp/registry";
 import { fetchPage, normaliseUrl } from "../browser/fetchPage";
-import { CdpBrowser, findBrowser, listBrowsers } from "../browser/cdp";
+import { CdpBrowser, findBrowser, listBrowsers, type FoundBrowser } from "../browser/cdp";
+import { wslHostBrowsers, cachedBrowser, fetchBrowser, missingLinuxLibs } from "../browser/provision";
 import { runBrowserAction } from "../browser/actions";
 import { runSearch, renderResults, botWallAdvice } from "../browser/search";
 // Still used directly by the panel's own controls, which drive the browser
@@ -1596,6 +1597,78 @@ export class SessionController {
   }
 
   /**
+   * A browser to drive, in order of what costs the user least.
+   *
+   * `listBrowsers()` alone was the whole of this, and it looks only at the
+   * machine running the EXTENSION HOST. In a dev container that is the
+   * container: no Chrome, no Edge, and an error telling the user to install
+   * one into an image somebody else builds. The feature did not exist for the
+   * people most likely to want it.
+   *
+   *   1. Installed here.       Free, already configured, already trusted.
+   *   2. The WSL host's.       A Windows browser on a mounted drive, run
+   *                            through WSL interop. Still free.
+   *   3. Fetched once.         Chrome for Testing into globalStorage, over
+   *                            the profile's dispatcher so it inherits the CA
+   *                            and proxy that make the rest of this work.
+   *
+   * Off by a setting for installs that must never fetch anything, and the
+   * fetch says what it is doing while it happens - 150 MB arriving silently
+   * is its own kind of rude.
+   */
+  private async findOrFetchBrowser(): Promise<FoundBrowser> {
+    const installed = listBrowsers();
+    if (installed.length) return installed[0];
+
+    const host = wslHostBrowsers();
+    if (host.length) {
+      this.app.log("info", `Browser: none in this environment; driving ${host[0].name} at ${host[0].path}.`);
+      return host[0];
+    }
+
+    const cacheDir = this.app.browserCacheDir();
+    const cached = cachedBrowser(cacheDir);
+    if (cached) return cached;
+
+    if (!this.app.configDto().browserAutoDownload) {
+      throw new Error(
+        "No Chromium-family browser is available here, and genesis.browserAutoDownload " +
+        "is off. Install Chrome, Edge, Brave or Chromium, or " +
+        "set GENESIS_BROWSER to its executable. " +
+        "fetch_url still works without any browser."
+      );
+    }
+
+    this.app.broadcast({ type: "browserProvisioning", message: "Getting a browser…" });
+    try {
+      const got = await fetchBrowser({
+        cacheDir,
+        // The endpoint's own transport. A plain download is the request that
+        // fails behind a corporate proxy; this one goes the way the model's
+        // traffic already goes.
+        dispatcher: (this.app.activeClient() as any)?.dispatcher,
+        onProgress: (m) => {
+          this.app.log("info", "Browser: " + m);
+          this.app.broadcast({ type: "browserProvisioning", message: m });
+        },
+      });
+      const missing = missingLinuxLibs(got.path);
+      if (missing.length) {
+        throw new Error(
+          `The browser downloaded but cannot start: ${missing.join(", ")} ` +
+          "missing. On Debian or Ubuntu add to the image: apt-get install -y " +
+          "libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 " +
+          "libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 " +
+          "libcairo2 libasound2"
+        );
+      }
+      return got;
+    } finally {
+      this.app.broadcast({ type: "browserProvisioning", message: "" });
+    }
+  }
+
+  /**
    * The browser this session drives, launched on first use.
    *
    * Extracted so the panel can start one too. It used to be reachable only
@@ -1604,16 +1677,7 @@ export class SessionController {
    */
   private async ensureBrowser(): Promise<CdpBrowser> {
     if (this.cdp) return this.cdp;
-    const found = listBrowsers();
-    if (!found.length) {
-      throw new Error(
-        "No Chromium-family browser is installed. Genesis drives Chrome, Edge, " +
-        "Brave, Vivaldi or Chromium - whichever the machine already has - and bundles " +
-        "none of them. Install one, or set GENESIS_BROWSER to its executable. " +
-        "fetch_url still works without any browser."
-      );
-    }
-    const pick = found[0];
+    const pick = await this.findOrFetchBrowser();
     const cdp = new CdpBrowser(pick.path);
     // Headless is still the default - a window appearing over the editor every
     // time the agent looks something up is worse than not seeing it. The panel
@@ -1629,11 +1693,7 @@ export class SessionController {
       profileDir: this.app.browserProfileDir(),
     });
     this.cdp = cdp;
-    this.app.log(
-      "info",
-      `Browser: driving ${pick.name} (${pick.path})` +
-        (found.length > 1 ? `. Also available: ${found.slice(1).map((f) => f.name).join(", ")}.` : "")
-    );
+    this.app.log("info", `Browser: driving ${pick.name} (${pick.path})`);
     // Show it. Asking for a browser and getting no browser on screen is the
     // whole complaint: headless plus a panel nobody opened means the only
     // evidence of a page is a wall of tool output in the chat.

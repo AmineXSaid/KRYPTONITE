@@ -2790,6 +2790,19 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 
 /* Acknowledges a message taken mid-turn. Without it the composer clears and
    nothing visibly happens, which reads as the message having been lost. */
+/* Getting a browser: one line, updated in place, while 150 MB arrives. It is
+   information rather than a warning - nothing is wrong, it is just slow the
+   first time - so it wears the info wash the queued note does. */
+.prov-note {
+  display: flex; align-items: center; gap: 7px;
+  margin: 4px 0 10px; padding: 6px 10px;
+  border-left: 2px solid var(--kx-info);
+  background: var(--kx-info-wash);
+  border-radius: 0 4px 4px 0;
+  font-size: 11.5px; color: var(--kx-fg-2);
+}
+.prov-note svg { flex: none; color: var(--kx-info); }
+
 .queued-note {
   display: flex; align-items: center; gap: 7px;
   margin: 4px 0 10px; padding: 6px 10px;
