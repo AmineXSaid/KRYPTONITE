@@ -42,6 +42,23 @@ const MAX_BYTES = 8 * 1024 * 1024;
 const MAX_TEXT = 200_000;
 const MAX_LINKS = 200;
 
+/**
+ * One identity for everything this extension sends.
+ *
+ * Identifying honestly. A blank or forged agent gets a different page from
+ * many sites, and then the panel, the reader and the agent disagree about what
+ * an address contains.
+ *
+ * Exported because the search request needs the same string and used to send
+ * none at all: undici adds no `User-Agent` of its own, and a request with no
+ * agent is the shape a bot has. It lives here rather than in `search.ts`
+ * because a site that allows one of these calls should see the same caller in
+ * the other - two identities from one extension is how you get a search that
+ * works and a page fetch that does not.
+ */
+export const USER_AGENT =
+  "Genesis/0.8 (VS Code extension; +https://github.com/AmineXSaid/KRYPTONITE)";
+
 /** Normalise what a person types into an address bar. */
 export function normaliseUrl(input: string): string {
   const raw = String(input ?? "").trim();
@@ -159,10 +176,7 @@ export async function fetchPage(
     signal: opts.signal,
     maxRedirections: 5,
     headers: {
-      // Identifying honestly. A blank or forged agent gets a different page
-      // from many sites, and then the panel and the agent disagree about what
-      // the address contains.
-      "user-agent": "Genesis/0.8 (VS Code extension; +https://github.com/AmineXSaid/KRYPTONITE)",
+      "user-agent": USER_AGENT,
       accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8",
       "accept-language": "en",
     },

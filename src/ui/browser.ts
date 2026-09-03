@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import type { App } from "../core/app";
 import { browserHtml, webviewOptions } from "./shell";
 import { fetchPage, normaliseUrl } from "../browser/fetchPage";
+import { runSearch } from "../browser/search";
 
 /**
  * The browser tab.
@@ -26,6 +27,14 @@ import { fetchPage, normaliseUrl } from "../browser/fetchPage";
  *
  * The panel starts in Live and falls back to Reader by itself when a frame is
  * refused, because a blank box is the worst possible answer.
+ *
+ * The box at the top is both an address bar and a search box, which is what
+ * every address bar has been for twenty years and what this one was not: words
+ * typed into it became `https://words with spaces` and the panel reported an
+ * unusable address. So the model could search the web from a tool call and the
+ * person watching it could not search it at all. A search here goes out on the
+ * same transport as the reader and through the same `runSearch` the tool uses,
+ * so the two cannot come to disagree about what a search is.
  */
 export class BrowserPanel {
   static readonly viewType = "genesis.browser";
@@ -104,6 +113,23 @@ export class BrowserPanel {
     BrowserPanel.current?.post({ type: "showAgent" });
   }
 
+  /**
+   * Open the panel on a set of results.
+   *
+   * The palette command's landing place, and the reason it is a static of its
+   * own rather than an argument to `show`: `show(url)` and `show(query)` would
+   * be the same call with two meanings, which is exactly the ambiguity the
+   * address bar has to resolve at runtime and a caller with the answer in hand
+   * should never re-introduce.
+   */
+  static search(app: App, extensionUri: vscode.Uri, query: string): void {
+    BrowserPanel.show(app, extensionUri);
+    // Through the webview rather than straight into `this.search`, so a search
+    // started from the palette lands in the panel's own history and its Back
+    // button works afterwards. One path in, however it was asked for.
+    BrowserPanel.current?.post({ type: "searchFor", query });
+  }
+
   /** Closing is a command as well as a tab button, so it can be bound. */
   static close(): void {
     BrowserPanel.current?.panel.dispose();
@@ -117,6 +143,9 @@ export class BrowserPanel {
     switch (msg?.type) {
       case "browserOpen":
         await this.open(String(msg.url ?? ""));
+        return;
+      case "browserSearch":
+        await this.search(String(msg.query ?? ""));
         return;
       case "browserStop":
         this.inFlight?.abort();
@@ -217,6 +246,45 @@ export class BrowserPanel {
     } catch (e: any) {
       if (ac.signal.aborted) return;
       this.post({ type: "browserError", message: String(e?.message ?? e), url });
+    } finally {
+      if (this.inFlight === ac) this.inFlight = undefined;
+    }
+  }
+
+  /**
+   * Run a search for the reader half and report it.
+   *
+   * Shaped like `open` above and sharing its in-flight controller, because
+   * from the panel's point of view they are the same act: one thing is being
+   * loaded into the stage and starting another cancels the first. A search
+   * left running behind a navigation would deliver results over the page the
+   * user went on to open.
+   *
+   * No approval gate, unlike the `web_search` tool. The gate exists because
+   * the model chose the query; here a person typed it, which is the approval.
+   */
+  private async search(query: string): Promise<void> {
+    const q = query.trim();
+    if (!q) return;
+
+    this.inFlight?.abort();
+    const ac = new AbortController();
+    this.inFlight = ac;
+    this.post({ type: "browserSearching", query: q });
+
+    try {
+      // The active profile's transport, exactly as the reader uses: a search
+      // that cannot reach the network the model reaches is no use to anyone
+      // behind a corporate gateway, which is who this is for.
+      const profile = this.app.activeProfile();
+      const dispatcher = profile ? (this.app.clientFor(profile) as any).dispatcher : undefined;
+      const out = await runSearch(q, this.app.searchConfig(), { dispatcher, signal: ac.signal });
+      if (ac.signal.aborted) return;
+      this.post({ type: "browserResults", results: out });
+      this.panel.title = q.length > 28 ? q.slice(0, 27) + "\u2026" : q;
+    } catch (e: any) {
+      if (ac.signal.aborted) return;
+      this.post({ type: "browserError", message: String(e?.message ?? e) });
     } finally {
       if (this.inFlight === ac) this.inFlight = undefined;
     }

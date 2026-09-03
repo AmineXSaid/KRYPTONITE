@@ -120,6 +120,11 @@
         "category": "Genesis"
       },
       {
+        "command": "genesis.searchWeb",
+        "title": "Search the web",
+        "category": "Genesis"
+      },
+      {
         "command": "genesis.newChat",
         "title": "New chat",
         "category": "Genesis"

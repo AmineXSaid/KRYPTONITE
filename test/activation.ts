@@ -90,6 +90,7 @@ async function main() {
     "genesis.explainSelection",
     "genesis.writeTests",
     "genesis.generateCommitMessage",
+    "genesis.searchWeb",
     // Distinct from openBrowser: lands on the agent's view and starts
     // watching, which is what the model launching a browser calls for.
     "genesis.watchAgentBrowser",

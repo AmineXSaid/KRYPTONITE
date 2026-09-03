@@ -1,7 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
-import { request } from "undici";
 import type { Msg } from "../providers/client";
 import { runAgent, type ExitReason } from "../agent/loop";
 import type { MicroCompactor } from "../agent/compact";
@@ -13,9 +12,7 @@ import { parseQualified } from "../mcp/registry";
 import { fetchPage, normaliseUrl } from "../browser/fetchPage";
 import { CdpBrowser, findBrowser, listBrowsers } from "../browser/cdp";
 import { runBrowserAction } from "../browser/actions";
-import {
-  buildSearch, parseProvider, renderResults, looksLikeBotWall, botWallAdvice,
-} from "../browser/search";
+import { runSearch, renderResults, botWallAdvice } from "../browser/search";
 // Still used directly by the panel's own controls, which drive the browser
 // without going through a model turn.
 import { navigate, snapshot } from "../browser/page";
@@ -1028,32 +1025,19 @@ export class SessionController {
       // that, and it is the reason this is worth having rather than a key to
       // somebody else's service.
       search: async (query: string, limit: number) => {
-        const cfg = this.app.searchConfig();
-        const req = buildSearch(query, cfg, limit);
-        const res = await request(req.url, {
-          method: "GET",
-          headers: req.headers,
+        const out = await runSearch(query, this.app.searchConfig(), {
           dispatcher: (client as any).dispatcher,
           signal: turn.abort.signal,
-          maxRedirections: 3,
+          limit,
         });
-        const body = await res.body.text();
-        if (res.statusCode >= 400) {
-          // Naming the provider matters: a 401 from Brave means a bad key, and
-          // a model told only "search failed" will retry it forever.
-          throw new Error(
-            `${cfg.provider} answered HTTP ${res.statusCode}. ` +
-            (res.statusCode === 401 || res.statusCode === 403
-              ? "The API key is missing or rejected; check genesis.searchApiKey."
-              : "Try again, or switch genesis.searchProvider.")
-          );
-        }
-        const results = parseProvider(req.kind, body, limit);
-        if (!results.length) {
-          const wall = looksLikeBotWall(req.url, body);
-          if (wall) return botWallAdvice(wall, req.url);
-        }
-        return renderResults(query, results);
+        // Our own sentence about what happened, so it stays outside the fence.
+        if (out.wall) return botWallAdvice(out.wall, out.url);
+        // Somebody else wrote every title and snippet in there. A search result
+        // is the cheapest injection surface in the extension - a page has to be
+        // fetched before it can say anything to the model, a snippet is
+        // delivered for the asking - and it was the one network-sourced string
+        // here that arrived unfenced.
+        return renderResults(query, out.results, (body) => wrapUntrusted(body, out.provider));
       },
       fetchUrl: async (url: string, withLinks: boolean) => {
         const page = await fetchPage(url, {

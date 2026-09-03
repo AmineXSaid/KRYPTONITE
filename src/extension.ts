@@ -85,7 +85,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
 
     /* The panel's palette, on the terminal beside it.
-    
+
        The two are docked side by side and the terminal runs whatever ANSI
        colours the workbench theme ships, so they do not read as one product.
        Everything applied here is derived from `media/webview/tokens.css` - the
@@ -110,18 +110,39 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     /* The HOST'S file dialog, which the composer's attach button no longer
        uses.
-    
+
        That button now opens a file input in the webview, because the webview
        renderer runs on the user's own machine while `showOpenDialog` runs on
        the extension host - and in a WSL, dev container or SSH window those are
        different computers, so the dialog could not reach the user's own disk.
-    
+
        This dialog is still the only way to reach a file on the REMOTE machine
        that is outside the workspace, which `@` does not cover, so it keeps a
        route rather than being deleted with the button that used to call it. */
     vscode.commands.registerCommand("genesis.attachFromHost", async () => {
       await vscode.commands.executeCommand("genesis.focusSidebar");
       await instance.pickAndAttach();
+    }),
+
+    vscode.commands.registerCommand("genesis.searchWeb", async (query?: string) => {
+      let q = typeof query === "string" ? query.trim() : "";
+      if (!q) {
+        const ed = vscode.window.activeTextEditor;
+        const picked = ed && !ed.selection.isEmpty
+          ? ed.document.getText(ed.selection).replace(/\s+/g, " ").trim().slice(0, 200)
+          : "";
+        q = (await vscode.window.showInputBox({
+          title: "Search the web",
+          prompt:
+            "Runs on the active endpoint's connection, so it reaches whatever that " +
+            "endpoint reaches - the same proxy, the same CAs.",
+          placeHolder: "What are you looking for?",
+          value: picked,
+          ignoreFocusOut: true,
+        }) ?? "").trim();
+      }
+      if (!q) return;
+      BrowserPanel.search(instance, context.extensionUri, q);
     }),
 
     vscode.commands.registerCommand("genesis.newChat", async () => {
