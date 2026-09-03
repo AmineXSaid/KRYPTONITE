@@ -1167,7 +1167,7 @@ function _sbRun() {
             // nobody knows about may as well not ship.
             '<div class="tipbar" id="tipBar" hidden>' +
               '<span class="tip-k">Tip</span>' +
-              '<span class="tip-t" id="tipText"></span>' +
+              '<span class="tip-t mq" id="tipText"></span>' +
               '<span class="sp"></span>' +
               '<button class="tip-x" id="tipNext" title="Another tip" aria-label="Another tip">' +
                 icon("i-refresh", "ic-11") + '</button>' +
@@ -1930,16 +1930,44 @@ function _sbRun() {
     return (Math.floor(Date.now() / TIP_PERIOD_MS) + (S.tipNudge || 0)) % TIPS.length;
   }
 
+  /* A .mq box reveals a too-long line by MOVING it rather than cutting it with
+     an ellipsis - see the .mq block in sidebar.css. This is the one part the
+     CSS cannot do for itself: measure how far the text overruns its box, and
+     pick a duration that keeps the travel slow whatever that distance is.
+     Cleared and recomputed on every call so it tracks the live width. */
+  function mqMeasure(vp) {
+    if (!vp) return;
+    var inner = vp.firstElementChild;
+    if (!inner || !inner.classList || !inner.classList.contains("mq-i")) return;
+    vp.removeAttribute("data-marquee");
+    vp.style.removeProperty("--mq-shift");
+    vp.style.removeProperty("--mq-time");
+    var over = inner.scrollWidth - vp.clientWidth;
+    if (over > 6) {
+      vp.style.setProperty("--mq-shift", over + "px");
+      // ~22px a second while it is actually moving, floored so a line that only
+      // just overruns still ambles rather than darting across.
+      vp.style.setProperty("--mq-time", Math.max(6, Math.round(over / 22) + 3) + "s");
+      vp.setAttribute("data-marquee", "1");
+    }
+  }
+  function mqAll() {
+    var els = document.querySelectorAll(".mq");
+    for (var i = 0; i < els.length; i++) mqMeasure(els[i]);
+  }
+
   function renderTip(advance) {
     var bar = $("tipBar");
     if (!bar) return;
     if (advance) S.tipNudge = (S.tipNudge || 0) + 1;
     var i = tipIndex();
     // innerHTML is safe here and only here: TIPS is a constant in this file
-    // and never carries anything a model or a page produced.
-    $("tipText").innerHTML = TIPS[i];
+    // and never carries anything a model or a page produced. The text sits in
+    // an .mq-i span so a long tip scrolls to reveal itself (see mqMeasure).
+    $("tipText").innerHTML = '<span class="mq-i">' + TIPS[i] + "</span>";
     S.tipShown = i;
     bar.hidden = false;
+    mqMeasure($("tipText"));
   }
 
   /* The strip has to change while the panel simply sits there, so the period
@@ -2423,7 +2451,7 @@ function _sbRun() {
     for (var si = 0; si < STARTERS.length; si++) {
       body += '<button class="w-row" data-starter="' + esc(STARTERS[si].run) + '">' +
         icon(STARTERS[si].icon, "ic-11") +
-        '<span class="t">' + esc(STARTERS[si].text) + "</span>" +
+        '<span class="t mq"><span class="mq-i">' + esc(STARTERS[si].text) + "</span></span>" +
         icon("i-chev", "ic-9") + "</button>";
     }
     body += "</div>";
@@ -2457,7 +2485,7 @@ function _sbRun() {
           // before, which spent the panel's success colour to say "this is a
           // row".
           (r.running ? liveMark() : '<span class="w-dot"></span>') +
-          '<span class="t ell">' + esc(r.title) + "</span>" +
+          '<span class="t mq"><span class="mq-i">' + esc(r.title) + "</span></span>" +
           '<span class="w-ago">' + esc(r.when) + "</span></button>" +
           '<button class="w-del" data-del="' + esc(r.id) + '" title="Delete this conversation" ' +
             'aria-label="Delete ' + esc(r.title) + '">' + icon("i-trash", "ic-13") + "</button>" +
@@ -2466,6 +2494,9 @@ function _sbRun() {
       body += "</div></div>";
     }
     logEl.appendChild(div("welcome", body));
+    // Long titles and starters reveal themselves by scrolling rather than an
+    // ellipsis; measure them now the rows are in the document.
+    mqAll();
   }
 
   /* The rail is a ::before on .msg-user, so everything else has to sit in a
@@ -6661,6 +6692,17 @@ function _sbRun() {
     });
     $("tipNext").addEventListener("click", function () { renderTip(true); });
     watchTips();
+
+    // The marquee's travel is measured from the live box width, so it has to be
+    // re-measured when the panel is resized (a tip that fit may now overrun, or
+    // the reverse) and once the webfont has loaded and the real glyph widths
+    // are known - the first measure runs against the fallback face otherwise.
+    var mqResizeT = null;
+    window.addEventListener("resize", function () {
+      if (mqResizeT) clearTimeout(mqResizeT);
+      mqResizeT = setTimeout(mqAll, 150);
+    });
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(mqAll);
 
     $("permBtn").addEventListener("click", function (e) {
       e.stopPropagation();
