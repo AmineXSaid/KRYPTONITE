@@ -31,6 +31,7 @@ const code = [
   grab("  function cells(line) {"),
   grab("  function icon(id, cls) {"),
   grab("  function highlight(code, lang) {"),
+  grab("  function mermaidFigure(code) {"),
   grab("  function md(t) {"),
   // The grammars are object literals, so grab()'s "stop at `  }`" rule cannot
   // lift them. Sliced whole instead, which also means a new language family
@@ -48,8 +49,14 @@ const code = [
 ].join("\n");
 
 const scope = {};
+// The flowchart renderer is a sibling module in the shell, loaded before
+// sidebar.js, so md() reaches it as the free global `KXMermaid`. It is passed
+// in as a parameter here so mermaidFigure() closes over the real renderer
+// rather than a stub - the SVG in these assertions is the one users see.
+const KXMermaid = require(path.join(__dirname, "..", "media", "webview", "mermaid.js"));
 // eslint-disable-next-line no-new-func
-new Function(code + "\n;this.md=md;this.inline=inline;this.esc=esc;this.highlight=highlight;").call(scope);
+new Function("KXMermaid", code + "\n;this.md=md;this.inline=inline;this.esc=esc;this.highlight=highlight;")
+  .call(scope, KXMermaid);
 const { md, highlight } = scope;
 
 let pass = 0;
@@ -337,6 +344,34 @@ console.log("\n──── fenced code ────");
 }
 ck(/start="3"/.test(md("3. three\n4. four")), "an ordered list starting at 3 says 3");
 ck(!/start=/.test(md("1. one\n2. two")), "a list starting at 1 needs no start attribute");
+
+console.log("\n──── mermaid ────");
+{
+  const F = "```";
+  const flow = md(F + "mermaid\nflowchart LR\n A[Start] --> B{Choice} --> C((End))\n" + F);
+  ck(/class="mm-svg"/.test(flow), "a mermaid flowchart renders an inline SVG", flow.slice(0, 40));
+  ck(/mermaid-fig/.test(flow), "in a figure that reuses the code frame");
+  ck(/data-cb-copy/.test(flow), "with a Copy control");
+  ck(/mermaid-src/.test(flow) && /hidden/.test(flow) && /Start/.test(flow),
+    "and the source kept, hidden, for Copy");
+  ck((flow.match(/<rect|<ellipse|<polygon/g) || []).length >= 3, "one shape per node");
+
+  // A subgraph and <br/> - the shape from the report - render, and every label
+  // is escaped, because it is untrusted model output reaching innerHTML.
+  const rich = md(F + "mermaid\nflowchart LR\n subgraph frame[One frame]\n A[ID<br/>0x3C] --> B[PCI]\n end\n" + F);
+  ck(/mm-sub/.test(rich), "a subgraph draws a labelled box");
+  ck(/<tspan/.test(rich) && /0x3C/.test(rich), "a <br/> splits a label across lines");
+  const inj = md(F + "mermaid\nflowchart TD\n A[<img src=x onerror=alert(1)>] --> B\n" + F);
+  ck(!/<img/i.test(inj) && /&lt;img/.test(inj), "markup in a label is escaped, never rendered");
+
+  // Anything that is not a flowchart, or is still streaming, falls back to a
+  // code block - never an error, never a broken SVG.
+  const seq = md(F + "mermaid\nsequenceDiagram\n A->>B: hi\n" + F);
+  ck(!/mm-svg/.test(seq) && /<pre>/.test(seq), "an unsupported diagram falls back to code", seq.slice(0, 50));
+  let okStream = true;
+  try { md(F + "mermaid\nflowchart LR\n A --> "); } catch (e) { okStream = false; }
+  ck(okStream, "a half-streamed mermaid block does not throw");
+}
 
 console.log("\n──── degenerate input ────");
 for (const [input, label] of [

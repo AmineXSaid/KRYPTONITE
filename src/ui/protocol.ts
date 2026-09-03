@@ -209,6 +209,8 @@ export interface ConfigDto {
   browserHeaded: boolean;
   /** Fetch a browser when the extension host's machine has none. */
   browserAutoDownload: boolean;
+  /** Offer the web_search tool. When off, the tool is withheld from the model. */
+  webSearch: boolean;
   /** Send what is on screen with each message. */
   editorContext: boolean;
   /**

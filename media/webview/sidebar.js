@@ -800,6 +800,31 @@ function _sbRun() {
     return out;
   }
 
+  /* A mermaid block, drawn as an SVG figure - or nothing, when it cannot be.
+   *
+   * Returns the figure's HTML on success and "" on any failure, which is the
+   * signal to md() to render the block as ordinary code instead. The renderer
+   * throws on a diagram it does not support and on a half-streamed one, and a
+   * webview that somehow loaded without mermaid.js has no renderer at all; all
+   * three end the same way, as the source in a code block, never as an error.
+   *
+   * The SVG the renderer returns is trusted markup by construction - it emits
+   * only shapes and text and escapes every label - so it is set as innerHTML
+   * inside the figure. The copy button copies the SOURCE, held in a hidden
+   * <pre> the existing delegated handler already reads from a .cb container. */
+  function mermaidFigure(code) {
+    if (typeof KXMermaid === "undefined" || !KXMermaid || !KXMermaid.render) return "";
+    var svg;
+    try { svg = KXMermaid.render(code); } catch (e) { return ""; }
+    if (!svg) return "";
+    return '<div class="cb mermaid-fig">' +
+      '<div class="cb-h"><span class="cb-l">mermaid</span><span class="sp"></span>' +
+      '<button class="cb-copy" data-cb-copy title="Copy diagram source" aria-label="Copy diagram source">' +
+        icon("i-copy", "ic-11") + "</button></div>" +
+      '<div class="mermaid-svg">' + svg + "</div>" +
+      '<pre class="mermaid-src" hidden>' + esc(code) + "</pre></div>";
+  }
+
   function md(t) {
     var out = "";
     var chunks = String(t).split("```");
@@ -813,6 +838,16 @@ function _sbRun() {
         var lang = nl === -1 ? body.trim() : body.slice(0, nl).trim();
         var code = nl === -1 ? "" : body.slice(nl + 1);
         if (/[^\w.+#-]/.test(lang)) { code = body; lang = ""; }
+        // A mermaid block is a picture the model could only describe in text,
+        // so the transcript draws it: the source becomes an SVG in place. The
+        // header still carries Copy, and it copies the SOURCE, since that is
+        // what anyone would want to take. A block that will not parse - or a
+        // half-streamed one - falls straight through to the code path below,
+        // so an unrenderable diagram is never worse than the fence it came in.
+        if (lang === "mermaid") {
+          var diagram = mermaidFigure(code.replace(/\n$/, ""));
+          if (diagram) { out += diagram; continue; }
+        }
         // Every fenced block gets a header, labelled or not, because the header
         // is what carries Copy - and code the model wrote is the single thing in
         // a transcript most likely to be wanted verbatim. Selecting it by hand

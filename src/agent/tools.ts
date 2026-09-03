@@ -1457,8 +1457,10 @@ export async function runTool(name: string, args: any, ctx: ToolContext): Promis
         if (!ctx.browser) {
           return {
             content:
-              "No browser is available. Genesis drives the Chrome or Edge already " +
-              "installed on this machine; none was found. Use fetch_url for static pages.",
+              "No browser is available. Genesis drives a Chromium-family browser - the " +
+              "Chrome, Edge or Chromium already on this machine, or one Playwright has " +
+              "installed (`npx playwright install chromium`); none was found. Use " +
+              "fetch_url for static pages.",
             isError: true,
           };
         }

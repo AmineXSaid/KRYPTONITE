@@ -1459,14 +1459,22 @@ function _run() {
          cannot see it. Headless is still right most of the time - a window
          opening over the editor on every lookup is worse than not watching -
          but "what is it actually doing" deserves an answer that is not a
-         settings file. */
-      card("Browser window",
-        optGroup("browserHeaded", [
-          ["false", "headless"], ["true", "window"]
-        ], S.config.browserHeaded ? "true" : "false", true) +
-        '<div class="hint muted" style="font-size:11px;margin-top:6px">' +
-        "headless: no window, screenshots only · window: a real Chromium you can watch " +
-        "and drive yourself. Applies the next time the browser starts.</div>") +
+         settings file. A switch rather than a two-option group: it is one
+         boolean - on is a window, off is headless - and a switch says so in
+         half the width, matching every other on/off control on this screen. */
+      card("Browser & web",
+        toggle("browserHeaded", "Use a real browser window",
+          "A Chromium you can watch and drive yourself, instead of a headless one that only " +
+          "takes screenshots. Applies the next time the browser starts.",
+          !!S.config.browserHeaded, true) +
+        /* Web search is a capability the model is handed, so it belongs beside
+           the browser toggle rather than in a settings file. Off withholds the
+           web_search tool entirely; fetch_url and the browser still work. */
+        toggle("webSearch", "Offer web search",
+          "Lets the agent query the configured search provider over the active endpoint's " +
+          "connection. Turn it off to withhold the web_search tool - fetch_url and the " +
+          "browser are unaffected.",
+          S.config.webSearch !== false, true)) +
       "</div>";
 
     html += '<div class="block" style="margin-top:14px"><h4>Behaviour</h4>' +

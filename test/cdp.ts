@@ -13,8 +13,10 @@
  *        --format=cjs --platform=node --target=node20 && node dist/cdp.cjs
  */
 import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import * as http from "node:http";
-import { CdpBrowser, findBrowser, listBrowsers } from "../src/browser/cdp";
+import { CdpBrowser, findBrowser, listBrowsers, playwrightBrowsers } from "../src/browser/cdp";
 import { navigate, snapshot, screenshot, click, type, scroll, renderSnapshot } from "../src/browser/page";
 import { sniffBytes } from "../src/providers/client";
 
@@ -64,6 +66,50 @@ const SECOND = `<!doctype html><html><head><title>Second Page</title></head>
     ck(over[0]?.path === self, "GENESIS_BROWSER takes precedence", over[0]?.path);
     ck(listBrowsers({ GENESIS_BROWSER: "C:/nope/none.exe" } as any).every((f) => f.path !== "C:/nope/none.exe"),
       "an override pointing at nothing is ignored rather than trusted");
+  }
+
+  /* ── Playwright's Chromium ───────────────────────────────────────────
+     The "works whatever the OS" fallback: a machine with no Chrome or Edge
+     of its own still has the Chromium that `playwright install` puts in a
+     cache directory, and it must be found there and driven like any other. */
+  console.log("\n──── Playwright's Chromium ────");
+  {
+    // A fake cache with two builds and a headless shell, laid out exactly as
+    // Playwright lays one out on this OS, so the real path logic is exercised.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "kx-pw-"));
+    const rel =
+      process.platform === "win32" ? ["chrome-win", "chrome.exe"]
+        : process.platform === "darwin" ? ["chrome-mac", "Chromium.app", "Contents", "MacOS", "Chromium"]
+          : ["chrome-linux", "chrome"];
+    const shellRel =
+      process.platform === "win32" ? ["chrome-win", "headless_shell.exe"]
+        : process.platform === "darwin" ? ["chrome-mac", "headless_shell"]
+          : ["chrome-linux", "headless_shell"];
+    const put = (dir: string, parts: string[]) => {
+      const p = path.join(root, dir, ...parts);
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, "#!/bin/sh\n");
+      return p;
+    };
+    put("chromium-1100", rel);
+    const newer = put("chromium-1194", rel);
+    put("chromium_headless_shell-1194", shellRel);
+
+    const viaEnv = playwrightBrowsers({ PLAYWRIGHT_BROWSERS_PATH: root } as any);
+    ck(viaEnv.some((f) => f.path === newer), "PLAYWRIGHT_BROWSERS_PATH is scanned for a Chromium", newer);
+    ck(viaEnv[0]?.path === newer, "the highest build wins over an older one", viaEnv[0]?.path);
+    ck(viaEnv.every((f) => f.name === "Chromium (Playwright)"), "and it is named as Playwright's");
+    ck(viaEnv[0] && !/headless_shell/.test(viaEnv[0].path),
+      "a full Chromium is preferred over the headless shell", viaEnv[0]?.path);
+    // It has to reach listBrowsers, since that is what the session actually asks.
+    ck(listBrowsers({ PLAYWRIGHT_BROWSERS_PATH: root } as any).some((f) => f.path === newer),
+      "listBrowsers falls back to it when no system browser is present");
+    // The empty-environment contract holds: no roots, no discovery.
+    ck(playwrightBrowsers({} as any).length === 0, "an empty environment finds no Playwright browser");
+    ck(playwrightBrowsers({ PLAYWRIGHT_BROWSERS_PATH: "0" } as any).length === 0,
+      "the \"0\" sentinel is treated as unset, not as a path");
+
+    fs.rmSync(root, { recursive: true, force: true });
   }
 
   const exe = findBrowser();

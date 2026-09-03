@@ -1025,7 +1025,12 @@ export class SessionController {
       // the corporate proxy and the private CA. A hosted search API cannot do
       // that, and it is the reason this is worth having rather than a key to
       // somebody else's service.
-      search: async (query: string, limit: number) => {
+      //
+      // Withheld entirely when web search is turned off, so the tool is not
+      // advertised rather than offered and then refused: the loop drops
+      // web_search from the model's list when this is absent, exactly as it
+      // drops generate_image with no image model.
+      search: this.app.configDto().webSearch ? async (query: string, limit: number) => {
         const out = await runSearch(query, this.app.searchConfig(), {
           dispatcher: (client as any).dispatcher,
           signal: turn.abort.signal,
@@ -1039,7 +1044,7 @@ export class SessionController {
         // delivered for the asking - and it was the one network-sourced string
         // here that arrived unfenced.
         return renderResults(query, out.results, (body) => wrapUntrusted(body, out.provider));
-      },
+      } : undefined,
       fetchUrl: async (url: string, withLinks: boolean) => {
         const page = await fetchPage(url, {
           dispatcher: (client as any).dispatcher,
@@ -1921,36 +1926,42 @@ export class SessionController {
   }
 
   /**
-   * Name the conversation from the first thing the user said.
+   * Name the conversation.
    *
-   * This used to ask the model, after the first exchange, in a separate request.
-   * Three things were wrong with that. It spent a request and tokens on a string
-   * decided once - visible on a rate-limited endpoint, where it was the call that
-   * tipped into 429. It arrived late, so the title appeared and then rewrote
-   * itself under the reader. And it could fail, leaving "Untitled 3" on a
-   * conversation that plainly had a subject.
+   * When a model is connected it writes the name, and the first words of the
+   * message are NOT promoted to the title: what the user typed is an
+   * instruction in whatever case and length they typed it, and a conversation
+   * opened with "LAUNCH BROWSER AND SEARCH FOR MY NAME" should not be filed
+   * under exactly that, shouting, in a list of other people's shouting. The
+   * model turns the same request into a short name someone recognises in a
+   * list. The untitled placeholder holds for the second or two until it
+   * answers, and the message-derived label is used only if that request fails,
+   * so a conversation with a plain subject is never left stuck on "Untitled".
    *
-   * The first message is already the best short label available, and it is there
-   * before the model answers. Several conversations called "Hi" is the accepted
-   * cost: a dull name that was correct from the first frame beats a clever one
-   * that changed after the fact.
+   * With no model connected there is nothing to ask, so the message itself is
+   * the best label available and the title becomes that.
    */
   private nameFromFirstMessage(): void {
     if (!isUntitled(this.title)) return;
 
-    // `titleFrom` is the existing helper the store has always used for this:
-    // first user turn, whitespace collapsed, capped. Deliberately NOT
-    // `sanitizeTitle`, which is tuned for model output - it strips a leading
-    // "ok" or "so" (wrong for a person's own words) and rejects anything under
-    // three characters, which would turn "Hi" into "Untitled".
-    const title = titleFrom(this.history);
-    if (!title || title === "New chat" || title === this.title) return;
+    // The message as a serviceable label: first user turn, whitespace
+    // collapsed, capped. `titleFrom`, not `sanitizeTitle` - the latter is tuned
+    // for model output and strips a leading "ok" or "so", which is wrong for a
+    // person's own words. Computed here either way; whether it is used depends
+    // on whether a model can be asked.
+    const fromMessage = titleFrom(this.history);
 
-    this.setTitle(title);
-    // Then ask for a real one. The line above is a placeholder that is right
-    // immediately; this replaces it a second later with something that reads
-    // like a name instead of like a shouted instruction.
-    void this.titleFromModel(this.sessionId, title);
+    // A model to ask: it names the conversation, and the message-derived label
+    // rides along only as the fallback for a failed request.
+    if (this.app.activeProfile()) {
+      void this.titleFromModel(this.sessionId, this.title, fromMessage);
+      return;
+    }
+
+    // No model: the message is the name.
+    if (fromMessage && fromMessage !== "New chat" && fromMessage !== this.title) {
+      this.setTitle(fromMessage);
+    }
   }
 
   private setTitle(title: string): void {
@@ -1963,21 +1974,27 @@ export class SessionController {
   /**
    * Ask the model to name the conversation.
    *
-   * The first message is a serviceable placeholder and a poor title. It is
-   * whatever the user typed, at whatever length and in whatever case they
-   * typed it, so a conversation opened with "LAUNCH BROWSER AND SEARCH FOR MY
-   * NAME" is filed under exactly that, shouting, in a list of other people's
-   * shouting.
-   *
    * Runs beside the turn rather than after it, on the one-shot path, so the
    * name settles within a second or two rather than after the answer. It
    * renames once and never again: a title that keeps changing as a
    * conversation grows is worse than a slightly wrong one that stays put.
    *
-   * Entirely best-effort. A failure here leaves the placeholder, which was
-   * already good enough to ship for months.
+   * `fallback` is the message-derived label. It is used only when the model
+   * cannot produce a usable title - a request that failed or came back empty -
+   * so the conversation is not left on "Untitled 3" when it plainly has a
+   * subject. That is the one case where the first words of the message become
+   * the title, and it is a genuine last resort rather than the default.
    */
-  private async titleFromModel(id: string, placeholder: string): Promise<void> {
+  private async titleFromModel(id: string, placeholder: string, fallback = ""): Promise<void> {
+    // Whether the run below moved on, renamed it, or started a new chat while
+    // the request was in flight. Naming a conversation the user has left would
+    // rename the wrong one; setting anything then is refused.
+    const stillWaiting = (): boolean =>
+      this.sessionId === id && this.title === placeholder && isUntitled(this.title);
+    const useFallback = (): void => {
+      if (fallback && fallback !== "New chat" && stillWaiting()) this.setTitle(fallback);
+    };
+
     const first = this.history.find((m) => m.role === "user");
     if (!first) return;
     const text = typeof first.content === "string"
@@ -1994,15 +2011,16 @@ export class SessionController {
         { maxTokens: 24 }
       );
     } catch {
-      return; // the placeholder stands
+      useFallback(); // the model was unreachable after all
+      return;
     }
 
     const title = sanitizeTitle(raw, "");
-    if (!title || title === placeholder) return;
-    // The user may have moved on, renamed it, or started a new chat while the
-    // request was in flight. Naming a conversation they have left would rename
-    // the wrong one.
-    if (this.sessionId !== id || this.title !== placeholder) return;
+    if (!title || title === placeholder) {
+      useFallback(); // unusable output - the message is still better than "Untitled"
+      return;
+    }
+    if (!stillWaiting()) return;
     this.setTitle(title);
   }
 

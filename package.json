@@ -255,6 +255,11 @@
           "default": false,
           "markdownDescription": "Show the browser the agent drives in a real window instead of running it headless. Off by default, because a window appearing over your editor every time the agent looks something up is worse than not seeing it - but turn it on when you want to watch what it is doing, or drive it yourself mid-task. Takes effect the next time the browser starts."
         },
+        "genesis.webSearch": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Offer the `web_search` tool, which queries the configured search provider over the active endpoint's connection. On by default. Turn it off to keep the agent from reaching the web this way - `fetch_url` and the browser are unaffected."
+        },
         "genesis.activeProfile": {
           "type": "string",
           "default": "",

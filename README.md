@@ -258,9 +258,15 @@ so rather than as an instruction.
 
 ## Browser
 
-The model drives whichever Chromium-family browser the machine already has;
-none is bundled. `read` returns the page text and a numbered ref for everything
-clickable, which is what `click` and `type` act on.
+The model drives whichever Chromium-family browser the machine already has —
+Chrome, Edge, Brave, Vivaldi or Chromium — and none is bundled. When the machine
+has none of its own, it falls back to a Chromium that Playwright has installed
+(`npx playwright install chromium`), found in Playwright's cache on any OS; set
+`GENESIS_BROWSER` to point at a specific executable. The browser is launched
+with background networking, telemetry and phone-home features off, so a lookup
+stays a lookup and works on a locked-down network. `read` returns the page text
+and a numbered ref for everything clickable, which is what `click` and `type`
+act on.
 
 `read` also lists the pictures. `innerText` carries no alt text, so a gallery of
 eight captioned photographs used to read as an empty page — every description
@@ -309,6 +315,19 @@ always sent whatever it weighs — a cap able to discard the picture the model
 asked for one step earlier would turn a size problem into a correctness one.
 Only the request is trimmed; the transcript keeps every image, so a later turn
 with more room can still send them.
+
+## Diagrams
+
+A model that is not multimodal cannot draw a picture — it can only describe one.
+So when it writes a ` ```mermaid ` flowchart, the transcript renders it: the
+source becomes an SVG in place, laid out by a hand-rolled subset of the mermaid
+syntax (`flowchart`/`graph` with the common node shapes, labelled edges, `<br/>`
+in labels, and `subgraph` boxes). It is not the 2.8 MB mermaid library — the
+same reason the browser is driven over raw CDP and code is highlighted by an
+in-house tokenizer, so it renders air-gapped and adds nothing to the bundle.
+Every label is escaped on the way in, and anything the subset cannot parse — a
+sequence diagram, a half-streamed block — falls back to a plain code block, so a
+diagram is never worse than the fence it arrived in.
 
 ## Sessions
 
@@ -434,6 +453,7 @@ write tool reachable without it and refused with it.
 | `genesis.inlineCompletion` | `false` | Ghost text at the cursor. Also needs `capabilities.fim` |
 | `genesis.browserHeaded` | `false` | Show the agent's browser instead of running it headless |
 | `genesis.browserProfile` | `persistent` | `persistent` keeps its cookies, `fresh` starts empty |
+| `genesis.webSearch` | `true` | Offer the `web_search` tool. Off withholds it; `fetch_url` and the browser are unaffected |
 | `genesis.searchProvider` | `duckduckgo` | `duckduckgo` / `brave` / `google` / `bing` |
 | `genesis.searchApiKey` | — | Key for the provider. Takes `${env:}` and `${file:}` |
 | `genesis.searchEngineId` | — | Google Programmable Search `cx`. Google only |

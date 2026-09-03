@@ -39,6 +39,26 @@
   it named, the code it said to reuse and the verification it described, rather
   than re-deriving what Plan already looked up.
 
+- **A transient failure mid-conversation is retried, not fatal.** A completion
+  that fails for a plausibly momentary reason — a gateway 5xx, a 429, a reset
+  socket — is retried a few times with growing backoff before the turn gives up,
+  and only when nothing has reached the transcript yet, so nothing is duplicated.
+  A 4xx the request earned (400, 401, 404, a context-length 413) still surfaces
+  at once. `test/reply-loop.ts` proves both.
+
+- **Conversation titles come from the model when one is connected.** The first
+  words of the message are no longer promoted to the title while a model is
+  available to write a short, recognisable one; the message-derived label is now
+  only the fallback for when there is no endpoint, or the naming request fails.
+
+- **The model control is a plated field.** It was bare clickable text; it now
+  wears the composer's surface behind a hairline at the send control's radius —
+  a recessed field in a row of raised buttons, distinct but part of the set.
+
+- **The browser-window control is a switch.** It was a two-option group; one
+  boolean is one switch, matching every other on/off control in the Control
+  Center.
+
 ### Added
 - **An approved plan now becomes the todo list.** The plan card has always
   parsed the fenced `plan` block into steps, and `update_todos` has always
@@ -64,6 +84,30 @@
   so opening the box is not a one-way door out of approving, and the text is
   read off the input at the moment it is sent rather than mirrored into panel
   state, where it would outlive the conversation it belongs to.
+- **A Playwright-installed Chromium is now a browser Genesis can drive.** Browser
+  discovery still prefers a real Chrome or Edge, but when the machine has none of
+  its own it falls back to the Chromium `npx playwright install chromium` puts in
+  Playwright's cache — found by path on any OS, driven over the same CDP as any
+  other, no Playwright dependency at runtime and nothing bundled. It is the
+  difference between the browser tool working and refusing every page on a fresh
+  CI runner or a locked-down container. `test/cdp.ts` covers the discovery and
+  drives the found browser end to end.
+- **The browser launches quiet.** Chromium's background traffic — safe-browsing,
+  autofill, optimization hints, translate, crash reports, domain-reliability
+  beacons — is turned off explicitly, on top of `--disable-background-networking`.
+  A lookup stays a lookup: no phone-home, and no requests that hang against a
+  proxy that will neither allow nor cleanly refuse them.
+- **`web_search` can be turned off.** New `genesis.webSearch` (default on). Off
+  withholds the tool from the model entirely rather than offering it and refusing
+  it; `fetch_url` and the browser are unaffected. It sits beside the browser
+  window control in the Control Center as a switch.
+- **Mermaid flowcharts render in the transcript.** A non-multimodal model can
+  only emit a ` ```mermaid ` block as text; the panel now draws it, turning the
+  source into an SVG in place. A hand-rolled subset — `flowchart`/`graph`,
+  the common node shapes, labelled edges, `<br/>`, and `subgraph` boxes — not the
+  2.8 MB library, so it renders air-gapped and adds one small file to the bundle.
+  Every label is escaped, and anything it cannot parse falls back to a code
+  block. Covered by `test/markdown-render.cjs`.
 
 ### Fixed
 - **The waiting mark was the busiest thing in a quiet panel.** It was three
