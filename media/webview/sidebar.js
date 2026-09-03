@@ -351,6 +351,9 @@ function _sbRun() {
   var S = {
     hydrated: false,
     workspace: { open: false, name: null },
+    /** Models the gateway answered for, and the filter typed against them. */
+    epModels: [],
+    epModelQ: null,
     /** Messages waiting for the running turn to finish, newest last. */
     queue: [],
     running: false,
@@ -5369,6 +5372,20 @@ function _sbRun() {
             '<button type="button" class="btn sm" data-ep="models" title="Ask the gateway which models it serves">Load</button>' +
           "</span>" +
           '<span></span><span class="f-hint" id="fModelHint"></span>' +
+          // THE ANSWER TO "LOAD", MADE VISIBLE.
+          //
+          // The ids used to go into the <datalist> above and nowhere else, and
+          // a datalist has no affordance of its own: no arrow, no button, and
+          // in a VS Code webview no reliable popup either. So pressing Load
+          // spent several seconds probing every id the gateway lists, and then
+          // the only thing on screen was a sentence saying "start typing to
+          // filter" - filter a list that could not be seen. The most useful
+          // thing the button had just learned was thrown behind a control that
+          // does not render.
+          //
+          // The datalist stays, because typing still completes against it.
+          // This is the part you can look at and click.
+          '<span></span><div class="mdl-picks" id="fModelPicks" hidden></div>' +
           // Directly under the model id, because it is a statement ABOUT that
           // id. Mandatory and unset by default: it is the one thing a gateway
           // cannot be probed for, and it silently decides whether vision is on
@@ -6725,6 +6742,15 @@ function _sbRun() {
     $("viewAgents").addEventListener("click", onAgentClick);
     $("tlsBody").addEventListener("click", onTlsClick);
     $("epBody").addEventListener("click", onEpClick);
+    // Delegated, because the form is re-rendered wholesale on every endpoint
+    // action and a listener bound to the field itself would be thrown away
+    // with it. This is what makes the hint's "start typing to filter" true.
+    $("epBody").addEventListener("input", function (e) {
+      if (e.target && e.target.id === "fModel") {
+        S.epModelQ = e.target.value;
+        renderModelPicks();
+      }
+    });
     // Delegated, because the form is re-rendered wholesale on every check rung
     // and a listener bound to the select would not survive that. The hint has
     // to move with the answer: it states what the chosen kind will do to the
@@ -6814,7 +6840,67 @@ function _sbRun() {
     }
   }
 
+  /**
+   * The models the gateway answered for, as rows you can click.
+   *
+   * Filtered by whatever is in the field, which is what makes the hint's
+   * "start typing to filter" true. Case-insensitive and a plain substring
+   * match: the ids are slash-separated paths and someone typing "sonnet"
+   * means anything with sonnet in it, not a prefix.
+   *
+   * Hidden when nothing has been loaded. It is not hidden when the filter
+   * matches nothing - that is a fact worth showing, and a list that vanishes
+   * as you type reads as the panel breaking.
+   */
+  function renderModelPicks() {
+    var box = $("fModelPicks");
+    if (!box) return;
+    var all = S.epModels || [];
+    if (!all.length) { box.hidden = true; box.innerHTML = ""; return; }
+    var inp = $("fModel");
+    /* THE FILTER IS WHAT WAS TYPED, NOT WHAT THE FIELD HOLDS.
+     *
+     * Filtering on the field's value looks identical and is wrong the one
+     * moment it matters: the field already holds the endpoint's current model
+     * when Load is pressed, so a list of twelve arrived pre-filtered down to
+     * the one id the user could already see. That is the same dead end this
+     * whole list exists to fix, reached a different way.
+     *
+     * `null` means nobody has typed since the last load, so show everything.
+     * The tick still marks the current value, which is the fact the field's
+     * contents are actually good for here. */
+    var q = (S.epModelQ == null ? "" : String(S.epModelQ)).trim().toLowerCase();
+    var hits = q ? all.filter(function (id) { return id.toLowerCase().indexOf(q) !== -1; }) : all;
+    box.hidden = false;
+    if (!hits.length) {
+      box.innerHTML = '<div class="mdl-pick-empty">No loaded model matches “' + esc(q) + '”</div>';
+      return;
+    }
+    var html = "";
+    for (var i = 0; i < hits.length; i++) {
+      var on = inp && inp.value === hits[i];
+      html += '<button type="button" class="mdl-pick" data-pick="' + esc(hits[i]) + '"' +
+        ' data-on="' + (on ? "1" : "0") + '">' +
+        (on ? icon("i-check", "ic-13") : '<span class="mdl-pick-gap"></span>') +
+        '<span class="ell">' + esc(hits[i]) + "</span></button>";
+    }
+    box.innerHTML = html;
+  }
+
   function onEpClick(e) {
+    // Choosing one fills the field. Handled before the [data-ep] lookup
+    // because a pick is not one of the form's actions - it is the field being
+    // filled by other means.
+    var pick = e.target.closest("[data-pick]");
+    if (pick) {
+      var mi = $("fModel");
+      if (mi) { mi.value = pick.getAttribute("data-pick"); mi.focus(); }
+      // Choosing is not typing: the list stays whole so a second thought can
+      // pick a different one without clearing the field first.
+      S.epModelQ = null;
+      renderModelPicks();
+      return;
+    }
     var b = e.target.closest("[data-ep]");
     if (!b) return;
     var a = b.getAttribute("data-ep"), id = b.getAttribute("data-id");
@@ -6862,6 +6948,11 @@ function _sbRun() {
     } else if (a === "models") {
       var mDraft = readEpForm();
       if (!mDraft) return;
+      // A fresh probe answers for the endpoint as it is NOW. Whatever the last
+      // one returned may have been for a different base URL entirely.
+      S.epModels = [];
+      S.epModelQ = null;
+      renderModelPicks();
       var hint = $("fModelHint");
       // Says what it is doing, because it is trying every id the gateway lists
       // and that takes a few seconds - silence would read as a hung button.
@@ -7123,6 +7214,11 @@ function _sbRun() {
         break;
 
       case "modelsListed": {
+        // Kept, so the list survives a re-render of the form and can be
+        // filtered as the field is typed into.
+        S.epModels = m.error ? [] : (m.models || []);
+        // A fresh answer is shown whole. See renderModelPicks.
+        S.epModelQ = null;
         var dl = $("fModelList");
         var mh = $("fModelHint");
         var lb = document.querySelector('[data-ep="models"]');
@@ -7155,6 +7251,7 @@ function _sbRun() {
             mh.removeAttribute("data-err");
           }
         }
+        renderModelPicks();
         break;
       }
 

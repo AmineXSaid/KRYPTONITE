@@ -428,19 +428,23 @@ function contrast(a, b) {
       if (cur.trim()) out.push(cur.trim());
       return out;
     };
-    const [entrance, steady] = [phases(anim.name), phases(anim.count)];
-    ok("it runs two animations: an entrance and the turn it settles into",
-      entrance.length === 2, anim.name);
-    ok("the entrance runs exactly once", steady[0] === "1", anim.count);
-    ok("and the turn behind it never stops", steady[1] === "infinite", anim.count);
+    /* ONE ANIMATION, AND IT ENDS.
+     *
+     * A steady 6s turn used to run behind the entrance for ever. The argument
+     * was that the two other g-sweep users - the streaming notch at 1.4s and
+     * the working-conversation mark at 2.4s - mean "something is happening",
+     * and a quarter of their speed reads as idle instead. It does not: motion
+     * is the signal, and its rate is a detail nobody measures against a mark
+     * they are not already watching. An idle panel looked like a busy one and
+     * spent a compositor frame every 16ms saying so. */
+    const [entrance, counts] = [phases(anim.name), phases(anim.count)];
+    ok("it runs one animation: the arrival", entrance.length === 1, anim.name);
+    ok("and it runs exactly once", counts[0] === "1", anim.count);
+    ok("with nothing left running behind it",
+      !/infinite/.test(anim.count), anim.count);
     const timings = phases(anim.timing);
     ok("the entrance is eased, which is what makes it decelerate",
       /cubic-bezier/.test(timings[0] || ""), anim.timing);
-    // Linear, still, and for the reason it always was: a curve on an infinite
-    // rotation stutters at the wrap where one turn meets the next.
-    ok("while the turn it settles into stays linear", timings[1] === "linear", anim.timing);
-    const durs = phases(anim.duration || "");
-    ok("and that turn is the slow 6s one", durs[1] === "6s", anim.duration);
 
     // The computed style only says an animation was DECLARED. Whether the mark
     // moves is a question about pixels, and it is the question the owner asked.
@@ -450,11 +454,17 @@ function contrast(a, b) {
     const shot = async () =>
       (await page.screenshot({ clip: box, animations: "allow" })).toString("base64");
     const a = await shot();
-    await page.waitForTimeout(700); // 42 degrees of a 6s turn
+    await page.waitForTimeout(180);
     const b = await shot();
+    ok("and the painted mark actually moves while it arrives", a !== b,
+      "two frames 180ms apart, inside the 1000ms entrance");
+    // And then stops, which is the whole point of the change.
+    await page.waitForTimeout(1200);
+    const settled1 = await shot();
     await page.waitForTimeout(700);
-    const c = await shot();
-    ok("and the painted mark actually moves", a !== b && b !== c, "sampled 3 frames 700ms apart");
+    const settled2 = await shot();
+    ok("then stops, instead of turning for ever", settled1 === settled2,
+      "two frames 700ms apart, after the entrance");
 
     // Same page, motion off: the pixels must settle.
     await ctx.close();
@@ -868,22 +878,18 @@ function contrast(a, b) {
         Math.abs(landed % 360) < 6 || Math.abs((landed % 360) - 360) < 6,
         `${landed.toFixed(1)}deg after the entrance`);
 
-      // Rate continuity, the other half. The entrance's last measured speed
-      // has to be near the steady turn's 60deg/s, or the mark stops dead and
-      // starts again.
-      const tail = vel(930);
-      const steady = vel(1600);
-      ok("and hands off at close to the steady rate",
-        Math.abs(tail - 60) < 45, `tail ${Math.round(tail)}deg/s vs steady 60`);
-      ok("the steady turn afterwards is the 6s one, forwards",
-        steady > 40 && steady < 80, `${Math.round(steady)}deg/s`);
+      // It comes to REST now rather than handing off, so what has to be true
+      // at the end is that nothing is still moving.
+      const after = vel(1600);
+      ok("and it is at rest a second after landing",
+        Math.abs(after) < 4, `${Math.round(after)}deg/s at 1600ms`);
 
-      // It is an ENTRANCE: it has to be much faster than what it settles into,
-      // or there is no transition to see.
+      // It is an ENTRANCE: it has to decelerate, or it stops dead.
       let peak = 0;
       for (let ms = 50; ms < 500; ms += 25) peak = Math.max(peak, vel(ms));
-      ok("the entrance is much faster than the turn it settles into",
-        peak > 8 * steady, `peak ${Math.round(peak)}deg/s vs steady ${Math.round(steady)}`);
+      const tail = vel(930);
+      ok("the entrance decelerates into its landing",
+        peak > 4 * Math.max(tail, 1), `peak ${Math.round(peak)}deg/s vs tail ${Math.round(tail)}`);
 
       // And not SO fast that it aliases. The bezel repeats every 90deg, so a
       // frame that advances it more than 45 reverses its apparent direction -

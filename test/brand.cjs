@@ -106,75 +106,66 @@ console.log("\n──── and it is the same mark as everywhere else ───
   ok("the light cut draws a dark ring", light.includes("#424242"));
 }
 
-console.log("\n──── the welcome mark rotates ────");
+console.log("\n──── the welcome mark turns once, and stops ────");
 {
-  // Matches `.welcome .crystal { ... }` and reads the animation shorthand.
+  /* THE STEADY TURN IS GONE, AND THAT IS THE POINT OF THIS BLOCK.
+   *
+   * A 6s rotation used to run behind the entrance for ever. The case for it
+   * was that the two other g-sweep users are STATUS - the streaming notch at
+   * 1.4s, the working-conversation mark at 2.4s - and a quarter of their
+   * speed reads as idle rather than busy.
+   *
+   * It does not. Motion is the signal; its rate is a detail nobody measures
+   * against a mark they were not already watching. An idle panel looked like
+   * a working one, and paid a compositor frame every 16ms to say so. The
+   * owner asked for one rotation. This is one rotation. */
   const rule = /\.welcome\s+\.crystal\s*\{([^}]*)\}/.exec(CSS);
-  ok("the welcome mark carries an animation rule", !!rule);
+  ok("the resting mark has a rule", !!rule);
   const decl = rule ? rule[1] : "";
 
-  ok("it is the shared 360 sweep", /animation:\s*g-sweep/.test(decl), decl.trim());
-  ok("and it never stops", /\binfinite\b/.test(decl), decl.trim());
-  // An eased infinite rotation stutters at the wrap, where the end of one turn
-  // meets the start of the next at a different rate.
-  ok("linear, so the wrap does not stutter", /\blinear\b/.test(decl), decl.trim());
-  ok("about its own centre", /transform-origin:\s*50%\s*50%/.test(decl));
-
-  const dur = /animation:\s*g-sweep\s+([\d.]+)s/.exec(decl);
-  ok("it declares a duration", !!dur, decl.trim());
-  // The other two g-sweep users mean "work is in flight" (1.4s streaming notch,
-  // 2.4s working conversation). An idle logo turning at their rate reads as a
-  // turn running on a panel where nothing is happening.
-  ok("slower than either status sweep, so an idle logo does not read as work",
-    !!dur && parseFloat(dur[1]) > 2.4, dur && dur[1] + "s");
-
-  ok("the keyframe it names is defined", /@keyframes\s+g-sweep/.test(CSS));
+  ok("and it declares no animation of its own",
+    !/animation:/.test(decl), decl.trim());
+  ok("nothing on it runs for ever", !/\binfinite\b/.test(decl), decl.trim());
+  ok("but it still turns about its own centre",
+    /transform-origin:\s*50%\s*50%/.test(decl));
 }
 
-console.log("\n──── and it arrives spinning before it settles into that ────");
+console.log("\n──── it arrives spinning, on a deliberate arrival only ────");
 {
-  // The steady turn above is what the mark settles INTO. The entrance is a
-  // second rule, and the two numbers that make the handoff invisible are
-  // asserted here as source text; test/render.cjs measures the motion itself.
+  // One animation now, on its own class. test/render.cjs measures the motion;
+  // this pins the source text.
   const rule = /\.welcome\s+\.crystal\.spin-in\s*\{([^}]*)\}/.exec(CSS);
   ok("the entrance is its own rule, on its own class", !!rule);
   const decl = rule ? rule[1] : "";
 
-  ok("it runs the entrance and the steady turn together",
-    /g-spin-in/.test(decl) && /g-turn/.test(decl), decl.trim());
-  ok("and eases the entrance, which is what makes it decelerate",
+  ok("it runs the entrance", /g-spin-in/.test(decl), decl.trim());
+  ok("and nothing behind it", !/g-turn/.test(decl) && !/g-sweep/.test(decl), decl.trim());
+  ok("exactly once, not for ever", !/\binfinite\b/.test(decl), decl.trim());
+  ok("and eases it, which is what makes it decelerate",
     /cubic-bezier/.test(decl), decl.trim());
 
-  // POSITION. The entrance has to end on a whole number of turns or the
-  // handoff to the steady turn is a visible jump.
-  // The block, then the `to` inside it. A single `[^}]*` cannot reach past the
-  // brace that closes `from`, which is why this is two steps.
+  // It still has to land square. Nothing hands off from it any more, but the
+  // mark comes to REST at this angle, and a bezel resting off-square looks
+  // like a rendering fault rather than a logo.
   const spinKf = /@keyframes\s+g-spin-in\s*\{([\s\S]*?)\n\}/.exec(CSS);
   const to = spinKf && /to\s*\{\s*transform:\s*rotate\((\d+)deg\)/.exec(spinKf[1]);
   ok("the entrance names a final angle", !!to, to && to[1]);
-  ok("and it is a whole number of turns, so the handoff cannot jump",
+  ok("and it is a whole number of turns, so the mark rests square",
     !!to && Number(to[1]) % 360 === 0, to && to[1] + "deg");
 
-  // TIMING. The steady turn's delay has to equal the entrance's duration, or
-  // the two overlap and fight for the same property.
-  const dur = /g-spin-in\s+(\d+)ms/.exec(decl);
-  const delay = /g-turn\s+[\ds.]+\s+linear\s+(\d+)ms/.exec(decl);
-  ok("the steady turn waits exactly as long as the entrance runs",
-    !!dur && !!delay && dur[1] === delay[1],
-    `entrance ${dur && dur[1]}ms, delay ${delay && delay[1]}ms`);
   // "kinda fast", as the brief put it. A logo entrance that outstays a second
   // and a half is a loading screen.
+  const dur = /g-spin-in\s+(\d+)ms/.exec(decl);
   ok("and the whole entrance is over quickly",
     !!dur && Number(dur[1]) <= 1200, dur && dur[1] + "ms");
 
-  // g-turn, not g-sweep. `g-sweep` declares only `to`, so layered behind a
-  // filled entrance its implicit start resolves to the entrance's final angle
-  // and the mark rotates BACKWARDS. It did.
-  const turn = /@keyframes\s+g-turn\s*\{([^}]*)\}/.exec(CSS);
-  ok("the steady keyframe is defined", !!turn);
-  ok("with an explicit start, so it cannot inherit the entrance's angle",
-    !!turn && /from\s*\{\s*transform:\s*rotate\(0deg\)/.test(turn[1]),
-    turn && turn[1].trim());
+  // The steady turn's keyframes went with it. An unused @keyframes is dead
+  // weight, and this one carried a trap: `g-sweep` declares only `to`, so
+  // layered behind a filled entrance its implicit start resolved to the
+  // entrance's final angle and the mark rotated BACKWARDS. It did. The lesson
+  // stays as a comment in the stylesheet; the keyframes do not.
+  ok("and the steady turn's keyframes are gone with it",
+    !/@keyframes\s+g-turn\b/.test(CSS));
 }
 
 console.log("\n──── and the one-shot it replaced is gone, not merely unused ────");

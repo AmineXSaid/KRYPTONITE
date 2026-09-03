@@ -559,22 +559,29 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
  * `both` on the entrance so the mark is at 0deg before it starts rather than
  * flashing at its resting angle for a frame. */
 .welcome .crystal {
-  /* Left-aligned, as the design draws it, and not only for fidelity:
-     everything below the intro is a list of rows, and a centred mark above a
-     left-aligned list gives the column two different axes. One edge, top to
-     bottom. */
+  /* Centred, with the wordmark and the intro above the lists. Left-aligned it
+     sat against the panel's edge with the whole width empty beside it, and a
+     greeting is the one screen with nothing to line up against. */
   opacity: .9;
   margin-bottom: 18px;
   transform-origin: 50% 50%;
-  animation: g-sweep 6s linear infinite;
 }
-/* Only a deliberate arrival at the welcome screen spins. See `renderWelcome`
-   in sidebar.js: a re-render caused by the session list changing under the
-   panel must not re-throw the logo across the screen. */
+/* IT TURNS ONCE, AND STOPS. THAT IS THE WHOLE OF IT.
+ *
+ * A steady 6s turn used to run behind the entrance, for ever, on every
+ * welcome screen. The argument for it was that the two other g-sweep users -
+ * the streaming notch at 1.4s and the working-conversation mark at 2.4s -
+ * mean "something is happening right now", and that a quarter of their speed
+ * reads as idle instead. It does not. Motion is the signal; its rate is a
+ * detail nobody measures against a mark they are not already watching, so an
+ * idle panel spent the whole time looking like a busy one - and spent a
+ * compositor frame every 16ms saying so.
+ *
+ * Only a deliberate arrival spins. See `renderWelcome` in sidebar.js: a
+ * re-render caused by the session list changing under the panel must not
+ * re-throw the logo across the screen. */
 .welcome .crystal.spin-in {
-  animation:
-    g-spin-in 1000ms cubic-bezier(.15, .45, .4, .985) both,
-    g-turn 6s linear 1000ms infinite;
+  animation: g-spin-in 1000ms cubic-bezier(.15, .45, .4, .985) both;
 }
 /* TWO turns, not three, and the ceiling is the MARK's own symmetry.
  *
@@ -593,19 +600,15 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   from { transform: rotate(0deg); }
   to   { transform: rotate(720deg); }
 }
-/* `g-turn` and not `g-sweep`, and the difference is one word: `from`.
- *
- * `g-sweep` declares only `to`, so its start is the element's UNDERLYING
- * value - which here is the entrance's `both` fill, holding 1080deg. The
- * steady turn therefore ran 1080deg to 360deg: the mark handed off and
- * immediately began rotating BACKWARDS at 120deg/s, for six seconds, forever.
- * It is a real thing that happened and it is invisible to reading the CSS,
- * because both keyframe sets look correct on their own. An explicit `from`
- * is what makes the second animation independent of the first. */
-@keyframes g-turn {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
-}
+/* `g-turn` lived here: an explicit 0-to-360, written because the steady turn
+   that used to run behind the entrance had to declare its own `from`. Layered
+   on `g-sweep`, which declares only `to`, its start resolved to the entrance's
+   filled angle and the mark handed off into rotating BACKWARDS at 120deg/s,
+   for ever. Both keyframe sets read as correct alone; only the composition was
+   wrong, and only a measurement could see it.
+
+   The steady turn is gone, so its keyframes are too - but the trap is not, and
+   any future animation layered on a filled one has to declare `from`. */
 /* Motion off: no turn, and no arrival either. The mark is simply there, which
    is all it has to be - and a fast spin is the one thing a reduced-motion
    setting is most clearly asking not to see. */
@@ -2715,6 +2718,39 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   font-size: 11px; color: var(--kx-fg-3); line-height: 1.4;
 }
 .f-hint[data-err="1"] { color: var(--kx-warn); }
+
+/* ── the models the gateway answered for ──
+   Load probes every id the gateway lists, which takes seconds, and the ids
+   used to land in a <datalist> and nowhere else. A datalist has no affordance
+   of its own - no arrow, no button - and inside a VS Code webview no reliable
+   popup either, so the whole result of that wait was invisible and the hint
+   below it said "start typing to filter" a list nobody could see.
+
+   These are the same ids as rows. The datalist stays for completion; this is
+   the part you can look at. */
+.mdl-picks {
+  min-width: 0; margin-top: 5px;
+  max-height: 168px; overflow-y: auto;
+  border: 1px solid var(--kx-line); border-radius: 4px;
+  background: var(--kx-surface-2);
+}
+.mdl-pick {
+  display: flex; align-items: center; gap: 7px;
+  width: 100%; padding: 5px 9px;
+  background: none; border: none; text-align: left;
+  font-family: var(--kx-mono); font-size: 11px; color: var(--kx-fg-2);
+}
+.mdl-pick + .mdl-pick { border-top: 1px solid var(--kx-hairline); }
+.mdl-pick:hover { background: var(--kx-hover); color: var(--kx-fg); }
+.mdl-pick[data-on="1"] { color: var(--kx-fg); }
+.mdl-pick[data-on="1"] svg { color: var(--kx-accent); flex: none; }
+/* The tick's slot, held open on every row so the ids line up whether or not
+   one of them is the chosen one. */
+.mdl-pick-gap { width: 13px; flex: none; }
+.mdl-pick-empty {
+  padding: 7px 9px; font-size: 11px; color: var(--kx-fg-3);
+}
+
 /* ── the waiting mark ──────────────────────────────────────────────────────
    One arc travelling one faint track, in the panel's own vocabulary - the
    same figure `liveMark` draws for a background conversation. It replaced
