@@ -2080,6 +2080,19 @@ function _sbRun() {
     var name = S.activeAgent || "";
     var nm = $("agentName");
     if (nm) nm.textContent = name;
+    /* HOW WIDE THIS NAME ACTUALLY IS, for the pill to open to.
+       The label is clamped to max-width 0 while no agent is set, so its own
+       `scrollWidth` is the only place its natural width survives; CSS cannot
+       reach it. Without this the pill animates towards the 118px cap and stops
+       dead as soon as it passes the text, spending most of the transition
+       standing still. Capped at the same 118 so a long name still truncates,
+       and left at the CSS fallback if the measure comes back 0 - which it does
+       while the panel is still display:none behind another tab. */
+    if (nm) {
+      var w = nm.scrollWidth;
+      if (w > 0) btn.style.setProperty("--agent-nm-w", Math.min(w, 118) + "px");
+      else btn.style.removeProperty("--agent-nm-w");
+    }
     // Drives the dimmed resting state in CSS, the way permBtn's data-mode does.
     btn.setAttribute("data-on", name ? "1" : "0");
     btn.setAttribute("aria-label", name ? "Agent: " + name + ", in this chat" : "Choose an agent for this chat");

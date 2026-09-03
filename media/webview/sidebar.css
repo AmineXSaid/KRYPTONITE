@@ -2434,26 +2434,72 @@ ul.md-l li.md-task, ol.md-l li.md-task {
  * agent IS SET, not whether a sheet is open. Purple is the colour agents are
  * everywhere else in the panel.
  */
-.agent-btn .nm { display: none; }
+/* ── IT OPENS, IT DOES NOT APPEAR ──────────────────────────────────────────
+ * Picking an agent widens this button from the 30px plate it shares with
+ * attach and send into a labelled pill, and the growth is animated, because a
+ * control that changes size between two frames reads as the row re-flowing
+ * rather than as this button becoming something.
+ *
+ * THE GROWTH IS ON THE LABEL'S max-width, NOT THE BUTTON'S width, and that is
+ * the whole trick. `width: auto` has no interpolable value in the Chromium
+ * these webviews run - `interpolate-size` is far newer than the Electron this
+ * has to survive on, the same reason `color-mix` needs its @supports fallback
+ * below - so a width transition would silently snap. A max-width from 0 to a
+ * cap animates everywhere, and because it is a MAX the label's own text still
+ * decides the final width: the pill opens to the name it has, not to 118px.
+ *
+ * Two things therefore never toggle, since neither `display` nor a `gap` can
+ * be animated: the button is always a flex row (centred, so the lone glyph
+ * still sits dead centre at 30px), and the label is always `display: block`,
+ * held at zero width with overflow hidden when there is no agent. The label's
+ * space comes from its own margin-left rather than the row's gap for the same
+ * reason - a margin interpolates, a gap does not.
+ */
+.agent-btn {
+  width: auto; min-width: 30px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .14s ease, color .14s ease, border-color .14s ease,
+              transform .09s ease, padding .26s cubic-bezier(.16, 1, .3, 1);
+}
+.agent-btn .nm {
+  display: block; max-width: 0; opacity: 0; margin-left: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase;
+  /* Closing: the word goes first and quickly, then the box shuts behind it. */
+  transition: max-width .26s cubic-bezier(.22, .8, .28, 1),
+              margin-left .26s cubic-bezier(.22, .8, .28, 1),
+              opacity .1s ease;
+}
 .agent-btn .ic-13 { color: currentColor; flex: none; }
 .agent-btn:hover { background: var(--kx-hover); color: var(--kx-fg); }
 .agent-btn[data-on="1"] {
   color: var(--kx-agent); border-color: color-mix(in srgb, var(--kx-agent) 38%, transparent);
   background: color-mix(in srgb, var(--kx-agent) 12%, transparent);
-  /* `.tb-btn` is a fixed 30px grid cell; a labelled pill is an auto-width row.
-     min-width keeps it on the same 30px module as attach and send when the name
-     is very short. */
-  width: auto; min-width: 30px; padding: 0 9px 0 8px;
-  display: flex; align-items: center; gap: 5px;
+  padding: 0 9px 0 8px;
 }
+/* THE TARGET IS THE NAME'S OWN WIDTH, measured in renderAgentBtn and handed
+   over as --agent-nm-w; 118px is only the fallback and the truncation cap.
+   That precision is what makes the movement readable rather than a flicker: a
+   fixed 118px cap animates 0 -> 118 while a 13-character name only occupies
+   ~84 of it, so the pill reached its full size a fifth of the way into the
+   transition and stood still for the rest. Measured, every millisecond of the
+   duration is spent actually moving. */
 .agent-btn[data-on="1"] .nm {
-  display: block; max-width: 118px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
-  letter-spacing: .1em; text-transform: uppercase;
+  max-width: var(--agent-nm-w, 118px); opacity: 1; margin-left: 5px;
+  /* Opening: the box leads and the word fades in just behind it, so the name
+     arrives into space that is already there instead of pushing it open. */
+  transition: max-width .26s cubic-bezier(.22, .8, .28, 1),
+              margin-left .26s cubic-bezier(.22, .8, .28, 1),
+              opacity .16s ease .08s;
 }
 @supports not (color: color-mix(in srgb, red 10%, transparent)) {
   .agent-btn[data-on="1"] { color: var(--kx-agent); }
+}
+/* Motion off: the pill still opens - the size change is information, not
+   decoration - it simply arrives already open. */
+@media (prefers-reduced-motion: reduce) {
+  .agent-btn, .agent-btn .nm, .agent-btn[data-on="1"] .nm { transition: none; }
 }
 /* Below this the control row cannot hold a fifth label, so the name sheds the
    way `.perm-btn`'s does and the glyph carries the state alone - the tooltip
@@ -2461,10 +2507,8 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    the old bar genuinely did more, and the row staying on one line is worth
    more than the name at a dock this narrow. */
 @media (max-width: 400px) {
-  .agent-btn[data-on="1"] {
-    width: 30px; min-width: 0; padding: 0; display: grid; place-items: center;
-  }
-  .agent-btn[data-on="1"] .nm { display: none; }
+  .agent-btn[data-on="1"] { padding: 0; }
+  .agent-btn[data-on="1"] .nm { max-width: 0; opacity: 0; margin-left: 0; }
 }
 .perm-btn .nm { display: none; }
 .perm-btn .ic-13 { color: currentColor; flex: none; }
