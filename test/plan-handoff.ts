@@ -121,6 +121,18 @@ async function main() {
     ck(/Do NOT write the implementation/.test(PLAN_ADDENDUM),
       "and still refuses to let Plan write the code");
 
+    // Asking for specificity has a failure mode of its own, and it showed up the
+    // first time this prompt was exercised: the plan cited a real file and a
+    // real symbol at a line number carried over from earlier in the session,
+    // which the file had long since moved past. A wrong line reads as though it
+    // was checked, so it is worse than no line at all.
+    ck(/BY NAME/.test(PLAN_ADDENDUM),
+      "it asks for code to be named, not just located");
+    ck(/survives edits that a line number does not/.test(PLAN_ADDENDUM),
+      "and says why a name beats a line number");
+    ck(/read this turn/.test(PLAN_ADDENDUM),
+      "a line number is allowed only for a line actually read this turn");
+
     // Every tool the addendum tells the model to use has to actually be offered
     // in this phase, or the instruction is a promise the tool gate breaks.
     for (const t of ["read_file", "list_files", "glob", "search", "read_skill"]) {

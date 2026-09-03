@@ -23,6 +23,17 @@
   untouched. Greenfield work keeps the same shape: name what will exist rather
   than which file changes.
 
+- **A plan cites code by name, not by line number.** Exercising the rewritten
+  prompt turned up the failure mode that asking for specificity introduces:
+  the plan named a real file and a real function at a line number carried over
+  from earlier in the session, which the file had long since moved past. Three
+  of its citations were stale that way, because the file shifted while the
+  session was editing it. A wrong line is worse than no line - it reads as
+  though it was checked, and a citation-resolution check passes it, since a
+  number always resolves to *some* line. The prompt now asks for the symbol
+  (`sendText` in `src/thing.ts`), which survives edits, and permits a line
+  number only for a line read in that same turn.
+
 - **Approving points Act at the plan, not just its steps.** The steps are the
   order; the plan above them is the detail. Act is now told to follow the files
   it named, the code it said to reuse and the verification it described, rather
