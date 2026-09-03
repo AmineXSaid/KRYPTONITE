@@ -2354,7 +2354,15 @@ export function approvalMessage(steps: string[]): string {
     "",
     list,
     "",
-    "These are already on the todo list; call update_todos to mark progress as you go.",
+    // The steps are the ORDER; the plan above them is the DETAIL. Plan mode
+    // researches the workspace and names files, the code to reuse and how to
+    // check the work - all of which is in the reply this approves, and none of
+    // which survives being compressed into a step. Pointing at it costs a line
+    // and stops Act rediscovering what was already looked up.
+    "Follow the plan above for the detail - the files it named, the existing code it " +
+      "said to reuse, and how it said to verify the work. Do not re-derive it.",
+    "",
+    "These steps are already on the todo list; call update_todos to mark progress as you go.",
   ].join("\n");
 }
 

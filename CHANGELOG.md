@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Changed
+- **Plan mode researches the code and names it.** Plan had been told it was
+  "a product designer, not an implementer", with a hard ban on naming a file,
+  a schema or a command. That was a correction to an earlier failure - Plan as
+  a dry-run of Act, writing implementations in prose - and it overshot. What
+  came back was outcomes and nothing to act on: "Ship the capture screen with
+  a live packet list" is a fine sentence that says nothing about where the
+  change goes, what already exists to reuse, or how anyone would know it
+  worked. Approving it approved a vision, and Act re-derived the plan.
+
+  The line between the two jobs is not design versus engineering, it is
+  **naming versus writing**. `PLAN_ADDENDUM` now asks for the research first -
+  `read_file`, `search` and `glob` have been in this phase's tool set the whole
+  time, unused because nothing asked for them - and then for a plan with
+  context, the files and functions the work lands in, the existing code to
+  reuse with its paths, the recommended approach, risks, and how to verify it.
+  The ban on writing the implementation body stays exactly where it was, and
+  the fenced `plan` block is unchanged, so the card and the todo seeding are
+  untouched. Greenfield work keeps the same shape: name what will exist rather
+  than which file changes.
+
+- **Approving points Act at the plan, not just its steps.** The steps are the
+  order; the plan above them is the detail. Act is now told to follow the files
+  it named, the code it said to reuse and the verification it described, rather
+  than re-deriving what Plan already looked up.
+
 ### Added
 - **An approved plan now becomes the todo list.** The plan card has always
   parsed the fenced `plan` block into steps, and `update_todos` has always

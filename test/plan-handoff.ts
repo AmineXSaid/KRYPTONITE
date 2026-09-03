@@ -24,6 +24,7 @@ import * as path from "node:path";
 import { App } from "../src/core/app";
 import { reset, makeContext } from "./vscode-stub";
 import { approvalMessage, extractPlan } from "../src/ui/session";
+import { PLAN_ADDENDUM, READ_ONLY } from "../src/agent/loop";
 import type { OutboundMessage } from "../src/ui/protocol";
 
 let pass = 0;
@@ -101,6 +102,34 @@ async function main() {
     );
     ck(/1\. Ship/.test(text) && /2\. Add/.test(text), "the steps are numbered");
     ck(text.includes("update_todos"), "Act is told to mark progress on the list");
+  }
+
+  console.log("──── what Plan mode is asked for ────");
+  {
+    // Plan mode has been wrong in both directions: once a dry-run of Act that
+    // wrote implementations in prose, then a product mode banned from naming a
+    // file at all, which produced plans Act could not act on. These pin the
+    // position between them, because it is one prompt edit away from either.
+    ck(/read_file|search|glob/.test(PLAN_ADDENDUM),
+      "it names the read tools, so a plan is researched rather than guessed");
+    ck(/reuse/i.test(PLAN_ADDENDUM),
+      "it asks what existing code to reuse");
+    ck(/files and functions|which file/i.test(PLAN_ADDENDUM),
+      "it asks the plan to name files and functions");
+    ck(/[Vv]erification|knows it worked/.test(PLAN_ADDENDUM),
+      "it asks how the work gets verified");
+    ck(/Do NOT write the implementation/.test(PLAN_ADDENDUM),
+      "and still refuses to let Plan write the code");
+
+    // Every tool the addendum tells the model to use has to actually be offered
+    // in this phase, or the instruction is a promise the tool gate breaks.
+    for (const t of ["read_file", "list_files", "glob", "search", "read_skill"]) {
+      ck(READ_ONLY.has(t), `plan phase really offers ${t}`);
+    }
+
+    ck(/```plan/.test(PLAN_ADDENDUM), "the fenced block contract survives the rewrite");
+    const demo = extractPlan(PLAN_ADDENDUM.slice(PLAN_ADDENDUM.indexOf("```plan")));
+    ck(demo.steps.length === 2, "and its own example parses", demo.steps.join("|"));
   }
 
   console.log("──── extractPlan, the contract this all rests on ────");

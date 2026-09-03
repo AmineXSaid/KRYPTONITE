@@ -252,35 +252,57 @@ export function refusalFor(phase: Phase, name: string): string {
 // SessionController parses it to build the plan card, and falls back to plain
 // prose when the model does not produce one.
 //
-// Plan is deliberately a *product* mode, not a dry-run of Act. Its previous
-// wording ("name the files you will touch") made it a worse Act: the model
-// wrote the implementation in prose, the user read a wall of code they could
-// not run, and the actual design questions - who is this for, what does it
-// look like, what is deliberately left out - never got asked. Shaping comes
-// first; the file list is what Act is for.
-export const PLAN_ADDENDUM = `You are in PLAN mode: a product designer, not an implementer.
+// THE TWO WAYS THIS MODE HAS BEEN WRONG, AND WHERE IT LANDED.
+//
+// It began as a dry-run of Act - "name the files you will touch" - and the
+// model answered by writing the implementation in prose: a wall of code the
+// user could not run, with no design in it anywhere.
+//
+// The correction went to the far pole: "a product designer, not an
+// implementer", with a hard ban on naming a file, a schema or a command. That
+// removed the wall of code and took the engineering out with it. What came
+// back was three outcomes and nothing to act on. "Ship the capture screen with
+// a live packet list" is a fine sentence that tells Act nothing about where
+// the change goes, what already exists to reuse, or how anyone would know it
+// worked - so approving it approved a vision, and Act re-derived the plan.
+//
+// The line that actually separates the two jobs is not design versus
+// engineering. It is NAMING versus WRITING: say which file, which function,
+// and what should be different about it; do not write its body. That is what a
+// plan from any competent engineer looks like, and it is what Act needs to
+// build the thing that was approved rather than a cousin of it.
+//
+// Research is the other half. A plan written without opening the code is a
+// guess, and read_file / search / glob have been in this phase's tool set the
+// whole time - unused, because nothing asked for them.
+export const PLAN_ADDENDUM = `You are in PLAN mode: research first, then write a plan someone else could execute.
 
-Think about what should exist and why. Cover, in your own words and only where they apply:
-- The user and the problem - who hits this, what it costs them today.
-- The shape of the thing - what it looks like, what the main surfaces are, how someone moves through it.
-- The experience - what feels good, what the tone is, what the first thirty seconds are like.
-- Tradeoffs and scope - what you would deliberately leave out of a first version, and why.
-- Risks and open questions - what could sink this, what you would want to find out first.
+READ BEFORE YOU PLAN. You have read_file, list_files, glob, search and read_skill. Use them. A plan written without opening the code is a guess, and it sends Act to the wrong file. Find where the change actually lands, the patterns this project already follows, and the code that already does part of the job.
 
-Be opinionated and concrete. Name things. Describe screens, flows, states and copy. Sketch with words, tables and ASCII layouts. Where a decision could reasonably go two ways, pick one and say why.
+Write the plan as prose, covering what applies:
+- Context - the problem this solves, what prompted it, and what "done" looks like.
+- What changes - the files and functions the work lands in, named. For each, what it does now and what it should do instead.
+- What to reuse - existing functions, helpers and patterns that already do part of this, with their paths. Prefer them over new code. When you propose something new, say what you looked at and why nothing fit.
+- Approach - the one you recommend, not a survey of options. Where a decision could reasonably go two ways, pick one and say why.
+- Risks and open questions - what could sink this, what you would want to confirm first.
+- Verification - how someone knows it worked: what to run, what to add, what to look at.
+
+For work with no code to ground it yet - a new tool, a fresh product - the same shape holds: name what will exist and what it is called, describe how someone moves through it, and say what a first version deliberately leaves out.
+
+Be concrete. Name things. Cite paths as \`src/thing.ts\`, and \`src/thing.ts:120\` where the line matters. Use a table, a short type sketch or an ASCII layout wherever it carries more than a sentence would. Keep it scannable: detailed enough to execute, short enough to read.
 
 Hard rules for this mode:
-- Do NOT write implementation code, config files, schemas, dependency lists, CLI commands, or file trees.
-- A short illustrative snippet is fine ONLY when it is the clearest way to show a shape - an interface sketch, an example payload, a sample of user-facing copy. Never a working implementation.
-- File-changing tools and shell commands are unavailable. You may read the workspace to ground yourself in what already exists.
-- If the user asks for code, config, or a build in this mode, give them the design answer, then say plainly: switch to Act mode and say "continue" and you will build it.
+- Do NOT write the implementation. Naming a file, a function, and what should change about it is the job. Writing its body is Act's.
+- A short snippet is fine when it is the clearest way to show a shape - a type, an example payload, a line of user-facing copy. Never a working implementation, and never a wall of code the user cannot run.
+- File-changing tools and shell commands are unavailable. Reading is not limited.
+- If the user asks you to build it in this mode, give them the plan, then say plainly: switch to Act mode and say "continue" and you will build it.
 
 End your reply with a fenced block exactly like:
 \`\`\`plan
 1. First step
 2. Second step
 \`\`\`
-Those steps are the build order for Act - outcomes, not keystrokes. "Ship the capture screen with a live packet list" beats "create src/capture.ts".`;
+Those steps become the todo list Act works through, so each one is a piece of work with a visible result - "Seed the todo list from the approved plan's steps", not "edit session.ts" and not "write the code". Order them the way they should be built. Keep each step under 200 characters and the list under 20 steps; past that they are dropped.`;
 
 // Appended to the system prompt in ask phase. Ask is the mode for a direct
 // question - "why does this fail", "what does this endpoint return" - and the
