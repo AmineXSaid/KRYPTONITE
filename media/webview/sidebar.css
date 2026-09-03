@@ -405,21 +405,55 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   letter-spacing: 0; color: var(--kx-error);
 }
 
+/* KEEP ALL FOUR TABS VISIBLE AS THE DOCK NARROWS.
+ *
+ * The tab strip shares the bar with the mark and the action buttons, so once
+ * the panel is narrow enough the four labels stop fitting and the last one
+ * ("Diagnostics") scroll-fades out. It never OVERLAPS the buttons - the strip
+ * is a flex:1 child that shrinks and scrolls inside its own track, so the
+ * buttons hold the right edge whatever it does - but a tab that fades away is
+ * a tab you cannot see.
+ *
+ * The generous spacing gives way before the labels do, in order: the 16px
+ * inter-tab gap first, then the bar's own gaps and the mark's divider padding,
+ * then the strip's inner padding. All four labels fully fit down to ~360px
+ * (the strip clipped "Diagnostics" at ~380px before this), and only start to
+ * fade past that - most of the last label is still legible near 300px. Below
+ * that the horizontal scroll with its edge fade is the graceful floor: the
+ * tabs are reached by scrolling the strip, never lost behind the buttons and
+ * never clipped mid-word without the fade to say so. */
+@media (max-width: 420px) {
+  .kx-tabs { gap: 10px; }
+  .kx-header { gap: 4px; }
+  .kx-mark { padding-right: 6px; }
+}
+@media (max-width: 340px) {
+  .kx-tabs { gap: 6px; padding: 0; }
+  .kx-header { padding-left: 8px; }
+}
+
 /* Shown for both read-only phases, Ask and Plan - hidden in Act, where
    nothing is withheld. Colour comes from data-phase rather than a default,
    so neither phase is "the" banner colour and the other an override. */
+/* Kept to a single short line, like the header and the tip strip: the padding
+   is trimmed, the label holds its line and the sentence beside it truncates
+   rather than wrapping to a second row that doubles the strip's height. */
 .phase-banner {
-  flex: none; display: flex; align-items: center; gap: 8px; padding: 7px 14px;
+  flex: none; display: flex; align-items: center; gap: 8px; padding: 4px 14px;
   background: var(--kx-surface);
   border-bottom: 1px solid var(--kx-line);
 }
 .phase-banner .dot { width: 6px; height: 6px; flex: none; border-radius: 50%; }
 .phase-banner .lbl {
+  flex: none; white-space: nowrap;
   font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
 }
 /* The banner takes the phase's own colour, so the strip and the segment that
    turned it on are visibly the same fact rather than two unrelated markers. */
-.phase-banner .sub { font-size: 11.5px; color: var(--kx-fg-2); }
+.phase-banner .sub {
+  min-width: 0; flex: 1; font-size: 11.5px; color: var(--kx-fg-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .phase-banner[data-phase="ask"] .dot { background: var(--kx-ask); }
 .phase-banner[data-phase="ask"] .lbl { color: var(--kx-ask); }
 .phase-banner[data-phase="plan"] .dot { background: var(--kx-phase-plan); }
