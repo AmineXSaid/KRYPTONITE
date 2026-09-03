@@ -1023,18 +1023,22 @@ function _sbRun() {
       CRYSTAL_DEFS + ICON_DEFS + '</defs></svg>' +
       '<div id="app">' +
         '<header class="kx-header">' +
-          crystal(24) +
-          // Static, always. This is the product's one wordmark; the duplicate
-          // that used to sit above it is VS Code's view header, blanked in
-          // package.json rather than competing with this.
-          '<span class="kx-wordmark">Genesis</span><span class="sp"></span>' +
-          // Context usage belongs up here, not in the footer: it is status, not
-          // a control, and moving it up shortens the composer.
-          // The meter lives here now. It used to sit in a strip under the
-          // composer next to the endpoint pill, which cost a row of vertical
-          // space on every panel for two facts that are status rather than
-          // controls - and vertical space in a 340px sidebar is the thing the
-          // conversation is short of.
+          // The brand mark, kept as the bar's one identity now that the
+          // "Genesis" wordmark text is gone. The wordmark still lives on the
+          // welcome screen (.w-mark); here the mark alone, plus the divider to
+          // its right, buys the row back for the tabs.
+          '<span class="kx-mark" aria-hidden="true">' + crystal(20) + '</span>' +
+          // The tabs move up into this bar, between the mark and the action
+          // buttons, so the panel spends one short row on what used to be a
+          // 40px header plus a separate 32px tab strip.
+          '<nav class="kx-tabs" role="tablist">' +
+            '<button class="kx-tab" id="tabSession" role="tab" aria-selected="true" tabindex="0" aria-label="Session" aria-controls="viewSession">Session</button>' +
+            '<button class="kx-tab" id="tabMcp" role="tab" aria-selected="false" tabindex="-1" aria-label="MCP" aria-controls="viewMcp">MCP<span class="tab-count" id="mcpCount" hidden></span></button>' +
+            '<button class="kx-tab" id="tabAgents" role="tab" aria-selected="false" tabindex="-1" aria-label="Agents" aria-controls="viewAgents">Agents<span class="tab-count" id="agentCount" hidden></span></button>' +
+            '<button class="kx-tab" id="tabDiag" role="tab" aria-selected="false" tabindex="-1" aria-label="Diagnostics" aria-controls="viewDiag">Diagnostics<span class="tab-count" id="tabCount" hidden></span></button>' +
+          '</nav>' +
+          // The action buttons sit at the end of the bar; the flex:1 tab strip
+          // above pushes them to the right edge.
           '<button class="icon-btn" id="newBtn" title="New chat" aria-label="New chat">' + icon("i-compose") + '</button>' +
           '<button class="icon-btn" id="histBtn" title="History" aria-label="Chat history" aria-haspopup="menu" aria-expanded="false">' + icon("i-history") + '</button>' +
           '<button class="icon-btn" id="moreBtn" title="More" aria-label="More actions" aria-haspopup="menu" aria-expanded="false">' + icon("i-kebab") + '</button>' +
@@ -1060,27 +1064,6 @@ function _sbRun() {
               '<span class="t">Author &amp; report an issue</span></button>' +
           '</div>' +
         '</header>' +
-        // Each tab carries an explicit aria-label so the accessible name stays
-        // the tab's name and nothing else. Three of the four append a count
-        // badge, and without a label the name reads "Diagnostics2".
-        //
-        // It was also load-bearing for a decorative "· " that CSS ::before put
-        // on every tab - generated content IS exposed in the accessibility
-        // tree, so the name read "· Session". That treatment is gone; the
-        // badge reason is the one that remains, and it is enough on its own.
-        '<nav class="kx-tabs" role="tablist">' +
-          '<button class="kx-tab" id="tabSession" role="tab" aria-selected="true" tabindex="0" aria-label="Session" aria-controls="viewSession">Session</button>' +
-          // MCP earns a tab now that it is real. 1a had a "SOON" placeholder,
-          // which the review deleted; 1b replaces it with the live surface.
-          '<button class="kx-tab" id="tabMcp" role="tab" aria-selected="false" tabindex="-1" aria-label="MCP" aria-controls="viewMcp">MCP<span class="tab-count" id="mcpCount" hidden></span></button>' +
-          // Agents sit after MCP because that is the order they are chosen in:
-          // a server has to be configured before an agent can be scoped to it.
-          // This was a collapsed section inside Diagnostics, which is where a
-          // thing goes when it is being inspected rather than used - and an
-          // agent is picked before a turn, not diagnosed after one.
-          '<button class="kx-tab" id="tabAgents" role="tab" aria-selected="false" tabindex="-1" aria-label="Agents" aria-controls="viewAgents">Agents<span class="tab-count" id="agentCount" hidden></span></button>' +
-          '<button class="kx-tab" id="tabDiag" role="tab" aria-selected="false" tabindex="-1" aria-label="Diagnostics" aria-controls="viewDiag">Diagnostics<span class="tab-count" id="tabCount" hidden></span></button>' +
-        '</nav>' +
         '<div class="phase-banner" id="phaseBanner" data-phase="plan" hidden>' +
           '<span class="dot"></span><span class="lbl" id="phaseBannerLbl">Plan phase</span>' +
           '<span class="sub" id="phaseBannerSub">reads and plans · no edits applied</span>' +
@@ -6369,10 +6352,15 @@ function _sbRun() {
       post("loadSession", { id: b.getAttribute("data-session") });
     });
     document.addEventListener("click", function (e) {
-      // The welcome screen's "All" opens the history popover, and it lives in
-      // the transcript rather than the header - without this exemption this
-      // closer fires on the same click and shuts it again.
-      if (!e.target.closest(".kx-header") && !e.target.closest('[data-act="history"]')) closePops();
+      // Keep the menu open only for clicks on its trigger buttons or inside
+      // the menu itself - not for the whole header, which now also holds the
+      // tabs: clicking a tab should dismiss an open menu, as it did when the
+      // tab strip was a separate element outside the header.
+      // The welcome screen's "All" opens the history popover from the
+      // transcript, so it is exempt too or this closer shuts it on the same
+      // click that opened it.
+      if (!e.target.closest("#histBtn") && !e.target.closest("#moreBtn") &&
+          !e.target.closest(".popover") && !e.target.closest('[data-act="history"]')) closePops();
       // The sheet covers the panel and handles its own backdrop click, so the
       // document-level closer must not also fire on it.
       if (!e.target.closest("#permBtn") && !e.target.closest("#permPop")) togglePerm(false);

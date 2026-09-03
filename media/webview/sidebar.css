@@ -148,14 +148,26 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 
 /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
+/* ONE BAR, NOT TWO. This used to be a 40px header (mark + "Genesis" wordmark
+   + action buttons) sitting above a separate 32px tab strip - 72px of chrome
+   before the transcript began. The two are merged: the mark, a divider, the
+   tabs and the action buttons now share this one 34px row, which is most of a
+   line of transcript handed back on every panel. */
 .kx-header {
-  height: 40px; flex: none; display: flex; align-items: center; gap: 9px;
-  padding: 0 10px 0 12px; position: relative;
+  height: 34px; flex: none; display: flex; align-items: center; gap: 6px;
+  padding: 0 6px 0 10px; position: relative;
   border-bottom: 1px solid var(--kx-line);
 }
+/* The brand mark stands in for the wordmark in the bar now the text is gone
+   (the wordmark still names the product on the welcome screen). The rule on
+   its right is the divider between it and the tab strip - drawn shorter than
+   the bar so it reads as a separator rather than a full-height wall. */
+.kx-mark {
+  flex: none; display: flex; align-items: center; color: var(--kx-fg);
+  height: 18px; padding-right: 8px; border-right: 1px solid var(--kx-line);
+}
 /* The wordmark: static, and the one place Michroma is allowed to speak.
-   VS Code's own view header above it is blanked in package.json, so this is the
-   only KRYPTONITE on screen.
+   Kept for the welcome screen's .w-mark, which shares this family and tracking.
    Michroma has a single weight, so `font-weight: 700` here would synthesise a
    bold the face does not have. The design sets it at 400 and lets the tracking
    do the work. */
@@ -170,7 +182,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 .icon-btn:hover { background: var(--kx-hover); color: var(--kx-fg); }
 
 .popover {
-  position: absolute; top: 38px; right: 10px; z-index: 60; padding: 4px;
+  position: absolute; top: 34px; right: 8px; z-index: 60; padding: 4px;
   /* It covers the tab strip and the transcript, so it cannot be a wash. */
   background: var(--kx-over);
   -webkit-backdrop-filter: blur(12px);
@@ -350,9 +362,15 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
  * fade is a mask rather than a gradient overlay so it works on any background
  * and costs no element. Scrollbar hidden - the fade is the affordance, and a
  * 10px bar under a 32px strip is most of the strip. */
+/* The strip now lives inside the header rather than under it, so it takes the
+   header's full height and grows to fill the space between the mark's divider
+   and the action buttons - which is what pushes those buttons to the right
+   edge. The border-bottom moved to the header; the scroll, the hidden bar and
+   the right-edge fade are unchanged, and the fade now falls just before the
+   action buttons when the tabs overflow. */
 .kx-tabs {
-  height: 32px; flex: none; display: flex; align-items: center; gap: 16px; padding: 0 14px;
-  border-bottom: 1px solid var(--kx-line);
+  flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; gap: 16px;
+  padding: 0 2px;
   overflow-x: auto; overflow-y: hidden;
   scrollbar-width: none;
   -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent);
@@ -362,8 +380,10 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 /* A tab must not shrink to fit; shrinking is what produced the clipped word
    the mask exists to explain. */
 .kx-tab { flex: none; }
+/* Full height so the active-tab underline sits on the bar's bottom edge, where
+   the header's border is. */
 .kx-tab {
-  height: 32px; display: flex; align-items: center; gap: 6px;
+  height: 100%; display: flex; align-items: center; gap: 6px;
   font-family: var(--kx-mono); font-size: 9px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
   color: var(--kx-fg-3);
 }
@@ -2241,10 +2261,14 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    Above the composer, below the transcript: the one place the eye already
    passes on its way to the input. Quiet enough to ignore on the hundredth
    read, legible enough to catch on the first. */
+/* Kept deliberately short vertically: it is a passing hint, not a paragraph,
+   so the padding and leading are trimmed and the message holds one line and
+   truncates rather than wrapping to a second - the refresh control rotates to
+   the next tip, so nothing is lost by not showing all of a long one at once. */
 .tipbar {
   display: flex; align-items: center; gap: 8px;
-  margin-bottom: 7px; padding: 6px 10px;
-  font-size: 11.5px; line-height: 1.45; color: var(--kx-fg-3);
+  margin-bottom: 6px; padding: 3px 10px;
+  font-size: 11.5px; line-height: 1.4; color: var(--kx-fg-3);
   background: var(--kx-hover);
   border: 1px solid var(--kx-hairline); border-radius: 4px;
 }
@@ -2255,7 +2279,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   letter-spacing: .1em; text-transform: uppercase;
   color: var(--kx-ask);
 }
-.tipbar .tip-t { min-width: 0; }
+.tipbar .tip-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The feature names inside a tip. `b` rather than a class: the tip strings
    are constants in sidebar.js and carry their own emphasis. */
 .tipbar .tip-t b { font-weight: 600; color: var(--kx-fg-2); }

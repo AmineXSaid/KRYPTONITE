@@ -249,7 +249,10 @@ function contrast(a, b) {
 
     const header = page.locator(".kx-header");
     ok("the header renders", (await header.count()) === 1);
-    const wordmark = await page.locator(".kx-wordmark").first().textContent();
+    // The header no longer carries a "Genesis" wordmark - just the brand mark
+    // and a divider before the tabs - so the wordmark is read from the welcome
+    // screen (.w-mark), which is where it moved and which the boot state shows.
+    const wordmark = await page.locator(".welcome .w-mark").first().textContent();
     ok("the wordmark reads GENESIS", /genesis/i.test(wordmark || ""), wordmark);
 
     // The brand face fails SILENTLY: a missing woff2 falls back to a platform
@@ -264,7 +267,7 @@ function contrast(a, b) {
       return m ? m[1] : "";
     })();
     ok("tokens.css names a brand face", brandFam.length > 0, brandFam);
-    const fam = await page.locator(".kx-wordmark").first()
+    const fam = await page.locator(".welcome .w-mark").first()
       .evaluate((el) => getComputedStyle(el).fontFamily);
     ok("and the wordmark is set in it", fam.includes(brandFam), fam);
 
