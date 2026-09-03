@@ -31,18 +31,26 @@ media/logo.svg
 
 # Generated offline bundles live under dist/ but are not part of the extension
 dist/genesis-offline-bundle/**
-# dist/extension.js is the only artifact that ships. Test bundles are built into
-# dist/ too, and shipping one would put a harness in front of users.
+# dist/extension.js and dist/webview/ are the artifacts that ship. Test bundles
+# are built into dist/ too, and shipping one would put a harness in front of
+# users - these two globs are deliberately top-level-only so dist/webview/*.js
+# is not caught by them.
 dist/*.cjs
 dist/*.mjs
 # The render harness mounts the real webview outside VS Code for visual checks.
 # Development only.
 dist/harness/**
 
-# NOTE: media/** is deliberately NOT ignored. media/icon.svg, media/logo.png,
-# media/webview/*.js|*.css (including crystal.js, the shared brand mark) and
-# media/fonts/* are loaded at runtime through asWebviewUri or named by the
-# manifest; excluding them breaks every webview surface.
+# The webview SOURCES. What ships is dist/webview/, the minified build of these
+# files that `npm run build:webview` emits and that src/ui/shell.ts points
+# asWebviewUri at. Shipping both would put 656 KB of readable, commented source
+# next to the build made from it - which is the whole of what a reader of the
+# .vsix would want. test/vsix.cjs asserts the archive is free of them.
+media/webview/**
+
+# NOTE: the REST of media/** is deliberately NOT ignored. media/icon.svg,
+# media/logo.png and media/fonts/* are loaded at runtime through asWebviewUri
+# or named by the manifest; excluding them breaks every webview surface.
 
 # The Python MCP servers are a SEPARATE deliverable. A user installs them with
 # pip and points .agent/mcp.json at them; nothing in dist/extension.js imports
@@ -50,3 +58,15 @@ dist/harness/**
 # to every download for code the extension cannot run. test/vsix.cjs asserts
 # the archive is free of them - this is the rule that makes that assertion pass.
 mcp-servers/**
+
+# Four of the bundled skills carry an Anthropic proprietary licence, not the
+# Apache-2.0 the other twelve carry. skills/{docx,pdf,pptx,xlsx}/LICENSE.txt
+# reads "© 2025 Anthropic, PBC. All rights reserved" and forbids reproducing,
+# distributing or transferring the materials to any third party - which is
+# exactly what shipping them inside a redistributed .vsix does. They stay in
+# the repo for local use and are kept out of the archive; test/vsix.cjs
+# asserts that. This also takes ~4 MB off every download.
+skills/docx/**
+skills/pdf/**
+skills/pptx/**
+skills/xlsx/**

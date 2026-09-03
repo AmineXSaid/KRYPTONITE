@@ -92,9 +92,31 @@ const ok = (label, cond, detail = "") => {
 };
 
 /* ── unpack the media the user actually installs ──────────────────────── */
+// Two trees, because the panel is assembled from two. The fonts and images
+// ship under media/; the scripts and stylesheets ship under dist/webview/ as
+// the MINIFIED build of media/webview/ - which is what src/ui/shell.ts points
+// asWebviewUri at, and so what this harness has to load. Rendering the
+// readable originals instead would leave a minifier bug to be found by a user.
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "genesis-render-"));
-execFileSync("unzip", ["-q", "-o", VSIX, "extension/media/*", "-d", tmp]);
+execFileSync("unzip", ["-q", "-o", VSIX,
+  "extension/media/*", "extension/dist/webview/*", "-d", tmp]);
 const MEDIA = path.join(tmp, "extension/media");
+
+// The page is written into MEDIA so the `fonts/…` urls in FONTS stay relative
+// to the fonts themselves; the built panel is one level up and across.
+const WEBVIEW = "../dist/webview";
+
+// The checks that SCAN asset text - which symbols a file defines, what a token
+// declares - read the repo sources rather than the shipped build. They are
+// asking what the panel is authored to do, and the answer does not change when
+// the minifier drops a space; the regexes they use would. What the browser
+// above loads is still the shipped, minified copy, so a minifier bug that
+// actually breaks the panel still fails this suite - in the rendering, which
+// is where it would show up for a user.
+const WEBVIEW_SRC = path.join(ROOT, "media/webview");
+if (!fs.existsSync(path.join(tmp, "extension/dist/webview/sidebar.js"))) {
+  throw new Error("the .vsix carries no dist/webview - run `npm run build` and repackage");
+}
 
 // Read from src/ui/shell.ts rather than restated here. This table used to be a
 // hand-kept copy, and when the design moved to one family it silently went on
@@ -122,8 +144,8 @@ const GROUND = "#181818";
 // what the surface talks to instead.
 const HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <style>${FONTS}</style>
-<link rel="stylesheet" href="webview/tokens.css">
-<link rel="stylesheet" href="webview/sidebar.css">
+<link rel="stylesheet" href="${WEBVIEW}/tokens.css">
+<link rel="stylesheet" href="${WEBVIEW}/sidebar.css">
 <style>
   html { background: ${GROUND}; color-scheme: dark; }
   :root { --vscode-sideBar-background: ${GROUND}; }
@@ -136,8 +158,8 @@ const HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
                          setState: function () {} },
                   surface: "sidebar" };
 </script>
-<script src="webview/crystal.js"></script>
-<script src="webview/sidebar.js"></script>
+<script src="${WEBVIEW}/crystal.js"></script>
+<script src="${WEBVIEW}/sidebar.js"></script>
 </body></html>`;
 
 const HTML_PATH = path.join(MEDIA, "__render.html");
@@ -233,7 +255,7 @@ function contrast(a, b) {
     // change of face does not need this line edited - it needs the token
     // edited, which is the point.
     const brandFam = (() => {
-      const css = fs.readFileSync(path.join(MEDIA, "webview/tokens.css"), "utf8");
+      const css = fs.readFileSync(path.join(WEBVIEW_SRC, "tokens.css"), "utf8");
       const m = /--kx-brand:\s*'([^']+)'/.exec(css);
       return m ? m[1] : "";
     })();
@@ -1089,11 +1111,11 @@ function contrast(a, b) {
     // other glyph in the file, including those in states this suite never
     // opens - an error box, a queued steer note - where a dangling reference
     // would ship unseen.
-    const src = fs.readFileSync(path.join(MEDIA, "webview/sidebar.js"), "utf8");
+    const src = fs.readFileSync(path.join(WEBVIEW_SRC, "sidebar.js"), "utf8");
     // Defs live in BOTH files: crystal.js owns the product mark (`i-kx`) so the
     // two surfaces share one copy of it, and sidebar.js pulls it in via
     // CRYSTAL_DEFS. Scanning only sidebar.js would report the mark as dangling.
-    const crystalSrc = fs.readFileSync(path.join(MEDIA, "webview/crystal.js"), "utf8");
+    const crystalSrc = fs.readFileSync(path.join(WEBVIEW_SRC, "crystal.js"), "utf8");
     const defined = new Set([...(src + crystalSrc).matchAll(/<symbol id="(i-[a-z0-9-]+)"/g)].map((m) => m[1]));
     const used = new Set([...src.matchAll(/icon\(\s*"(i-[a-z0-9-]+)"/g)].map((m) => m[1]));
     // Ternaries inside an icon() call - icon(x ? "i-up" : "i-clock") - are not
@@ -1140,7 +1162,7 @@ function contrast(a, b) {
 
     // The fade width is read from the stylesheet, not retyped: the padding that
     // clears it and the mask that needs clearing must stay the same number.
-    const css = fs.readFileSync(path.join(MEDIA, "webview/controlCenter.css"), "utf8");
+    const css = fs.readFileSync(path.join(WEBVIEW_SRC, "controlCenter.css"), "utf8");
     const fade = Number((/mask-image: linear-gradient\(90deg, #000 calc\(100% - (\d+)px\)/.exec(css) || [])[1]);
     ok("the strip's fade width is declared in css", Number.isFinite(fade), String(fade));
 

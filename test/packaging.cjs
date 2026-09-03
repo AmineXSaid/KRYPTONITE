@@ -71,24 +71,59 @@ console.log("──── .vscodeignore keeps the runtime assets ────");
  * shell declares. Excluding any of these produces an extension that installs
  * cleanly and renders a blank panel - the worst kind of packaging bug, because
  * it cannot be seen from the .vsix file list without knowing what to look for.
+ *
+ * These live under dist/webview/ rather than media/webview/: what ships is the
+ * MINIFIED build, and src/ui/shell.ts points asWebviewUri at it. The readable
+ * originals stay in the repo as build input and are kept out of the archive.
+ * They exist by the time this runs because `pretest` builds before `test`.
  */
+const SURFACE_ASSETS = [
+  "sidebar.js", "sidebar.css",
+  "controlCenter.js", "controlCenter.css",
+  "browser.js", "browser.css",
+  "tokens.css", "crystal.js",
+];
 const RUNTIME = [
-  "media/webview/sidebar.js", "media/webview/sidebar.css",
-  "media/webview/controlCenter.js", "media/webview/controlCenter.css",
-  "media/webview/browser.js", "media/webview/browser.css",
-  "media/webview/tokens.css", "media/webview/crystal.js",
+  ...SURFACE_ASSETS.map((f) => `dist/webview/${f}`),
   "media/icon.svg", "media/logo.png",
 ];
 for (const f of RUNTIME) ok(`ships ${f}`, exists(f));
 
-// A crude but effective read of the ignore file: any bare `media/**` or
-// `media/webview` rule would take the whole panel with it.
+// The sources those are built FROM. Present in the repo, absent from the .vsix.
+for (const f of SURFACE_ASSETS) {
+  ok(`builds from media/webview/${f}`, exists(`media/webview/${f}`));
+}
+
+// The point of shipping dist/webview/ instead of media/webview/ is that the
+// shipped copy is minified. If the build ever silently stops minifying, every
+// surface still renders and nothing else in the suite notices.
+//
+// The test is line DENSITY, not file size: esbuild reprints the AST either
+// way, so even an unminified build drops every comment and lands ~40% smaller
+// than the source - a size check passes on output that is still perfectly
+// readable. Whitespace is what actually separates them. Measured on this
+// repo: 18-60 bytes/line unminified against 973-32787 minified.
+for (const f of SURFACE_ASSETS) {
+  const out = path.join(ROOT, "dist/webview", f);
+  if (!fs.existsSync(out)) continue;
+  const text = fs.readFileSync(out, "utf8");
+  const density = text.length / (text.split("\n").length);
+  ok(`and ships ${f} minified`, density > 300, `${density.toFixed(0)} bytes/line`);
+}
+
+// A crude but effective read of the ignore file: any bare `media/**` rule, or
+// anything excluding the built panel, would take the whole panel with it.
 const ignoreLines = ignore.split("\n").map((l) => l.trim())
   .filter((l) => l && !l.startsWith("#"));
 ok("nothing excludes media wholesale",
-  !ignoreLines.some((l) => /^media\/?\*?\*?$/.test(l) || /^media\/webview/.test(l)),
+  !ignoreLines.some((l) => /^media\/?\*?\*?$/.test(l)),
   ignoreLines.filter((l) => l.startsWith("media")).join(", "));
-ok("but the logo SOURCE is excluded, having no runtime use",
+ok("nothing excludes the built webview",
+  !ignoreLines.some((l) => /^dist\/webview/.test(l) || /^dist\/?\*?\*?$/.test(l)),
+  ignoreLines.filter((l) => l.startsWith("dist")).join(", "));
+ok("but the webview SOURCES are excluded, the built copy shipping instead",
+  ignoreLines.includes("media/webview/**"));
+ok("and the logo SOURCE is excluded, having no runtime use",
   ignoreLines.includes("media/logo.svg"));
 
 console.log("──── the fonts the shell declares are all present ────");
@@ -104,8 +139,26 @@ ok("the shell names some fonts", fontFiles.length > 0, String(fontFiles.length))
 for (const f of [...new Set(fontFiles)]) ok(`ships media/fonts/${f}`, exists(`media/fonts/${f}`));
 
 console.log("──── the packaging scripts still exist ────");
-for (const s of ["vscode:prepublish", "package", "build"]) {
+for (const s of ["vscode:prepublish", "package", "build", "build:extension", "build:webview"]) {
   ok(`npm run ${s} is defined`, typeof pkg.scripts[s] === "string", pkg.scripts[s]);
+}
+
+// `build` is what vscode:prepublish runs, so it is what decides whether the
+// shipped bundle is readable. Minifying is the whole reason the webview build
+// exists as a separate step; a `build` that lost the flag would still produce a
+// working extension, and would quietly ship the sources it was added to hide.
+ok("and build minifies what it ships", /--minify/.test(pkg.scripts.build), pkg.scripts.build);
+ok("and vscode:prepublish runs build",
+  /\bnpm run build\b/.test(pkg.scripts["vscode:prepublish"]), pkg.scripts["vscode:prepublish"]);
+
+// build:webview names its inputs one by one rather than globbing, because npm
+// runs scripts through cmd.exe on Windows and cmd.exe does not expand globs -
+// the same reason test:bundle spells out every suite. An explicit list drifts,
+// though: add a panel file, forget this line, and it silently never ships.
+for (const f of fs.readdirSync(path.join(ROOT, "media/webview"))) {
+  if (!/\.(js|css)$/.test(f)) continue;
+  ok(`build:webview builds media/webview/${f}`,
+    pkg.scripts["build:webview"].includes(`media/webview/${f}`));
 }
 
 console.log("──── settings that must not travel ────");

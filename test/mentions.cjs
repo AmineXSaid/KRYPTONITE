@@ -73,9 +73,21 @@ const ok = (label, cond, detail = "") => {
   failures.push(label + (detail ? "  — " + detail : ""));
 };
 
+// Two trees: the fonts and images ship under media/, the scripts and
+// stylesheets under dist/webview/ as the minified build of media/webview/.
+// src/ui/shell.ts points asWebviewUri at the latter, so that is what this
+// harness loads - the page under test is the one a user installs.
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "genesis-mentions-"));
-execFileSync("unzip", ["-q", "-o", VSIX, "extension/media/*", "-d", tmp]);
+execFileSync("unzip", ["-q", "-o", VSIX,
+  "extension/media/*", "extension/dist/webview/*", "-d", tmp]);
 const MEDIA = path.join(tmp, "extension/media");
+
+// The page is written into MEDIA so the `fonts/…` urls stay relative to the
+// fonts; the built panel is one level up and across.
+const WEBVIEW = "../dist/webview";
+if (!fs.existsSync(path.join(tmp, "extension/dist/webview/sidebar.js"))) {
+  throw new Error("the .vsix carries no dist/webview - run `npm run build` and repackage");
+}
 
 const shell = fs.readFileSync(path.join(ROOT, "src/ui/shell.ts"), "utf8");
 const FONTS = [...shell.matchAll(/file:\s*"([^"]+\.woff2?)",\s*family:\s*"([^"]+)",\s*weight:\s*"([^"]+)"/g)]
@@ -83,7 +95,7 @@ const FONTS = [...shell.matchAll(/file:\s*"([^"]+\.woff2?)",\s*family:\s*"([^"]+
               `src:url('fonts/${m[1]}') format('woff2')}`).join("");
 
 const HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><style>${FONTS}</style>
-<link rel="stylesheet" href="webview/tokens.css"><link rel="stylesheet" href="webview/sidebar.css">
+<link rel="stylesheet" href="${WEBVIEW}/tokens.css"><link rel="stylesheet" href="${WEBVIEW}/sidebar.css">
 <style>html{background:#010409;color-scheme:dark}:root{--vscode-sideBar-background:#010409}</style>
 </head><body><div id="root"></div>
 <script>
@@ -92,7 +104,7 @@ const HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><style>
                          getState: function(){return null;}, setState: function(){} },
                   surface: "sidebar" };
 </script>
-<script src="webview/crystal.js"></script><script src="webview/sidebar.js"></script>
+<script src="${WEBVIEW}/crystal.js"></script><script src="${WEBVIEW}/sidebar.js"></script>
 </body></html>`;
 const PAGE = path.join(MEDIA, "__mentions.html");
 fs.writeFileSync(PAGE, HTML);

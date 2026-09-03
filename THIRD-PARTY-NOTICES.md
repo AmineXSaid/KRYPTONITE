@@ -4,19 +4,51 @@ THE FOLLOWING SETS FORTH ATTRIBUTION NOTICES FOR THIRD PARTY SOFTWARE THAT MAY B
 
 ---
 
-## **UNRESOLVED — Anthropic Sans (bundled fonts)**
+## **RESOLVED — bundled fonts (SIL Open Font License 1.1)**
 
-`media/fonts/*.woff2` contains **Anthropic Sans**, a proprietary typeface. It is not
-published under an open licence, and the files were obtained from a third-party
-mirror, which is not a licence grant. Because the folder ships inside the packaged
-`.vsix`, the extension redistributes it.
+This entry previously recorded that `media/fonts/` shipped **Anthropic Sans**, a
+proprietary typeface with no licence grant, and that the extension was therefore not
+cleared for public release. That is no longer the case. The design moved to the two
+families it now specifies, both under the **SIL Open Font License 1.1**, which
+expressly permits redistribution inside a commercial product provided the fonts are
+not sold on their own and the licence travels with them:
 
-**This is not cleared for public release.** Before publishing, either obtain written
-permission from Anthropic to redistribute the binaries, or remove `media/fonts/` from
-the package — `src/ui/shell.ts` emits `@font-face` only for files that exist, so
-deleting the folder needs no code change.
+| File | Family | Role | Licence |
+| --- | --- | --- | --- |
+| `media/fonts/JetBrainsMono-Variable.woff2` | JetBrains Mono | the interface | OFL 1.1 |
+| `media/fonts/IBMPlexSans-Variable.woff2` | IBM Plex Sans | prose only | OFL 1.1 |
 
-Full detail, provenance and the fallback path: `media/fonts/LICENSE-NOTE.md`.
+Both licence texts travel with them, as the OFL requires — `OFL-JetBrainsMono.txt`
+and `OFL-IBMPlexSans.txt` in the same folder. No Anthropic Sans binary remains, and
+`test/fonts.cjs` asserts that none comes back.
+
+Full detail and provenance: `media/fonts/LICENSE-NOTE.md`.
+
+---
+
+## **Bundled skills**
+
+`skills/` ships inside the `.vsix` and is loaded at runtime by
+`src/core/app.ts`. Twelve skills ship, each under the **Apache License 2.0**, and
+each carries its own `LICENSE.txt` in the archive as that licence requires:
+
+`algorithmic-art`, `brand-guidelines`, `canvas-design`, `claude-api`,
+`frontend-design`, `internal-comms`, `mcp-builder`, `skill-creator`,
+`slack-gif-creator`, `theme-factory`, `web-artifacts-builder`, `webapp-testing`.
+
+`skills/canvas-design/canvas-fonts/` additionally carries a set of OFL 1.1 typefaces,
+each beside its own `*-OFL.txt` licence text.
+
+**Four skills are deliberately NOT packaged.** `skills/docx`, `skills/pdf`,
+`skills/pptx` and `skills/xlsx` carry an Anthropic proprietary licence — *"© 2025
+Anthropic, PBC. All rights reserved"* — which forbids reproducing, distributing or
+transferring the materials to any third party. Redistributing them inside the `.vsix`
+would breach those terms, so `.vscodeignore` excludes them and `test/vsix.cjs` asserts
+the archive is free of them. They remain in the repository for local use.
+
+`skills/doc-coauthoring` carries no `LICENSE.txt`. Its provenance should be
+established before the next release; until then it ships on the same footing as the
+Apache-2.0 set.
 
 ---
 

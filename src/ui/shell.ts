@@ -115,12 +115,12 @@ function shell(
   // for the same reason the crystal artwork is a shared script: two documents,
   // one definition. A surface sheet that redefined a token would silently fork
   // the design system.
-  const tokens = assetUri(webview, extensionUri, "media", "webview", "tokens.css");
-  const css = assetUri(webview, extensionUri, "media", "webview", `${surface}.css`);
-  const js = assetUri(webview, extensionUri, "media", "webview", `${surface}.js`);
+  const tokens = assetUri(webview, extensionUri, "dist", "webview", "tokens.css");
+  const css = assetUri(webview, extensionUri, "dist", "webview", `${surface}.css`);
+  const js = assetUri(webview, extensionUri, "dist", "webview", `${surface}.js`);
   // The brand mark is shared, so it ships as its own script rather than being
   // pasted into both surface files where the two copies would drift apart.
-  const crystal = assetUri(webview, extensionUri, "media", "webview", "crystal.js");
+  const crystal = assetUri(webview, extensionUri, "dist", "webview", "crystal.js");
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -163,9 +163,9 @@ export function controlCenterHtml(webview: vscode.Webview, extensionUri: vscode.
  */
 export function browserHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   const nonce = makeNonce();
-  const tokens = assetUri(webview, extensionUri, "media", "webview", "tokens.css");
-  const css = assetUri(webview, extensionUri, "media", "webview", "browser.css");
-  const js = assetUri(webview, extensionUri, "media", "webview", "browser.js");
+  const tokens = assetUri(webview, extensionUri, "dist", "webview", "tokens.css");
+  const css = assetUri(webview, extensionUri, "dist", "webview", "browser.css");
+  const js = assetUri(webview, extensionUri, "dist", "webview", "browser.js");
   const policy = [
     "default-src 'none'",
     `img-src ${webview.cspSource} data: https: http:`,

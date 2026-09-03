@@ -62,6 +62,14 @@ console.log("\n──── and nothing that should not ────");
     [/^extension\/node_modules\//, "node_modules"],
     [/^extension\/\.agent\//, "workspace fixtures"],
     [/^extension\/\.github\//, "CI configuration"],
+    // The readable originals of what dist/webview/ is built from. Shipping
+    // both would hand a reader of the .vsix the commented source next to the
+    // build made from it.
+    [/^extension\/media\/webview\//, "raw webview sources"],
+    // Anthropic-proprietary skills. Their LICENSE.txt forbids distributing or
+    // transferring the materials to a third party, which is what putting them
+    // in a redistributed archive does.
+    [/^extension\/skills\/(docx|pdf|pptx|xlsx)\//, "proprietary-licensed skills"],
   ];
   for (const [re, what] of forbidden) {
     const hits = listing.filter((f) => re.test(f));
