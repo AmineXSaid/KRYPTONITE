@@ -319,7 +319,10 @@ function contrast(a, b) {
       painted ? `luminance ${lum(painted).toFixed(3)}` : "none");
 
     // Then the thing a user would actually report: can you read it.
-    for (const [label, sel] of [["the wordmark", ".kx-wordmark"], ["a tab", ".kx-tab"]]) {
+    // `.w-mark`, not `.kx-wordmark`: the header and the tab strip were merged
+    // into one bar and the header's wordmark went with the row it cost. The
+    // name is set on the welcome screen now, which is where this reads it.
+    for (const [label, sel] of [["the wordmark", ".welcome .w-mark"], ["a tab", ".kx-tab"]]) {
       const el = page.locator(sel).first();
       if (!(await el.count())) { ok(`${label} renders in light`, false); continue; }
       const fg = rgb(await el.evaluate((e) => getComputedStyle(e).color));

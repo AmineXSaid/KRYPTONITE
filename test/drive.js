@@ -46,7 +46,10 @@ const STATE = (over = {}) => ({ type: "stateSync", state: {
 
 /* ── 1. crystal artwork ────────────────────────────────────────────────── */
 {
-  const { w, d } = boot();
+  // State, so the welcome screen renders: the wordmark lives there now rather
+  // than in the header, and a bare mount() has no transcript to put it in.
+  const { w, d, inbound } = boot();
+  inbound(STATE());
   const defs = w.__kxCrystal.defs;
   ok("roundel symbol is square 24:24", /viewBox="0 0 24 24"/.test(defs));
   // Pinned so a palette change cannot silently wash the notches out. They are
@@ -60,9 +63,21 @@ const STATE = (over = {}) => ({ type: "stateSync", state: {
   ok("svg() is square, so no call site can stretch it", /width="24"/.test(svg) && /height="24"/.test(svg));
   ok("svg() references shared symbol", svg.includes('href="#i-kx"'));
   const header = d.querySelector(".kx-header svg");
-  ok("header renders the roundel next to the wordmark", !!header);
-  const wordmark = d.querySelector(".kx-wordmark");
-  ok("wordmark reads GENESIS", /genesis/i.test(wordmark.textContent));
+  ok("the header bar renders the roundel", !!header);
+  /* THE WORDMARK IS NOT IN THE HEADER ANY MORE, AND THAT IS DELIBERATE.
+   *
+   * The header and the tab strip were merged into one bar, which cost the
+   * "Genesis" text its place: the mark alone identifies the bar, and the row
+   * that used to be a 40px header plus a separate 32px tab strip is now one.
+   * The wordmark still exists - on the welcome screen, where there is room to
+   * say the name properly - so this checks it moved rather than vanished. */
+  ok("and the header spends no width on the wordmark",
+    !d.querySelector(".kx-header .kx-wordmark"));
+  ok("the tabs moved up into the same bar", !!d.querySelector(".kx-header .kx-tabs"));
+  const wordmark = d.querySelector(".w-mark");
+  ok("the wordmark still reads GENESIS, on the welcome screen",
+    !!wordmark && /genesis/i.test(wordmark.textContent),
+    wordmark ? wordmark.textContent : "no .w-mark");
 }
 
 /* ── 2. aura while waiting ──────────────────────────────────────────── */
