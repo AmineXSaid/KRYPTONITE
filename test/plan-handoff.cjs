@@ -117,6 +117,16 @@ function boot() {
     rejects[0] && JSON.stringify(rejects[0].feedback));
   ok("declining does not post an approval", b.sent.every((m) => m.type !== "approvePlan"));
   ok("and the card records the decision", !!b.d.querySelector(".plan-done"));
+  // The objection row is a sibling of the footer, so stamping the footer does
+  // not take it with it. Left behind, the decided card kept a live Send button
+  // that would post the same objection a second time - which is what driving
+  // the real panel showed, and what these assertions missed.
+  ok("the objection row is gone once sent", !b.d.querySelector(".plan-why-row"));
+  ok("so the objection cannot be sent twice", !b.d.querySelector('[data-plan="send"]'));
+  b.click('[data-plan="send"]');
+  ok("and clicking where Send was posts nothing more",
+    b.sent.filter((m) => m.type === "rejectPlan").length === 1,
+    String(b.sent.filter((m) => m.type === "rejectPlan").length));
   // The draft belongs to the DOM node and nothing else. In `S` it would survive
   // a session switch into a conversation it means nothing in.
   ok("the objection never reaches panel state",

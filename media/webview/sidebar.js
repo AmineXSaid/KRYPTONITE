@@ -4082,6 +4082,12 @@ function _sbRun() {
       foot.className = "plan-done";
       foot.innerHTML = '<span style="display:flex">' + icon("i-check", "ic-13") + "</span>" +
         "<span>" + esc(label) + "</span>";
+      // The objection row is a SIBLING of the footer, so replacing the footer
+      // leaves it behind: a decided card kept a live input and a Send button
+      // that would post the same objection again. Whatever the decision was,
+      // the card is done being asked.
+      var row = el.querySelector(".plan-why-row");
+      if (row) row.remove();
     }
 
     // The objection is read straight off the input at the moment it is sent and
