@@ -205,7 +205,17 @@
       n.lines.forEach(function (l) { maxLine = Math.max(maxLine, l.length); });
       var w = Math.max(MINW, Math.round(maxLine * CHAR) + PADX);
       var ht = Math.max(NODE_H, 12 + n.lines.length * LINEH);
-      if (n.shape === "circle" || n.shape === "diamond") { w = Math.max(w, ht); }
+      // A diamond and a circle only offer their full width along the centre
+      // line and taper to a point at the corners, so a box sized as though it
+      // were a rectangle puts the label across the edge. Both are widened until
+      // the text sits inside the shape rather than through it.
+      if (n.shape === "diamond") {
+        w = Math.max(Math.round(w * 1.6), ht * 2);
+        ht = ht + 10;
+      } else if (n.shape === "circle") {
+        w = Math.max(Math.round(w * 1.25), ht);
+        ht = Math.max(ht, Math.round(w * 0.72));
+      }
       size[id] = { w: w, h: ht };
     });
 
