@@ -613,30 +613,36 @@ const pasteTests = (async () => {
   ok("13 aria-checked follows", btn("ask").getAttribute("aria-checked") === "true" &&
     btn("act").getAttribute("aria-checked") === "false");
 
-  // The rail replaced the banner, and a rail is a colour. What a screen
-  // reader gets in its place is the live region applyPhase writes, so that
-  // announcement is what these assert on: it is the last place the read-only
-  // promise survives as words.
+  // The rail replaced the read-only banner. It is painted from data-phase on
+  // the session view, and unlike the banner it paints ALL THREE phases - Act
+  // included, because Act is the one that edits the workspace.
+  const rail = () => d.getElementById("viewSession").getAttribute("data-phase");
+  ok("13 the rail follows into Ask", rail() === "ask");
+  // The rail is decorative - no node, no aria - so the WORDS a screen reader
+  // gets come from the live region applyPhase writes. It carries both halves
+  // of what the banner used to say: the promise nothing is written, and the
+  // purpose the mode exists for.
   const said = () => d.getElementById("announcer").textContent;
-  ok("13 switching phase announces it", /Ask phase/.test(said()), said());
-  ok("13 and the announcement keeps the no-edit promise",
-    /never edits/.test(said()), said());
-  ok("13 and says what the mode is for", /teaches/.test(said()), said());
+  ok("13 and the phase is announced in words", /Ask phase/.test(said()), said());
+  ok("13 keeping the no-edit promise", /never edits/.test(said()), said());
+  ok("13 and saying what Ask is for", /teaches/.test(said()), said());
   ok("13 Ask's placeholder asks a question",
     /^\u203A\u00A0Ask Genesis anything/.test(d.getElementById("draft").placeholder),
     d.getElementById("draft").placeholder);
 
   btn("plan").click();
-  ok("13 Plan's announcement is its own",
+  ok("13 the rail follows into Plan", rail() === "plan");
+  ok("13 and Plan's announcement is its own",
     /Plan phase/.test(said()) && /no edits applied/.test(said()), said());
   ok("13 Plan's placeholder describes planning",
     /^\u203A\u00A0Describe what to plan/.test(d.getElementById("draft").placeholder),
     d.getElementById("draft").placeholder);
 
   btn("act").click();
+  ok("13 and Act paints it too, where the banner showed nothing", rail() === "act");
   // Act withholds nothing, so it has no promise to make - but it must still
-  // announce, or a screen-reader user leaving a read-only phase is told
-  // nothing about the one they landed in.
+  // announce, or someone leaving a read-only phase is told nothing about the
+  // one they landed in.
   ok("13 Act announces full tools rather than a promise",
     /Act phase/.test(said()) && !/never edits/.test(said()), said());
   ok("13 Act's placeholder is a work order",
@@ -669,7 +675,7 @@ const pasteTests = (async () => {
   // badge over a session the host would still run a write in.
   inbound({ type: "phaseChanged", phase: "sideways" });
   ok("13 an unknown phase falls back to act rather than blanking",
-    lit() === "act");
+    lit() === "act" && rail() === "act");
   ok("13 nothing rendered undefined",
     !/undefined|NaN|\[object Object\]/.test(d.getElementById("root").innerHTML));
 }
@@ -1392,8 +1398,11 @@ const AGENTS = [
 {
   const { d, sent, inbound } = boot();
   inbound(STATE({ agents: AGENTS, activeAgent: "" }));
-  ok("AG nothing is lit while no agent is selected",
-    d.getElementById("agentBtn").getAttribute("data-on") === "0");
+  // The bar is gone; the composer's agent button is the one place that shows
+  // an agent, and with none set it is the bare glyph the other tools are.
+  ok("AG nothing is named while no agent is selected",
+    d.getElementById("agentBtn").getAttribute("data-on") === "0" &&
+    d.getElementById("agentName").textContent === "");
 
   // Agents have a tab of their own now, after MCP. It was a collapsed section
   // inside Diagnostics, which is where a thing goes to be inspected rather than
@@ -1457,9 +1466,9 @@ const AGENTS = [
   const agBtn = d.getElementById("agentBtn");
   ok("AG selecting one lights the button", agBtn.getAttribute("data-on") === "1");
   ok("AG which names it", /reader/.test(d.getElementById("agentName").textContent));
-  // The scope moved into the button's title when the bar went. It is still the
-  // only place the panel says what an agent can reach outside the Agents tab,
-  // so it stays asserted wherever it lives.
+  // The scope the bar used to print moved onto this button's tooltip when the
+  // bar was removed - it is the only place left that says what the agent can
+  // reach without opening the Agents tab.
   ok("AG and states what it can reach", /MCP: filesystem/.test(agBtn.title), agBtn.title);
   d.getElementById("tabDiag").click();
   ok("AG the row marks itself active",
@@ -1471,8 +1480,9 @@ const AGENTS = [
     sent.some((m) => m.type === "setAgent" && m.name === ""));
 
   inbound({ type: "agentChanged", agent: null });
-  ok("AG leaving dims the button again",
-    d.getElementById("agentBtn").getAttribute("data-on") === "0");
+  ok("AG leaving returns it to the bare glyph",
+    d.getElementById("agentBtn").getAttribute("data-on") === "0" &&
+    d.getElementById("agentName").textContent === "");
 }
 {
   // The composer's own picker.

@@ -830,6 +830,33 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 .cb-copy:focus-visible { outline: 1px solid var(--kx-link); outline-offset: 1px; }
 .cb-copy[data-done="1"] { color: var(--kx-accent); }
 
+/* A rendered mermaid flowchart. The figure reuses the code block's frame and
+   header so a diagram and a code sample read as the same kind of object; the
+   difference is the body, which is an SVG that scrolls sideways rather than a
+   <pre>. A wide diagram must never widen the transcript, so the scroll lives
+   inside the figure. */
+.mermaid-fig .mermaid-svg {
+  overflow-x: auto; padding: 12px; display: flex; justify-content: center;
+  background: color-mix(in srgb, var(--kx-line) 8%, transparent);
+}
+.mermaid-fig .mm-svg { display: block; max-width: 100%; height: auto; }
+/* The parts of the drawing, coloured from the palette so the diagram is legible
+   in whichever theme the editor is in - the same tokens the rest of the panel
+   uses, never a hard-coded ink. */
+.mm-node { fill: var(--kx-surface-3); stroke: var(--kx-edge); stroke-width: 1; }
+.mm-node-line { stroke: var(--kx-edge); stroke-width: 1; fill: none; }
+.mm-text {
+  fill: var(--kx-fg); font-family: var(--kx-mono); font-size: 12px;
+}
+.mm-edge { stroke: var(--kx-line-2); stroke-width: 1.5; fill: none; }
+.mm-edge.mm-dotted { stroke-dasharray: 4 3; }
+.mm-edge.mm-thick { stroke-width: 3; }
+.mm-arrow { fill: var(--kx-line-2); }
+.mm-sub { fill: color-mix(in srgb, var(--kx-line) 6%, transparent); stroke: var(--kx-line); stroke-width: 1; stroke-dasharray: 5 3; }
+.mm-sub-title { fill: var(--kx-fg-2); font-family: var(--kx-mono); font-size: 11px; font-weight: 700; }
+.mm-elabel-bg { fill: var(--kx-surface); }
+.mm-elabel { fill: var(--kx-fg-2); font-family: var(--kx-mono); font-size: 11px; }
+
 .md-h { font-family: var(--kx-ui); line-height: 1.3; margin: 14px 0 6px; }
 .md-h:first-child { margin-top: 0; }
 .md-h1 { font-family: var(--kx-display); font-size: 16px; font-weight: 700; letter-spacing: -.01em; }
@@ -2185,11 +2212,38 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 
 
 .hint { font-size: 10.5px; flex: none; color: var(--kx-fg-3); }
+/* The model button is a rounded square, sharing the send control's shape and
+ * the composer's radius - but styled as a FIELD rather than a plate, because it
+ * is not the same kind of control as the icon buttons.
+ *
+ * It used to be bare text with a caret: a label that happened to be clickable,
+ * no plate and no edge, so the one control that says which model answers read
+ * as prose. The attach and send controls one group over are RAISED plates - a
+ * lifted surface you press. This is a picker that shows a value and opens a
+ * list, so it reads as a recessed field instead: the composer's own base
+ * surface set behind a hairline, with a faint inner shadow to sink it a touch
+ * below the row. Same 4px radius, same edge token, same height as its
+ * neighbours, so it is unmistakably part of the set - just the field in a row
+ * of buttons rather than another button. The radius stays well under half the
+ * height, so it is a squircle by arithmetic and can never round into a pill. */
 #modelBtn {
-  display: flex; align-items: center; gap: 5px; min-width: 0; height: 26px; padding: 0 6px;
+  display: flex; align-items: center; gap: 5px; min-width: 0; height: 28px; padding: 0 8px;
   border-radius: 4px; font-size: 12px; color: var(--kx-fg-2); white-space: nowrap;
+  background: var(--kx-surface); border: 1px solid var(--kx-edge);
+  box-shadow: inset 0 1px 2px var(--kx-shadow);
+  transition: background .14s ease, color .14s ease, border-color .14s ease, box-shadow .14s ease;
 }
-#modelBtn:hover:not(:disabled) { color: var(--kx-fg); }
+#modelBtn:hover:not(:disabled) {
+  color: var(--kx-fg); background: var(--kx-surface-2); border-color: var(--kx-line-2);
+}
+/* Open, it stops looking recessed: the list is now the thing being read, and a
+   sunk trigger under a raised popup reads as two planes fighting. */
+#modelBtn[aria-expanded="true"] {
+  background: var(--kx-surface-2); border-color: var(--kx-line-2);
+  color: var(--kx-fg); box-shadow: none;
+}
+#modelBtn:disabled { background: transparent; border-color: var(--kx-hairline); box-shadow: none; }
+@media (prefers-reduced-motion: reduce) { #modelBtn { transition: none; } }
 /* The attach control is a CONTROL, not a floating glyph.
  *
  * It was a bare 26px icon with no plate and no border: nothing but a dim

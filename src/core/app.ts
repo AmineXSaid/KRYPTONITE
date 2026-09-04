@@ -297,6 +297,10 @@ const REAL_CONFIG_KEYS = new Set([
   "browserHeaded",
   "browserAutoDownload",
   "editorContext",
+  // Whether the web_search tool is offered at all. A real setting, not UI
+  // state: it governs a capability the model is given, and someone who does not
+  // want the agent reaching the web this way wants that in every window.
+  "webSearch",
 ]);
 
 /**
@@ -2188,6 +2192,7 @@ export class App {
       skillsDirectory: this.cfg().get<string>("skillsDirectory", ".agent/skills"),
       browserHeaded: this.cfg().get<boolean>("browserHeaded", false),
       browserAutoDownload: this.cfg().get<boolean>("browserAutoDownload", true),
+      webSearch: this.cfg().get<boolean>("webSearch", true),
       editorContext: this.cfg().get<boolean>("editorContext", true),
       readOutsideWorkspace: this.cfg().get<boolean>("readOutsideWorkspace", true),
       extensionVersion: String(this.context.extension.packageJSON.version ?? "0.0.0"),
@@ -3290,7 +3295,7 @@ export class App {
       // the toggle group is built from string values. Stored as written they
       // would make `get<boolean>` return the string "false", which is truthy.
       const stored =
-        key === "browserHeaded" || key === "editorContext"
+        key === "browserHeaded" || key === "editorContext" || key === "webSearch"
           ? value === true || value === "true"
           : value;
       await this.cfg().update(key, stored, vscode.ConfigurationTarget.Workspace);

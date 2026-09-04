@@ -164,6 +164,19 @@ function shell(
   // The brand mark is shared, so it ships as its own script rather than being
   // pasted into both surface files where the two copies would drift apart.
   const crystal = assetUri(webview, extensionUri, "media", "webview", "crystal.js");
+  // The flowchart renderer, loaded only where the transcript is - the sidebar.
+  // It turns a model's ```mermaid block into an SVG in place. A hand-rolled
+  // subset rather than the 2.8 MB library, for the same reason the browser is
+  // driven over raw CDP: this extension bundles nothing heavy and renders
+  // air-gapped. sidebar.js falls back to a code block when it is absent, so
+  // loading it only here costs the Control Center nothing.
+  const mermaid =
+    surface === "sidebar"
+      ? assetUri(webview, extensionUri, "media", "webview", "mermaid.js")
+      : undefined;
+  const mermaidTag = mermaid
+    ? `<script nonce="${nonce}" src="${mermaid}"></script>`
+    : "";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -186,7 +199,7 @@ ${fontFaces(extensionUri, webview)}
   };
 </script>
 <script nonce="${nonce}" src="${crystal}"></script>
-<script nonce="${nonce}" src="${js}"></script>
+${mermaidTag}<script nonce="${nonce}" src="${js}"></script>
 </body>
 </html>`;
 }

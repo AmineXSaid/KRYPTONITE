@@ -95,7 +95,7 @@ const HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><style>
                          getState: function(){return null;}, setState: function(){} },
                   surface: "sidebar" };
 </script>
-<script src="webview/crystal.js"></script><script src="webview/sidebar.js"></script>
+<script src="webview/crystal.js"></script><script src="webview/mermaid.js"></script><script src="webview/sidebar.js"></script>
 </body></html>`;
 const PAGE = path.join(MEDIA, "__mentions.html");
 fs.writeFileSync(PAGE, HTML);

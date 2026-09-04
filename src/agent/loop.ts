@@ -93,6 +93,45 @@ export const BUDGET_EXHAUSTED_NOTICE =
   "found, what you changed, and what is left to do, so the user can carry on " +
   "from here or send you back in with a narrower task.";
 
+/**
+ * Whether a completion failure is the kind worth trying again.
+ *
+ * The link most likely to fail mid-conversation is the gateway between here and
+ * the model, not the model itself: a 502 from a load balancer, a rate-limit
+ * blip, a re-signing proxy dropping a socket. None of those means the request
+ * was wrong or the model refused, and each is usually gone a second later. So
+ * these are retried, and everything else - a 400 the body earned, a 401 for a
+ * bad credential, a 404 for a model that does not exist, a context-length 413 -
+ * is surfaced at once, because retrying it only wastes the user's time.
+ *
+ * Server status wins when there is one; a network failure carries a code in its
+ * message or detail instead, so those are matched by name.
+ */
+export function isTransientError(e: any): boolean {
+  const status = typeof e?.status === "number" ? e.status : 0;
+  // Busy, timed out, or the gateway itself faulting.
+  if (status === 408 || status === 409 || status === 425 || status === 429) return true;
+  if (status >= 500 && status <= 599) return true;
+  // Any other status the server actually returned is the request's fault, not
+  // a blip: do not retry a 4xx that named a real problem.
+  if (status >= 400 && status < 500) return false;
+  // No status: a socket-level failure, which is transient far more often than
+  // not. Matched by the codes Node and undici raise for a dropped or timed-out
+  // connection.
+  const s = `${e?.code ?? ""} ${e?.message ?? ""} ${e?.detail ?? ""}`.toLowerCase();
+  if (/\babort/.test(s)) return false; // a user interrupt is not a blip
+  return /econnreset|etimedout|econnaborted|epipe|eai_again|enetunreach|socket hang up|other side closed|terminated|premature close|und_err|network|stream/.test(s);
+}
+
+/** A sleep that a turn's abort can cut short, so a retry wait is interruptible. */
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) return resolve();
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => { clearTimeout(t); resolve(); }, { once: true });
+  });
+}
+
 export interface AgentEvent {
   /**
    * `text_reset` says that everything streamed so far in this turn was the
@@ -890,10 +929,16 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
   // that claim is the only thing that opens Ask and Plan. An unmarked server
   // stays withheld: a plan (or an answer) that quietly filed a GitHub issue
   // would break the one promise each mode makes.
-  // generate_image is offered only when the active profile declares an image
-  // model. Advertising a tool that can only ever answer "not configured" costs
-  // tokens on every request and invites the model to reach for it.
-  const builtins = ctx.image ? TOOL_DEFS : TOOL_DEFS.filter((t) => t.name !== "generate_image");
+  // generate_image and web_search are each dropped when the context does not
+  // carry the capability behind them - no image model, or web search turned
+  // off. Advertising a tool that can only ever answer "not configured" or "not
+  // available" costs tokens on every request and invites the model to reach for
+  // it, so the tool is withheld rather than offered-then-refused.
+  const builtins = TOOL_DEFS.filter(
+    (t) =>
+      (t.name !== "generate_image" || ctx.image) &&
+      (t.name !== "web_search" || ctx.search)
+  );
 
   // Both branches run the same predicate, so "what Ask may call" is stated
   // once. MCP tools now join the candidate list in every phase, because
@@ -1025,11 +1070,11 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
     };
 
     let text = "";
-    const calls: ToolCall[] = [];
+    let calls: ToolCall[] = [];
     // Thinking is filtered out of the stream rather than after it. A reasoning
     // model's working is often longer than its answer, and rendering it and
     // then removing it is a paragraph that appears and vanishes.
-    const think = new ThinkSplitter();
+    let think = new ThinkSplitter();
 
     /* A reply that opens with `{` or a fence might be a tool call the model
        wrote as prose. It is withheld until we know, because once a delta has
@@ -1049,6 +1094,28 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
     /** Did the endpoint report real usage for this step? */
     let billed = false;
 
+    /* A transient failure in the middle of a conversation must not end it.
+       The gateway is the flakiest link, and a 502 or a reset socket is gone a
+       second later - so a completion that fails for a plausibly momentary
+       reason is retried a few times with growing backoff before the turn gives
+       up. Retried ONLY when nothing has reached the transcript yet this step:
+       once a delta or a tool call is out, re-running would duplicate it, so a
+       mid-stream failure is surfaced rather than replayed. The accumulators are
+       reset at the top of each attempt so a clean retry starts from nothing. */
+    const maxRetries = 3;
+    let attempt = 0;
+    for (;;) {
+    text = "";
+    calls = [];
+    think = new ThinkSplitter();
+    decided = false;
+    holding = false;
+    pending = "";
+    gaps = 0;
+    truncated = false;
+    streamError = "";
+    stopReason = "";
+    billed = false;
     try {
       for await (const ev of client.complete({
         messages: fitted,
@@ -1176,7 +1243,22 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
           }
         }
       }
+      break; // the stream finished cleanly
     } catch (e: any) {
+      // A user interrupt is not a failure to recover from - the turn is meant
+      // to stop, and the same abort check the loop opens with applies here.
+      if (opts.signal?.aborted) return;
+      // Only a failure with nothing yet on screen this step can be replayed;
+      // anything already streamed would be duplicated by a re-run.
+      const clean = !text && calls.length === 0;
+      if (clean && attempt < maxRetries && isTransientError(e)) {
+        attempt++;
+        // 0.6s, 1.2s, 2.4s: long enough for a load balancer to route past a
+        // dead node, short enough not to feel hung.
+        await delay(Math.min(8000, 600 * 2 ** (attempt - 1)), opts.signal);
+        if (opts.signal?.aborted) return;
+        continue;
+      }
       yield {
         type: "error",
         error: e.message,
@@ -1186,6 +1268,7 @@ export async function* runAgent(opts: AgentRunOptions): AsyncGenerator<AgentEven
       yield { type: "exit", exit: "error" };
       return;
     }
+    } // end retry loop
 
     /* THE STREAM STOPPED WITHOUT SAYING IT HAD FINISHED.
      *

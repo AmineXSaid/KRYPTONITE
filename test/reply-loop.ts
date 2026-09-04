@@ -18,7 +18,7 @@ import * as http from "node:http";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { runAgent, AgentEvent } from "../src/agent/loop";
+import { runAgent, AgentEvent, isTransientError } from "../src/agent/loop";
 import { EndpointClient } from "../src/providers/client";
 import { loadProfile } from "../src/endpoints/profile";
 import type { ToolContext } from "../src/agent/tools";
@@ -42,10 +42,24 @@ function frames(text: string, size: number): string[] {
 (async () => {
   let reply = "";
   let chunk = 7;
+  // Failure injection, for the retry tests: the next `failTimes` requests answer
+  // with `failStatus` (or drop the socket, when failStatus is 0) before the
+  // canned reply is served. `requests` counts every request that arrived, which
+  // is how a test proves a retry actually went back out.
+  let failTimes = 0;
+  let failStatus = 503;
+  let requests = 0;
   const server = http.createServer((req, res) => {
     let body = "";
     req.on("data", (c) => (body += c));
     req.on("end", () => {
+      requests++;
+      if (failTimes > 0) {
+        failTimes--;
+        if (failStatus === 0) { res.destroy(); return; } // a reset socket, mid-conversation
+        res.writeHead(failStatus, { "content-type": "application/json" }).end('{"error":"try again"}');
+        return;
+      }
       res.writeHead(200, { "content-type": "text/event-stream" });
       for (const f of frames(reply, chunk)) {
         res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: f } }] })}\n\n`);
@@ -178,6 +192,51 @@ function frames(text: string, size: number): string[] {
     ck(/still working through this/.test(shown),
       "a turn that was only thinking falls back to showing the working",
       JSON.stringify(shown));
+  }
+
+  /* ── a blip mid-conversation is retried, not fatal ──────────────── */
+  console.log("\n──── a transient failure does not end the turn ────");
+  {
+    // Which failures are worth retrying at all - the pure decision, before any
+    // wiring. A gateway 5xx and a reset socket are; a request the server
+    // rejected on its merits is not.
+    ck(isTransientError({ status: 503 }), "a 503 is transient");
+    ck(isTransientError({ status: 429 }), "so is a rate limit");
+    ck(isTransientError({ status: 502 }), "and a bad gateway");
+    ck(isTransientError({ code: "ECONNRESET", message: "socket hang up" }), "and a reset socket");
+    ck(!isTransientError({ status: 400 }), "a 400 is not - the body earned it");
+    ck(!isTransientError({ status: 401 }), "nor a 401");
+    ck(!isTransientError({ status: 404 }), "nor a 404");
+    ck(!isTransientError({ status: 413 }), "nor a context-length 413");
+    ck(!isTransientError({ message: "The operation was aborted" }), "and a user abort is never retried");
+
+    // A 503 on the first request, then the real reply: the loop must recover
+    // and run the tool rather than surfacing an error.
+    failTimes = 1; failStatus = 503; requests = 0;
+    let r = await turn(
+      "<tool_call><function=browser><parameter=action>read</parameter></function></tool_call>"
+    );
+    ck(requests >= 2, "the failed request is sent again", `${requests} requests`);
+    ck(ran.length === 1 && ran[0].action === "read", "and the turn completes as if nothing happened",
+      JSON.stringify(ran));
+    // The only error a one-iteration run can legitimately carry is the cap
+    // notice after the tool ran; the 503 itself must never reach the user.
+    const realErrors = r.events.filter((e) => e.type === "error" && !/Stopped after/.test(e.error ?? ""));
+    ck(realErrors.length === 0, "with the failure never shown to the user", JSON.stringify(realErrors));
+
+    // A dropped socket recovers the same way.
+    failTimes = 1; failStatus = 0; requests = 0;
+    r = await turn("Recovered fine.");
+    ck(requests >= 2, "a reset socket is retried too", `${requests} requests`);
+    ck(r.shown.trim() === "Recovered fine.", "and the answer arrives on the retry", JSON.stringify(r.shown));
+    ck(!r.events.some((e) => e.type === "error"), "again with no error");
+
+    // A non-transient failure is surfaced at once, not retried into the ground.
+    failTimes = 5; failStatus = 401; requests = 0;
+    r = await turn("unused");
+    ck(requests === 1, "a 401 is not retried", `${requests} requests`);
+    ck(r.events.some((e) => e.type === "error"), "it surfaces as an error immediately");
+    failTimes = 0; failStatus = 503;
   }
 
   await new Promise<void>((r) => server.close(() => r()));

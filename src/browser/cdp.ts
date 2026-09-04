@@ -118,7 +118,94 @@ export function listBrowsers(env: NodeJS.ProcessEnv = process.env): FoundBrowser
     seen.add(c.path.toLowerCase());
     found.push(c);
   }
+
+  // Playwright's own Chromium, last. A real Chrome or Edge the person chose is
+  // preferable to a headless build an installer dropped in a cache - it has
+  // their extensions, their logins, their idea of a default - so system
+  // browsers win the ordering. But when the machine has none, this is the one
+  // browser that is still reliably present, and finding it is the difference
+  // between the browser tool working and refusing every page.
+  for (const pw of playwrightBrowsers(env)) {
+    if (seen.has(pw.path.toLowerCase())) continue;
+    seen.add(pw.path.toLowerCase());
+    found.push(pw);
+  }
   return found;
+}
+
+/**
+ * A Chromium that Playwright manages, if one has been installed.
+ *
+ * Playwright downloads a versioned Chromium into a cache directory whose layout
+ * is the same on every OS, and drives it over the very protocol this file
+ * already speaks. So on a machine with no Chrome or Edge of its own - a fresh
+ * CI runner, a locked-down container, a devcontainer that ran `playwright
+ * install` but no browser installer - the one browser that IS present is the
+ * one Playwright put there, and it is a Chromium executable like any other.
+ *
+ * This is the "works whatever the OS" half of browser discovery, and it does it
+ * without a Playwright dependency at runtime: the layout is stable enough to
+ * find by path, and the launcher below needs an executable, not an API. Nothing
+ * here downloads anything - `npx playwright install chromium` is what fills this
+ * directory; this only notices that it has been.
+ *
+ * The cache roots are derived from the passed environment rather than from
+ * `os.homedir()`, so an empty environment resolves to no roots and finds
+ * nothing - the same contract the system-browser list keeps.
+ */
+export function playwrightBrowsers(env: NodeJS.ProcessEnv = process.env): FoundBrowser[] {
+  const roots: string[] = [];
+  // The explicit cache location wins, exactly as Playwright itself reads it.
+  // "0" is Playwright's sentinel for "browsers live beside the package", which
+  // this cannot resolve by path, so it is treated as unset.
+  const configured = env.PLAYWRIGHT_BROWSERS_PATH;
+  if (configured && configured !== "0") roots.push(configured);
+
+  if (process.platform === "win32") {
+    if (env.LOCALAPPDATA) roots.push(path.join(env.LOCALAPPDATA, "ms-playwright"));
+  } else if (process.platform === "darwin") {
+    if (env.HOME) roots.push(path.join(env.HOME, "Library", "Caches", "ms-playwright"));
+  } else {
+    if (env.HOME) roots.push(path.join(env.HOME, ".cache", "ms-playwright"));
+  }
+
+  // A full Chromium before its headless-only shell: the shell renders pages but
+  // is stripped of the machinery a full build has, so it is the fallback rather
+  // than the pick. Within each kind, the highest build number wins.
+  const rank = (name: string): number =>
+    name.startsWith("chromium-") ? 0 : name.startsWith("chromium_headless_shell-") ? 1 : 2;
+  const build = (name: string): number => Number(name.split("-").pop()) || 0;
+
+  const found: FoundBrowser[] = [];
+  const seen = new Set<string>();
+  for (const root of roots) {
+    let entries: string[];
+    try { entries = fs.readdirSync(root); } catch { continue; }
+    const dirs = entries
+      .filter((e) => /^chromium(_headless_shell)?-\d+$/.test(e))
+      .sort((a, b) => rank(a) - rank(b) || build(b) - build(a));
+    for (const d of dirs) {
+      const exe = playwrightExecutable(path.join(root, d), d.startsWith("chromium_headless_shell-"));
+      if (exe && exists(exe) && !seen.has(exe.toLowerCase())) {
+        seen.add(exe.toLowerCase());
+        found.push({ name: "Chromium (Playwright)", path: exe });
+      }
+    }
+  }
+  return found;
+}
+
+/** Where the executable sits inside a Playwright browser directory, per OS. */
+function playwrightExecutable(dir: string, shell: boolean): string {
+  if (process.platform === "win32") {
+    return path.join(dir, "chrome-win", shell ? "headless_shell.exe" : "chrome.exe");
+  }
+  if (process.platform === "darwin") {
+    return shell
+      ? path.join(dir, "chrome-mac", "headless_shell")
+      : path.join(dir, "chrome-mac", "Chromium.app", "Contents", "MacOS", "Chromium");
+  }
+  return path.join(dir, "chrome-linux", shell ? "headless_shell" : "chrome");
 }
 
 function exists(p: string): boolean {
@@ -252,6 +339,23 @@ export class CdpBrowser {
       "--disable-component-update",
       "--disable-sync",
       "--disable-default-apps",
+      // Silence every background call Chromium makes on its own account. This
+      // browser exists to look at the page it was pointed at, and its idea of
+      // "helpful" background traffic - safe-browsing lists, autofill and
+      // optimization hints to Google, translate and phishing models, crash
+      // reports, domain-reliability beacons - is a privacy leak the agent's
+      // user never asked for and, on a locked-down network, a set of requests
+      // that hang against a proxy that will neither allow nor cleanly refuse
+      // them. `--disable-background-networking` covers some of it; these name
+      // the rest explicitly so a headless lookup does not phone home.
+      "--disable-features=Translate,OptimizationHints,OptimizationGuideModelDownloading,InterestFeedContentSuggestions,MediaRouter,AutofillServerCommunication,CalculateNativeWinOcclusion",
+      "--disable-client-side-phishing-detection",
+      "--safebrowsing-disable-auto-update",
+      "--disable-domain-reliability",
+      "--disable-breakpad",
+      "--metrics-recording-only",
+      "--no-pings",
+      "--mute-audio",
       // Renderers sharing a temp profile trip over each other's sandboxes on
       // some Windows setups; the profile is throwaway either way.
       "--no-sandbox",

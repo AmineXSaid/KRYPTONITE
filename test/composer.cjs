@@ -580,6 +580,50 @@ console.log("\n──── the send control ────");
     /prefers-reduced-motion[\s\S]*?#sendBtn:active\s*\{\s*transform:\s*none/.test(CSS));
 }
 
+/* ── the model control's shape ───────────────────────────────────────────
+   The same shape decision the send control gets, applied to the one control
+   that names the model. Pinned in CSS text for the same reason: jsdom applies
+   no stylesheet, so nothing else would notice it losing its plate. */
+console.log("\n──── the model control ────");
+{
+  const model = CSS.match(/\n#modelBtn\s*\{[^}]*\}/);
+  ok("the model control has its own rule", !!model);
+  // A real surface and a hairline are what make it read as a control rather
+  // than as clickable prose.
+  ok("it wears a surface", !!model && /background:\s*var\(--kx-surface\b/.test(model[0]),
+    model ? model[0].replace(/\s+/g, " ") : "not found");
+  ok("and a hairline edge", !!model && /border:\s*1px solid var\(--kx-edge\)/.test(model[0]));
+  // A FIELD, not a raised plate: it is a picker showing a value, so it is sunk
+  // with an inner shadow rather than lifted like the icon buttons. That is the
+  // "kinda different but still part of the set" treatment.
+  ok("and reads as a recessed field, not a raised plate",
+    !!model && /box-shadow:\s*inset\b/.test(model[0]),
+    model ? model[0].replace(/\s+/g, " ") : "not found");
+  ok("with softened corners, not a pill",
+    !!model && /border-radius:\s*(\d+)px/.test(model[0]) && !/border-radius:\s*50%/.test(model[0]),
+    model ? model[0].replace(/\s+/g, " ") : "not found");
+  // Same radius as the send control, so the two read as one family rather than
+  // two unrelated shapes.
+  const sendRadius = (CSS.match(/\n#sendBtn\s*\{[^}]*border-radius:\s*(\d+)px/) || [])[1];
+  const modelRadius = model && (model[0].match(/border-radius:\s*(\d+)px/) || [])[1];
+  ok("sharing the send control's corner radius",
+    !!sendRadius && sendRadius === modelRadius, `model ${modelRadius} vs send ${sendRadius}`);
+  // The radius must stay well under half the height or the square rounds into a
+  // pill by arithmetic - the same guard the send control carries.
+  const h = model && model[0].match(/height:\s*(\d+)px/);
+  const r = model && model[0].match(/border-radius:\s*(\d+)px/);
+  ok("and its corners stay corners",
+    !!h && !!r && Number(r[1]) < Number(h[1]) / 2,
+    h && r ? `radius ${r[1]} of height ${h[1]}` : "not found");
+  // Hover lifts the field rather than only the ink, so it answers a press.
+  ok("hover lifts the whole field",
+    /#modelBtn:hover:not\(:disabled\)[^}]*background:\s*var\(--kx-surface-2\)/.test(CSS));
+  // Open, the field flattens so it is not a sunk trigger fighting a raised list.
+  ok("and flattens while its list is open",
+    /#modelBtn\[aria-expanded="true"\][^}]*box-shadow:\s*none/.test(CSS));
+}
+
+
 /* ── the mode sheet arrives, rather than appearing ──────────────────────── */
 {
   console.log("\n──── the mode sheet's transition ────");
