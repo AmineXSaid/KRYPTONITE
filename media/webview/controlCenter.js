@@ -313,21 +313,35 @@ function _run() {
   }
 
   /**
-   * The waiting mark: three arcs from the palette on their own periods.
+   * The waiting mark: one arc travelling one track.
    *
-   * One rotating ring reads as a stalled image; three at 1.1s, 1.7s and 2.6s
-   * never repeat the same figure, so the eye keeps reading it as work.
+   * It was three concentric arcs in three palette colours on three
+   * incommensurate periods - 1.1s, 1.7s, 2.6s - chosen so the figure never
+   * repeated. The reasoning was that a single rotating ring reads as a stalled
+   * image. At the size this is actually drawn, 12 to 13 pixels, it did not
+   * work: three rings inside 13px leaves under two pixels between strokes, the
+   * three hues smear into one muddy colour, and three unrelated speeds read as
+   * jitter rather than as motion. It was the busiest thing in a panel whose
+   * every other surface is quiet.
+   *
+   * One idea instead, and it is the panel's own: a faint track with an arc
+   * travelling it, which is exactly what `liveMark` draws for a conversation
+   * working in the background. The two "something is happening" marks now
+   * speak one language instead of two.
+   *
+   * The stalled-image worry is real and is answered by the arc's LENGTH rather
+   * than by more rings: it breathes between a sixth of the circle and a half
+   * while it travels, so no frame looks like any other and a frozen render is
+   * obvious. The two periods are 2:1 on purpose - the arc is longest at the
+   * same two points of every turn, which is a rhythm rather than the beating
+   * that three coprime periods produced.
    */
   function spinner(size) {
     var s = size || 12;
     return '<svg class="kx-spin" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" ' +
       'fill="none" aria-hidden="true">' +
-      '<circle class="a1" cx="12" cy="12" r="10" stroke="var(--kx-accent)" stroke-width="2.5" ' +
-        'stroke-linecap="round" stroke-dasharray="16 47"/>' +
-      '<circle class="a2" cx="12" cy="12" r="6.5" stroke="var(--kx-agent)" stroke-width="2.5" ' +
-        'stroke-linecap="round" stroke-dasharray="10 31"/>' +
-      '<circle class="a3" cx="12" cy="12" r="3" stroke="var(--kx-active)" stroke-width="2.5" ' +
-        'stroke-linecap="round" stroke-dasharray="5 14"/>' +
+      '<circle class="kx-track" cx="12" cy="12" r="9" stroke-width="2.6"/>' +
+      '<circle class="kx-arc" cx="12" cy="12" r="9" stroke-width="2.6" stroke-linecap="round"/>' +
       "</svg>";
   }
 
@@ -452,22 +466,26 @@ function _run() {
   /**
    * The persisted always-allow grants, with a way to take each one back.
    *
-   * Deliberately blunt about scope: the row shows the TOKEN and says what it
-   * covers, because "git" and "git status" are different promises and the one
-   * that was made is the first.
+   * Deliberately blunt about scope: the row shows the WHOLE COMMAND and says
+   * what it covers. It used to show a first word - "git" - because that is
+   * honestly what was granted, and one yes to `git status` carried `git push
+   * --force` with it. The host matches the whole normalised line exactly now,
+   * so the row can print the command itself and be telling the truth.
    */
   function allowList() {
     var list = (S.config && S.config.alwaysAllowedCommands) || [];
     if (!list.length) {
       return '<div class="hint muted" style="font-size:11px">' +
-        "None. Pressing “Always allow ⟨command⟩” on a permission request adds the " +
-        "command’s first word here, for this workspace, until you remove it.</div>";
+        "None. Pressing “Always allow ⟨command⟩” on a permission request adds that " +
+        "exact command here, for this workspace, until you remove it. Commands that " +
+        "can discard your work are never added, whatever the approval mode.</div>";
     }
     var rows = "";
     for (var i = 0; i < list.length; i++) {
       rows += '<div class="tr2" style="grid-template-columns:minmax(0,1fr) auto">' +
-        '<span class="v mono ell" title="Every command starting with ' + esc(list[i]) + '">' +
-          esc(list[i]) + " …</span>" +
+        '<span class="v mono ell" title="Runs without asking: ' + esc(list[i]) +
+          ". Other commands, including ones sharing a program name, still ask.\">" +
+          esc(list[i]) + "</span>" +
         '<button class="mini" data-forget="' + esc(list[i]) +
           '" title="Stop always allowing ' + esc(list[i]) + '" ' +
           'aria-label="Stop always allowing ' + esc(list[i]) + '">' + icon("i-x", "ic-13") + "</button>" +
@@ -1423,13 +1441,19 @@ function _run() {
         "Manual: always ask before making changes · Accept edits: file edits run " +
         "automatically, shell commands still ask · Auto: never asks, and runs shell " +
         "commands and writes files without stopping</div>") +
-      /* WHAT "ALWAYS ALLOW" ACTUALLY GRANTED, AND THE ONLY WAY BACK.
+      /* WHAT "ALWAYS ALLOW" ACTUALLY GRANTS, AND THE ONLY WAY BACK.
        *
-       * Pressing "Always allow" on a shell command appends its FIRST TOKEN to a
-       * workspace-level list that survives restarts. So one yes to `git status`
-       * authorises `git push --force` for good - and until this card the list
-       * existed only in workspaceState: no screen, no setting, no protocol
-       * message. A grant nobody can see is a grant nobody can revoke. */
+       * Pressing "Always allow" on a shell command stores a workspace-level
+       * grant that survives restarts. It used to be keyed on the command's
+       * FIRST TOKEN, so one yes to `git status` authorised `git push --force`
+       * for good. It is the whole normalised line now, matched exactly and
+       * never stored at all for a line carrying a shell operator, and a
+       * destructive command is refused however the list reads.
+       *
+       * The card stays for the reason it was built: until it existed the list
+       * lived only in workspaceState, with no screen, no setting and no
+       * protocol message. A grant nobody can see is a grant nobody can
+       * revoke, and that is true of a narrow grant too. */
       card("Always-allowed commands", allowList()) +
       /* The browser the agent drives is a real Chromium, and by default you
          cannot see it. Headless is still right most of the time - a window
@@ -1480,7 +1504,43 @@ function _run() {
      worse than none. test/control-center.cjs pins the ones that are easy to
      get wrong against the source, so a limit cannot change here alone. */
 
-  function pre(lines) { return '<div class="pre">' + esc(lines.join("\n")) + "</div>"; }
+  /**
+   * A code block. `copyable` adds a copy button.
+   *
+   * It is opt-in rather than on every block, because half the blocks in these
+   * guides are ILLUSTRATIONS rather than templates: the skill folder tree
+   * carries an arrow annotation, the built-in tool names are a word list, and
+   * the five forms of `mcp:` have their meanings written down the right-hand
+   * side. A copy button on those hands the user something that does not parse,
+   * which is worse than no button - they would find out at load time, from a
+   * warning about a file they believed they had been given.
+   *
+   * The four that are marked copyable are complete, valid files as printed.
+   */
+  function pre(lines, copyable, lang) {
+    var body = '<div class="pre">' + esc(lines.join("\n")) + "</div>";
+    if (!copyable) return body;
+    /* A HEADER ROW, not a button floating over the block.
+    
+       Floating it was the first attempt and it is the obvious one: absolute,
+       top-right, with the block padded on that side to keep it off the text.
+       The padding holds for content that can WRAP, and a probe against the
+       four real templates came back clean at every width. It cannot hold in
+       general - `.pre` is `overflow-x: auto`, so a token with no break
+       opportunity runs straight under the button, and the reader can scroll
+       any line under it by hand. Reserving a gutter does not help: there is
+       nothing for the line to wrap at.
+    
+       A row above the block cannot be overlapped by anything, at any width,
+       for any content. It is also what the transcript's code blocks already
+       do (`.cb` / `.cb-h` in sidebar.css), so the two surfaces now offer copy
+       the same way instead of two ways. */
+    return '<div class="pre-wrap">' +
+      '<div class="pre-h"><span class="pre-l">' + esc(lang) + "</span>" +
+      '<button class="pre-copy" data-copy-pre title="Copy to clipboard" ' +
+      'aria-label="Copy this example to the clipboard">Copy</button></div>' +
+      body + "</div>";
+  }
   function kvTable(rows) {
     var h = "";
     for (var i = 0; i < rows.length; i++) {
@@ -1524,7 +1584,7 @@ function _run() {
         "",
         "For a worked example see handshake.md.",
         "For the report layout use templates/report.md."
-      ]) +
+      ], true, "SKILL.md") +
       '<div class="explainer" style="margin-top:9px"><b>The description is the entire trigger.</b> ' +
       "It is the only sentence the model sees before deciding whether to open the skill, so say " +
       "<i>when to use it</i>, not what it contains. A skill with no description still loads, and " +
@@ -1549,7 +1609,13 @@ function _run() {
       '<div class="explainer">A watcher on <code>' + dir + '</code> picks up new and changed skills ' +
       "without a reload. If one does not appear, the Skills tab has a Reload button and lists the " +
       "parse warnings. Every skill has a switch there: a disabled skill stays on disk and out of " +
-      "the prompt.</div></div>" +
+      "the prompt.</div>" +
+      /* The guide's own step 1 is "make the folder", and the panel can just
+         make it: the host mkdirs before revealing, so this works the first
+         time as well as the fortieth. A guide that describes a directory it
+         is perfectly able to open is asking the reader to do its job. */
+      '<div class="row-actions"><button class="btn" data-act="openSkills">' +
+      "Open " + dir + "</button></div></div>" +
 
       '<div class="block"><h4>Limits</h4>' +
       kvTable([
@@ -1580,7 +1646,7 @@ function _run() {
         "    }",
         "  }",
         "}"
-      ]) + "</div>" +
+      ], true, ".agent/mcp.json") + "</div>" +
 
       '<div class="block"><h4>2 &middot; A remote server (HTTP or SSE)</h4>' +
       '<div class="explainer">Anything with a <code>url</code>, or an explicit <code>type</code>, is ' +
@@ -1596,7 +1662,7 @@ function _run() {
         "    }",
         "  }",
         "}"
-      ]) +
+      ], true, ".agent/mcp.json") +
       '<div class="explainer" style="margin-top:9px"><code>type</code> may be <code>http</code>, ' +
       "<code>streamable-http</code> or <code>sse</code>. A server declared remote with no " +
       "<code>url</code> is reported as a warning rather than started.</div></div>" +
@@ -1633,7 +1699,14 @@ function _run() {
       '<div class="block"><h4>5 &middot; Load it</h4>' +
       '<div class="explainer">The MCP tab lists every declared server with its transport, its state ' +
       "and its tool count, and has a Reload button. A server that fails to start stays listed with " +
-      "its error rather than disappearing.</div></div>";
+      "its error rather than disappearing.</div>" +
+      /* `mcpOpenConfig`, not `openFile`: the file usually does not exist yet -
+         that is the whole case this button is for - and the host writes a
+         commented starter before opening. Posting `openFile` here would give
+         "Unable to resolve nonexistent file", which is the mistake the
+         protocol comment on McpOpenConfigMsg already records. */
+      '<div class="row-actions"><button class="btn" data-act="mcpOpen">' +
+      "Open .agent/mcp.json</button></div></div>";
   }
 
   /* ── how to prepare an agent ── */
@@ -1663,7 +1736,7 @@ function _run() {
         "",
         "You are a TLS triage specialist. You read captures and name the",
         "failure. You do not change configuration."
-      ]) +
+      ], true, ".agent/agents/tls-triage.md") +
       '<div class="explainer" style="margin-top:9px"><b>Only <code>name</code> is required</b>, and ' +
       "every omission means <i>unrestricted</i>, not <i>nothing</i>. An agent that declares no " +
       "<code>tools</code> gets the full built-in set; one that declares no <code>mcp</code> gets " +
@@ -1721,10 +1794,14 @@ function _run() {
       "than run.</div></div>" +
 
       '<div class="block"><h4>6 &middot; Use it</h4>' +
+      '<div class="row-actions" style="margin-bottom:9px">' +
+      '<button class="btn" data-act="newAgent">New agent from template</button></div>' +
       '<div class="explainer"><code>/agent</code> in the composer, the command palette, and the ' +
-      "Agents tab all reach the same list. While an agent is active a bar under the tabs names it " +
-      "and states its scope. The count on the Agents tab is <i>files that failed to parse</i>, not " +
-      "agents, so it stays dark when nothing is wrong.</div></div>" +
+      "Agents tab all reach the same list. An agent belongs to ONE CONVERSATION: choosing one " +
+      "applies it to the chat you are in, other chats are unaffected, and a new chat starts with " +
+      "none. While one is active a bar under the tabs names it and states its scope. The count on " +
+      "the Agents tab is <i>files that failed to parse</i>, not agents, so it stays dark when " +
+      "nothing is wrong.</div></div>" +
 
       '<div class="block"><h4>On &ldquo;Hermes&rdquo;</h4>' +
       '<div class="explainer">There is one agent format, and it <i>is</i> Hermes Agent&rsquo;s: the ' +
@@ -2017,6 +2094,27 @@ function _run() {
       render();
       return;
     }
+    /* Before [data-act], because the copy button sits inside a block that has
+       none - and because delegation is the only option here: the guides are
+       written as innerHTML and re-rendered on every state sync, so a listener
+       bound per block would be dropped on the next flush. */
+    if ((t = e.target.closest("[data-copy-pre]"))) {
+      var block = t.parentElement && t.parentElement.querySelector(".pre");
+      if (block) {
+        post("copyText", { text: block.textContent });
+        /* Confirmed on the button itself rather than through setFlash: flash
+           goes through render(), which rebuilds the pane and would collapse
+           whichever accordion the reader had open to press it. */
+        var was = t.textContent;
+        t.textContent = "Copied";
+        t.setAttribute("data-done", "1");
+        setTimeout(function () {
+          t.textContent = was;
+          t.removeAttribute("data-done");
+        }, 1400);
+      }
+      return;
+    }
     if ((t = e.target.closest("[data-act]"))) {
       onAction(t.getAttribute("data-act"));
       return;
@@ -2068,6 +2166,8 @@ function _run() {
       case "trace": S.tracing = true; S.rungs = []; render(); post("runTrace"); break;
       case "reloadSkills": post("reloadSkills"); setFlash("reloadSkills"); break;
       case "openSkills": post("openSkillsFolder"); break;
+      case "mcpOpen": post("mcpOpenConfig"); break;
+      case "newAgent": post("newAgent"); break;
       case "export": post("exportBundle"); break;
       case "issues": post("openIssues"); break;
       case "copyEmail":
@@ -2278,6 +2378,9 @@ function _run() {
   mount();
   wire();
   render();
-  post("ready");
+  // See the sidebar: the host compares this against its own version so a
+  // cached panel from before an update is reported rather than silently
+  // dropping messages it does not recognise.
+  post("ready", { build: (window.__kx && window.__kx.build) || "" });
 })();
 } /* end _run */

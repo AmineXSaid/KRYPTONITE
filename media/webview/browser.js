@@ -13,7 +13,14 @@
  *
  * History is this panel's own, not the frame's: `history.back()` on a
  * cross-origin frame is blocked, so a back button driven by it would work on
- * some sites and silently do nothing on others.
+ * some sites and silently do nothing on others. Its entries are strings for
+ * addresses and `{q: "..."}` for searches, because both are places this panel
+ * has been and Back has to return to either.
+ *
+ * The box at the top is an address bar and a search box at once. It used to be
+ * only the first, so words typed into it became `https://words with spaces`
+ * and the panel answered that the address was unusable - the model could
+ * search the web from a tool call and the person watching it could not.
  */
 (function () {
   var api = window.__kx.api;
@@ -33,6 +40,11 @@
     url: "",
     view: "live",          // live | reader
     page: null,
+    /* A search outcome from the host: {query, provider, url, results, wall, ms}.
+       Mutually exclusive with `page` - the stage shows one thing - and both are
+       cleared by whichever navigation replaces them. */
+    results: null,
+    query: "",
     loading: false,
     error: "",
     history: [],
@@ -71,13 +83,13 @@
     return '<svg class="' + (cls || "ic") + '" aria-hidden="true"><use href="#' + id + '"/></svg>';
   }
 
-  /** Three arcs on their own periods, matching the rest of the extension. */
+  /** One arc travelling one track. See the note in sidebar.js. */
   function spinner(size) {
     var s = size || 13;
-    return '<svg class="kx-spin" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
-      '<circle class="a1" cx="12" cy="12" r="10" stroke="var(--kx-accent)" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="16 47"/>' +
-      '<circle class="a2" cx="12" cy="12" r="6.5" stroke="var(--kx-agent)" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="10 31"/>' +
-      '<circle class="a3" cx="12" cy="12" r="3" stroke="var(--kx-active)" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="5 14"/>' +
+    return '<svg class="kx-spin" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" ' +
+      'fill="none" aria-hidden="true">' +
+      '<circle class="kx-track" cx="12" cy="12" r="9" stroke-width="2.6"/>' +
+      '<circle class="kx-arc" cx="12" cy="12" r="9" stroke-width="2.6" stroke-linecap="round"/>' +
       "</svg>";
   }
 
@@ -135,7 +147,7 @@
           '<button class="gh" id="bFwd" title="Forward" aria-label="Forward" disabled>' + icon("b-fwd", "ic-15") + "</button>" +
           '<button class="gh" id="bGo" title="Reload" aria-label="Reload">' + icon("b-reload", "ic-14") + "</button>" +
           '<div class="addr"><input id="bUrl" type="text" spellcheck="false" autocomplete="off" ' +
-            'placeholder="Type a URL" aria-label="Address"><span id="bBusy" class="busy"></span></div>' +
+            'placeholder="Search or enter a URL" aria-label="Address"><span id="bBusy" class="busy"></span></div>' +
           '<button class="gh" id="bAgent" title="Send this page to the chat" aria-label="Send to chat">' +
             icon("b-agent", "ic-15") + "</button>" +
         "</div>" +
@@ -225,6 +237,61 @@
       "</div>";
   }
 
+  /**
+   * A page of results.
+   *
+   * Rows rather than a list of links: a result is a title, a destination and a
+   * sentence about it, and dropping either of the last two is what turns a
+   * results page into a wall of blue text nobody can choose from. The address
+   * is shown in full and in the monospace face, because judging a source is
+   * mostly reading its domain.
+   *
+   * A wall - a bot check or a rate limit - is not zero results, and must not
+   * render as "nothing found". They call for different actions: one is a
+   * different query, the other is waiting or a different provider.
+   */
+  function renderResults(stage) {
+    var R = S.results;
+    var rows = R.results || [];
+
+    if (R.wall) {
+      stage.innerHTML =
+        '<div class="blank"><div class="blank-in err">' +
+          "<h2>The search provider refused</h2>" +
+          "<p>That was " + esc(R.wall) + " rather than results. It is not something to " +
+          "retry your way past &mdash; wait a little, or set a different provider in " +
+          "<code>genesis.searchProvider</code>.</p>" +
+        "</div></div>";
+      return;
+    }
+    if (!rows.length) {
+      stage.innerHTML =
+        '<div class="blank"><div class="blank-in">' +
+          "<h2>No results</h2><p>Nothing came back for " +
+          "<b>" + esc(R.query) + "</b>. Try different words.</p>" +
+        "</div></div>";
+      return;
+    }
+
+    var html = "";
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      html +=
+        '<li class="res">' +
+          '<a class="res-t" href="#" data-go="' + esc(r.url) + '">' + esc(r.title) + "</a>" +
+          '<div class="res-u">' + esc(r.url) + "</div>" +
+          (r.snippet ? '<p class="res-s">' + esc(r.snippet) + "</p>" : "") +
+        "</li>";
+    }
+    stage.innerHTML =
+      '<article class="reader">' +
+        "<h1>" + esc(R.query) + "</h1>" +
+        '<div class="src">' + rows.length + " result" + (rows.length === 1 ? "" : "s") +
+          " from " + esc(R.provider) + "</div>" +
+        '<ol class="results">' + html + "</ol>" +
+      "</article>";
+  }
+
   function renderStage() {
     var stage = $("bStage");
 
@@ -293,9 +360,10 @@
     }
 
     /* reader */
+    if (S.results) { renderResults(stage); return; }
     if (S.loading && !S.page) {
       stage.innerHTML = '<div class="blank"><div class="blank-in load">' + spinner(20) +
-        "<span>Fetching&hellip;</span></div></div>";
+        "<span>" + (S.query ? "Searching&hellip;" : "Fetching&hellip;") + "</span></div></div>";
       return;
     }
     if (!S.page) {
@@ -388,6 +456,56 @@
     return /^https?:\/\//i.test(s) ? s : "https://" + s.replace(/^https?:/i, "");
   }
 
+  /**
+   * A thing to look up, or a place to go?
+   *
+   * Mirrors `looksLikeQuery` in src/browser/search.ts, which is the source of
+   * truth and carries the reasoning. Duplicated here for the same reason
+   * `normalise` above is: this file is loaded as a plain script under a nonce
+   * CSP with no bundler, so it cannot import from src/, and a box that posts
+   * every keystroke to the host to ask what kind of thing it is would make
+   * pressing Enter a round trip.
+   */
+  function looksLikeQuery(input) {
+    var s = String(input || "").trim();
+    if (!s) return false;
+    // Whitespace first, and before the scheme test rather than after it: a
+    // stack trace pasted in here starts with something the scheme pattern is
+    // happy to match, and that is a search every time.
+    if (/\s/.test(s)) return true;
+    var m = /^([a-z][a-z0-9+.-]*):(\/\/)?/i.exec(s);
+    // An explicit scheme is intent. http and https navigate; anything else
+    // falls through to `normalise` and is refused there, because silently
+    // searching for `javascript:alert(1)` hides a refusal worth seeing.
+    if (m && !(!m[2] && /^\d/.test(s.slice(m[0].length)))) return false;
+    var host = s.split(/[/?#]/, 1)[0].replace(/:\d+$/, "");
+    if (/^localhost$/i.test(host)) return false;
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return false;
+    if (/^\[[0-9a-f:]+\]$/i.test(host)) return false;
+    return !/^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/i.test(host);
+  }
+
+  /** Whatever was typed, sent wherever it belongs. One entry point. */
+  function submit(raw) {
+    var v = String(raw || "").trim();
+    if (!v) return;
+    if (looksLikeQuery(v)) goSearch(v);
+    else go(v);
+  }
+
+  /** Replay one history entry, which is an address or a search. */
+  function goEntry(entry) {
+    if (entry && typeof entry === "object") goSearch(entry.q, true);
+    else go(entry, true);
+  }
+
+  /** Push onto history, discarding whatever was ahead. */
+  function record(entry) {
+    S.history = S.history.slice(0, S.at + 1);
+    S.history.push(entry);
+    S.at = S.history.length - 1;
+  }
+
   function go(raw, fromHistory) {
     // An empty box is not a navigation. Clearing state first would discard a
     // visible error message and quietly return to the previous page, which
@@ -399,15 +517,40 @@
     if (!url) { render(); return; }
     S.url = url;
     S.page = null;
+    S.results = null;
     S.error = "";
     $("bUrl").value = url;
-    if (!fromHistory) {
-      // Forward entries are discarded on a new navigation, as everywhere else.
-      S.history = S.history.slice(0, S.at + 1);
-      S.history.push(url);
-      S.at = S.history.length - 1;
-    }
+    if (!fromHistory) record(url);
     if (S.view === "reader") post("browserOpen", { url: url });
+    render();
+  }
+
+  /**
+   * Search, and show the results in the Reader.
+   *
+   * The Reader rather than a fourth tab, because that is what results are:
+   * fetched by the host over the active endpoint's connection and reduced to
+   * text. A tab of their own would be a second name for the same mechanism,
+   * and the panel already has three.
+   *
+   * `S.url` is cleared rather than set to the provider's address. That address
+   * is a query string with somebody's API key redacted out of it, so it is not
+   * somewhere to navigate, not something to frame, and not something to hand
+   * to "open externally".
+   */
+  function goSearch(query, fromHistory) {
+    var q = String(query || "").trim();
+    if (!q) return;
+    S.error = "";
+    S.url = "";
+    S.page = null;
+    S.results = null;
+    S.query = q;
+    S.loading = true;
+    S.view = "reader";
+    $("bUrl").value = q;
+    if (!fromHistory) record({ q: q });
+    post("browserSearch", { query: q });
     render();
   }
 
@@ -416,10 +559,13 @@
     input.addEventListener("keydown", function (e) {
       if (e.key !== "Enter") return;
       e.preventDefault();
-      go(input.value.trim());
+      submit(input.value.trim());
     });
     $("bGo").addEventListener("click", function () {
       if (S.loading) { post("browserStop"); S.loading = false; render(); return; }
+      // Reloading a set of results re-runs the search rather than doing
+      // nothing, which is what a reload button on a results page means.
+      if (S.results) { post("browserSearch", { query: S.results.query }); S.results = null; render(); return; }
       if (!S.url) return;
       S.page = null;
       if (S.view === "reader") post("browserOpen", { url: S.url });
@@ -434,12 +580,12 @@
     $("bBack").addEventListener("click", function () {
       if (S.at <= 0) return;
       S.at--;
-      go(S.history[S.at], true);
+      goEntry(S.history[S.at]);
     });
     $("bFwd").addEventListener("click", function () {
       if (S.at >= S.history.length - 1) return;
       S.at++;
-      go(S.history[S.at], true);
+      goEntry(S.history[S.at]);
     });
     $("bLive").addEventListener("click", function () { setView("live"); });
     $("bRead").addEventListener("click", function () { setView("reader"); });
@@ -466,13 +612,31 @@
     $("bExt").addEventListener("click", function () { post("browserExternal", { url: S.url }); });
     $("bClosePanel").addEventListener("click", function () { post("browserClose"); });
     $("bAgent").addEventListener("click", function () {
-      if (!S.page || !S.page.text) return;
-      post("browserToAgent", { url: S.page.finalUrl, text: S.page.text });
+      if (S.page && S.page.text) {
+        post("browserToAgent", { url: S.page.finalUrl, text: S.page.text });
+        return;
+      }
+      // Results are worth sending too, and are the more useful half of the
+      // pair: "here is what the web says about X, now use it" is the reason
+      // somebody searched from this panel instead of asking the model to.
+      if (S.results && S.results.results && S.results.results.length) {
+        var rs = S.results.results;
+        var text = rs.map(function (r, i) {
+          return (i + 1) + ". " + r.title + "\n   " + r.url + (r.snippet ? "\n   " + r.snippet : "");
+        }).join("\n\n");
+        post("browserToAgent", {
+          url: "a web search for " + JSON.stringify(S.results.query),
+          text: text,
+        });
+      }
     });
     $("bStage").addEventListener("click", function (e) {
       var a = e.target.closest("[data-go]");
       if (!a) return;
       e.preventDefault();
+      // `go`, not `submit`: these are addresses out of a page or a result row,
+      // never words to look up, and classifying them again could only get it
+      // wrong.
       go(a.getAttribute("data-go"));
     });
   }
@@ -537,6 +701,23 @@
         S.loading = false;
         S.error = m.message || "Unknown error";
         render();
+        break;
+      case "browserSearching":
+        S.loading = true;
+        S.query = m.query || "";
+        S.error = "";
+        S.results = null;
+        S.page = null;
+        render();
+        break;
+      case "browserResults":
+        S.loading = false;
+        S.query = "";
+        S.results = m.results || null;
+        render();
+        break;
+      case "searchFor":
+        goSearch(m.query);
         break;
     }
   });

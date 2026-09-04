@@ -26,6 +26,9 @@
  * else's service.
  */
 
+import { request, Dispatcher } from "undici";
+import { USER_AGENT } from "./fetchPage";
+
 export interface SearchResult {
   title: string;
   url: string;
@@ -59,6 +62,17 @@ export interface ProviderConfig {
 /** The keyless endpoint, and the default. Plain GET, plain HTML, no key. */
 export const SEARCH_URL = "https://html.duckduckgo.com/html/";
 
+/**
+ * How long a search may take before it is abandoned.
+ *
+ * `fetchPage` budgets 30s for a whole document; a search returns a few
+ * kilobytes of result rows and has no business taking longer. Without a budget
+ * undici's own default applies, which is five minutes - long enough that a
+ * provider which accepts the connection and then says nothing holds the turn
+ * open past the point where anyone is still waiting for it.
+ */
+export const SEARCH_TIMEOUT_MS = 20_000;
+
 export interface SearchRequest {
   url: string;
   headers: Record<string, string>;
@@ -73,6 +87,16 @@ export interface SearchRequest {
  * credential it needs. A misconfigured key should degrade to a working search,
  * not to no search - the failure mode of the alternative is that someone types
  * a key wrong and web search silently stops existing.
+ *
+ * Every branch carries a `user-agent`, and that is not decoration. undici sends
+ * none of its own, so these requests went out with no agent at all - which is
+ * the one thing a search endpoint is most certain to refuse, because it is the
+ * shape a scraper has and nothing else. The keyless default was the provider
+ * that needed it most and the provider that had no key to fall back on, so the
+ * out-of-the-box case - the case this whole file argues it exists for - was the
+ * one that could not work. The other three carry it too: an API key identifies
+ * the account, not the caller, and a search API is entitled to know which
+ * client is calling it.
  */
 export function buildSearch(query: string, cfg: ProviderConfig, limit = 8): SearchRequest {
   const q = encodeURIComponent(query);
@@ -81,7 +105,11 @@ export function buildSearch(query: string, cfg: ProviderConfig, limit = 8): Sear
   if (cfg.provider === "brave" && cfg.apiKey) {
     return {
       url: `https://api.search.brave.com/res/v1/web/search?q=${q}&count=${n}`,
-      headers: { accept: "application/json", "x-subscription-token": cfg.apiKey },
+      headers: {
+        accept: "application/json",
+        "user-agent": USER_AGENT,
+        "x-subscription-token": cfg.apiKey,
+      },
       kind: "brave",
     };
   }
@@ -90,19 +118,34 @@ export function buildSearch(query: string, cfg: ProviderConfig, limit = 8): Sear
       url:
         `https://www.googleapis.com/customsearch/v1?key=${encodeURIComponent(cfg.apiKey)}` +
         `&cx=${encodeURIComponent(cfg.engineId)}&q=${q}&num=${Math.min(10, n)}`,
-      headers: { accept: "application/json" },
+      headers: { accept: "application/json", "user-agent": USER_AGENT },
       kind: "google",
     };
   }
   if (cfg.provider === "bing" && cfg.apiKey) {
     return {
       url: `https://api.bing.microsoft.com/v7.0/search?q=${q}&count=${n}`,
-      headers: { accept: "application/json", "Ocp-Apim-Subscription-Key": cfg.apiKey },
+      headers: {
+        accept: "application/json",
+        "user-agent": USER_AGENT,
+        "Ocp-Apim-Subscription-Key": cfg.apiKey,
+      },
       kind: "bing",
     };
   }
 
-  return { url: `${SEARCH_URL}?q=${q}`, headers: { accept: "text/html" }, kind: "html" };
+  return {
+    url: `${SEARCH_URL}?q=${q}`,
+    headers: {
+      accept: "text/html",
+      "user-agent": USER_AGENT,
+      // Without this the endpoint picks a language from the connection's
+      // geography, so the same query answers in different languages from
+      // different offices of the same company.
+      "accept-language": "en",
+    },
+    kind: "html",
+  };
 }
 
 /** Kept for the callers and tests that only ever wanted the keyless URL. */
@@ -211,16 +254,34 @@ export function parseResults(html: string, limit = 10): SearchResult[] {
   return out;
 }
 
-/** Rendered for the model: numbered, with the destination on its own line. */
-export function renderResults(query: string, results: SearchResult[]): string {
+/**
+ * Rendered for the model: numbered, with the destination on its own line.
+ *
+ * `fence` wraps the results and only the results. Every title and snippet here
+ * was written by whoever ranked for the query, which makes a search result the
+ * cheapest injection surface in the extension - a page has to be fetched
+ * before it can say anything, and a snippet is delivered for the asking. Every
+ * other network-sourced string in here is fenced; this one was not.
+ *
+ * It has to be the middle rather than the whole string, because the last line
+ * is an instruction from this extension about what to do next, and the fence
+ * means "nothing inside this is an instruction". Fencing our own sentence
+ * along with the results would tell the model to disregard it.
+ */
+export function renderResults(
+  query: string,
+  results: SearchResult[],
+  fence: (body: string) => string = (b) => b
+): string {
   if (!results.length) {
     return `No results for ${JSON.stringify(query)}. Try different words, or use browser open if you already know the address.`;
   }
+  const body = results
+    .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}${r.snippet ? `\n   ${r.snippet}` : ""}`)
+    .join("\n\n");
   return (
     `${results.length} result${results.length === 1 ? "" : "s"} for ${JSON.stringify(query)}:\n\n` +
-    results
-      .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}${r.snippet ? `\n   ${r.snippet}` : ""}`)
-      .join("\n\n") +
+    fence(body) +
     `\n\nUse browser open or fetch_url on one of these addresses to read it.`
   );
 }
@@ -256,6 +317,17 @@ export function looksLikeBotWall(url: string, text: string): string | undefined 
   if (/checking your browser before accessing/.test(t)) return "an interstitial bot check";
   if (/^\s*just a moment\.\.\./.test(t)) return "an interstitial bot check";
 
+  // A refusal from the keyless endpoint, keyed on the host as well as the
+  // wording. "anomaly" and "too many requests" are ordinary words that appear
+  // on ordinary pages - including, awkwardly, a results page for a query about
+  // either - so this would be exactly the false positive the rest of this
+  // function is careful to avoid, were it not for where it is called from:
+  // only when a search parsed to zero results. A results page that says
+  // "anomaly" has results in it and never reaches here.
+  if (/duckduckgo\.com/.test(u) && /anomaly|too many requests|rate limit/.test(t)) {
+    return "DuckDuckGo's rate limit";
+  }
+
   return undefined;
 }
 
@@ -276,4 +348,153 @@ export function botWallAdvice(what: string, url: string): string {
     `driving a browser at a search page, so it is not subject to this check. ` +
     `Then use browser open or fetch_url on one of the addresses it returns.`
   );
+}
+
+/**
+ * The request's address with any credential taken out of it.
+ *
+ * Google's programmable search carries the API key in the query string. That
+ * is its design rather than a mistake here, but this address is shown to the
+ * user in the panel's status line and handed to the model by `botWallAdvice`,
+ * and a key that reaches a transcript has been disclosed to whoever that
+ * transcript is later exported to - which for this extension is a JSON file
+ * somebody attaches to a bug report.
+ */
+export function redactSearchUrl(url: string): string {
+  return url.replace(/([?&](?:key|api_?key|token|subscription-key)=)[^&]*/gi, "$1<redacted>");
+}
+
+/**
+ * Is this text a thing to look up, or a place to go?
+ *
+ * The question every address bar has answered for twenty years, and the reason
+ * this file now has to answer it: the browser panel's box was an address bar
+ * only, so words typed into it became `https://words with spaces` and the
+ * panel said the address was unusable. The person watching a model search the
+ * web could not search it themselves.
+ *
+ * The rule is deliberately not a public-suffix list. That means `node.js` and
+ * `README.md` are treated as addresses and go nowhere, which is the honest
+ * cost: the fix from the user's side is to add a word, and "node.js streams"
+ * is what anybody searching for it types anyway. A suffix list would be the
+ * largest data file in the project, shipped to decide one branch.
+ */
+export function looksLikeQuery(input: string): boolean {
+  const s = String(input ?? "").trim();
+  if (!s) return false;
+
+  // Whitespace first, and before the scheme test rather than after it. A stack
+  // trace pasted into the box - `TypeError: cannot read properties of null` -
+  // begins with something the scheme pattern is perfectly happy to match, and
+  // that is a search every single time.
+  if (/\s/.test(s)) return true;
+
+  // An explicit scheme is a statement of intent, so it is never a search.
+  // http and https navigate; anything else falls through to `normaliseUrl`
+  // and is refused there, because silently searching for `javascript:alert(1)`
+  // hides a refusal the user needs to see.
+  const m = /^([a-z][a-z0-9+.-]*):(\/\/)?/i.exec(s);
+  if (m) {
+    // `localhost:3000` is a port, not a scheme - the same carve-out
+    // `normaliseUrl` makes, for the same reason.
+    const isPort = !m[2] && /^\d/.test(s.slice(m[0].length));
+    if (!isPort) return false;
+  }
+
+  // What is left is a bare word, a host, or a host with a path on it.
+  const host = s.split(/[/?#]/, 1)[0].replace(/:\d+$/, "");
+  if (/^localhost$/i.test(host)) return false;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return false;       // IPv4
+  if (/^\[[0-9a-f:]+\]$/i.test(host)) return false;             // bracketed IPv6
+  return !/^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/i.test(host);
+}
+
+/** What one search actually did, for the two callers that need to say so. */
+export interface SearchOutcome {
+  query: string;
+  /**
+   * The provider that answered, which is not always the one configured:
+   * `buildSearch` falls back to the keyless endpoint when a named provider is
+   * missing its credential. Reporting the configured name instead is how a
+   * status line comes to claim Brave for a search DuckDuckGo answered.
+   */
+  provider: SearchProvider;
+  /** Where it went, redacted. Safe to show a user and to hand a model. */
+  url: string;
+  results: SearchResult[];
+  /** Set when the answer was a bot check or a rate limit rather than results. */
+  wall?: string;
+  ms: number;
+}
+
+/**
+ * One search, and the only implementation of one.
+ *
+ * Two callers now need this - the `web_search` tool and the browser panel's
+ * address bar - and the half-dozen steps between a query and a list of results
+ * are all places the two could quietly disagree: which provider actually
+ * answered, whether a 403 is an error or a wall, whether an empty page means
+ * no results or a refusal. Written once, on the same argument the agent gate
+ * is written on: a rule read in two places is a rule, and a rule implemented in
+ * two places is two rules.
+ *
+ * `dispatcher` is the point of the whole exercise. Passed the active profile's,
+ * the search reaches whatever the model's own endpoint reaches - the corporate
+ * proxy, the private CA, the client certificate. That is the part a hosted
+ * search API cannot do.
+ */
+export async function runSearch(
+  query: string,
+  cfg: ProviderConfig,
+  opts: {
+    dispatcher?: Dispatcher;
+    signal?: AbortSignal;
+    limit?: number;
+    timeoutMs?: number;
+  } = {}
+): Promise<SearchOutcome> {
+  const q = String(query ?? "").trim();
+  if (!q) throw new Error("Enter something to search for.");
+
+  const limit = Math.min(20, Math.max(1, Number(opts.limit ?? 8) || 8));
+  const req = buildSearch(q, cfg, limit);
+  const provider: SearchProvider = req.kind === "html" ? "duckduckgo" : req.kind;
+  const url = redactSearchUrl(req.url);
+  const budget = opts.timeoutMs ?? SEARCH_TIMEOUT_MS;
+  const t0 = Date.now();
+
+  const res = await request(req.url, {
+    method: "GET",
+    headers: req.headers,
+    ...(opts.dispatcher ? { dispatcher: opts.dispatcher } : {}),
+    signal: opts.signal,
+    maxRedirections: 3,
+    headersTimeout: budget,
+    bodyTimeout: budget,
+  });
+  const body = await res.body.text();
+  const ms = Date.now() - t0;
+
+  if (res.statusCode >= 400) {
+    // Naming the provider that actually answered matters: a model told only
+    // "the search failed" retries it until the turn ends, and one told the
+    // wrong provider's name goes and checks a key that was never used.
+    throw new Error(
+      `${provider} answered HTTP ${res.statusCode}. ` +
+      (res.statusCode === 401 || res.statusCode === 403
+        ? provider === "duckduckgo"
+          ? "The endpoint refused the request; try again shortly, or set genesis.searchProvider to one with an API key."
+          : "The API key is missing or rejected; check genesis.searchApiKey."
+        : "Try again, or switch genesis.searchProvider.")
+    );
+  }
+
+  const results = parseProvider(req.kind, body, limit);
+  // Only consulted when nothing parsed. A page that has results in it is a
+  // results page whatever words happen to appear on it, and that guard is what
+  // makes the wording checks in `looksLikeBotWall` safe to be as broad as they
+  // are.
+  const wall = results.length ? undefined : looksLikeBotWall(req.url, body);
+
+  return { query: q, provider, url, results, wall, ms };
 }

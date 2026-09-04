@@ -22,6 +22,20 @@ export interface StoredSession {
   /** Epoch milliseconds. */
   updatedAt: number;
   messages: Msg[];
+  /**
+   * The agent this conversation is being held with, if any.
+   *
+   * Per conversation, because it used to be one string in workspace state and
+   * so every chat had the same one: choosing `reviewer` for a diff made every
+   * chat opened afterwards a review, with no way to have one and not the
+   * other.
+   *
+   * Optional, and absent means none. Every transcript already on disk was
+   * written before this existed and loads unchanged, which is the right answer
+   * for them - they were held under whatever the global happened to be at the
+   * time, and that is not a fact worth reconstructing.
+   */
+  agent?: string;
 }
 
 /** `just now`, `4m ago`, `3h ago`, `2d ago`. */
@@ -146,7 +160,8 @@ export class SessionStore {
     this.hydrated = true;
     if (!fs.existsSync(this.dir)) return;
     for (const name of fs.readdirSync(this.dir)) {
-      if (!name.endsWith(".json")) continue;
+      // `.json.<pid>.tmp` is a write in progress, not a conversation.
+      if (!name.endsWith(".json") || name.includes(".tmp")) continue;
       try {
         const doc = JSON.parse(fs.readFileSync(path.join(this.dir, name), "utf8")) as StoredSession;
         if (!doc || typeof doc.id !== "string") continue;
@@ -251,13 +266,16 @@ export class SessionStore {
    * conversation. When it is omitted the old first-user-message behaviour still
    * applies, which is what keeps pre-existing transcripts readable.
    */
-  save(id: string, messages: Msg[], title?: string): void {
+  save(id: string, messages: Msg[], title?: string, agent?: string): void {
     if (!messages.length) return;
     const doc: StoredSession = {
       id,
       title: title?.trim() || titleFrom(messages),
       updatedAt: Date.now(),
       messages,
+      // Written only when there is one, so a chat held with no agent produces
+      // the same JSON it did before the field existed.
+      ...(agent ? { agent } : {}),
     };
     // The index updates synchronously so the UI is immediately correct; only
     // the disk write is deferred. Serialising the whole transcript and writing
@@ -266,9 +284,20 @@ export class SessionStore {
     this.pending.set(id, doc);
     const body = JSON.stringify(doc);
     const file = path.join(this.dir, `${id}.json`);
+    /* ATOMIC, BECAUSE A HALF-WRITTEN TRANSCRIPT IS AN INVISIBLE LOSS.
+     *
+     * `writeFile` truncates and then writes. A crash, a full disk or a power
+     * cut in between leaves a JSON file that does not parse - and both readers
+     * here swallow a parse failure and skip the file, so the conversation
+     * simply stopped existing: gone from the history popover, with nothing
+     * anywhere saying why. Writing beside it and renaming makes the swap a
+     * single filesystem operation, so the reader sees either the old
+     * transcript or the new one. */
+    const tmp = `${file}.${process.pid}.tmp`;
     this.writes = this.writes
       .then(() => fsp.mkdir(this.dir, { recursive: true }))
-      .then(() => fsp.writeFile(file, body, "utf8"))
+      .then(() => fsp.writeFile(tmp, body, "utf8"))
+      .then(() => fsp.rename(tmp, file))
       .then(() => {
         // Only clear if a newer save has not already replaced it.
         if (this.pending.get(id) === doc) this.pending.delete(id);
@@ -276,6 +305,7 @@ export class SessionStore {
       .catch(() => {
         // A failed transcript write must not take down the turn that produced
         // it. The in-memory copy stays, so the session is still readable.
+        return fsp.rm(tmp, { force: true }).catch(() => {});
       });
   }
 
@@ -287,6 +317,7 @@ export class SessionStore {
   delete(id: string): void {
     this.meta.delete(id);
     this.pending.delete(id);
+
     const file = path.join(this.dir, `${id}.json`);
     this.writes = this.writes
       .then(() => fsp.rm(file, { force: true }))

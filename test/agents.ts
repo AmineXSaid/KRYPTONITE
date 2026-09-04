@@ -18,8 +18,10 @@ import {
   agentAllowsMcp,
   agentAllowsTool,
   agentPrompt,
+  agentMemoryFull,
   agentRefusal,
   agentTemplate,
+  MAX_MEMORY_CHARS,
   matchesGlob,
   type Agent,
 } from "../src/agents/loader";
@@ -204,6 +206,31 @@ ck(!agentAllowsTool(t, "write_file"), "an unlisted built-in is refused");
 ck(agentAllowsTool(g, "read_file") && agentAllowsTool(g, "list_files"), "globs work here too");
 ck(!agentAllowsTool(g, "run_command"), "and still refuse what they do not match");
 
+// `tools: []` means every built-in, which is the reverse of how it reads. The
+// behaviour stays - an agent that cannot read a file is useless, so an empty
+// list is a slip rather than an intent - but it is no longer silent.
+{
+  write(
+    "empty-tools.md",
+    `---
+name: empty-tools
+description: Writes an empty built-in allowlist.
+tools: []
+---
+
+Everything, as it turns out.
+`
+  );
+  const et = loadAgents(dir);
+  const a = et.agents.find((x) => x.name === "empty-tools")!;
+  ck(agentAllowsTool(a, "write_file"), "an empty tools list still means every built-in");
+  ck(
+    et.warnings.some((w) => /empty-tools/.test(w) && /EVERY built-in/.test(w)),
+    "and the load says so rather than leaving it to be discovered",
+    et.warnings.filter((w) => /empty-tools/.test(w)).join(" | ")
+  );
+}
+
 console.log("\n──── the glob itself ────");
 ck(matchesGlob("read_file", "read_file"), "an exact name matches itself");
 ck(!matchesGlob("read_file", "read_files"), "and nothing else");
@@ -214,6 +241,211 @@ ck(matchesGlob("*_file", "read_file"), "a leading star matches a suffix");
 // A pattern is not a regular expression: a dot is a dot.
 ck(!matchesGlob("read.file", "read_file"), "a dot in a pattern is a literal dot");
 
+// The rest of Hermes's dialect. Each of these used to contain no `*`, fall
+// through to the exact-string comparison, and match nothing - so a lifted
+// Hermes block silently denied every tool it was written to allow.
+console.log("\n──── the rest of the dialect ────");
+ck(matchesGlob("read_?", "read_a"), "a question mark matches one character");
+ck(!matchesGlob("read_?", "read_ab"), "and not two");
+ck(!matchesGlob("read_?", "read_"), "nor none");
+ck(matchesGlob("read_file?", "read_file2"), "it works at the end of a pattern");
+ck(matchesGlob("tool[123]", "tool2"), "a class matches one of its members");
+ck(!matchesGlob("tool[123]", "tool4"), "and nothing outside it");
+ck(matchesGlob("tool[a-f]", "toolc"), "a range works");
+ck(!matchesGlob("tool[a-f]", "toolz"), "and stops where it says");
+ck(matchesGlob("tool[!0-9]", "toolx"), "`!` negates, as fnmatch spells it");
+ck(!matchesGlob("tool[!0-9]", "tool5"), "so a member of the class is refused");
+// And `^` does NOT negate - fnmatch reads it as an ordinary member of the
+// class, where a regular expression reads it as an operator. Getting this
+// backwards inverted every `[^...]` pattern, which for an include list means
+// admitting exactly the tools it was written to keep out. Found by running
+// this function against Python's own fnmatch over a grid of patterns; these
+// four are the shape that failed.
+ck(matchesGlob("tool[^0-9]", "tool5"), "`^` is a literal member, not an operator");
+ck(matchesGlob("tool[^0-9]", "tool^"), "so the caret itself is in the class");
+ck(!matchesGlob("tool[^0-9]", "toolx"), "and a character outside it does not match");
+ck(matchesGlob("x[]]y", "x]y"), "a `]` straight after the bracket is a literal");
+ck(matchesGlob("x[!]]y", "x-y"), "and after a `!` too");
+ck(!matchesGlob("x[!]]y", "x]y"), "with the negation still applying");
+ck(matchesGlob("read[_-]*", "read-text"), "a class and a star compose");
+ck(matchesGlob("read[_-]*", "read_text"), "over either member");
+// Case matters. Hermes matches case-sensitively and a filter that quietly did
+// not would be a scope that admits names its author never wrote.
+ck(!matchesGlob("read_*", "READ_FILE"), "matching is case-sensitive");
+ck(!matchesGlob("tool[a-f]", "toolC"), "including inside a class");
+
+// A pattern nobody could have meant. It must not throw - this runs on every
+// tool call and every advertisement - and it must not become a wildcard.
+console.log("\n──── a malformed pattern ────");
+for (const bad of ["read[", "read[a-", "[", "read[]"]) {
+  let threw = false;
+  let matched = false;
+  try {
+    matched = matchesGlob(bad, "read_file") || matchesGlob(bad, "anything");
+  } catch {
+    threw = true;
+  }
+  ck(!threw && !matched, `an unbalanced "${bad}" is inert rather than fatal`);
+}
+ck(matchesGlob("read[", "read["), "and still matches itself literally");
+
+// A pattern that gets all the way to a regular expression and is rejected
+// there. `[z-a]` is a reversed range: fnmatch quietly matches nothing, and a
+// JavaScript RegExp throws outright, so this is the one input that reaches the
+// try/catch. What matters is which way it falls back - to an exact comparison,
+// never to a wildcard. A malformed pattern that matched everything would widen
+// an agent's scope to every tool on the server, which is the failure this whole
+// filter exists to prevent.
+ck(!matchesGlob("x[z-a]y", "xay"), "a reversed range matches nothing, as fnmatch has it");
+ck(!matchesGlob("x[z-a]y", "anything"), "and is emphatically not a wildcard");
+ck(matchesGlob("x[z-a]y", "x[z-a]y"), "though it still matches itself literally");
+
+/* ── 3a. an empty include withholds, it does not grant ─────────────────── */
+console.log("\n──── an empty include list ────");
+{
+  // The inversion. `asList([])` and `asList(undefined)` both produce an empty
+  // array, so the predicate's old `include.length &&` guard could not tell an
+  // include that was written and left empty from one that was never written -
+  // and read the first as the second, handing an agent scoped to NOTHING every
+  // tool on the server. Hermes resolves it the other way (include_active), and
+  // names the path that writes such a block: the install checklist's "uncheck
+  // everything". So it is a real config, lifted across on the strength of the
+  // compatibility readMcp advertises, that got the reverse of what it asked for.
+  write(
+    "sealed-server.md",
+    `---
+name: sealed-server
+description: Declares a server and then no tools on it.
+mcp:
+  filesystem:
+    tools:
+      include: []
+---
+
+Nothing here.
+`
+  );
+  const loaded = loadAgents(dir);
+  const sealedFs = loaded.agents.find((a) => a.name === "sealed-server")!;
+  ck(!!sealedFs, "the block loads");
+  ck(sealedFs.mcp[0].includeActive === true, "an empty include is still an include");
+  ck(!agentAllowsMcp(sealedFs, "filesystem", "read_text_file"), "and admits nothing");
+  ck(!agentAllowsMcp(sealedFs, "filesystem", "write_file"), "not even by accident");
+  ck(!agentAllowsMcp(sealedFs, "filesystem", "anything_at_all"), "whatever the tool is called");
+  // Said out loud: it is a real setting and also what a typo looks like.
+  ck(
+    loaded.warnings.some((w) => /sealed-server/.test(w) && /no tools/.test(w)),
+    "and the load warns about it",
+    loaded.warnings.filter((w) => /sealed-server/.test(w)).join(" | ")
+  );
+
+  // The shorthand is an include list too, so an empty one means the same.
+  write(
+    "sealed-short.md",
+    `---
+name: sealed-short
+description: Empty shorthand list.
+mcp:
+  filesystem: []
+---
+
+Nothing here either.
+`
+  );
+  const short = loadAgents(dir).agents.find((a) => a.name === "sealed-short")!;
+  ck(!agentAllowsMcp(short, "filesystem", "read_text_file"), "an empty shorthand list admits nothing");
+
+  // And the cases that must NOT have moved. `server: true` and an exclude-only
+  // block both leave the include absent, which still means every tool.
+  write(
+    "unfiltered.md",
+    `---
+name: unfiltered
+description: Declares servers without an include.
+mcp:
+  filesystem: true
+  memory:
+    tools:
+      exclude: [create_entities]
+---
+
+Everything but the one.
+`
+  );
+  const u = loadAgents(dir).agents.find((a) => a.name === "unfiltered")!;
+  ck(u.mcp.every((m) => m.includeActive === false), "no include written means none is active");
+  ck(agentAllowsMcp(u, "filesystem", "read_text_file"), "`server: true` still grants every tool");
+  ck(agentAllowsMcp(u, "filesystem", "write_file"), "including the ones that write");
+  ck(agentAllowsMcp(u, "memory", "search_nodes"), "an exclude-only block still grants the rest");
+  ck(!agentAllowsMcp(u, "memory", "create_entities"), "minus what it excludes");
+}
+
+/* ── 3b. include and exclude together ──────────────────────────────────── */
+console.log("\n──── include and exclude together ────");
+{
+  // The one place this deviates from Hermes, which resolves a block with both
+  // keys as "include wins" and ignores exclude entirely. The two readings
+  // disagree in the dangerous direction, so Genesis keeps the subtraction and
+  // says so in readMcp's comment rather than claiming a parity it does not
+  // have. Pinned here so a later "let us match the spec" is a failing test
+  // rather than an agent quietly gaining a tool.
+  write(
+    "both-keys.md",
+    `---
+name: both-keys
+description: Sets include and exclude on one server.
+mcp:
+  filesystem:
+    tools:
+      include: ["read_*"]
+      exclude: [read_secrets]
+---
+
+Reads, except the one.
+`
+  );
+  const both = loadAgents(dir).agents.find((a) => a.name === "both-keys")!;
+  ck(!!both, "the block loads");
+  ck(agentAllowsMcp(both, "filesystem", "read_text_file"), "include still admits what it names");
+  ck(
+    !agentAllowsMcp(both, "filesystem", "read_secrets"),
+    "and exclude still removes what it names, rather than being ignored"
+  );
+  ck(!agentAllowsMcp(both, "filesystem", "write_file"), "and include still narrows");
+}
+
+/* ── 3c. the name form the filter sees ─────────────────────────────────── */
+console.log("\n──── hyphens and dots survive the filter ────");
+{
+  // Hermes matches the server's own tool names, before the mcp__<server>__
+  // prefix is built around them. Genesis does too - McpRegistry.toolDefs hands
+  // the predicate `t.name` raw - and it has to, because registry.ts rejects a
+  // name containing `__`: a server exposing `list-directory` could not be
+  // filtered at all if the predicate saw the qualified form.
+  write(
+    "hyphenated.md",
+    `---
+name: hyphenated
+description: Scopes a server whose tools have hyphens and dots.
+mcp:
+  files:
+    tools:
+      include: ["list-*", "fs.read"]
+---
+
+Reads.
+`
+  );
+  const h = loadAgents(dir).agents.find((a) => a.name === "hyphenated")!;
+  ck(agentAllowsMcp(h, "files", "list-directory"), "a hyphenated tool name matches a glob");
+  ck(agentAllowsMcp(h, "files", "fs.read"), "and a dotted one matches exactly");
+  ck(!agentAllowsMcp(h, "files", "fs_read"), "with the dot still a literal dot");
+  ck(
+    !agentAllowsMcp(h, "files", "mcp__files__list-directory"),
+    "the qualified form is not what the filter is given"
+  );
+}
+
 /* ── 4. the refusal is written for the model to act on ─────────────────── */
 console.log("\n──── refusals ────");
 const refusal = agentRefusal(t, "mcp__github__create_issue");
@@ -222,6 +454,19 @@ ck(/tls-triage/.test(refusal), "and the agent that refused it");
 ck(/filesystem/.test(refusal) && /memory/.test(refusal), "and what it can reach instead");
 ck(/switch to/i.test(refusal), "and tells the model what the user can do about it");
 ck(/no MCP servers/.test(agentRefusal(sealed, "mcp__x__y")), "a sealed agent says so plainly");
+
+// The memory cap's refusal is the same kind of message and has to read like
+// one: the model is being asked to do something about it, so it has to be told
+// the number and the action. The old behaviour truncated on read and logged a
+// warning nothing in the conversation could see.
+const full = agentMemoryFull(t, MAX_MEMORY_CHARS + 500);
+ck(/nothing was written/.test(full), "a burst cap says the write did not land");
+ck(full.includes(String(MAX_MEMORY_CHARS)), "and names the cap");
+ck(full.includes(String(MAX_MEMORY_CHARS + 500)), "and the size it would have been");
+ck(/\.agent\/memory\/tls\.md/.test(full), "and the file");
+ck(/merge or delete/.test(full), "and what to do about it");
+ck(/no larger than it already is/.test(full),
+  "and that shrinking an oversized file is always allowed");
 
 /* ── 5. the prompt ─────────────────────────────────────────────────────── */
 console.log("\n──── the system prompt ────");
@@ -289,7 +534,36 @@ console.log("\n──── the shipped example ────");
     ck(!agentAllowsTool(reader, "run_command"), "nor run a command");
     ck(agentAllowsTool(reader, "read_file"), "while still being able to read one");
     ck(reader.memory.length > 0, "and it demonstrates a memory file");
+    // The half of that demonstration that was missing. The agent is told on
+    // every request to maintain this file; with no writer on its tools list it
+    // was refused every time it tried, and the example shipped that way.
+    ck(agentAllowsTool(reader, "edit_file"),
+      "which it can actually write, or the memory loop is a prompt that argues with itself");
   }
+}
+
+/* ── 7b. a memory file with no way to write it is reported ─────────────── */
+console.log("\n──── memory without a writer ────");
+{
+  const d = path.join(root, "agents-memory");
+  fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(d, "sealed.md"), [
+    "---", "name: sealed", "description: reads only.",
+    "memory: .agent/memory/sealed.md",
+    "tools: [read_file, search]", "---", "", "You read things.", "",
+  ].join("\n"), "utf8");
+  const got = loadAgents(d);
+  ck(got.agents.length === 1, "the agent still loads - this is a warning, not a rejection");
+  ck(got.warnings.some((w) => /memory file/.test(w) && /edit_file/.test(w)),
+    "and the contradiction is reported, naming the fix", got.warnings.join(" "));
+
+  fs.writeFileSync(path.join(d, "sealed.md"), [
+    "---", "name: sealed", "description: reads only.",
+    "memory: .agent/memory/sealed.md",
+    "tools: [read_file, search, edit_*]", "---", "", "You read things.", "",
+  ].join("\n"), "utf8");
+  ck(loadAgents(d).warnings.length === 0,
+    "a glob that admits edit_file satisfies it, since that is what the gate checks");
 }
 
 /* ── 8. an absent directory is not an error ────────────────────────────── */

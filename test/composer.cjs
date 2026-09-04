@@ -634,10 +634,23 @@ console.log("\n──── the send control ────");
     /#root\s*\{[^}]*overflow:\s*hidden/.test(CSS));
 }
 
-/* ── files dropped on the composer ──────────────────────────────────────── */
+/* ── files dropped on the panel ─────────────────────────────────────────── */
 {
   console.log("\n──── drag and drop ────");
-  ok("the composer takes a drop", /composer\.addEventListener\("drop"/.test(SRC));
+  /* This read `composer.addEventListener("drop"` - a grep for one variable
+     name, which broke the moment the drop target was widened from the composer
+     box to the whole panel even though the behaviour it cares about got
+     BETTER. The name was never the invariant.
+
+     What matters is that a drop is handled somewhere, and that the target is
+     not the composer alone: a file let go over the transcript - most of the
+     panel, and the obvious place to aim - used to hit the document guard and
+     do nothing at all, silently. Whether the drop actually attaches the file
+     is tested for real, with a real DataTransfer and a real File, in
+     render.cjs 5x; this suite has no browser and can only read the source. */
+  ok("a drop is handled", /\.addEventListener\("drop"/.test(SRC));
+  ok("and the target is the panel, not just the composer box",
+    /var zone = document\.getElementById\("root"\)/.test(SRC), "drop zone");
   ok("and shows it is about to", /data-drop/.test(SRC) && /\.composer\[data-drop="1"\]/.test(CSS));
   // The load-bearing half: a webview's default action for a dropped file is to
   // navigate to it, which replaces the panel and loses the conversation.
@@ -645,8 +658,15 @@ console.log("\n──── the send control ────");
     /document\.addEventListener\("drop",\s*function[^)]*\)\s*\{\s*e\.preventDefault\(\)/.test(SRC));
   ok("and cancels dragover too, or drop never fires at all",
     /document\.addEventListener\("dragover",\s*function[^)]*\)\s*\{\s*e\.preventDefault\(\)/.test(SRC));
-  ok("the drop reuses the paste path's size and count caps",
+  ok("the drop reuses the paste path's reader and count cap",
     /function takeFiles[\s\S]{0,400}readBlob\(/.test(SRC));
+  /* And there is no SIZE cap on either path any more, at the owner's
+     instruction. This file's own wording said "size and count caps", which was
+     true of both halves until the host's 10 MB limit came out - and the
+     webview kept a second copy of that number, so a dropped file was still
+     refused after the host had stopped refusing it. */
+  ok("and no size cap survives in the webview",
+    !/ATTACH_MAX/.test(SRC), "ATTACH_MAX");
 }
 
 /* ── a conversation can be thrown away from the welcome screen ──────────── */
@@ -680,34 +700,120 @@ console.log("\n──── the send control ────");
   b.dom.window.close();
 }
 
+/* ── the agent button ───────────────────────────────────────────────────── */
+{
+  /* THE PICKER EXISTED; THE DOOR DID NOT.
+     The agent sheet has always been there and was reachable only by typing
+     `/agent`, so choosing an agent meant knowing the command or leaving the
+     composer for the Agents tab. This is the control that opens it from where
+     you type, and the state it has to carry is WHOSE agent it is - the whole
+     reason the old workspace-wide agent went unnoticed is that nothing near
+     the composer said which chat it applied to. */
+  const b = boot();
+  b.sync("ask");
+
+  const btn = () => b.d.getElementById("agentBtn");
+  ok("the composer offers an agent button", !!b.d.querySelector(".toolbar #agentBtn"));
+  /* A DIRECT CHILD OF THE TOOLBAR, next to the actions rather than inside
+     them. `.tb-actions` is pinned to the phase segment's row at 280px so a
+     wrap cannot orphan send, and a fourth plate in that group took it over the
+     width - which put attach and send on a row of their own with the left half
+     of the composer empty. `render.cjs` catches exactly that, so this pins the
+     placement that keeps it caught. */
+  ok("it is a direct child of the toolbar", !!b.d.querySelector(".toolbar > #agentBtn"));
+  ok("and not inside the actions group", !b.d.querySelector(".tb-actions #agentBtn"));
+  ok("sitting immediately before them, so it still reads as one run",
+    (btn().nextElementSibling || {}).className === "tb-actions",
+    (btn().nextElementSibling || {}).className);
+  ok("it draws the sparkle", !!btn().querySelector('use[href="#i-spark"]'));
+  ok("which is defined", /id="i-spark"/.test(SRC));
+
+  // Resting: no agent in this conversation.
+  ok("with no agent it rests", btn().getAttribute("data-on") === "0",
+    btn().getAttribute("data-on"));
+  ok("and says what it is for", /choose an agent/i.test(btn().title), btn().title);
+  ok("naming the scope, because that is what was invisible before",
+    /this chat/i.test(btn().title), btn().title);
+  ok("it has an accessible name of its own",
+    (btn().getAttribute("aria-label") || "").length > 8, btn().getAttribute("aria-label"));
+
+  ok("the sheet starts closed", b.d.getElementById("qp").hidden);
+  ok("clicking opens it", b.click("#agentBtn") && !b.d.getElementById("qp").hidden);
+
+  // Armed: an agent is set for this conversation.
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "agentChanged",
+    agent: { name: "reviewer", description: "Reads a diff.", tools: ["read_file"], mcp: [], file: "x.md" },
+  } }));
+  ok("with one set it arms", btn().getAttribute("data-on") === "1",
+    btn().getAttribute("data-on"));
+  ok("and names it in the tooltip", /reviewer/.test(btn().title), btn().title);
+  ok("…and in the accessible name", /reviewer/.test(btn().getAttribute("aria-label") || ""),
+    btn().getAttribute("aria-label"));
+  ok("while still saying other chats are unaffected",
+    /other chats/i.test(btn().title), btn().title);
+  /* The armed state is a paint, so it has to exist in the stylesheet or the
+     attribute above is bookkeeping nobody can see. */
+  ok("the armed state is drawn", /\.agent-btn\[data-on="1"\]/.test(CSS));
+  b.dom.window.close();
+}
+
 /* ── the permission card, and what "always" costs ───────────────────────── */
 {
   /* THE SAME LABEL FOR TWO DIFFERENT PROMISES.
    *
    * "Always allow" on an EDIT sets a flag for this conversation. "Always
-   * allow" on a COMMAND appends the command's first token to a workspace-level
-   * list that survives restarts - so one yes to `git status` authorises
-   * `git push --force` for good. Both buttons read "Always allow", and the
-   * distinction appeared only in the card's replacement text, after the click.
+   * allow" on a COMMAND stores a workspace-level grant that survives restarts.
+   * Both buttons read "Always allow", and the distinction appeared only in the
+   * card's replacement text, after the click. The scope belongs on the control.
    *
-   * The scope belongs on the control. The TOKEN, not the whole command:
-   * printing "Always allow git status" would promise a precision the grant
-   * does not have. */
+   * That command grant used to be keyed on the first WORD, and the card
+   * printed the word - "Always allow git" - because that was honestly what was
+   * being granted: one yes to `git status` authorised `git push --force` for
+   * good. The host matches the whole normalised line exactly now, so the card
+   * says "this command" and names it in the tooltip. Printing the first word
+   * would now UNDER-state the grant, which is its own kind of lie. */
   const b = boot();
   b.sync("ask");
   b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
-    type: "permissionRequest", id: "p1", summary: "Run: git status --porcelain",
+    type: "permissionRequest", id: "p1", summary: "Run: npm test --silent",
+    risk: "write", grants: ["npm test --silent"],
   } }));
   const cmdBtn = b.d.querySelector('.perm [data-perm="always"]');
-  ok("a command grant names the token it actually grants",
-    cmdBtn.textContent.trim() === "Always allow git", cmdBtn.textContent);
-  ok("and its tooltip says the grant outlives the turn",
+  ok("a command grant is scoped to the one command",
+    cmdBtn.textContent.trim() === "Always allow this command", cmdBtn.textContent);
+  ok("and its tooltip names the exact command it grants",
+    cmdBtn.title.indexOf("npm test --silent") > -1, cmdBtn.title);
+  ok("and says the grant outlives the turn",
     /workspace/.test(cmdBtn.title) && /revoke/i.test(cmdBtn.title), cmdBtn.title);
+  ok("and that a shared program name is not covered by it",
+    /same word/i.test(cmdBtn.title), cmdBtn.title);
   ok("allow-once says it is once",
     /once/i.test(b.d.querySelector('.perm [data-perm="allow"]').textContent));
 
+  /* A DESTRUCTIVE COMMAND CANNOT BE GRANTED FOR NEXT TIME.
+   *
+   * The host refuses it on every future invocation whatever is stored, so a
+   * button offering to store one would promise something nothing honours. It
+   * is withheld rather than shown and ignored, and the card says why in its
+   * own text - not only in a tooltip, because the person about to lose
+   * uncommitted work is the person not reading tooltips. */
   b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
-    type: "permissionRequest", id: "p2", summary: "Overwrite src/index.ts",
+    type: "permissionRequest", id: "p2", summary: "Run: git reset --hard origin/main",
+    risk: "destructive", grants: [],
+  } }));
+  const danger = [...b.d.querySelectorAll(".perm")].pop();
+  ok("a destructive command offers no 'always' at all",
+    !danger.querySelector('[data-perm="always"]'), danger.textContent);
+  ok("but still offers allow-once and deny",
+    !!danger.querySelector('[data-perm="allow"]') && !!danger.querySelector('[data-perm="deny"]'));
+  ok("the card is marked as the different kind of question it is",
+    danger.classList.contains("perm-danger"), danger.className);
+  ok("and says on its face that the work may not come back",
+    /cannot be recovered/i.test(danger.textContent), danger.textContent.slice(0, 200));
+
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "permissionRequest", id: "p3", summary: "Overwrite src/index.ts",
   } }));
   const editBtn = [...b.d.querySelectorAll('.perm [data-perm="always"]')].pop();
   ok("an edit grant is named as an edit grant",
@@ -774,6 +880,414 @@ console.log("\n──── the send control ────");
   const cmd = [...b.d.querySelectorAll(".perm")].pop();
   ok("a command falls back to its payload", !!cmd.querySelector(".perm-cmd[style]"));
   ok("and draws no empty diff", !cmd.querySelector(".perm-diff"));
+  b.dom.window.close();
+}
+
+/* ── the message context menu ───────────────────────────────────────────── */
+/*
+ * The transcript was the one surface in the panel with no per-message actions
+ * at all. turn-foot is per TURN, sits at the end, and its Copy only ever took
+ * the assistant's answer - so there was no way to copy a question, and no way
+ * to reach an earlier turn's answer without selecting it by hand in a 340px
+ * column.
+ *
+ * Right-click was the chosen trigger, and it costs something: opening our menu
+ * means preventDefault(), which takes away VS Code's own menu - the one Copy
+ * normally lives in. So Copy has to be here, and a code block, which already
+ * has its own copy button and where native select-and-copy is the better tool,
+ * is deliberately left alone.
+ */
+{
+  const b = boot();
+  b.sync("ask");
+  const rc = (sel, x = 40, y = 60) => {
+    const el = b.d.querySelector(sel);
+    if (!el) return null;
+    const ev = new b.w.MouseEvent("contextmenu", {
+      bubbles: true, cancelable: true, clientX: x, clientY: y,
+    });
+    el.dispatchEvent(ev);
+    return ev;
+  };
+  const menu = () => b.d.getElementById("msgMenu");
+  const rows = () => [...b.d.querySelectorAll("#msgMenu [data-mm]")]
+    .map((r) => r.getAttribute("data-mm"));
+  const labels = () => [...b.d.querySelectorAll("#msgMenu [data-mm]")]
+    .map((r) => r.textContent.trim());
+
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "streamDelta", text: "The answer.",
+  } }));
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: { type: "turnEnd" } }));
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "steerAccepted", text: "the original question", files: [],
+  } }));
+
+  ok("the menu exists and starts closed", !!menu() && menu().hidden);
+
+  const ev = rc(".msg-user");
+  ok("right-clicking a question opens it", !!menu() && !menu().hidden);
+  // Both menus appearing at once is the failure this guards.
+  ok("and takes the native menu, rather than sitting under it",
+    !!ev && ev.defaultPrevented);
+  ok("a question offers all four actions",
+    rows().join(",") === "edit,resend,attach,copy", rows().join(","));
+
+  rc(".msg-ai");
+  // Copy and its stripped variant, which only an answer has - a question is
+  // never markdown-rendered, so there is no second reading of one to offer.
+  ok("an answer offers only the ones that mean anything on it",
+    rows().join(",") === "attach,copy,copyPlain", rows().join(","));
+  ok("no Edit on an answer", !rows().includes("edit"));
+  ok("and no Resend either", !rows().includes("resend"));
+
+  b.dom.window.close();
+}
+
+/* A code block keeps the native menu: it has its own copy button two pixels
+   away, and selecting part of a snippet is worth more there than a
+   message-level action. */
+{
+  const b = boot();
+  b.sync("ask");
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "streamDelta", text: "Here:\n\n```js\nconst a = 1;\n```\n",
+  } }));
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: { type: "turnEnd" } }));
+  const cb = b.d.querySelector(".msg-ai .cb");
+  ok("the answer really does hold a code block", !!cb);
+  const ev = new b.w.MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+  if (cb) cb.dispatchEvent(ev);
+  const cbMenu = b.d.getElementById("msgMenu");
+  ok("right-clicking a code block opens nothing", !cbMenu || cbMenu.hidden);
+  ok("and leaves the native menu alone", !ev.defaultPrevented);
+  b.dom.window.close();
+}
+
+/* Edit, Resend, Attach and Copy all end in the composer or the clipboard. */
+{
+  const b = boot();
+  b.sync("ask");
+  const rc = (sel) => {
+    const el = b.d.querySelector(sel);
+    el.dispatchEvent(new b.w.MouseEvent("contextmenu", {
+      bubbles: true, cancelable: true, clientX: 40, clientY: 60,
+    }));
+  };
+  const row = (name) => b.d.querySelector(`#msgMenu [data-mm="${name}"]`);
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "steerAccepted", text: "the original question", files: [],
+  } }));
+
+  rc(".msg-user");
+  ok("Edit is called Edit while the composer is empty",
+    !!row("edit") && row("edit").textContent.trim() === "Edit",
+    row("edit") && row("edit").textContent);
+  b.click('#msgMenu [data-mm="edit"]');
+  ok("and loads the message into the composer",
+    b.d.getElementById("draft").value === "the original question",
+    b.d.getElementById("draft").value);
+  const afterEdit = b.d.getElementById("msgMenu");
+  ok("closing the menu behind it", !!afterEdit && afterEdit.hidden);
+
+  /* A HALF-WRITTEN DRAFT IS WORK. Replacing it silently is the same class of
+     harm as any other unconfirmed destructive action, so the cost goes on the
+     row rather than being discovered after the click. */
+  b.d.getElementById("draft").value = "something I was already writing";
+  rc(".msg-user");
+  ok("with a draft present the row says what it will cost",
+    !!row("edit") && /replace draft/i.test(row("edit").textContent),
+    row("edit") && row("edit").textContent);
+
+  // Resend goes through the ordinary send path, so it queues, draws a bubble
+  // and clears attachments exactly as typing it would.
+  b.sent.length = 0;
+  b.click('#msgMenu [data-mm="resend"]');
+  const sends = b.sent.filter((m) => m.type === "sendMessage");
+  ok("Resend sends the message again",
+    sends.length === 1 && sends[0].text === "the original question",
+    JSON.stringify(sends));
+
+  // Attach reuses the pill the composer already draws for a pasted file.
+  rc(".msg-user");
+  b.click('#msgMenu [data-mm="attach"]');
+  ok("Attach puts a pill in the composer",
+    b.d.querySelectorAll(".att-pill").length === 1,
+    String(b.d.querySelectorAll(".att-pill").length));
+  const pillName = b.d.querySelector(".att-name");
+  ok("named for what it is",
+    !!pillName && /question/.test(pillName.textContent), pillName && pillName.textContent);
+  ok("and the strip is shown", !b.d.getElementById("attachStrip").hidden);
+  rc(".msg-user");
+  b.click('#msgMenu [data-mm="attach"]');
+  ok("attaching twice attaches twice - the pills are what will be sent",
+    b.d.querySelectorAll(".att-pill").length === 2);
+
+  b.sent.length = 0;
+  rc(".msg-user");
+  b.click('#msgMenu [data-mm="copy"]');
+  const copies = b.sent.filter((m) => m.type === "copyText");
+  ok("Copy reaches the host", copies.length === 1, JSON.stringify(b.sent));
+  ok("with the message's own text", copies[0] && copies[0].text === "the original question",
+    copies[0] && copies[0].text);
+  b.dom.window.close();
+}
+
+/* The text a message was BUILT from, not the text its DOM happens to hold.
+   A multimodal question joins its text blocks with newlines and drops the
+   images; textContent would run them together and lose the breaks. */
+{
+  const b = boot();
+  b.sync("ask");
+  // The array shape reaches the transcript through a REPLAYED conversation,
+  // which is the path that matters: an old chat reopened from the history
+  // popover has to offer the same actions as one typed a second ago.
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "sessionSwitched", id: "s2", title: "t", messages: [
+      { role: "user", content: [{ type: "text", text: "first" }, { type: "text", text: "second" }] },
+    ],
+  } }));
+  const msg = b.d.querySelector(".msg-user");
+  ok("a replayed multimodal question is drawn", !!msg);
+  if (msg) {
+    ok("its text is stored, not scraped", msg._raw === "first\nsecond", JSON.stringify(msg._raw));
+    ok("and the DOM alone would have lost the break",
+      msg.querySelector(".u-text").textContent !== msg._raw);
+  }
+  b.dom.window.close();
+}
+
+/* One closer owns every menu, and the pointer-anchored one cannot outlive the
+   position it was anchored to. */
+{
+  const b = boot();
+  b.sync("ask");
+  const rc = () => b.d.querySelector(".msg-user").dispatchEvent(
+    new b.w.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 60 }));
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "steerAccepted", text: "q", files: [],
+  } }));
+
+  const shut = () => {
+    const m = b.d.getElementById("msgMenu");
+    return !!m && m.hidden;
+  };
+  const open = () => {
+    const m = b.d.getElementById("msgMenu");
+    return !!m && !m.hidden;
+  };
+
+  rc();
+  ok("it opens before each of these", open());
+  b.d.dispatchEvent(new b.w.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  ok("Escape closes it", shut());
+
+  rc();
+  b.click("#histBtn");
+  ok("opening another menu closes it - two menus at once is the bug", shut());
+
+  /* Scrolling closes it - but only a scroll that MOVED something. A bare event
+     with the transcript still where the menu was anchored is the spurious one
+     the browser suite caught: the click's own scroll-into-view queues a scroll
+     that lands after the menu has opened, and closing on it made the menu open
+     and vanish on one gesture. */
+  const log = b.d.getElementById("log");
+  rc();
+  log.dispatchEvent(new b.w.Event("scroll"));
+  ok("a scroll that moved nothing leaves it alone", open());
+  log.scrollTop = 240;
+  log.dispatchEvent(new b.w.Event("scroll"));
+  ok("and a real one closes it, because what it was anchored to has moved", shut());
+  b.dom.window.close();
+}
+
+/* Clamped to the panel. jsdom has no layout, so the menu's measured size is
+   supplied here - the arithmetic is the thing under test, and the real
+   rendering is covered by test/render.cjs in a browser at 200%. */
+{
+  const b = boot();
+  b.sync("ask");
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "steerAccepted", text: "q", files: [],
+  } }));
+  const menu = b.d.getElementById("msgMenu");
+  if (menu) {
+    Object.defineProperty(menu, "offsetWidth", { value: 180, configurable: true });
+    Object.defineProperty(menu, "offsetHeight", { value: 120, configurable: true });
+  }
+  b.w.innerWidth = 200;
+  b.w.innerHeight = 400;
+
+  b.d.querySelector(".msg-user").dispatchEvent(new b.w.MouseEvent("contextmenu", {
+    bubbles: true, cancelable: true, clientX: 190, clientY: 380,
+  }));
+  const left = menu ? parseFloat(menu.style.left) : NaN;
+  const top = menu ? parseFloat(menu.style.top) : NaN;
+  ok("a menu opened at the right edge stays inside the panel",
+    left + 180 <= 200 && left >= 0, menu && `left ${menu.style.left}`);
+  ok("and one opened at the bottom flips up rather than clipping",
+    top + 120 <= 400 && top >= 0, menu && `top ${menu.style.top}`);
+  b.dom.window.close();
+}
+
+/* An answer has TWO readings and a question has one.
+
+   .msg-ai keeps its markdown source on _raw, which is what Copy has always
+   given - here and in turn-foot, which must not disagree with it. What did not
+   exist was the other reading: the answer as it is actually displayed. A
+   question is never markdown-rendered, so it has no second reading and gets no
+   second row. */
+{
+  const b = boot();
+  b.sync("ask");
+  const rc = (sel) => b.d.querySelector(sel).dispatchEvent(
+    new b.w.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 60 }));
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "streamDelta", text: "Try this:\n\n```python\nx = 1\n```\n",
+  } }));
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: { type: "turnEnd" } }));
+
+  b.sent.length = 0;
+  rc(".msg-ai");
+  b.click('#msgMenu [data-mm="copy"]');
+  rc(".msg-ai");
+  b.click('#msgMenu [data-mm="copyPlain"]');
+  const c = b.sent.filter((m) => m.type === "copyText");
+  ok("both readings reach the clipboard", c.length === 2, JSON.stringify(c.map((m) => m.text)));
+  ok("Copy is still the markdown, as the turn footer's Copy already was",
+    c[0] && c[0].text.indexOf("```") !== -1, JSON.stringify(c[0]));
+  ok("Copy as plain text is not", c[1] && c[1].text.indexOf("```") === -1,
+    JSON.stringify(c[1]));
+  /* The block's header is chrome, not prose: pasting an answer that reads
+     "pythonx = 1" is the defect this drops .cb-h to avoid. */
+  ok("and it drops the block's language label rather than reading it as prose",
+    c[1] && c[1].text.indexOf("python") === -1, JSON.stringify(c[1]));
+  ok("while keeping the code itself", c[1] && c[1].text.indexOf("x = 1") !== -1,
+    JSON.stringify(c[1]));
+  b.dom.window.close();
+}
+
+/* REWIND FINDS ITS CHECKPOINT BY LABEL, AND LABELS REPEAT.
+
+   The hash cannot ride on the message: the stored session and the stateSync
+   payload both carry Msg[], the model's own wire format, so a field added there
+   would be sent to the model. The host commits each snapshot with the message
+   text as its subject, so the label is what there is to match on - and the
+   Retry button sends "Retry that last step." verbatim every time, which is why
+   the match consumes as it goes rather than taking the first hit twice. */
+{
+  const b = boot();
+  b.sync("ask");
+  const rc = (sel, n) => [...b.d.querySelectorAll(sel)][n].dispatchEvent(
+    new b.w.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 60 }));
+  const rows = () => [...b.d.querySelectorAll("#msgMenu [data-mm]")]
+    .map((r) => r.getAttribute("data-mm"));
+  const say = (text) => b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "steerAccepted", text, files: [] } }));
+
+  say("Retry that last step.");
+  say("Retry that last step.");
+  ok("two identically worded turns are on screen",
+    b.d.querySelectorAll(".msg-user").length === 2,
+    String(b.d.querySelectorAll(".msg-user").length));
+
+  rc(".msg-user", 0);
+  ok("with nothing snapshotted there is no Rewind row to press",
+    !rows().includes("rewind"), rows().join(","));
+
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "checkpointsListed",
+    checkpoints: [
+      { hash: "hnew", label: "Retry that last step.", when: "now" },
+      { hash: "hold", label: "Retry that last step.", when: "2m ago" },
+    ],
+  } }));
+
+  b.sent.length = 0;
+  rc(".msg-user", 0);
+  ok("once the host lists one, the row appears", rows().includes("rewind"), rows().join(","));
+  b.click('#msgMenu [data-mm="rewind"]');
+  let r = b.sent.filter((m) => m.type === "restoreCheckpoint");
+  ok("the first turn rewinds to the OLDER checkpoint",
+    r.length === 1 && r[0].hash === "hold", JSON.stringify(r));
+
+  b.sent.length = 0;
+  rc(".msg-user", 1);
+  b.click('#msgMenu [data-mm="rewind"]');
+  r = b.sent.filter((m) => m.type === "restoreCheckpoint");
+  ok("and the second, worded identically, rewinds to the newer one",
+    r.length === 1 && r[0].hash === "hnew", JSON.stringify(r));
+
+  /* It posts the message the Control Center's checkpoint list already posts,
+     so the modal naming the files is the host's existing one rather than a
+     second confirmation that could disagree with it. */
+  ok("it asks the host to restore rather than doing anything itself",
+    !b.sent.some((m) => m.type === "sendMessage" || m.type === "newChat"));
+  b.dom.window.close();
+}
+
+/* role="menu" IS A PROMISE ABOUT THE KEYBOARD.
+
+   a11y.cjs exists because role="tablist" was once declared and the contract
+   that goes with it was not implemented. The same trap is open here: the menu
+   already says role="menu" and role="menuitem". */
+{
+  const b = boot();
+  b.sync("ask");
+  const rc = (sel) => b.d.querySelector(sel).dispatchEvent(
+    new b.w.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 60 }));
+  const key = (k, el) => (el || b.d).dispatchEvent(
+    new b.w.KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "steerAccepted", text: "the original question", files: [] } }));
+
+  rc(".msg-user");
+  const rows = [...b.d.querySelectorAll("#msgMenu .pop-row")];
+  ok("focus enters the menu when it opens", b.d.activeElement === rows[0],
+    b.d.activeElement && b.d.activeElement.className);
+  ok("and no row is a tab stop, so the panel gains none",
+    rows.every((r) => r.getAttribute("tabindex") === "-1"));
+  key("ArrowDown", rows[0]);
+  ok("ArrowDown moves to the next row", b.d.activeElement === rows[1]);
+  key("End", rows[1]);
+  ok("End goes to the last", b.d.activeElement === rows[rows.length - 1]);
+  key("ArrowDown", rows[rows.length - 1]);
+  ok("and it wraps rather than stopping dead", b.d.activeElement === rows[0]);
+  key("ArrowUp", rows[0]);
+  ok("ArrowUp wraps the other way", b.d.activeElement === rows[rows.length - 1]);
+  key("Home", rows[rows.length - 1]);
+  ok("Home returns to the first", b.d.activeElement === rows[0]);
+  key("Escape", rows[0]);
+  ok("Escape closes it", b.d.getElementById("msgMenu").hidden);
+  /* Focus on <body> would mean the next Tab restarts from the top of the
+     panel, which is further from where the user was than where they started. */
+  ok("and focus goes back to the message rather than to the body",
+    b.d.activeElement === b.d.querySelector(".msg-user"),
+    b.d.activeElement && (b.d.activeElement.className || b.d.activeElement.tagName));
+  b.dom.window.close();
+}
+
+/* Escape dismissing a menu must not also kill the turn underneath it. */
+{
+  const b = boot();
+  b.sync("ask");
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "steerAccepted", text: "the original question", files: [] } }));
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "streamDelta", text: "working" } }));
+
+  b.sent.length = 0;
+  b.d.dispatchEvent(new b.w.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  ok("Escape with no menu open still interrupts a running turn",
+    b.sent.filter((m) => m.type === "interrupt").length === 1, JSON.stringify(b.sent));
+
+  b.sent.length = 0;
+  b.d.querySelector(".msg-user").dispatchEvent(
+    new b.w.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 60 }));
+  b.d.querySelector("#msgMenu .pop-row").dispatchEvent(
+    new b.w.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  ok("but Escape that dismisses the menu leaves the turn running",
+    b.sent.filter((m) => m.type === "interrupt").length === 0, JSON.stringify(b.sent));
   b.dom.window.close();
 }
 

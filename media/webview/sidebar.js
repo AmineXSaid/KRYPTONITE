@@ -70,8 +70,42 @@ function _sbRun() {
     /* The three mode glyphs, lifted from the Genesis defs unchanged: an open
        palm for "stop and ask", angle brackets for "edits go through", a bolt
        for "decide for me". */
-    '<symbol id="i-hand" viewBox="0 0 24 24"><path d="M9 11.4V5.6a1.4 1.4 0 0 1 2.8 0v5.8m0 0V4.7a1.4 1.4 0 0 1 2.8 0v6.7m0 0V6.6a1.4 1.4 0 0 1 2.8 0V13c0 4.4-2.3 7.6-6.1 7.6S6.2 17.4 6.2 13v-2.1a1.4 1.4 0 0 1 2.8 0v.5" ' + S6 + ' stroke-width="1.5"/></symbol>' +
+    /* Manual mode's mark. It was a raised open palm, and it was the odd one
+       out three ways: a pictogram in a set whose other two members are
+       geometric (`<>` and a bolt); a "stop" gesture on a mode that does not
+       stop but ASKS; and, measured, an 8x13 bbox against the bolt's 9x14 and
+       the brackets' 11x7 - the thinnest ink of the three, which at the 15px
+       the composer draws it left a smudge rather than a shape.
+       A shield carrying a check is what Manual actually does: nothing passes
+       unchecked. 11x14 of ink, so it holds its shape at 15px. */
+    '<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 2.9 4.4 6.1v5.6c0 4.4 3.1 8.1 7.6 9.4 4.5-1.3 7.6-5 7.6-9.4V6.1zM9.2 12.1l2 2 3.6-3.9" ' + S6R + ' stroke-width="1.5"/></symbol>' +
     '<symbol id="i-code" viewBox="0 0 24 24"><path d="M9.5 7.5L5 12l4.5 4.5M14.5 7.5L19 12l-4.5 4.5" ' + S6 + ' stroke-width="1.7"/></symbol>' +
+    /* The agent glyph: a four-point sparkle, large and small.
+     *
+     * Each point is a quadratic whose control point is the star's OWN CENTRE,
+     * which is what makes the sides concave rather than straight - a straight
+     * four-point star is a diamond with spikes and reads as a compass rose.
+     * The concavity is the whole shape, so it is not a number to tune.
+     *
+     * FILLED, unlike the stroked glyphs it sits beside in the toolbar. Drawn
+     * with a 1.5 stroke at the 13px that row uses, the concave sides close on
+     * each other and the star fills in to a blob - the shape survives only as
+     * ink. `i-stop` is filled for its own reasons, so this is not the first.
+     *
+     * Two stars, not the three the reference uses: at 13px the third lands
+     * inside the gap between the other two and the whole glyph muddies.
+     */
+    '<symbol id="i-spark" viewBox="0 0 24 24">' +
+      /* Placed so the PAIR is centred, not each star. Centring the large one
+         in the box and hanging the small one off its shoulder left the ink
+         weighted up and to the right, with dead space at the bottom left - at
+         13px, beside a shield and a clip that are both centred, that reads as
+         a misaligned button rather than as a composition. The two bounding
+         boxes together span 1.8-22 across and 2-21.7 down, so the mass sits on
+         the box centre. */
+      '<path fill="currentColor" d="M10 5.3Q10 13.5 18.2 13.5Q10 13.5 10 21.7Q10 13.5 1.8 13.5Q10 13.5 10 5.3Z"/>' +
+      '<path fill="currentColor" d="M17.8 2Q17.8 6.2 22 6.2Q17.8 6.2 17.8 10.4Q17.8 6.2 13.6 6.2Q17.8 6.2 17.8 2Z"/>' +
+    '</symbol>' +
     '<symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13.2 3L6 13.6h4.6L10.2 21 17.4 10.4h-4.6z" ' + S6 + ' stroke-width="1.5"/></symbol>' +
     '<symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" ' + S6 + ' stroke-width="1.5"/><path d="M3.5 12h17M12 3.5c-4.5 5-4.5 12 0 17 4.5-5 4.5-12 0-17z" ' + S6 + ' stroke-width="1.4"/></symbol>' +
     '<symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="12" rx="1.5" ' + S6 + ' stroke-width="1.5"/><path d="M9 20h6M12 16.5V20" ' + S6 + ' stroke-width="1.5"/></symbol>' +
@@ -124,7 +158,7 @@ function _sbRun() {
   var RUNG_LABELS = {
     "Certificates and keys": "Config", "Profile": "Config", "DNS": "DNS", "TCP": "TCP",
     "TLS handshake": "TLS", "Authentication": "Auth", "Completion": "HTTP",
-    "Streaming": "Stream", "Tool calling": "Tools"
+    "Streaming": "Stream", "Tool calling": "Tools", "Proxy tunnel": "Proxy"
   };
 
   /* GitHub-flavoured callout kinds -> the glyph each one wears. */
@@ -319,6 +353,9 @@ function _sbRun() {
   var S = {
     hydrated: false,
     workspace: { open: false, name: null },
+    /** Models the gateway answered for, and the filter typed against them. */
+    epModels: [],
+    epModelQ: null,
     /** Messages waiting for the running turn to finish, newest last. */
     queue: [],
     running: false,
@@ -368,6 +405,9 @@ function _sbRun() {
     timer: null,
     searchTimer: null,
     attachments: [],
+    /* The shadow-repo checkpoints. Kept because "Rewind to here" resolves a
+       message to one of them. */
+    checkpoints: [],
     sessionId: null,
     title: ""
   };
@@ -508,10 +548,20 @@ function _sbRun() {
     "between|like|order|by|group|having|limit|offset|union|all|distinct|case|when|" +
     "then|else|end|primary|foreign|key|references|default|unique|constraint|cascade|" +
     "begin|commit|rollback|transaction|with|exists|any|asc|desc|count|sum|avg|min|max";
+  /* SHELL SYNTAX ONLY. The builtins that used to be in here - echo, cd, test,
+     printf, read, export, source, alias, set, unset, eval, trap, shopt - are
+     not syntax, they are THINGS YOU RUN, and they were being coloured as
+     keywords while `npm`, `git`, `ls` and `node` were coloured as nothing at
+     all. That is backwards: on a command line the program being invoked is
+     the most important word on the line, and which of them happens to be a
+     shell builtin is an implementation detail of the shell.
+     They fall through to the `cmd` rule below, which colours whatever sits in
+     command position - so they are still coloured, and now the same colour as
+     every other command. It also stops `--set` and `read-only` being tinted
+     mid-flag, which the old \b word match did. */
   var KW_SH =
-    "if|then|elif|else|fi|for|while|until|do|done|case|esac|in|function|return|local|" +
-    "export|source|alias|shift|exit|break|continue|set|unset|readonly|declare|eval|" +
-    "trap|echo|cd|test|printf|read|shopt";
+    "if|then|elif|else|fi|for|while|until|do|done|case|esac|in|function|return|" +
+    "local|break|continue";
 
   var KW_BAT =
     "set|setlocal|endlocal|echo|if|else|for|in|do|goto|call|exit|pause|shift|" +
@@ -583,6 +633,23 @@ function _sbRun() {
       ["st", /"(?:\\[\s\S]|[^"\\])*"|'[^']*'/],
       ["va", /\$(?:\{[^}\n]*\}|\(\(?|[\w]+|[@*#?$!0-9-])/],
       ["kw", new RegExp("\\b(?:" + KW_SH + ")\\b")],
+      /* THE COMMAND BEING RUN.
+      
+         After `kw`, so `if` and `for` stay syntax rather than being read as
+         programs; before `at`, so a command is never mistaken for a flag.
+      
+         Command position is the start of the line, or after a pipe, a
+         separator or a subshell - `npm test | grep -c PASS && ls` colours all
+         three. `$` is in the set because pasted terminal output almost always
+         carries the prompt, and without it `$ npm run verify` left `npm`
+         plain, which is the exact case this was reported for. */
+      /* Lowercase, `.` or `/` to start. A fenced `bash` block usually holds a
+         command AND its output, and matching any word at line start painted
+         `PASS`, `FAIL` and `WARN` as programs - which looks exactly as wrong
+         as it sounds. Commands are lowercase by convention (`npm`, `git`,
+         `ls`, `python3`) or a path (`./run.sh`, `/usr/bin/env`), so that is
+         what this asks for. */
+      ["cmd", /(?<=(?:^|[|&;($]|\n)\s*)[a-z_.\/][\w.+\/-]*/],
       ["at", /(?<=\s)--?[A-Za-z][\w-]*/],
       ["nu", /\b\d+\b/],
       ["pu", /[{}()[\];|&<>=!`]/],
@@ -961,18 +1028,22 @@ function _sbRun() {
       CRYSTAL_DEFS + ICON_DEFS + '</defs></svg>' +
       '<div id="app">' +
         '<header class="kx-header">' +
-          crystal(24) +
-          // Static, always. This is the product's one wordmark; the duplicate
-          // that used to sit above it is VS Code's view header, blanked in
-          // package.json rather than competing with this.
-          '<span class="kx-wordmark">Genesis</span><span class="sp"></span>' +
-          // Context usage belongs up here, not in the footer: it is status, not
-          // a control, and moving it up shortens the composer.
-          // The meter lives here now. It used to sit in a strip under the
-          // composer next to the endpoint pill, which cost a row of vertical
-          // space on every panel for two facts that are status rather than
-          // controls - and vertical space in a 340px sidebar is the thing the
-          // conversation is short of.
+          // The brand mark, kept as the bar's one identity now that the
+          // "Genesis" wordmark text is gone. The wordmark still lives on the
+          // welcome screen (.w-mark); here the mark alone, plus the divider to
+          // its right, buys the row back for the tabs.
+          '<span class="kx-mark" aria-hidden="true">' + crystal(20) + '</span>' +
+          // The tabs move up into this bar, between the mark and the action
+          // buttons, so the panel spends one short row on what used to be a
+          // 40px header plus a separate 32px tab strip.
+          '<nav class="kx-tabs" role="tablist">' +
+            '<button class="kx-tab" id="tabSession" role="tab" aria-selected="true" tabindex="0" aria-label="Session" aria-controls="viewSession">Session</button>' +
+            '<button class="kx-tab" id="tabMcp" role="tab" aria-selected="false" tabindex="-1" aria-label="MCP" aria-controls="viewMcp">MCP<span class="tab-count" id="mcpCount" hidden></span></button>' +
+            '<button class="kx-tab" id="tabAgents" role="tab" aria-selected="false" tabindex="-1" aria-label="Agents" aria-controls="viewAgents">Agents<span class="tab-count" id="agentCount" hidden></span></button>' +
+            '<button class="kx-tab" id="tabDiag" role="tab" aria-selected="false" tabindex="-1" aria-label="Diagnostics" aria-controls="viewDiag">Diagnostics<span class="tab-count" id="tabCount" hidden></span></button>' +
+          '</nav>' +
+          // The action buttons sit at the end of the bar; the flex:1 tab strip
+          // above pushes them to the right edge.
           '<button class="icon-btn" id="newBtn" title="New chat" aria-label="New chat">' + icon("i-compose") + '</button>' +
           '<button class="icon-btn" id="histBtn" title="History" aria-label="Chat history" aria-haspopup="menu" aria-expanded="false">' + icon("i-history") + '</button>' +
           '<button class="icon-btn" id="moreBtn" title="More" aria-label="More actions" aria-haspopup="menu" aria-expanded="false">' + icon("i-kebab") + '</button>' +
@@ -998,56 +1069,51 @@ function _sbRun() {
               '<span class="t">Author &amp; report an issue</span></button>' +
           '</div>' +
         '</header>' +
-        // Each tab carries an explicit aria-label so the accessible name stays
-        // the tab's name and nothing else. Three of the four append a count
-        // badge, and without a label the name reads "Diagnostics2".
-        //
-        // It was also load-bearing for a decorative "· " that CSS ::before put
-        // on every tab - generated content IS exposed in the accessibility
-        // tree, so the name read "· Session". That treatment is gone; the
-        // badge reason is the one that remains, and it is enough on its own.
-        '<nav class="kx-tabs" role="tablist">' +
-          '<button class="kx-tab" id="tabSession" role="tab" aria-selected="true" tabindex="0" aria-label="Session" aria-controls="viewSession">Session</button>' +
-          // MCP earns a tab now that it is real. 1a had a "SOON" placeholder,
-          // which the review deleted; 1b replaces it with the live surface.
-          '<button class="kx-tab" id="tabMcp" role="tab" aria-selected="false" tabindex="-1" aria-label="MCP" aria-controls="viewMcp">MCP<span class="tab-count" id="mcpCount" hidden></span></button>' +
-          // Agents sit after MCP because that is the order they are chosen in:
-          // a server has to be configured before an agent can be scoped to it.
-          // This was a collapsed section inside Diagnostics, which is where a
-          // thing goes when it is being inspected rather than used - and an
-          // agent is picked before a turn, not diagnosed after one.
-          '<button class="kx-tab" id="tabAgents" role="tab" aria-selected="false" tabindex="-1" aria-label="Agents" aria-controls="viewAgents">Agents<span class="tab-count" id="agentCount" hidden></span></button>' +
-          '<button class="kx-tab" id="tabDiag" role="tab" aria-selected="false" tabindex="-1" aria-label="Diagnostics" aria-controls="viewDiag">Diagnostics<span class="tab-count" id="tabCount" hidden></span></button>' +
-        '</nav>' +
-        '<div class="phase-banner" id="phaseBanner" data-phase="plan" hidden>' +
-          '<span class="dot"></span><span class="lbl" id="phaseBannerLbl">Plan phase</span>' +
-          '<span class="sub" id="phaseBannerSub">reads and plans · no edits applied</span>' +
-        '</div>' +
-        // Only drawn while an agent is actually selected. A permanent chip in
-        // the composer toolbar would cost a row of chrome on every panel to
-        // say "none" almost all of the time; this says nothing until there is
-        // something to say, and then says the whole of it - who is answering
-        // and what it can reach.
-        '<div class="agent-bar" id="agentBar" hidden>' +
-          '<span class="dot"></span>' +
-          '<span class="nm" id="agentBarName"></span>' +
-          '<span class="sub ell" id="agentBarScope"></span>' +
-          '<button class="tb-btn" id="agentLeave" title="Stop using this agent" ' +
-            'aria-label="Stop using this agent">' + icon("i-x", "ic-9") + '</button>' +
-        '</div>' +
-        '<section class="view" id="viewSession" role="tabpanel" aria-labelledby="tabSession">' +
+        /* NO PHASE BANNER AND NO AGENT BAR HERE ANY MORE.
+         *
+         * Those were two full-width strips between the tabs and the transcript,
+         * and between them they cost ~55px of every panel to state two facts.
+         * Both facts still show, in places that cost no row at all:
+         *
+         *   the phase  -> the rail down this view's left edge, painted from
+         *                 `data-phase` below (see #viewSession::before in the
+         *                 CSS), plus the composer's Ask/Plan/Act segment, which
+         *                 is the WRITTEN answer the colour must not be alone in
+         *                 giving.
+         *   the agent  -> the composer's agent button, which already opens the
+         *                 picker and now carries the name beside its glyph.
+         *
+         * The rail also fixes something the banner never could: it is visible at
+         * every scroll position, where the banner only sat at the top. */
+        '<section class="view" id="viewSession" role="tabpanel" aria-labelledby="tabSession" data-phase="act">' +
           // The conversation's name. Placeholder until the model has been asked
           // for a real one, so the strip never appears and disappears.
           '<div class="convo-title" id="convoTitle" hidden></div>' +
-          '<div id="log"></div>' +
-          /* Once you scroll up mid-stream, autoscroll stops following the
-             answer - correctly, because fighting the user is worse. But nothing
-             offered a way back: the reply kept growing below the fold with no
-             signal it had, and the only route down was scrolling by hand.
-             Shown only when it is true, so it costs no chrome the rest of the
-             time. */
-          '<button class="to-latest" id="toLatest" hidden>' +
-            icon("i-caret", "ic-11") + "<span>Jump to latest</span></button>" +
+          /* The pill is positioned against THIS, not against the view.
+          
+             It used to be an absolute child of `#viewSession` at `bottom: 8px`
+             - and `#viewSession` holds the composer as well as the transcript,
+             so "8px from the bottom" was 8px from the bottom of the COMPOSER.
+             Measured at a 360px panel: the transcript ended at y=418 and the
+             pill sat at 606-632, on top of a composer occupying 497-628,
+             covering the ACT button. The comment on `.to-latest` claimed this
+             wrapper's job was already being done by `#viewSession`; it was
+             not, and nothing rendered the two together to notice.
+          
+             It cannot go inside `#log` either: that is the scroll container,
+             and an absolutely positioned child of a scroller travels with the
+             content instead of staying at its foot. */
+          '<div class="log-wrap">' +
+            '<div id="log"></div>' +
+            /* Once you scroll up mid-stream, autoscroll stops following the
+               answer - correctly, because fighting the user is worse. But
+               nothing offered a way back: the reply kept growing below the fold
+               with no signal it had, and the only route down was scrolling by
+               hand. Shown only when it is true, so it costs no chrome the rest
+               of the time. */
+            '<button class="to-latest" id="toLatest" hidden>' +
+              icon("i-caret", "ic-11") + "<span>Jump to latest</span></button>" +
+          "</div>" +
           /* THE TRANSCRIPT IS NOT A LIVE REGION, AND USED TO BE ONE.
            *
            * `#log` carried aria-live="polite" - which sounds right and is the
@@ -1103,14 +1169,21 @@ function _sbRun() {
             // nobody knows about may as well not ship.
             '<div class="tipbar" id="tipBar" hidden>' +
               '<span class="tip-k">Tip</span>' +
-              '<span class="tip-t" id="tipText"></span>' +
+              '<span class="tip-t mq" id="tipText"></span>' +
               '<span class="sp"></span>' +
               '<button class="tip-x" id="tipNext" title="Another tip" aria-label="Another tip">' +
                 icon("i-refresh", "ic-11") + '</button>' +
             '</div>' +
             '<div class="composer">' +
               '<div class="sel-pill" id="selPill" hidden>' + icon("i-file", "ic-13") +
-                '<span id="selText"></span><span class="sp"></span>' +
+                /* `ell` is not decoration here. Without it the span is a flex
+                   item at its default `min-width: auto`, so a long path cannot
+                   shrink: it pushed the row 153px past the composer, which
+                   CLIPS - and the dismiss button went with it. A selection on
+                   a deep path could not be cleared at any panel width, so it
+                   rode along with every message sent. The sibling ed-pill
+                   already carried this class; this one was missed. */
+                '<span class="ell" id="selText"></span><span class="sp"></span>' +
                 '<button class="tb-btn" id="selClear" title="Dismiss selection" aria-label="Dismiss selection" style="width:18px;height:18px">' + icon("i-x", "ic-9") + '</button>' +
               '</div>' +
               // The automatic one, above the attachments and visibly unlike
@@ -1167,28 +1240,80 @@ function _sbRun() {
                 // press send": what it may do, which model does it, and
                 // whether it will ask first. It used to sit under the box in a
                 // footer, which is where things go to be ignored.
-                '<button class="perm-btn" id="permBtn" aria-haspopup="menu" aria-expanded="false"' +
-                  ' title="What the agent may do without asking">' +
-                  icon("i-hand", "ic-15") + '<span class="nm" id="permName">Manual</span>' +
-                '</button>' +
                 '<span class="sp"></span>' +
-                // Attach and send. THERE IS NO `@` BUTTON, on purpose.
+                // Mode, attach and send. THERE IS NO `@` BUTTON, on purpose.
                 //
                 // It typed a single character into the box, which is a thing
                 // the keyboard already does and which the placeholder already
-                // teaches - "( / skills · @ files )". As a sixth control in a
+                // teaches - "( / skills · @ files )". As another control in a
                 // wrapping row it was the one that broke the line: the group
                 // orphaned onto a second row and sat right-aligned with the
                 // whole left half of the composer empty. The design's composer
                 // has five controls and this is the one it does not have.
                 //
-                // The pair is still a GROUP rather than two siblings, so a
-                // wrap at a narrow width moves them together instead of
-                // leaving send on a row by itself.
+                // These are a GROUP rather than siblings, so a wrap at a narrow
+                // width moves them together instead of leaving send on a row by
+                // itself.
+                //
+                // The MODE button joins them here, at the owner's instruction,
+                // and takes their geometry. It used to sit on the left beside
+                // the model name, where it was a labelled pill among labelled
+                // controls; here it is a 30px icon button in a run of three,
+                // which is what it always was underneath - a glyph, a tooltip
+                // and a sheet. Its label moves to the tooltip and the
+                // accessible name, both of which already carried it.
+                /* THE AGENT, REACHABLE FROM WHERE YOU TYPE.
+                 *
+                 * The picker this opens has existed all along and was reachable
+                 * only by typing `/agent` - so choosing one meant knowing the
+                 * command, or leaving the composer for the Agents tab. The
+                 * sheet is unchanged; this is the door.
+                 *
+                 * A DIRECT CHILD OF THE TOOLBAR, not a fourth member of
+                 * `.tb-actions`, which is where it started. That group is
+                 * pinned to the phase segment's row at 280px - the whole reason
+                 * it is a group is that a wrap must not orphan send - and a
+                 * fourth 30px plate plus its gap took it 36px over, which put
+                 * attach and send on a row of their own with the left half of
+                 * the composer empty. Out here it sits beside them when there
+                 * is room and rides down with the model button when there is
+                 * not; see the ordering rule in sidebar.css.
+                 *
+                 * It belongs next to the model on that second row anyway: the
+                 * model and the agent are both WHO you are talking to, while
+                 * shield, attach and send are things you DO. */
+                '<button class="tb-btn agent-btn" id="agentBtn" aria-haspopup="menu"' +
+                  ' title="Choose an agent for this chat">' +
+                  icon("i-spark", "ic-13") + '<span class="nm" id="agentName"></span>' +
+                '</button>' +
                 '<span class="tb-actions">' +
+                  '<button class="tb-btn perm-btn" id="permBtn" aria-haspopup="menu" aria-expanded="false"' +
+                    ' title="What the agent may do without asking">' +
+                    icon("i-shield", "ic-13") + '<span class="nm" id="permName">Manual</span>' +
+                  '</button>' +
                   '<button class="tb-btn" id="clipBtn" title="Upload from your computer - or drop files on the box" aria-label="Upload files from your computer">' + icon("i-clip", "ic-13") + '</button>' +
                   '<button id="sendBtn" data-ready="0" data-mode="send" title="Send" aria-label="Send">' + icon("i-up", "ic-13") + '</button>' +
                 '</span>' +
+                /* The local file picker.
+                
+                   `showOpenDialog` runs on the EXTENSION HOST. In a WSL, dev
+                   container, SSH or Codespaces window that host is the remote
+                   machine, so the dialog browses the remote filesystem and a
+                   file sitting on the user's own Desktop is unreachable
+                   through it - which is exactly what was reported.
+                
+                   The webview renderer is always LOCAL, on the machine with
+                   the screen and the mouse, so a plain file input here opens
+                   the user's own OS picker whatever the window is attached to.
+                   The bytes arrive in the page and take the same path a
+                   dropped or pasted file already takes.
+                
+                   Off-screen rather than `display: none`: a hidden input is
+                   not focusable and some engines refuse to open the picker for
+                   one that is not rendered. */
+                '<input type="file" id="localPick" multiple ' +
+                  'style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none" ' +
+                  'tabindex="-1" aria-hidden="true">' +
               '</div>' +
             '</div>' +
             // The mode picker is a sheet over the whole panel rather than a
@@ -1227,6 +1352,14 @@ function _sbRun() {
             '<div class="ag-body" id="agBody"></div>' +
           '</div>' +
         '</section>' +
+        /* The transcript's context menu.
+         *
+         * Outside the header on purpose: the document-level closer exempts
+         * `.kx-header` so a click inside the history popover does not shut it,
+         * and this menu wants the opposite - a click on one of its rows should
+         * run the action and then close it. Position is fixed and set at open
+         * time, so where it sits in the tree costs nothing. */
+        '<div class="ctx-menu" id="msgMenu" role="menu" hidden></div>' +
         '<section class="view" id="viewDiag" role="tabpanel" aria-labelledby="tabDiag" hidden>' +
           '<button class="cc-card" id="ccBtn">' + crystal(19) +
             '<span class="col"><span class="t">Control Center</span>' +
@@ -1301,8 +1434,232 @@ function _sbRun() {
   function closePops() {
     $("historyPop").hidden = true;
     $("morePop").hidden = true;
+    // The message menu closes with the rest. Two menus open at once is the bug
+    // a second closer would have introduced.
+    if ($("msgMenu")) $("msgMenu").hidden = true;
     $("histBtn").setAttribute("aria-expanded", "false");
     $("moreBtn").setAttribute("aria-expanded", "false");
+  }
+
+  /* ───────────────────── the message context menu ─────────────────────
+   *
+   * The transcript was the one surface here with no per-message actions at all.
+   * `turn-foot` is per TURN, sits at the end of it, and its Copy only ever took
+   * the assistant's answer - so there was no way to copy a question, and no way
+   * to reach an earlier turn's answer except by selecting it by hand in a 340px
+   * column.
+   *
+   * RIGHT-CLICK COSTS SOMETHING, AND COPY IS THE PRICE. A webview's right-click
+   * shows VS Code's own menu, which is where Copy lives; opening ours means
+   * preventDefault(), which takes that away. So Copy is a row here - not scope
+   * creep, but restoring the one capability the trigger removes. For the same
+   * reason a fenced code block is left alone entirely: it has its own copy
+   * button two pixels away, and selecting half a snippet is worth more there
+   * than any message-level action.
+   *
+   * `role` is which messages a row belongs on. Edit and Resend are meaningless
+   * on an answer - there is nothing to re-ask - so an answer offers the two
+   * that mean something and no more.
+   */
+  var MSG_ACTIONS = [
+    ["edit",      "user", "i-compose", "Edit"],
+    ["resend",    "user", "i-up",      "Resend"],
+    ["attach",    "both", "i-clip",    "Attach to composer"],
+    ["copy",      "both", "i-copy",    "Copy"],
+    /* Only on an answer. A question is never markdown-rendered, so there is no
+       second reading of one to offer. Copy above stays the RAW markdown, which
+       is what turn-foot's Copy has always given - the two disagreeing about
+       what "copy this answer" means would be the surprise. */
+    ["copyPlain", "ai",   "i-file",    "Copy as plain text"],
+    /* Last, because it is the only row that changes anything outside the panel.
+       Shown only when a checkpoint is actually behind the turn. */
+    ["rewind",    "user", "i-history", "Rewind to here"]
+  ];
+
+  /**
+   * An answer with the markdown taken out.
+   *
+   * md() is one-way, so this reads the rendered tree back rather than trying to
+   * unparse. .cb-h goes first, or every fenced block contributes its language
+   * label and its copy button to what is supposed to be prose.
+   */
+  function msgPlain(el) {
+    var clone = el.cloneNode(true);
+    var heads = clone.querySelectorAll(".cb-h");
+    for (var i = 0; i < heads.length; i++) heads[i].parentNode.removeChild(heads[i]);
+    return (clone.textContent || "").replace(/\n{3,}/g, "\n\n").trim();
+  }
+
+  /** The label the host commits a snapshot under: the first line, cut at 60. */
+  function ckptLabel(text) {
+    return String(text).slice(0, 60).split("\n")[0].trim();
+  }
+
+  /**
+   * The checkpoint taken before this message's turn, or "" when there is none.
+   *
+   * The hash cannot travel on the message. Both the stored session and the
+   * stateSync payload carry Msg[], which is the MODEL's wire format - a field
+   * added there would be sent to the model on the next turn. What can be
+   * matched is the label, because the host commits each snapshot with the
+   * message's own text as its subject.
+   *
+   * Matched in order and CONSUMED, because labels are not unique: the Retry
+   * button sends "Retry that last step." verbatim every time, and pairing by
+   * label alone points every one of them at the newest hash.
+   */
+  function checkpointFor(el) {
+    var list = (S.checkpoints || []).slice().reverse();  // oldest first
+    var msgs = logEl ? logEl.querySelectorAll(".msg-user") : [];
+    var next = 0;
+    for (var i = 0; i < msgs.length; i++) {
+      var label = ckptLabel(msgText(msgs[i]));
+      var hit = "";
+      for (var j = next; j < list.length; j++) {
+        if (list[j].label === label) { hit = list[j].hash; next = j + 1; break; }
+      }
+      if (msgs[i] === el) return hit;
+    }
+    return "";
+  }
+
+  /** The string a message was built from, never the string its DOM holds. */
+  function msgText(el) {
+    if (el && typeof el._raw === "string") return el._raw;
+    // A message from a build before `_raw` existed on this side. Better than
+    // nothing, and wrong only about the newlines between multimodal blocks.
+    var t = el && el.querySelector(".u-text");
+    return (t || el || {}).textContent || "";
+  }
+
+  /** Where this message sits in the conversation, for naming an attachment. */
+  function msgIndex(el) {
+    var all = logEl.querySelectorAll(".msg-user, .msg-ai");
+    for (var i = 0; i < all.length; i++) if (all[i] === el) return i + 1;
+    return all.length + 1;
+  }
+
+  function openMsgMenu(el, x, y) {
+    // One closer owns every menu; opening this one shuts whatever else is up.
+    closePops();
+    var menu = $("msgMenu");
+    if (!menu) return;
+    var isUser = el.classList.contains("msg-user");
+    var drafting = ($("draft").value || "").trim().length > 0;
+    var html = "";
+    // Resolved once per open rather than once per row: it walks the transcript.
+    var hash = isUser ? checkpointFor(el) : "";
+    for (var i = 0; i < MSG_ACTIONS.length; i++) {
+      var a = MSG_ACTIONS[i];
+      if (a[1] === "user" && !isUser) continue;
+      if (a[1] === "ai" && isUser) continue;
+      /* A turn with nothing snapshotted behind it cannot be rewound to, and an
+         inert row is worse than an absent one. Ask and Plan turns are never
+         snapshotted, nor is a turn with snapshotTurn off, nor anything past the
+         thirty the list stops at. */
+      if (a[0] === "rewind" && !hash) continue;
+      /* REPLACING A HALF-WRITTEN DRAFT IS DESTROYING WORK, so the row says so
+         before the click rather than after it. Same rule the mode sheet and the
+         delete confirmations follow: the cost goes on the control. */
+      var label = a[0] === "edit" && drafting ? "Replace draft and edit" : a[3];
+      html += '<button class="pop-row" role="menuitem" tabindex="-1" data-mm="' + a[0] + '"' +
+        (a[0] === "rewind" ? ' data-hash="' + esc(hash) + '"' : "") + ">" +
+        icon(a[2], "ic-13") + '<span class="t">' + esc(label) + "</span></button>";
+    }
+    menu.innerHTML = html;
+    menu._target = el;
+    /* Focusable only programmatically, so the menu can hand focus back to the
+       message rather than to <body> - where the next Tab would restart from the
+       top of the panel - without every message becoming a tab stop. */
+    if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "-1");
+    // Where the transcript stood when this menu was anchored. The scroll
+    // closer measures against it rather than trusting the event itself.
+    menu._scrollAt = logEl.scrollTop;
+    menu.hidden = false;
+
+    /* Clamped to the panel, which at its narrowest is about 200px - narrower
+       than the menu itself is wide. Measured after unhiding, because a hidden
+       element has no size to measure. */
+    var w = menu.offsetWidth;
+    var h = menu.offsetHeight;
+    var maxX = window.innerWidth;
+    var maxY = window.innerHeight;
+    var left = x + w > maxX ? Math.max(0, maxX - w - 4) : x;
+    var top = y + h > maxY ? Math.max(0, maxY - h - 4) : y;
+    menu.style.left = left + "px";
+    menu.style.top = top + "px";
+
+    /* role="menu" is a promise about the keyboard, and a11y.cjs exists because
+       role="tablist" was once declared without the contract that goes with it.
+       Focus enters here; msgMenuKeys carries the rest. */
+    var first = menu.querySelector(".pop-row");
+    if (first && first.focus) first.focus();
+  }
+
+  /** Hide the menu, giving focus back to the message it belonged to. */
+  function closeMsgMenu(restoreFocus) {
+    var menu = $("msgMenu");
+    if (!menu || menu.hidden) return false;
+    menu.hidden = true;
+    var back = menu._target;
+    if (restoreFocus && back && back.focus) back.focus();
+    return true;
+  }
+
+  /** Arrows, Home/End and Tab inside the menu. Escape is handled at the top. */
+  function msgMenuKeys(e) {
+    var menu = $("msgMenu");
+    if (!menu || menu.hidden) return;
+    if (e.key === "Tab") {
+      e.preventDefault();
+      closeMsgMenu(true);
+      return;
+    }
+    var rows = [].slice.call(menu.querySelectorAll(".pop-row"));
+    if (!rows.length) return;
+    var at = rows.indexOf(document.activeElement);
+    var to;
+    if (e.key === "ArrowDown") to = at < 0 ? 0 : (at + 1) % rows.length;
+    else if (e.key === "ArrowUp") to = at <= 0 ? rows.length - 1 : at - 1;
+    else if (e.key === "Home") to = 0;
+    else if (e.key === "End") to = rows.length - 1;
+    else return;
+    e.preventDefault();
+    if (rows[to] && rows[to].focus) rows[to].focus();
+  }
+
+  function onMsgAction(action, el, hash) {
+    var text = msgText(el);
+    if (action === "copy") { post("copyText", { text: text }); return; }
+    if (action === "copyPlain") { post("copyText", { text: msgPlain(el) }); return; }
+    if (action === "rewind") {
+      /* The host names the files a restore would change and asks before doing
+         it. Posting the message the Control Center's checkpoint list already
+         posts is what gets that confirmation, rather than a second one written
+         here that could disagree with it. It restores FILES; the transcript is
+         left alone, which is what restore has always meant in this product. */
+      if (hash) post("restoreCheckpoint", { hash: hash });
+      return;
+    }
+    if (action === "resend") { sendText(text); return; }
+    if (action === "edit") {
+      var draft = $("draft");
+      draft.value = text;
+      syncComposer();
+      draft.focus();
+      // The caret at the END, because this is a message to amend rather than
+      // one to retype from the top.
+      if (draft.setSelectionRange) draft.setSelectionRange(text.length, text.length);
+      return;
+    }
+    if (action === "attach") {
+      var isUser = el.classList.contains("msg-user");
+      var name = (isUser ? "question-" : "answer-") + msgIndex(el) + ".md";
+      if (addAttachment(textAttachment(name, text))) {
+        renderAttachments();
+        syncComposer();
+      }
+    }
   }
 
   /* Each row is one stored conversation. The message count and the active dot
@@ -1350,6 +1707,17 @@ function _sbRun() {
           '<span class="ell"><span class="t ell">' + esc(s.title) + '</span>' +
           '<span class="m">' + esc(s.when) + ' · ' + n + '</span></span>' +
         '</button>' +
+        // Stop, for a conversation that is working but is not the one on
+        // screen. The composer's Stop deliberately reaches only the visible
+        // turn, which left a backgrounded turn - one blocked on an approval
+        // nobody saw asked, or inside a long command - with no control
+        // anywhere that could reach it. This list is where those conversations
+        // are, so this is where the control belongs.
+        (s.running
+          ? '<button class="hist-stop" data-stop="' + esc(s.id) + '" title="Stop this turn" ' +
+              'aria-label="Stop the turn running in ' + esc(s.title) + '">' +
+              icon("i-stop", "ic-13") + "</button>"
+          : "") +
         '<button class="hist-del" data-del="' + esc(s.id) + '" title="Delete session" ' +
           'aria-label="Delete session">' + icon("i-trash", "ic-13") + '</button>' +
         '</div>';
@@ -1464,32 +1832,43 @@ function _sbRun() {
     // host would still happily run a write in.
     if (PHASE_CYCLE.indexOf(phase) === -1) phase = "act";
     S.phase = phase;
+    var view = $("viewSession");
     var segs = $("phaseSeg").querySelectorAll("[data-phase]");
     for (var i = 0; i < segs.length; i++) {
       var on = segs[i].getAttribute("data-phase") === phase;
       segs[i].setAttribute("data-on", on ? "1" : "0");
       segs[i].setAttribute("aria-checked", on ? "true" : "false");
     }
-    /* One banner, two read-only phases. Both make the same promise - nothing in
-       the workspace changes - and saying it twice in two colours would be two
-       ways to read one fact.
-
-       This was written TWICE, from two `var banner` declarations in the same
-       function: once off PHASE_INFO and once off a pair of inline literals
-       saying the same thing. Two copies of one string is how they stop being
-       one string, so PHASE_INFO is the only one left. Ask's line carries a
-       promise Plan's does not - no plan either - which is the whole difference
-       between the two, and it lives in that table. */
+    /* THE RAIL, WHERE THE BANNER USED TO BE.
+     *
+     * One attribute drives the stripe down the view's left edge (see
+     * `#viewSession::before`). It replaces a full-width strip that cost a row
+     * and only appeared at the top of the transcript; the rail costs no row and
+     * is in view at every scroll position.
+     *
+     * ALL THREE PHASES PAINT IT, where the banner deliberately showed nothing
+     * in Act. That reversal is the point rather than an oversight: the banner
+     * was a disclosure - "something is being withheld" - so Act, which withholds
+     * nothing, had nothing to say. The rail is not a disclosure, it is a mode
+     * indicator, and Act is the mode most worth being able to notice, because
+     * it is the one that edits the workspace. Costing nothing, it can say so.
+     *
+     * COLOUR IS NOT ALONE IN CARRYING THIS. The composer's Ask/Plan/Act segment
+     * is on screen whenever the rail is, lit and `aria-checked` on the live
+     * phase, and each segment's tooltip states what the phase does. The rail is
+     * decorative reinforcement - a ::before with no node and no aria - so a
+     * viewer who cannot separate the three hues loses nothing but a convenience.
+     * The announce below is what a screen reader gets in the banner's place. */
+    view.setAttribute("data-phase", phase);
     var info = PHASE_INFO[phase];
-    var banner = $("phaseBanner");
-    banner.hidden = !info;
-    if (info) {
-      banner.setAttribute("data-phase", phase);
-      $("phaseBannerLbl").textContent = info.lbl;
-      $("phaseBannerSub").textContent = info.sub;
-    }
     syncComposer();
-    if (!silent) post("setPhase", { phase: phase });
+    /* Only on a real change the user did not make by reading a segment: `silent`
+       marks the host echoing state back, which would otherwise announce the
+       phase twice on every restore. */
+    if (!silent) {
+      announce(info ? info.lbl + " - " + info.sub : "Act phase - full tools, makes changes");
+      post("setPhase", { phase: phase });
+    }
   }
 
   /**
@@ -1564,16 +1943,44 @@ function _sbRun() {
     return (Math.floor(Date.now() / TIP_PERIOD_MS) + (S.tipNudge || 0)) % TIPS.length;
   }
 
+  /* A .mq box reveals a too-long line by MOVING it rather than cutting it with
+     an ellipsis - see the .mq block in sidebar.css. This is the one part the
+     CSS cannot do for itself: measure how far the text overruns its box, and
+     pick a duration that keeps the travel slow whatever that distance is.
+     Cleared and recomputed on every call so it tracks the live width. */
+  function mqMeasure(vp) {
+    if (!vp) return;
+    var inner = vp.firstElementChild;
+    if (!inner || !inner.classList || !inner.classList.contains("mq-i")) return;
+    vp.removeAttribute("data-marquee");
+    vp.style.removeProperty("--mq-shift");
+    vp.style.removeProperty("--mq-time");
+    var over = inner.scrollWidth - vp.clientWidth;
+    if (over > 6) {
+      vp.style.setProperty("--mq-shift", over + "px");
+      // ~22px a second while it is actually moving, floored so a line that only
+      // just overruns still ambles rather than darting across.
+      vp.style.setProperty("--mq-time", Math.max(6, Math.round(over / 22) + 3) + "s");
+      vp.setAttribute("data-marquee", "1");
+    }
+  }
+  function mqAll() {
+    var els = document.querySelectorAll(".mq");
+    for (var i = 0; i < els.length; i++) mqMeasure(els[i]);
+  }
+
   function renderTip(advance) {
     var bar = $("tipBar");
     if (!bar) return;
     if (advance) S.tipNudge = (S.tipNudge || 0) + 1;
     var i = tipIndex();
     // innerHTML is safe here and only here: TIPS is a constant in this file
-    // and never carries anything a model or a page produced.
-    $("tipText").innerHTML = TIPS[i];
+    // and never carries anything a model or a page produced. The text sits in
+    // an .mq-i span so a long tip scrolls to reveal itself (see mqMeasure).
+    $("tipText").innerHTML = '<span class="mq-i">' + TIPS[i] + "</span>";
     S.tipShown = i;
     bar.hidden = false;
+    mqMeasure($("tipText"));
   }
 
   /* The strip has to change while the panel simply sits there, so the period
@@ -1631,7 +2038,7 @@ function _sbRun() {
     // "ASK PLAN ACT ... ASK" the pair looks like one broken segmented control
     // with a stray fourth option. The design's own name for this mode is
     // Manual, which is both unambiguous and what the sheet already called it.
-    ["ask", "Manual", "Always ask before making changes", "Manual", "i-hand", "var(--kx-fg)"],
+    ["ask", "Manual", "Always ask before making changes", "Manual", "i-shield", "var(--kx-fg)"],
     ["edits-auto", "Accept edits", "File edits run automatically. Shell commands still ask.", "Edits", "i-code", "var(--kx-agent)"],
     /* "The agent handles permission decisions itself" was the mechanism, and the
        other two rows here name a consequence: "Always ask before making
@@ -1659,6 +2066,49 @@ function _sbRun() {
   function permIcon(mode) {
     for (var i = 0; i < PERMS.length; i++) if (PERMS[i][0] === mode) return PERMS[i][4];
     return PERMS[0][4];
+  }
+
+  /**
+   * The agent button, showing the agent of the conversation on screen.
+   *
+   * Says "this chat" in every string, deliberately. The agent used to be one
+   * value for the whole workspace and nothing near the composer said so, which
+   * is how it went unnoticed that choosing one for a diff review had made every
+   * later chat a review too. A control that names the scope cannot repeat that.
+   */
+  function renderAgentBtn() {
+    var btn = $("agentBtn");
+    if (!btn) return;
+    var name = S.activeAgent || "";
+    var nm = $("agentName");
+    if (nm) nm.textContent = name;
+    /* HOW WIDE THIS NAME ACTUALLY IS, for the pill to open to.
+       The label is clamped to max-width 0 while no agent is set, so its own
+       `scrollWidth` is the only place its natural width survives; CSS cannot
+       reach it. Without this the pill animates towards the 118px cap and stops
+       dead as soon as it passes the text, spending most of the transition
+       standing still. Capped at the same 118 so a long name still truncates,
+       and left at the CSS fallback if the measure comes back 0 - which it does
+       while the panel is still display:none behind another tab. */
+    if (nm) {
+      var w = nm.scrollWidth;
+      if (w > 0) btn.style.setProperty("--agent-nm-w", Math.min(w, 118) + "px");
+      else btn.style.removeProperty("--agent-nm-w");
+    }
+    // Drives the dimmed resting state in CSS, the way permBtn's data-mode does.
+    btn.setAttribute("data-on", name ? "1" : "0");
+    btn.setAttribute("aria-label", name ? "Agent: " + name + ", in this chat" : "Choose an agent for this chat");
+    /* THE SCOPE MOVED HERE when the bar under the tabs was removed. That strip
+       was the only thing stating what the agent can actually reach - its tools,
+       its MCP servers, its skills - and dropping it without rehoming the line
+       would have left the panel unable to answer "what can this thing do?"
+       anywhere outside the Agents tab. */
+    var a = name ? activeAgentDto() : null;
+    var scope = a ? agentScope(a) : "";
+    btn.title = name
+      ? name + " is answering in this chat. Other chats are unaffected." +
+        (scope ? "\n" + scope : "")
+      : "Choose an agent for this chat. Other chats are unaffected.";
   }
 
   function renderPerm() {
@@ -1915,7 +2365,16 @@ function _sbRun() {
     return el;
   }
   function clearTranscript() {
+    /* Dropped, not sealed: the element is about to be removed from the DOM
+       with the rest of the transcript, and holding the reference would have
+       the next turn append its reasoning into a detached node - text written
+       to a box nobody can see. */
+    thinkEl = null;
     if (aiFrame) { cancelAnimationFrame(aiFrame); aiFrame = 0; }
+    // The working has its own reveal loop, and it needs cancelling for the
+    // same reason: a frame that fires after this paints into a node that has
+    // been detached from the document.
+    if (thinkFrame) { cancelAnimationFrame(thinkFrame); thinkFrame = 0; }
     logEl.innerHTML = "";
     aiEl = null; streamEl = null; pendingTool = null; todoEl = null; toolGroup = null;
   }
@@ -1941,10 +2400,18 @@ function _sbRun() {
     var spin = arriving !== false ? " spin-in" : "";
     clearTranscript();
     if (!S.workspace.open) {
+      /* A BUTTON, not only a sentence. This screen said the right thing and
+         offered no way to act on it, while the endpoint screen below it -
+         the second-most-likely first-run state - has offered two buttons all
+         along. Someone reading "open a folder" with nothing to press goes to
+         the menu bar if they know VS Code and to Settings if they do not. */
       logEl.appendChild(div("welcome",
         crystal(46, "crystal" + spin) +
         "<h2>Open a folder to use Genesis</h2>" +
-        "<p>Genesis reads endpoint profiles and skills from the folder you have open, and edits files inside it.</p>"));
+        "<p>Genesis reads endpoint profiles and skills from the folder you have open, and edits files inside it. It has nowhere to read from and nothing to edit until there is one.</p>" +
+        '<div class="chips">' +
+          '<button class="btn primary" data-act="openFolder">Open folder…</button>' +
+        '</div>'));
       return;
     }
     if (!hasEndpoint()) {
@@ -1987,12 +2454,27 @@ function _sbRun() {
      * so two of them read as eyes - and as eyes they were ugly. The mark is a
      * BEZEL: four notches on a ring, which is a thing that turns. So it turns,
      * once, a beat after the panel arrives, and then it is a logo again. */
-    var body = crystal(34, "crystal" + spin) +
+    /* 34 was too small to be the brand mark on the one screen that exists to
+       carry it: at 34px it read as an icon beside the wordmark rather than as
+       the thing the screen is built around, and the wordmark under it is only
+       19px tall - so the whole identity block was 56px in a 340px column.
+       56 gives the mark presence without crowding the column it sits in; the
+       CSS scales it down with the panel so a narrow dock does not have a mark
+       wider than the text under it. */
+    var body = crystal(56, "crystal w-crystal" + spin) +
       '<div class="w-mark">Genesis</div>' +
       '<p>' + (recent.length
         ? "Pick up where you left off, or start something new."
-        : "I read your workspace, propose edits as diffs, and never write a file " +
-          "until you accept it. Ask anything about this repository.") + "</p>";
+        /* This used to say "never write a file until you accept it", which is
+           the first sentence a new user reads and is not what happens: a write
+           lands on disk as soon as the approval card is answered, and the diff
+           card afterwards is a review with an undo behind it. In edits-auto or
+           full-auto, and after one "Always allow", there is no card at all.
+           The honest version is still the reassuring one - nothing happens
+           unasked, and every change is reviewable and revertible. */
+        : "I read your workspace and ask before I change anything. Every edit " +
+          "arrives as a diff you can review and undo. Ask anything about this " +
+          "repository.") + "</p>";
 
     // Openers. These were removed once for being invented examples about a
     // function nobody in the workspace has - and that objection was right about
@@ -2003,7 +2485,7 @@ function _sbRun() {
     for (var si = 0; si < STARTERS.length; si++) {
       body += '<button class="w-row" data-starter="' + esc(STARTERS[si].run) + '">' +
         icon(STARTERS[si].icon, "ic-11") +
-        '<span class="t">' + esc(STARTERS[si].text) + "</span>" +
+        '<span class="t mq"><span class="mq-i">' + esc(STARTERS[si].text) + "</span></span>" +
         icon("i-chev", "ic-9") + "</button>";
     }
     body += "</div>";
@@ -2037,7 +2519,7 @@ function _sbRun() {
           // before, which spent the panel's success colour to say "this is a
           // row".
           (r.running ? liveMark() : '<span class="w-dot"></span>') +
-          '<span class="t ell">' + esc(r.title) + "</span>" +
+          '<span class="t mq"><span class="mq-i">' + esc(r.title) + "</span></span>" +
           '<span class="w-ago">' + esc(r.when) + "</span></button>" +
           '<button class="w-del" data-del="' + esc(r.id) + '" title="Delete this conversation" ' +
             'aria-label="Delete ' + esc(r.title) + '">' + icon("i-trash", "ic-13") + "</button>" +
@@ -2046,6 +2528,9 @@ function _sbRun() {
       body += "</div></div>";
     }
     logEl.appendChild(div("welcome", body));
+    // Long titles and starters reveal themselves by scrolling rather than an
+    // ellipsis; measure them now the rows are in the document.
+    mqAll();
   }
 
   /* The rail is a ::before on .msg-user, so everything else has to sit in a
@@ -2100,6 +2585,15 @@ function _sbRun() {
    */
   function userTurn(html, plain, att) {
     var msg = div("msg-user");
+    /* The text this turn was BUILT from, kept on the element.
+     *
+     * `.msg-ai` has carried `_raw` since streaming existed; this side threw
+     * `plain` away and nothing could get it back. Scraping the DOM is not the
+     * same string: a multimodal question joins its text blocks with newlines
+     * and drops its images, so textContent runs the blocks together and loses
+     * the breaks. Everything the context menu does - copy, resend, attach -
+     * wants the string the model was actually sent. */
+    msg._raw = plain;
     var body = div("u-body");
     var text = div("u-text", html);
     body.appendChild(text);
@@ -2204,10 +2698,36 @@ function _sbRun() {
    * few frames instead of crawling, while a genuine token stream still reveals
    * smoothly. `_done` marks the end of the turn: once set, the last frame
    * reveals whatever is left so nothing is ever stranded unpainted.
+   *
+   * PACED BY TIME, NOT BY FRAME. The floor used to be "2 characters per
+   * frame", which is not a speed: it is 120 chars/sec on a 60Hz display and
+   * 240 on a 120Hz one, so the same reply typed at two different rates
+   * depending on the monitor. Worse, 120 chars/sec is far slower than any
+   * gateway delivers, so the backlog grew all turn and the reveal ran visibly
+   * behind the model - the stutter being fixed here.
    */
   var aiFrame = 0;
-  var TYPE_MIN = 2;      // chars per frame at the tail, so short replies still type
-  var TYPE_DIVISOR = 9;  // larger backlog reveals proportionally faster
+  /* Floor speed, characters per second. Fast enough to keep up with a real
+     stream, slow enough that a short reply still visibly types. */
+  var TYPE_CPS = 320;
+  /* Fraction of the outstanding backlog to clear each frame on top of the
+     floor, so a burst drains in a few frames rather than crawling. */
+  var TYPE_DIVISOR = 8;
+  /* Minimum gap between FULL markdown re-parses, in ms.
+   *
+   * The cheap path writes one text node and is used whenever the tail is
+   * still plain prose. When it is not - a fence is open, a list or table is
+   * being built - the only correct paint is a full `md()` and an innerHTML
+   * swap, and that was running on every frame. Measured against a realistic
+   * reply, the expensive branch is taken for 52% of paints, not the "handful
+   * of times per reply" the note above this claims: at 60fps that is ~30
+   * whole-message re-parses a second, each one O(n) over everything received
+   * so far, and each one destroying the nodes a selection is anchored in.
+   *
+   * 60ms is ~16 re-parses a second, which still reads as continuous typing
+   * and takes the cost off the frame budget. `_done` bypasses it, so the
+   * finished message is always exactly correct. */
+  var REPARSE_MS = 60;
 
   /**
    * Everything after the last blank line, which is the part still being written.
@@ -2262,6 +2782,15 @@ function _sbRun() {
       return;
     }
 
+    /* The expensive path, rate-limited. See REPARSE_MS.
+     *
+     * Skipping a re-parse means `_shown` does not advance, so the characters
+     * are not lost - they are painted by the next frame that is allowed to
+     * parse. `_done` never waits: the last paint of a turn must be exact. */
+    var now = Date.now();
+    if (!aiEl._done && aiEl._lastParse && now - aiEl._lastParse < REPARSE_MS) return;
+    aiEl._lastParse = now;
+
     aiEl.innerHTML = md(text);
     aiEl._shown = next;
     aiEl._tail = null;
@@ -2296,10 +2825,19 @@ function _sbRun() {
     if (!aiEl) return;
     var full = aiEl._raw || "";
     var shown = aiEl._shown || 0;
-    if (shown >= full.length) return;
+    if (shown >= full.length) { aiEl._last = 0; return; }
+
+    // Elapsed since the previous frame, so the reveal runs at the same speed
+    // on any display. Clamped: a backgrounded webview can hand back a gap of
+    // several seconds, which would dump the whole reply in one frame.
+    var now = Date.now();
+    var dt = aiEl._last ? Math.min(now - aiEl._last, 100) : 16;
+    aiEl._last = now;
 
     var backlog = full.length - shown;
-    var step = aiEl._done ? backlog : Math.max(TYPE_MIN, Math.ceil(backlog / TYPE_DIVISOR));
+    var step = aiEl._done
+      ? backlog
+      : Math.max(1, Math.ceil((TYPE_CPS * dt) / 1000), Math.ceil(backlog / TYPE_DIVISOR));
     var next = Math.min(full.length, shown + step);
 
     var stick = atBottom();
@@ -2307,7 +2845,9 @@ function _sbRun() {
     if (stick) scroll();
     syncToLatest();
 
-    if (next < full.length) aiFrame = requestAnimationFrame(typeStep);
+    // `aiEl._shown`, not `next`: a throttled re-parse leaves `_shown` where it
+    // was, and the loop has to keep running until it actually catches up.
+    if ((aiEl._shown || 0) < full.length) aiFrame = requestAnimationFrame(typeStep);
   }
 
   /** Reveal everything immediately. Used at turn end and before reordering. */
@@ -2316,6 +2856,34 @@ function _sbRun() {
     if (!aiEl) return;
     aiEl._done = true;
     paintAi();
+  }
+
+  /**
+   * Stop writing into the current answer bubble, having first painted it.
+   *
+   * THE REPLY THAT STOPPED IN THE MIDDLE.
+   *
+   * `aiEl = null` appeared at seventeen places - every card that interrupts
+   * prose: a diff, a plan, a todo list, a permission request, a tool group -
+   * and `flushAi()` at three. Everywhere else the assignment simply dropped
+   * the element while `_raw` still held text past `_shown`, and that text was
+   * never painted by anything. It had arrived, it was in memory, and it was
+   * discarded.
+   *
+   * The typewriter is what made it constant rather than rare: it reveals
+   * BEHIND arrival by design, so there is nearly always a backlog outstanding
+   * at the moment a tool call lands, and the faster the gateway the more of
+   * the reply was lost. The symptom is a reply that stops mid-sentence with
+   * no error and nothing in the log.
+   *
+   * So detaching is one operation, and it paints first. `resetAi` is the one
+   * deliberate exception - it discards because what is on screen turned out to
+   * be a `<think>` prefill being taken off screen, which is the opposite
+   * intention and says so there.
+   */
+  function detachAi() {
+    flushAi();
+    aiEl = null;
   }
 
   /**
@@ -2340,6 +2908,13 @@ function _sbRun() {
 
   function appendAi(text) {
     if (!aiEl) {
+      /* The answer has started, so the working is finished. Sealing HERE
+         rather than only at turn end matters for the common shape: a model
+         thinks, answers, thinks again, answers again. Left open, the second
+         run of reasoning would append into the first box - above the first
+         answer - and the transcript would claim the model thought it all
+         before saying anything. */
+      sealThinking();
       // Prose after a run of tools ends the strip - the model has stopped
       // working and started explaining.
       closeToolGroup();
@@ -2369,6 +2944,7 @@ function _sbRun() {
    * without a trace and the answer to arrive in a fresh one.
    */
   function resetAi() {
+    sealThinking();
     if (!aiEl) return;
     if (aiFrame) { cancelAnimationFrame(aiFrame); aiFrame = null; }
     if (aiEl.parentNode) aiEl.parentNode.removeChild(aiEl);
@@ -2417,47 +2993,174 @@ function _sbRun() {
    * surprising and worth nothing the rest of the time, which is exactly the
    * shape of a disclosure.
    */
-  function addThinking(text) {
-    var t = String(text == null ? "" : text).trim();
-    if (!t) return;
-    // Captured before `aiEl` is dropped, because the insert below needs the
-    // answer element that is already on screen, and the next line is what
-    // forgets it.
-    var prior = aiEl && aiEl.parentNode === logEl ? aiEl : null;
-    // Not through `aiEl`: this is not the answer, and appending it there would
-    // put it back in the same paragraph flow it just came out of.
-    aiEl = null;
+  /* The live box, or null between turns. `addThinking` grows this rather than
+     making a new one per chunk; `sealThinking` closes it. */
+  var thinkEl = null;
+  /** The working's own reveal loop. Paced by `thinkStep`, like the answer. */
+  var thinkFrame = 0;
 
-    var box = div("think");
+  function thinkWords(t) {
+    var w = t.trim() ? t.trim().split(/\s+/).length : 0;
+    return w + " word" + (w === 1 ? "" : "s");
+  }
+
+  /**
+   * Close the live thinking box: collapse it and give it its final count.
+   *
+   * Called when the answer starts and again at turn end, so a turn that never
+   * produced visible text still seals. Idempotent.
+   */
+  function sealThinking() {
+    if (!thinkEl) return;
+    var box = thinkEl;
+    /* Painted in full before it is sealed, for the same reason the answer is.
+       The box reveals behind arrival now, so at the moment the answer starts
+       there is normally a backlog outstanding, and closing without this would
+       seal a box whose last sentence had never been drawn - and would then
+       label it with a word count it did not show. */
+    if (thinkFrame) { cancelAnimationFrame(thinkFrame); thinkFrame = 0; }
+    var body = box.querySelector(".think-body");
+    if (body) body.textContent = box._raw || "";
+    box._shown = (box._raw || "").length;
+    box._done = true;
+
+    thinkEl = null;
     box.setAttribute("data-open", "0");
-    var words = t.split(/\s+/).length;
-    box.innerHTML =
-      '<button class="think-head">' + icon("i-chev", "ic-9 chev") +
-        '<span class="n">Thought for ' + words + " word" + (words === 1 ? "" : "s") + "</span></button>" +
-      '<div class="think-body">' + esc(t) + "</div>";
-    box.querySelector(".think-head").addEventListener("click", function () {
-      box.setAttribute("data-open", box.getAttribute("data-open") === "1" ? "0" : "1");
-    });
+    box.setAttribute("data-live", "0");
+    box.querySelector(".think-head .n").textContent =
+      "Thought for " + thinkWords(box._raw || "");
+  }
 
-    // ABOVE the answer, never below it.
-    //
-    // Appending put the working after the prose it produced, because that is
-    // the order the events arrive in: several providers flush a reasoning
-    // summary only once the visible answer has started, so the transcript read
-    // "here is the answer... and here is the thinking that led to it", which is
-    // backwards and makes the disclosure look like an afterthought rather than
-    // a preamble.
-    //
-    if (prior) {
-      flushAi();
-      var stick = atBottom();
-      logEl.insertBefore(box, prior);
-      if (stick) scroll();
-      syncToLatest();
-    syncToLatest();
-    } else {
-      add(box);
+  function addThinking(text) {
+    var t = String(text == null ? "" : text);
+    if (!t.trim() && !thinkEl) return;
+
+    /* ONE BOX PER RUN OF THINKING, OPEN WHILE IT IS BEING WRITTEN.
+    
+       This used to build a fresh `.think` element on every reasoning event.
+       A model that streams its working in chunks - which is what a reasoning
+       model does - therefore produced one collapsed strip PER CHUNK, each
+       labelled "Thought for 4 words" as though it were a finished thought.
+       Measured against the shipped panel with five chunks: five boxes, and
+       `visibleChars: 0` at every step, because every one of them was closed.
+    
+       So while the model was thinking the user watched a stack of identical
+       grey strips accumulate, saw none of the reasoning, and then got the
+       whole answer at once. The panel had the text the entire time and was
+       hiding it behind five doors.
+    
+       Now: the box is created once, opens itself, and grows. The disclosure
+       still exists - it seals shut the moment the answer starts, which is
+       when the working stops being the interesting thing on screen - but
+       while the model IS thinking, its thinking is what you see. */
+    if (!thinkEl) {
+      // Captured before `aiEl` is dropped, because the insert below needs the
+      // answer element that is already on screen, and the next line is what
+      // forgets it.
+      var prior = aiEl && aiEl.parentNode === logEl ? aiEl : null;
+      /* Painted BEFORE it is forgotten, which is the order that was wrong.
+       *
+       * The `flushAi()` below, inside `if (prior)`, was written for exactly
+       * this case and could never once have run: `flushAi` opens with
+       * `if (!aiEl) return`, and `aiEl` had already been set to null here, two
+       * dozen lines above it. So a model that answered and then thought again
+       * lost whatever of the first answer had not yet been revealed.
+       *
+       * Not through `aiEl` afterwards: the box is not the answer, and
+       * appending it there would put it back in the same paragraph flow it
+       * just came out of. */
+      detachAi();
+
+      var box = div("think");
+      // Open, and marked live so the stylesheet can show it is still being
+      // written rather than presenting it as a finished disclosure.
+      box.setAttribute("data-open", "1");
+      box.setAttribute("data-live", "1");
+      // `_raw` is everything received, `_shown` how much has been revealed -
+      // the same pair the answer bubble keeps, read by `thinkStep`.
+      box._raw = "";
+      box._shown = 0;
+      box._done = false;
+      box._last = 0;
+      box.innerHTML =
+        '<button class="think-head">' + icon("i-chev", "ic-9 chev") +
+          '<span class="n">Thinking\u2026</span></button>' +
+        '<div class="think-body"></div>';
+      box.querySelector(".think-head").addEventListener("click", function () {
+        box.setAttribute("data-open", box.getAttribute("data-open") === "1" ? "0" : "1");
+      });
+
+      // ABOVE the answer, never below it.
+      //
+      // Appending put the working after the prose it produced, because that is
+      // the order the events arrive in: several providers flush a reasoning
+      // summary only once the visible answer has started, so the transcript
+      // read "here is the answer... and here is the thinking that led to it",
+      // which is backwards and makes the disclosure look like an afterthought
+      // rather than a preamble.
+      if (prior) {
+        // Already painted, by the `detachAi()` above.
+        var stick = atBottom();
+        logEl.insertBefore(box, prior);
+        if (stick) scroll();
+        syncToLatest();
+      } else {
+        add(box);
+      }
+      thinkEl = box;
     }
+
+    thinkEl._raw += t;
+    thinkEl._done = false;
+    if (!thinkFrame) thinkFrame = requestAnimationFrame(thinkStep);
+  }
+
+  /**
+   * The working, revealed at the same pace as the answer.
+   *
+   * The box painted `_raw` whole on every chunk, so how the thinking appeared
+   * was entirely the gateway's frame size: one that streams token by token
+   * typed, and one that sends a paragraph per frame produced a paragraph per
+   * frame. Now both type, and the working and the answer that follows it move
+   * at one speed.
+   *
+   * `textContent`, never innerHTML: this is raw working, it arrives mid-token,
+   * and half a fence or a stray `<` must not become markup. It is also the
+   * cheap paint - one text node, no parse - so unlike the answer there is
+   * nothing here to rate-limit.
+   */
+  function thinkStep() {
+    thinkFrame = 0;
+    var el = thinkEl;
+    if (!el) return;
+    var full = el._raw || "";
+    var shown = el._shown || 0;
+    if (shown >= full.length) { el._last = 0; return; }
+
+    var now = Date.now();
+    var dt = el._last ? Math.min(now - el._last, 100) : 16;
+    el._last = now;
+
+    var backlog = full.length - shown;
+    var step = el._done
+      ? backlog
+      : Math.max(1, Math.ceil((TYPE_CPS * dt) / 1000), Math.ceil(backlog / TYPE_DIVISOR));
+    var next = Math.min(full.length, shown + step);
+
+    var body = el.querySelector(".think-body");
+    var stick = atBottom();
+    body.textContent = full.slice(0, next);
+    el._shown = next;
+    /* The box is capped at 168px, so past that the newest thinking is below
+       its own fold. Follow it: the point of showing the working live is the
+       part being written, and a live region that stops at the first screenful
+       is back to showing nothing. No CSS does this - see the note in
+       sidebar.css - so it is set here, after the text lands. */
+    body.scrollTop = body.scrollHeight;
+    if (stick) scroll();
+    syncToLatest();
+
+    if (next < full.length) thinkFrame = requestAnimationFrame(thinkStep);
   }
 
   /** Freeze the group's counters. Safe to call when no group is open. */
@@ -2507,7 +3210,7 @@ function _sbRun() {
   }
 
   function toolStart(name, args) {
-    aiEl = null;
+    detachAi();
     var g = openToolGroup();
     var el = toolCard(name, args);
     g.querySelector(".tool-group-body").appendChild(el);
@@ -2567,7 +3270,12 @@ function _sbRun() {
       // here. Shown even on failure, where "what was actually run" is the
       // first thing anyone checks.
       var cmd = div("term-block cmd-in");
-      cmd.textContent = String(args.command);
+      /* Highlighted, not `textContent`. This was the one place in the panel
+         showing a shell command with no colour at all - the command the user
+         is being asked to approve, in a card whose whole job is to say what
+         is about to run. `highlight()` escapes everything it emits, so its
+         output is safe as innerHTML. */
+      cmd.innerHTML = highlight(String(args.command), "sh");
       body.appendChild(ioRow("IN", cmd));
       if (text) body.appendChild(ioRow("OUT", resultBlock(text, name, args)));
     } else if (preview) body.appendChild(preview);
@@ -2911,7 +3619,7 @@ function _sbRun() {
   }
 
   function addDiff(m) {
-    aiEl = null;
+    detachAi();
     closeToolGroup();
     var body = diffRows(m.patch);
 
@@ -2985,7 +3693,15 @@ function _sbRun() {
     if (a.allMcp) parts.push("all MCP servers");
     else if (a.mcp && a.mcp.length) {
       parts.push("MCP: " + a.mcp.map(function (m) {
-        return m.include && m.include.length ? m.server + " (" + m.include.length + ")" : m.server;
+        // Three states. A count is "these tools"; a bare name is "all of them";
+        // "(none)" is an include list written and left empty, which withholds
+        // every tool on the server. Reading include.length alone drew that last
+        // case as unrestricted, which is the label agreeing with a bug rather
+        // than with the user's file.
+        if (!m.includeActive) return m.server;
+        return m.include && m.include.length
+          ? m.server + " (" + m.include.length + ")"
+          : m.server + " (none)";
       }).join(", "));
     } else parts.push("no MCP");
     if (a.skills && a.skills.length) parts.push(a.skills.length + " skills");
@@ -3001,16 +3717,6 @@ function _sbRun() {
     return null;
   }
 
-  function renderAgentBar() {
-    var bar = $("agentBar");
-    var a = activeAgentDto();
-    if (!a) { bar.hidden = true; return; }
-    bar.hidden = false;
-    $("agentBarName").textContent = a.name;
-    $("agentBarScope").textContent = agentScope(a);
-    $("agentBarScope").title = a.description || agentScope(a);
-  }
-
   /** The Agents section in the Diagnostics tab. */
   function renderAgents() {
     var body = $("agBody");
@@ -3021,12 +3727,18 @@ function _sbRun() {
 
     var html = "";
     if (!S.agents.length) {
+      /* Same shape as the MCP tab's empty state and the welcome screen: a
+         mark, a line saying what is missing, the explanation held to a
+         measure, and one action. It was a full-width paragraph with a button
+         underneath, sitting at the top of an otherwise blank screen. */
       html +=
-        '<div class="ag-empty">' +
-        "<p>An agent is a persona plus a list of what it may reach: which built-in tools, " +
-        "which MCP servers and which of their tools, which skills, and a memory file it " +
+        '<div class="tab-empty">' +
+        '<span class="te-mark">' + icon("i-agent", "ic-22") + "</span>" +
+        '<p class="te-t">No agents yet</p>' +
+        '<p class="te-s">An agent is a persona plus a list of what it may reach: which built-in ' +
+        "tools, which MCP servers and which of their tools, which skills, and a memory file it " +
         "keeps for itself. They live in <code>.agent/agents/</code>, one Markdown file each.</p>" +
-        '<button class="btn primary sm" data-ag="new">Create an agent</button></div>';
+        '<button class="btn primary" data-ag="new">Create an agent</button></div>';
     } else {
       html += '<div class="ag-rows">';
       for (var i = 0; i < S.agents.length; i++) {
@@ -3053,8 +3765,15 @@ function _sbRun() {
       // Two identical primary actions on one screen is not two chances to find
       // it - it is a moment spent working out whether they differ. The header's
       // copy stays, because it is the one that is always on screen.
+      /* "in this chat", because that is now the truth and it was not before.
+         The agent was one value for the whole workspace, so "reviewer is
+         active" was a statement about every conversation open and every one
+         created afterwards. It belongs to this conversation now, and a label
+         that does not say so invites the same wrong assumption. */
       html += '<div class="sk-foot"><span>' +
-        (S.activeAgent ? esc(S.activeAgent) + " is active" : "No agent - the default assistant") +
+        (S.activeAgent
+          ? esc(S.activeAgent) + " is active in this chat"
+          : "No agent in this chat - the default assistant") +
         "</span></div>";
     }
     if (S.agentWarnings.length) {
@@ -3247,13 +3966,13 @@ function _sbRun() {
       '<ul class="todo-list">' + items + "</ul>";
 
     if (todoEl) { todoEl.innerHTML = html; return; }
-    aiEl = null;
+    detachAi();
     closeToolGroup();
     todoEl = add(div("card", html));
   }
 
   function addPermission(m) {
-    aiEl = null;
+    detachAi();
     closeToolGroup();
     // The one interruption that is genuinely an interruption: the turn has
     // stopped and is waiting on an answer nobody has been told is wanted.
@@ -3262,34 +3981,50 @@ function _sbRun() {
      *
      * The label was "Always allow" for both kinds of request, and the two are
      * not the same grant at all. For an edit it sets a flag for this session.
-     * For a command it appends the command's FIRST TOKEN to a workspace-level
-     * list that survives restarts - so "always allow" on `git status`
-     * permanently authorises `git push --force`, and the only place that was
-     * ever said was the card's replacement text, after the click.
+     * For a command it stores a workspace-level grant that survives restarts.
      *
-     * The scope goes on the control. `git` rather than `git status`, because
-     * the token is what is actually being granted and printing the full command
-     * would promise a precision the grant does not have. */
+     * That grant used to be keyed on the command's FIRST WORD, and the button
+     * said so - "Always allow git" - because that was honestly what was being
+     * granted: one yes to `git status` carried `git push --force` with it.
+     *
+     * The host matches the whole normalised line exactly now, so the button can
+     * name the command itself and be telling the truth. Printing the first word
+     * would now UNDER-state a grant the host reads exactly, which is its own
+     * kind of lie.
+     *
+     * `m.risk` is the host's verdict. A `destructive` command is refused on
+     * every future invocation whatever is stored, so the button is withheld
+     * rather than offered and quietly ignored. */
     var isCmd = String(m.summary || "").indexOf("Run:") === 0;
-    var token = isCmd
-      ? String(m.summary).replace(/^Run:\s*/, "").trim().split(/\s+/)[0]
-      : "";
+    var cmdText = isCmd ? String(m.summary).replace(/^Run:\s*/, "").trim() : "";
+    var destructive = m.risk === "destructive";
+    var canAlways = !destructive;
     var always = isCmd
-      ? "Always allow " + esc(token)
+      ? "Always allow this command"
       : "Always allow edits";
-    /* Built raw and escaped ONCE, at the point of use. Escaping the token and
+    /* Built raw and escaped ONCE, at the point of use. Escaping the text and
        then dropping the result into a double-quoted attribute alongside a
        literal quote character closed the attribute early and swallowed the rest
        of the sentence - the tooltip read "Every command starting with " and
        stopped. Typographic quotes would have hidden that rather than fixed it. */
     var alwaysTitle = isCmd
-      ? 'Every command starting with "' + token + '" runs without asking, in this ' +
-        "workspace, until you revoke it in the Control Center."
+      ? "Exactly this command - " + cmdText + " - runs without asking, in this " +
+        "workspace, until you revoke it in the Control Center. Nothing else does, " +
+        "including other commands starting with the same word."
       : "Every file edit runs without asking for the rest of this conversation.";
-    var el = add(div("perm",
-      '<div class="perm-t">' + icon("i-warn", "ic-14") + "Permission required</div>" +
+    var el = add(div("perm" + (destructive ? " perm-danger" : ""),
+      '<div class="perm-t">' + icon("i-warn", "ic-14") +
+        (destructive ? "This can destroy work" : "Permission required") + "</div>" +
       '<div class="perm-b">Genesis wants to:</div>' +
       '<div class="perm-cmd">' + esc(m.summary) + "</div>" +
+      /* Said on the card, not only in a tooltip. A command that can discard
+         uncommitted work is the one place where the reason to read before
+         clicking has to survive someone who is not reading. */
+      (destructive
+        ? '<div class="perm-b" style="margin-top:6px">This command can discard work ' +
+          "that cannot be recovered. It is never approved automatically, and it " +
+          "cannot be granted for next time.</div>"
+        : "") +
       /* THE CHANGE, AS A DIFF, AT THE MOMENT OF THE DECISION.
        *
        * This was `esc(m.detail)` in a monospace block: no gutter, no line
@@ -3306,7 +4041,9 @@ function _sbRun() {
         : m.detail ? '<div class="perm-cmd" style="margin-top:6px">' + esc(String(m.detail).slice(0, 4000)) + "</div>" : "") +
       '<div class="perm-actions">' +
         '<button class="btn go" data-perm="allow">Allow once</button>' +
-        '<button class="btn" data-perm="always" title="' + esc(alwaysTitle) + '">' + always + "</button>" +
+        (canAlways
+          ? '<button class="btn" data-perm="always" title="' + esc(alwaysTitle) + '">' + always + "</button>"
+          : "") +
         '<button class="btn" data-perm="deny">Deny</button></div>'));
     el.dataset.perm = m.id;
     el.dataset.summary = m.summary;
@@ -3338,9 +4075,29 @@ function _sbRun() {
     }
   }
 
+  /**
+   * Retire the buttons on every plan card already in the transcript.
+   *
+   * The host remembers exactly one plan - the last one proposed - so a card
+   * from an earlier round is a button that would run something other than what
+   * it lists. That is not hypothetical now that "Keep planning" asks for a
+   * re-plan: the second card arrives with the first still armed above it.
+   */
+  function retirePlans(label) {
+    var feet = logEl.querySelectorAll(".plan-card .plan-foot");
+    for (var i = 0; i < feet.length; i++) {
+      var foot = feet[i];
+      foot.className = "plan-done";
+      foot.innerHTML = '<span style="display:flex">' + icon("i-check", "ic-13") + "</span>" +
+        "<span>" + esc(label) + "</span>";
+    }
+  }
+
   function addPlan(m) {
-    aiEl = null;
+    detachAi();
     closeToolGroup();
+    // Whatever is above this card can no longer be acted on.
+    retirePlans("Superseded by a newer plan");
     var steps = "";
     for (var i = 0; i < m.steps.length; i++) {
       steps += '<li><span class="n">' + (i + 1) + '</span><span>' + esc(m.steps[i]) + "</span></li>";
@@ -3352,15 +4109,70 @@ function _sbRun() {
       '<div class="plan-foot">' +
         '<button class="btn go" data-plan="run">Approve &amp; run</button>' +
         '<button class="btn" data-plan="keep">Keep planning</button></div>'));
+
+    // Replaces the footer with a stamp rather than removing it, so a decided
+    // card still says what was decided instead of quietly losing its buttons.
+    function settle(label) {
+      var foot = el.querySelector(".plan-foot");
+      if (!foot) return;
+      foot.className = "plan-done";
+      foot.innerHTML = '<span style="display:flex">' + icon("i-check", "ic-13") + "</span>" +
+        "<span>" + esc(label) + "</span>";
+      // The objection row is a SIBLING of the footer, so replacing the footer
+      // leaves it behind: a decided card kept a live input and a Send button
+      // that would post the same objection again. Whatever the decision was,
+      // the card is done being asked.
+      var row = el.querySelector(".plan-why-row");
+      if (row) row.remove();
+    }
+
+    // The objection is read straight off the input at the moment it is sent and
+    // never mirrored into `S`. Its life is the card's life, which is right: a
+    // draft copied into state would outlive the conversation it belongs to and
+    // reappear somewhere it means nothing.
+    function decline() {
+      var box = el.querySelector(".plan-why");
+      if (!box) return;
+      var text = box.value.trim();
+      if (!text) return;
+      applyPhase("plan", true);
+      post("rejectPlan", { feedback: text });
+      settle("Kept planning");
+    }
+
     el.addEventListener("click", function (e) {
       var b = e.target.closest("[data-plan]");
       if (!b) return;
-      if (b.getAttribute("data-plan") === "run") {
+      var what = b.getAttribute("data-plan");
+      if (what === "run") {
         applyPhase("act", true);
         post("approvePlan");
+        settle("Approved · running");
+        return;
       }
+      if (what === "send") {
+        decline();
+        return;
+      }
+      // Keep planning opens the box rather than posting: nothing is typed until
+      // the user has committed to declining, which is also why the draft can
+      // never be caught by a re-render. Approve stays put beside it - opening
+      // the box must not be a one-way door out of approving.
       var foot = el.querySelector(".plan-foot");
-      if (foot) foot.remove();
+      if (!foot || el.querySelector(".plan-why")) return;
+      b.remove();
+      var row = div("plan-why-row",
+        '<input class="plan-why" type="text" placeholder="What should change?" ' +
+        'aria-label="Why this plan needs more work">' +
+        '<button class="btn" data-plan="send">Send</button>');
+      foot.parentNode.insertBefore(row, foot.nextSibling);
+      var box = row.querySelector(".plan-why");
+      box.addEventListener("keydown", function (ev) {
+        if (ev.key !== "Enter") return;
+        ev.preventDefault();
+        decline();
+      });
+      box.focus();
     });
   }
 
@@ -3423,6 +4235,10 @@ function _sbRun() {
   }
   function endStream() {
     flushAi();
+    /* A turn can end with the working still open - the model spent the whole
+       turn reasoning and produced no visible text, or it was interrupted. The
+       box must not be left saying "Thinking…" over a model that has stopped. */
+    sealThinking();
     if (S.timer) { clearInterval(S.timer); S.timer = null; }
     if (streamEl) { streamEl.remove(); streamEl = null; }
     S.gerund = "Thinking…";
@@ -3545,8 +4361,22 @@ function _sbRun() {
     // Every branch carries the prompt caret, including the blocked one. Putting
     // it on only some of them made the marker blink in and out as the phase
     // changed, which reads as a rendering bug rather than a prompt.
-    draft.placeholder = CARET + (blocked
-      ? "Configure an endpoint first…"
+    /* TWO DIFFERENT BLOCKERS, TWO DIFFERENT SENTENCES.
+     *
+     * `blocked` is `!workspace.open || !hasEndpoint()`, and both branches used
+     * to print "Configure an endpoint first…" - which names the fix for the
+     * second one. Someone who installs this and clicks the icon on VS Code's
+     * welcome screen, with no folder open, is told to go and configure an
+     * endpoint. There is nothing to configure: profiles are read from .agent/
+     * in the folder you have open, and there is no folder. Nothing on screen
+     * said the word "folder", so the next stop was Settings, and the next stop
+     * after that was uninstalling it. It is the most likely thing in this
+     * panel to happen to a new user, because it happens before they have done
+     * anything at all. */
+    draft.placeholder = CARET + (!S.workspace.open
+      ? "Open a folder to start…"
+      : blocked
+      ? "Add an endpoint to start…"
       : S.running
       ? "Queue another message…" + COMPOSER_HINT
       : S.phase === "plan"
@@ -3666,7 +4496,8 @@ function _sbRun() {
       // "None" is a row rather than a separate control: leaving an agent is
       // exactly as common as entering one, and hiding the way out is how a
       // mode becomes a trap.
-      var out = [{ group: "Agents" }, { agent: "", desc: "No agent - the default assistant", active: !S.activeAgent }];
+      var out = [{ group: "Agents" },
+        { agent: "", desc: "No agent in this chat - the default assistant", active: !S.activeAgent }];
       for (var a = 0; a < S.agents.length; a++) {
         out.push({
           agent: S.agents[a].name,
@@ -3836,6 +4667,20 @@ function _sbRun() {
       '<span class="qp-scope-t ell">' + esc(name) + "/</span>" +
       '<span class="sp"></span>' +
       '<span class="qp-scope-n">whole workspace</span></div>';
+  }
+
+  /**
+   * Open the agent sheet.
+   *
+   * One function because there are two doors into it now - `/agent` and the
+   * toolbar button - and two copies of "set three flags and render" is how the
+   * two doors end up opening onto slightly different rooms.
+   */
+  function openAgentPicker() {
+    S.agentOpen = true;
+    S.modelOpen = false;
+    S.qpIndex = 0;
+    renderQuickPick();
   }
 
   function renderQuickPick() {
@@ -4020,7 +4865,7 @@ function _sbRun() {
       case "/export":
         draft.value = ""; post("exportChat", { scope: "current" }); break;
       case "/agent":
-        draft.value = ""; S.agentOpen = true; S.modelOpen = false; S.qpIndex = 0; renderQuickPick(); return;
+        draft.value = ""; openAgentPicker(); return;
       case "/review":
         draft.value = ""; sendText(REVIEW_PROMPT); break;
       case "/skills":
@@ -4034,7 +4879,7 @@ function _sbRun() {
             : "No skills enabled. Add a SKILL.md under .agent/skills/.") +
           "\n\nCommands\n\n" +
           CMDS.map(function (c) { return c[0] + "  -  " + c[1]; }).join("\n");
-        aiEl = null;
+        detachAi();
         add(div("note-box", esc(text)));
         break;
       }
@@ -4080,7 +4925,7 @@ function _sbRun() {
       return;
     }
     addUser(trimmed, S.attachments);
-    aiEl = null;
+    detachAi();
     // One verb per turn, held for its whole length.
     S.idleVerb = pickVerb(S.phase);
     S.gerund = S.idleVerb;
@@ -4124,7 +4969,7 @@ function _sbRun() {
     // failure is the worst possible moment to throw on the failure renderer.
     var e = typeof m === "string" ? { message: m } : (m || {});
     var message = e.message || "Something went wrong.";
-    aiEl = null;
+    detachAi();
     closeToolGroup();
     announce(message);
 
@@ -4172,7 +5017,7 @@ function _sbRun() {
    * afterwards. This stays in the transcript, and its path opens the file.
    */
   function addNotice(iconId, text, openPath) {
-    aiEl = null;
+    detachAi();
     closeToolGroup();
     var box = div("ok-box", icon(iconId, "ic-13") + "<span>" + esc(text) + "</span>");
     if (openPath) {
@@ -4194,7 +5039,7 @@ function _sbRun() {
    * generation had failed when it had not.
    */
   function addImage(m) {
-    aiEl = null;
+    detachAi();
     closeToolGroup();
     var card = div("gen-img");
     // A button, not an anchor: the click opens an editor tab through the host,
@@ -4269,6 +5114,58 @@ function _sbRun() {
      on until it was nearly full. The usage is still tracked and still printed
      on each turn's footer line, which is where a figure belongs: attached to
      the turn that spent it, once, and not moving afterwards. */
+  /* The label the button WANTS to show, before it is cut to fit. Kept apart
+     from the DOM text because the fitter reads the element's own width to
+     decide the cut, and measuring a string against a box already containing a
+     truncated copy of itself converges on the wrong answer. */
+  var modelLabel = "No model";
+
+  /**
+   * Show the END of the model id when the whole of it will not fit.
+   *
+   * `text-overflow: ellipsis` cuts the tail, which is the wrong half here.
+   * Model ids share their prefixes - `claude-sonnet-4-6`, `claude-opus-4-1`,
+   * `openai/gpt-oss-20b` - so the row's narrowest case, about seven characters
+   * at a 360px panel, spends all seven on "claude-" and distinguishes nothing.
+   * Truncating before the first distinguishing character is the same as
+   * showing no name at all.
+   *
+   * Binary search rather than a character-width estimate: the face is
+   * proportional at some weights and the id carries digits, slashes and
+   * hyphens whose advances differ, so anything averaged is wrong by a
+   * character or two exactly when the budget is a character or two.
+   */
+  function fitModelName() {
+    var el = $("modelName");
+    if (!el) return;
+    el.textContent = modelLabel;
+    var room = el.clientWidth;
+    // Zero while the panel is hidden or not yet laid out. Leave the full text:
+    // a fit computed against no width would cut everything, and renderFooter
+    // runs again on the next state sync.
+    if (room <= 0 || el.scrollWidth <= room) return;
+
+    // Measured in a detached span carrying the element's own computed font, so
+    // the answer holds whatever the type system is doing today.
+    var probe = document.createElement("span");
+    probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;left:-9999px;font:" +
+      getComputedStyle(el).font;
+    document.body.appendChild(probe);
+    var fits = function (n) {
+      probe.textContent = "\u2026" + modelLabel.slice(modelLabel.length - n);
+      return probe.getBoundingClientRect().width <= room;
+    };
+    var lo = 0, hi = modelLabel.length;
+    while (lo < hi) {
+      var mid = Math.ceil((lo + hi) / 2);
+      if (fits(mid)) lo = mid; else hi = mid - 1;
+    }
+    probe.remove();
+    // Nothing fits, not even one character behind the ellipsis. Leave the full
+    // label and let the CSS clip it: a bare ellipsis names nothing at all.
+    el.textContent = lo > 0 ? "\u2026" + modelLabel.slice(modelLabel.length - lo) : modelLabel;
+  }
+
   function renderFooter() {
     var active = activeProfile();
     // Named here and not inline: it is the model button's tooltip that needs
@@ -4297,9 +5194,10 @@ function _sbRun() {
     // "Auto" when no profile is pinned and there is more than one to
     // choose from: the label has to say the choice is being made for you.
     var pinnedTo = (S.config && S.config.activeProfile) || "";
-    $("modelName").textContent = active
+    modelLabel = active
       ? (pinnedTo === "" && S.models.length > 1 ? "Auto · " + active.model : active.model)
       : "No model";
+    fitModelName();
     // THE MODEL FIRST, THEN THE ENDPOINT.
     //
     // This named only the endpoint. That was defensible while the button was
@@ -4524,6 +5422,20 @@ function _sbRun() {
             '<button type="button" class="btn sm" data-ep="models" title="Ask the gateway which models it serves">Load</button>' +
           "</span>" +
           '<span></span><span class="f-hint" id="fModelHint"></span>' +
+          // THE ANSWER TO "LOAD", MADE VISIBLE.
+          //
+          // The ids used to go into the <datalist> above and nowhere else, and
+          // a datalist has no affordance of its own: no arrow, no button, and
+          // in a VS Code webview no reliable popup either. So pressing Load
+          // spent several seconds probing every id the gateway lists, and then
+          // the only thing on screen was a sentence saying "start typing to
+          // filter" - filter a list that could not be seen. The most useful
+          // thing the button had just learned was thrown behind a control that
+          // does not render.
+          //
+          // The datalist stays, because typing still completes against it.
+          // This is the part you can look at and click.
+          '<span></span><div class="mdl-picks" id="fModelPicks" hidden></div>' +
           // Directly under the model id, because it is a statement ABOUT that
           // id. Mandatory and unset by default: it is the one thing a gateway
           // cannot be probed for, and it silently decides whether vision is on
@@ -4627,23 +5539,35 @@ function _sbRun() {
   var MCP_CHIP_CAP = 5;
 
   /**
-   * The waiting mark: three arcs from the palette, each on its own period.
+   * The waiting mark: one arc travelling one track.
    *
-   * A single rotating ring reads as a stalled GIF; three arcs at 1.1s, 1.7s
-   * and 2.6s never repeat the same figure, so the eye keeps reading it as
-   * work in progress. Colours are the wall, the shadow and the frame, so it
-   * belongs to this app rather than to the operating system.
+   * It was three concentric arcs in three palette colours on three
+   * incommensurate periods - 1.1s, 1.7s, 2.6s - chosen so the figure never
+   * repeated. The reasoning was that a single rotating ring reads as a stalled
+   * image. At the size this is actually drawn, 12 to 13 pixels, it did not
+   * work: three rings inside 13px leaves under two pixels between strokes, the
+   * three hues smear into one muddy colour, and three unrelated speeds read as
+   * jitter rather than as motion. It was the busiest thing in a panel whose
+   * every other surface is quiet.
+   *
+   * One idea instead, and it is the panel's own: a faint track with an arc
+   * travelling it, which is exactly what `liveMark` draws for a conversation
+   * working in the background. The two "something is happening" marks now
+   * speak one language instead of two.
+   *
+   * The stalled-image worry is real and is answered by the arc's LENGTH rather
+   * than by more rings: it breathes between a sixth of the circle and a half
+   * while it travels, so no frame looks like any other and a frozen render is
+   * obvious. The two periods are 2:1 on purpose - the arc is longest at the
+   * same two points of every turn, which is a rhythm rather than the beating
+   * that three coprime periods produced.
    */
   function spinner(size) {
     var s = size || 13;
     return '<svg class="kx-spin" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" ' +
       'fill="none" aria-hidden="true">' +
-      '<circle class="a1" cx="12" cy="12" r="10" stroke="var(--kx-accent)" stroke-width="2.5" ' +
-        'stroke-linecap="round" stroke-dasharray="16 47"/>' +
-      '<circle class="a2" cx="12" cy="12" r="6.5" stroke="var(--kx-agent)" stroke-width="2.5" ' +
-        'stroke-linecap="round" stroke-dasharray="10 31"/>' +
-      '<circle class="a3" cx="12" cy="12" r="3" stroke="var(--kx-active)" stroke-width="2.5" ' +
-        'stroke-linecap="round" stroke-dasharray="5 14"/>' +
+      '<circle class="kx-track" cx="12" cy="12" r="9" stroke-width="2.6"/>' +
+      '<circle class="kx-arc" cx="12" cy="12" r="9" stroke-width="2.6" stroke-linecap="round"/>' +
       "</svg>";
   }
 
@@ -4712,16 +5636,28 @@ function _sbRun() {
       "</div>";
 
     if (m.warnings && m.warnings.length) {
-      head += '<div class="warn-line" style="padding:0 16px 10px">' + esc(m.warnings.join(" ")) + "</div>";
+      // The gutter is the stylesheet's - see `#mcpBody .warn-line`. It was an
+      // inline `padding:0 16px 10px`, which is a second place the tab's
+      // measurements lived and the one place no stylesheet change could reach.
+      head += '<div class="warn-line">' + esc(m.warnings.join(" ")) + "</div>";
     }
 
     if (!servers.length) {
+      /* Centred, and holding the prose to a measure. It was a left-aligned
+         paragraph pinned under the header with the button loose beneath it,
+         which at panel width was one 90-character line and then most of a
+         screen of nothing. `.tab-empty` is the shape the welcome screen
+         already uses for the same job; the Agents tab now uses it too, so the
+         extension answers "there is nothing here yet" the same way
+         everywhere. */
       body.innerHTML = head +
-        '<div class="mcp-empty">' +
-        "<p>No MCP servers configured.</p>" +
-        '<p class="s">Declare them in <code>.agent/mcp.json</code>, in the same shape Claude Desktop uses. ' +
-        "Their tools reach the model as <code>mcp__server__tool</code>, and are withheld in Ask and Plan mode.</p>" +
-        '<div><button class="btn sm primary" data-mcp="open">Create config</button></div>' +
+        '<div class="tab-empty">' +
+        '<span class="te-mark">' + icon("i-bolt", "ic-22") + "</span>" +
+        '<p class="te-t">No MCP servers configured</p>' +
+        '<p class="te-s">Declare them in <code>.agent/mcp.json</code>, in the same shape Claude ' +
+        "Desktop uses. Their tools reach the model as <code>mcp__server__tool</code>, and are " +
+        "withheld in Ask and Plan mode.</p>" +
+        '<button class="btn primary" data-mcp="open">Create config</button>' +
         "</div>";
       return;
     }
@@ -4957,7 +5893,29 @@ function _sbRun() {
 
   /* ───────────────────────── hydration ───────────────────────── */
 
+  /**
+   * The contract version this frontend was built against. See PROTOCOL_VERSION
+   * in src/ui/protocol.ts.
+   */
+  var PROTOCOL_VERSION = 1;
+  var versionWarned = false;
+
   function hydrate(state) {
+    /* The two halves ship together, so this normally never fires. It fires when
+       a webview outlives an extension update installed while VS Code is
+       running: the panel is restored against the new host, and every message
+       type it does not recognise is silently ignored while every field that
+       moved reads as undefined. That produced a plausible, stale, wrong panel
+       with nothing suggesting a reload. */
+    if (!versionWarned && state && typeof state.protocolVersion === "number" &&
+        state.protocolVersion !== PROTOCOL_VERSION) {
+      versionWarned = true;
+      addError({
+        message: "This panel is running an older build than the extension.",
+        fix: "Reload the window (Developer: Reload Window) so the panel and the extension " +
+             "match. Until then some things here may be out of date or missing."
+      });
+    }
     S.workspace = state.workspace;
     S.running = state.running;
     S.phase = state.phase;
@@ -4970,6 +5928,19 @@ function _sbRun() {
     S.activeAgent = state.activeAgent || "";
     S.mcp = state.mcp || { servers: [], warnings: [] };
     S.config = state.config;
+    /* The host has always sent `status` in the sync payload and this handler
+       has always dropped it, so `S.status` was written by exactly one message:
+       `statusChanged`. That is a PUSH, sent when the status changes - not when
+       a panel opens - so a webview built while the gateway was failing came up
+       with no status at all and renderFooter's `bad` was false. The health dot
+       sat green, and stayed green until the endpoint's state next CHANGED.
+
+       That is the one case the dot exists for. VS Code's status bar, which the
+       host renders from the same StatusDto, showed "ERROR - HTTP" the whole
+       time; the panel's own dot disagreed with it. Reloading the window - the
+       first thing anyone tries - reproduced it rather than clearing it, since
+       a reload is a fresh sync and no change. */
+    S.status = state.status || null;
     S.tlsError = state.tlsError;
     S.rungs = state.rungs || [];
     S.tracing = state.tracing;
@@ -4980,6 +5951,7 @@ function _sbRun() {
     S.context = state.context;
     S.changes = state.changes || [];
     S.models = state.models || [];
+    S.checkpoints = state.checkpoints || [];
 
     S.sessionId = state.session ? state.session.id : null;
     S.title = state.session ? state.session.title : "";
@@ -5003,7 +5975,7 @@ function _sbRun() {
     renderEndpoints();
     renderSkills();
     renderAgents();
-    renderAgentBar();
+    renderAgentBtn();
     renderMcp();
     renderMcpCount();
     renderHistory();
@@ -5084,10 +6056,15 @@ function _sbRun() {
    * screenshot to disk first, finding it, and picking it. Ctrl+V puts it
    * straight into the composer.
    *
-   * The same limits as the picker apply, enforced here because these bytes
-   * never pass through it.
+   * There is no SIZE limit here, matching the host: the 10 MB cap this file
+   * carried was a second copy of the one removed from `attachUris`, so a file
+   * dropped or pasted was still refused after the host had stopped refusing
+   * it. Two copies of a limit is how half a limit survives its own deletion.
+   *
+   * The COUNT cap stays. It is not a size policy - it is what keeps one
+   * message from carrying forty files, which is a different failure and one
+   * the user can act on by sending twice.
    */
-  var ATTACH_MAX = 10 * 1024 * 1024;   // 10 MB, matching pickAndAttach
   var ATTACH_COUNT_MAX = 10;
   /* Characters past which pasted text becomes a file rather than composer
      content. A pasted log is something to hand over, not something to edit,
@@ -5105,6 +6082,29 @@ function _sbRun() {
     return "pasted-" + ++pasteSeq + "." + ext;
   }
 
+  /**
+   * A string as an attachment, in the shape the composer and the wire use.
+   *
+   * Lifted out of `onPaste`, which has turned a large text paste into a
+   * `text/plain` attachment since it shipped. Attaching a transcript message is
+   * that same operation with the message's text instead of the clipboard's, and
+   * two copies of a base64 encoder is how they stop agreeing.
+   *
+   * The host decodes it in `decodeTextAttachment` and inlines it as
+   * ``Attached file `name`:`` with its own 60,000-character cap, so nothing
+   * downstream needs to know where the text came from.
+   */
+  function textAttachment(name, text) {
+    var bytes = new TextEncoder().encode(text);
+    var b64 = "";
+    // Chunked, because String.fromCharCode.apply on a large array overflows
+    // the argument list.
+    for (var k = 0; k < bytes.length; k += 8192) {
+      b64 += String.fromCharCode.apply(null, bytes.subarray(k, k + 8192));
+    }
+    return { name: name, mediaType: "text/plain", data: btoa(b64), size: bytes.length };
+  }
+
   function addAttachment(a) {
     if (!S.attachments) S.attachments = [];
     if (S.attachments.length >= ATTACH_COUNT_MAX) {
@@ -5117,13 +6117,6 @@ function _sbRun() {
 
   /** Read a Blob into the base64 shape the host and the wire already use. */
   function readBlob(blob, name, done) {
-    if (blob.size > ATTACH_MAX) {
-      addError(
-        name + " is " + (blob.size / 1048576).toFixed(1) + " MB. The limit is 10 MB."
-      );
-      done(false);
-      return;
-    }
     var r = new FileReader();
     r.onload = function () {
       // readAsDataURL gives "data:<mime>;base64,<payload>"; the wire wants only
@@ -5223,6 +6216,19 @@ function _sbRun() {
   function wireDrop() {
     var composer = document.querySelector(".composer");
     if (!composer) return;
+    /* THE WHOLE PANEL IS THE DROP TARGET, not just the composer box.
+    
+       The listeners were bound to `.composer`, so a file let go anywhere else -
+       over the transcript, which is most of the panel and the obvious place to
+       aim at - hit the document guard below, was cancelled to stop the webview
+       navigating to it, and did nothing at all. Silently: no outline, no
+       error, no attachment. Aiming at a 90px box at the bottom of the panel is
+       a requirement nobody knows about until they miss.
+    
+       `#root` rather than `document`, so the drag still ends at the panel's
+       own bounds. The composer keeps the HIGHLIGHT, because that is where the
+       file is going and the outline is the answer to "will this land". */
+    var zone = document.getElementById("root") || composer;
 
     /* The document-wide guard.
      *
@@ -5254,16 +6260,16 @@ function _sbRun() {
       return false;
     };
 
-    composer.addEventListener("dragenter", function (e) {
+    zone.addEventListener("dragenter", function (e) {
       if (!carriesFiles(e)) return;
       depth++;
       composer.setAttribute("data-drop", "1");
     }, true);
-    composer.addEventListener("dragleave", function () {
+    zone.addEventListener("dragleave", function () {
       if (depth > 0) depth--;
       if (!depth) composer.removeAttribute("data-drop");
     }, true);
-    composer.addEventListener("dragover", function (e) {
+    zone.addEventListener("dragover", function (e) {
       if (!carriesFiles(e)) return;
       e.preventDefault();
       e.stopPropagation();
@@ -5271,7 +6277,7 @@ function _sbRun() {
       // the cursor to the one with a plus on it.
       if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
     }, true);
-    composer.addEventListener("drop", function (e) {
+    zone.addEventListener("drop", function (e) {
       e.preventDefault();
       e.stopPropagation();
       depth = 0;
@@ -5333,19 +6339,7 @@ function _sbRun() {
     var text = cd.getData("text/plain") || "";
     if (text.length > PASTE_AS_FILE) {
       e.preventDefault();
-      var bytes = new TextEncoder().encode(text);
-      var b64 = "";
-      // Chunked, because String.fromCharCode.apply on a large array overflows
-      // the argument list.
-      for (var k = 0; k < bytes.length; k += 8192) {
-        b64 += String.fromCharCode.apply(null, bytes.subarray(k, k + 8192));
-      }
-      var ok = addAttachment({
-        name: pasteName("text/plain"),
-        mediaType: "text/plain",
-        data: btoa(b64),
-        size: bytes.length,
-      });
+      var ok = addAttachment(textAttachment(pasteName("text/plain"), text));
       if (ok) {
         renderAttachments();
         syncComposer();
@@ -5402,6 +6396,15 @@ function _sbRun() {
       else if (a === "issue") post("openControlCenter", { section: "about" });
     });
     $("historyPop").addEventListener("click", function (e) {
+      var stop = e.target.closest("[data-stop]");
+      if (stop) {
+        // Nested inside the row like Delete is, so the load handler must not
+        // also fire on the way up and switch you into the chat you just
+        // stopped.
+        e.stopPropagation();
+        post("stopSession", { id: stop.getAttribute("data-stop") });
+        return;
+      }
       var del = e.target.closest("[data-del]");
       if (del) {
         /* Delete is nested inside the row, so the load handler must not also
@@ -5416,10 +6419,15 @@ function _sbRun() {
       post("loadSession", { id: b.getAttribute("data-session") });
     });
     document.addEventListener("click", function (e) {
-      // The welcome screen's "All" opens the history popover, and it lives in
-      // the transcript rather than the header - without this exemption this
-      // closer fires on the same click and shuts it again.
-      if (!e.target.closest(".kx-header") && !e.target.closest('[data-act="history"]')) closePops();
+      // Keep the menu open only for clicks on its trigger buttons or inside
+      // the menu itself - not for the whole header, which now also holds the
+      // tabs: clicking a tab should dismiss an open menu, as it did when the
+      // tab strip was a separate element outside the header.
+      // The welcome screen's "All" opens the history popover from the
+      // transcript, so it is exempt too or this closer shuts it on the same
+      // click that opened it.
+      if (!e.target.closest("#histBtn") && !e.target.closest("#moreBtn") &&
+          !e.target.closest(".popover") && !e.target.closest('[data-act="history"]')) closePops();
       // The sheet covers the panel and handles its own backdrop click, so the
       // document-level closer must not also fire on it.
       if (!e.target.closest("#permBtn") && !e.target.closest("#permPop")) togglePerm(false);
@@ -5453,8 +6461,55 @@ function _sbRun() {
       if (b) applyPhase(b.getAttribute("data-phase"));
     });
 
+    /* RIGHT-CLICK ON A MESSAGE, AND ONLY ON A MESSAGE.
+     *
+     * Tool cards, diff cards, the error box and the welcome screen keep VS
+     * Code's own menu - and so does a fenced code block, checked first because
+     * it sits INSIDE `.msg-ai` and would otherwise be caught by it. */
+    logEl.addEventListener("contextmenu", function (e) {
+      if (e.target.closest(".cb")) return;
+      var el = e.target.closest(".msg-user, .msg-ai");
+      if (!el) return;
+      e.preventDefault();
+      /* The Menu key and Shift+F10 raise this event too, with clientX and
+         clientY both 0 - so a keyboard user would get the menu pinned to the
+         panel's top-left corner rather than to the message they are on. */
+      var x = e.clientX;
+      var y = e.clientY;
+      if (!x && !y && el.getBoundingClientRect) {
+        var r = el.getBoundingClientRect();
+        x = r.left + 8;
+        y = r.top + 8;
+      }
+      openMsgMenu(el, x, y);
+    });
+
+    $("msgMenu").addEventListener("click", function (e) {
+      var row = e.target.closest("[data-mm]");
+      if (!row) return;
+      var el = $("msgMenu")._target;
+      if (el) onMsgAction(row.getAttribute("data-mm"), el, row.getAttribute("data-hash") || "");
+      // The document-level closer hides it a moment later, on the same click.
+    });
+
     // The log's own scrolling is the only other thing that changes the answer.
     logEl.addEventListener("scroll", syncToLatest);
+    /* A menu anchored to a pointer position is wrong the instant the content
+       under it moves, and the transcript scrolls on its own while a turn
+       streams.
+       
+       MEASURED, NOT MERELY OBSERVED. Closing on the bare event was wrong and
+       the browser suite caught it: a scroll event queued just BEFORE the menu
+       opened - by the click's own scroll-into-view, or by a delta landing
+       mid-stream - is delivered at the next rendering opportunity, which is
+       after the contextmenu handler has run. The menu opened and vanished on
+       the same gesture. So this compares against the offset the menu was
+       anchored at and ignores anything that did not actually move. */
+    logEl.addEventListener("scroll", function () {
+      var menu = $("msgMenu");
+      if (!menu || menu.hidden) return;
+      if (Math.abs(logEl.scrollTop - (menu._scrollAt || 0)) > 4) menu.hidden = true;
+    });
     $("toLatest").addEventListener("click", function () {
       scroll();
       syncToLatest();
@@ -5504,6 +6559,7 @@ function _sbRun() {
       if (!act) return;
       var a = act.getAttribute("data-act");
       if (a === "doctor") { setTab("diagnostics"); openSection("secTls"); post("runTrace"); }
+      else if (a === "openFolder") post("openFolder");
       else if (a === "newEndpoint") post("newEndpoint");
       else if (a === "ccEndpoints") post("openControlCenter", { section: "endpoints" });
       else if (a === "history") {
@@ -5519,10 +6575,28 @@ function _sbRun() {
     });
 
     var draft = $("draft");
+    var warmed = false;
     draft.addEventListener("input", function () {
       syncComposer();
       detectQuickPick();
       renderDraftMirror();
+      /* Pay the connection, credential and prompt-cache costs of the next turn
+         while the user is still typing, rather than after they press Enter.
+
+         ON THE FIRST KEYSTROKE, NOT ON FOCUS. Warming builds the endpoint
+         client, and building one runs the profile's transform module and
+         spawns its `exec` credential helper - both of them programs named by
+         files in the open folder. Hanging that off `focus` meant clicking into
+         the text box was enough to run them, before the user had asked for
+         anything at all. Typing a character is a deliberate act; putting the
+         cursor somewhere is not.
+
+         Once per composer, because the host debounces but a message per
+         keystroke is still a message per keystroke. */
+      if (!warmed && draft.value.trim()) {
+        warmed = true;
+        post("warm");
+      }
       // Cheap, synchronous, and the whole reason a draft survives the view
       // being collapsed. See saveUiState.
       saveUiState();
@@ -5533,10 +6607,6 @@ function _sbRun() {
       $("draftMirror").scrollTop = draft.scrollTop;
     });
     draft.addEventListener("keydown", onDraftKey);
-    // Pay the connection, credential, and prompt-cache costs of the next turn
-    // while the user is still typing, instead of after they press Enter. The
-    // host debounces this and ignores it while a turn is running.
-    draft.addEventListener("focus", function () { post("warm"); });
 
     $("qp").addEventListener("click", function (e) {
       var b = e.target.closest("[data-i]");
@@ -5544,6 +6614,16 @@ function _sbRun() {
       S.qpIndex = Number(b.getAttribute("data-i"));
       acceptQuickPick();
     });
+    /* The panel is draggable, so the room the label has is not fixed at render
+       time. Without this the name is fitted once, to whatever width the panel
+       happened to have when the endpoint last changed, and dragging the panel
+       wider leaves it truncated while dragging it narrower overflows it.
+       Observed on the button rather than the window: the button's width is
+       what the fit is against, and it changes for reasons other than a window
+       resize - the mode label appearing at 500px takes 46px out of it. */
+    if (typeof ResizeObserver === "function") {
+      new ResizeObserver(function () { fitModelName(); }).observe($("modelBtn"));
+    }
     $("modelBtn").addEventListener("click", function (e) {
       e.stopPropagation();
       S.modelOpen = !S.modelOpen;
@@ -5551,8 +6631,37 @@ function _sbRun() {
       S.qpIndex = 0;
       renderQuickPick();
     });
+    /* THE LOCAL PICKER, not the host's dialog.
+    
+       This posted `attachFiles`, which reaches `showOpenDialog` on the
+       extension host. In a local window the two are the same thing. In a WSL,
+       dev container, SSH or Codespaces window they are not: the host is the
+       remote machine, the dialog browses the remote disk, and the button
+       labelled "Upload from your computer" could not reach the user's
+       computer. Reported from exactly that setup.
+    
+       The input runs in the renderer, which is always on the machine the user
+       is sitting at, so it opens their own OS picker in every window type.
+       Files on the REMOTE side are still reachable, and by a better route than
+       a dialog: `@` completes workspace paths, and the host reads them. */
     $("clipBtn").addEventListener("click", function () {
-      post("attachFiles");
+      var input = $("localPick");
+      // The value is cleared first so picking the SAME file twice in a row
+      // still fires `change`. Without it the second pick is silent, which
+      // reads as the button being broken.
+      input.value = "";
+      input.click();
+    });
+    $("localPick").addEventListener("change", function () {
+      var files = this.files;
+      if (!files || !files.length) return;
+      takeFiles(files, function () {
+        renderAttachments();
+        syncComposer();
+      });
+      // Released as soon as it is read: a file input holds a reference to
+      // every File it was given, and these are whole files in memory.
+      this.value = "";
     });
     // On the textarea rather than the document, so a paste into some other
     // field cannot silently become an attachment.
@@ -5603,9 +6712,24 @@ function _sbRun() {
     $("tipNext").addEventListener("click", function () { renderTip(true); });
     watchTips();
 
+    // The marquee's travel is measured from the live box width, so it has to be
+    // re-measured when the panel is resized (a tip that fit may now overrun, or
+    // the reverse) and once the webfont has loaded and the real glyph widths
+    // are known - the first measure runs against the fallback face otherwise.
+    var mqResizeT = null;
+    window.addEventListener("resize", function () {
+      if (mqResizeT) clearTimeout(mqResizeT);
+      mqResizeT = setTimeout(mqAll, 150);
+    });
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(mqAll);
+
     $("permBtn").addEventListener("click", function (e) {
       e.stopPropagation();
       togglePerm();
+    });
+    $("agentBtn").addEventListener("click", function (e) {
+      e.stopPropagation();
+      openAgentPicker();
     });
     $("permPop").addEventListener("click", function (e) {
       // The X, and the dimmed backdrop itself. A modal sheet that can only be
@@ -5662,16 +6786,35 @@ function _sbRun() {
     });
 
     document.addEventListener("keydown", function (e) {
+      /* Escape shuts the menu FIRST. Interrupting a turn because the user
+         wanted to dismiss a menu is the wrong reading of one keystroke. */
+      if (e.key === "Escape" && $("msgMenu") && !$("msgMenu").hidden) {
+        closeMsgMenu(true);
+        return;
+      }
+      msgMenuKeys(e);
       if (e.key === "Escape" && S.running && $("qp").hidden) post("interrupt");
     });
 
-    $("agentLeave").addEventListener("click", function () { post("setAgent", { name: "" }); });
+    /* The bar's "stop using this agent" x is gone with the bar. Clearing is not
+       lost: the agent picker this button opens leads with a "No agent - the
+       default assistant" row, and choosing the agent that is already active
+       toggles it off (see the setAgent post in the quick-pick handler). */
     // On the wrapper rather than the list: the header's New agent button is a
     // sibling of the list, and it is the one control that has to work when the
     // list is empty.
     $("viewAgents").addEventListener("click", onAgentClick);
     $("tlsBody").addEventListener("click", onTlsClick);
     $("epBody").addEventListener("click", onEpClick);
+    // Delegated, because the form is re-rendered wholesale on every endpoint
+    // action and a listener bound to the field itself would be thrown away
+    // with it. This is what makes the hint's "start typing to filter" true.
+    $("epBody").addEventListener("input", function (e) {
+      if (e.target && e.target.id === "fModel") {
+        S.epModelQ = e.target.value;
+        renderModelPicks();
+      }
+    });
     // Delegated, because the form is re-rendered wholesale on every check rung
     // and a listener bound to the select would not survive that. The hint has
     // to move with the answer: it states what the chosen kind will do to the
@@ -5761,7 +6904,67 @@ function _sbRun() {
     }
   }
 
+  /**
+   * The models the gateway answered for, as rows you can click.
+   *
+   * Filtered by whatever is in the field, which is what makes the hint's
+   * "start typing to filter" true. Case-insensitive and a plain substring
+   * match: the ids are slash-separated paths and someone typing "sonnet"
+   * means anything with sonnet in it, not a prefix.
+   *
+   * Hidden when nothing has been loaded. It is not hidden when the filter
+   * matches nothing - that is a fact worth showing, and a list that vanishes
+   * as you type reads as the panel breaking.
+   */
+  function renderModelPicks() {
+    var box = $("fModelPicks");
+    if (!box) return;
+    var all = S.epModels || [];
+    if (!all.length) { box.hidden = true; box.innerHTML = ""; return; }
+    var inp = $("fModel");
+    /* THE FILTER IS WHAT WAS TYPED, NOT WHAT THE FIELD HOLDS.
+     *
+     * Filtering on the field's value looks identical and is wrong the one
+     * moment it matters: the field already holds the endpoint's current model
+     * when Load is pressed, so a list of twelve arrived pre-filtered down to
+     * the one id the user could already see. That is the same dead end this
+     * whole list exists to fix, reached a different way.
+     *
+     * `null` means nobody has typed since the last load, so show everything.
+     * The tick still marks the current value, which is the fact the field's
+     * contents are actually good for here. */
+    var q = (S.epModelQ == null ? "" : String(S.epModelQ)).trim().toLowerCase();
+    var hits = q ? all.filter(function (id) { return id.toLowerCase().indexOf(q) !== -1; }) : all;
+    box.hidden = false;
+    if (!hits.length) {
+      box.innerHTML = '<div class="mdl-pick-empty">No loaded model matches “' + esc(q) + '”</div>';
+      return;
+    }
+    var html = "";
+    for (var i = 0; i < hits.length; i++) {
+      var on = inp && inp.value === hits[i];
+      html += '<button type="button" class="mdl-pick" data-pick="' + esc(hits[i]) + '"' +
+        ' data-on="' + (on ? "1" : "0") + '">' +
+        (on ? icon("i-check", "ic-13") : '<span class="mdl-pick-gap"></span>') +
+        '<span class="ell">' + esc(hits[i]) + "</span></button>";
+    }
+    box.innerHTML = html;
+  }
+
   function onEpClick(e) {
+    // Choosing one fills the field. Handled before the [data-ep] lookup
+    // because a pick is not one of the form's actions - it is the field being
+    // filled by other means.
+    var pick = e.target.closest("[data-pick]");
+    if (pick) {
+      var mi = $("fModel");
+      if (mi) { mi.value = pick.getAttribute("data-pick"); mi.focus(); }
+      // Choosing is not typing: the list stays whole so a second thought can
+      // pick a different one without clearing the field first.
+      S.epModelQ = null;
+      renderModelPicks();
+      return;
+    }
     var b = e.target.closest("[data-ep]");
     if (!b) return;
     var a = b.getAttribute("data-ep"), id = b.getAttribute("data-id");
@@ -5809,6 +7012,11 @@ function _sbRun() {
     } else if (a === "models") {
       var mDraft = readEpForm();
       if (!mDraft) return;
+      // A fresh probe answers for the endpoint as it is NOW. Whatever the last
+      // one returned may have been for a different base URL entirely.
+      S.epModels = [];
+      S.epModelQ = null;
+      renderModelPicks();
       var hint = $("fModelHint");
       // Says what it is doing, because it is trying every id the gateway lists
       // and that takes a few seconds - silence would read as a hung button.
@@ -5969,7 +7177,7 @@ function _sbRun() {
         S.running = false;
         endStream();
         endTurn();
-        aiEl = null;
+        detachAi();
         pendingTool = null;
         syncComposer();
         // The one announcement a turn earns. The reply itself is navigable in
@@ -6070,6 +7278,11 @@ function _sbRun() {
         break;
 
       case "modelsListed": {
+        // Kept, so the list survives a re-render of the form and can be
+        // filtered as the field is typed into.
+        S.epModels = m.error ? [] : (m.models || []);
+        // A fresh answer is shown whole. See renderModelPicks.
+        S.epModelQ = null;
         var dl = $("fModelList");
         var mh = $("fModelHint");
         var lb = document.querySelector('[data-ep="models"]');
@@ -6102,6 +7315,7 @@ function _sbRun() {
             mh.removeAttribute("data-err");
           }
         }
+        renderModelPicks();
         break;
       }
 
@@ -6125,7 +7339,7 @@ function _sbRun() {
         S.agentWarnings = m.warnings || [];
         S.activeAgent = m.active || "";
         renderAgents();
-        renderAgentBar();
+        renderAgentBtn();
         break;
 
       case "agentChanged":
@@ -6134,7 +7348,7 @@ function _sbRun() {
           S.agents[ai].active = S.agents[ai].name === S.activeAgent;
         }
         renderAgents();
-        renderAgentBar();
+        renderAgentBtn();
         break;
 
       case "skillsReloaded":
@@ -6171,7 +7385,7 @@ function _sbRun() {
         S.title = m.title || "";
         S.running = false;
         endStream();
-        aiEl = null;
+        detachAi();
         todoEl = null;
         S.todos = [];
         S.context = null;
@@ -6249,17 +7463,64 @@ function _sbRun() {
         /* This was in the do-nothing list, so "Export offline bundle" wrote a
            folder and the panel said nothing whatsoever - the command looked
            like it had failed. Same treatment the chat export gets, for the same
-           reason: what the user needs afterwards is the path. */
+           reason: what the user needs afterwards is the path.
+
+           It used to end "and no credentials", which was the same unchecked
+           claim the README made. The export scans what it copied now, so this
+           reports the count it was given. */
         addNotice("i-download",
           "Offline bundle written to " + m.path +
-          " - it holds this workspace's .agent configuration, and no credentials.",
+          (m.redactions
+            ? " - " + m.redactions + (m.redactions === 1 ? " credential was" : " credentials were") +
+              " found in this workspace's config and redacted from the copy. See its README."
+            : " - it holds this workspace's .agent configuration, scanned and clear of credentials."),
           m.path);
         break;
 
+      /* Kept rather than dropped: a message finds its checkpoint by matching
+         this list, and the host broadcasts it again after every restore, so the
+         row keeps pointing at a hash that still exists. */
       case "checkpointsListed":
+        S.checkpoints = m.checkpoints || [];
+        break;
+
       case "checkpointRestored":
       case "logLine":
+      case "browserProvisioning": {
+        /* One line that updates in place, not a message per step.
+         *
+         * The fetch is 150 MB and reports every ten percent; eleven notices in
+         * the transcript for one browser is the flood this avoids. An empty
+         * message means it finished - one way or the other - and the line
+         * goes. */
+        var prov = logEl.querySelector(".prov-note");
+        if (!m.message) { if (prov) prov.remove(); break; }
+        if (!prov) {
+          prov = div("prov-note", icon("i-globe", "ic-11") + '<span class="t"></span>');
+          add(prov);
+        }
+        prov.querySelector(".t").textContent = m.message;
+        break;
+      }
+
       case "navigate":
+        break;
+
+      /* AN UNRECOGNISED MESSAGE IS A FACT, NOT A NO-OP.
+       *
+       * Both sides used to switch on `type` and fall off the end in silence,
+       * so a host newer than this cached document produced a control that did
+       * nothing at all: no error, no console line, nothing for a bug report to
+       * name. The `ready` handshake compares builds and says so properly; this
+       * is the backstop for anything that slips past it. */
+      default:
+        if (window.console && console.warn) {
+          console.warn(
+            "[genesis] the extension sent a message this panel does not handle: " + m.type +
+            ". This panel is build " + ((window.__kx && window.__kx.build) || "unknown") +
+            "; reload the window if controls are not responding."
+          );
+        }
         break;
     }
   });
@@ -6277,6 +7538,8 @@ function _sbRun() {
   renderEndpoints();
   renderSkills();
   syncComposer();
-  post("ready");
+  // The build this document was served from, so the host can say so if VS
+  // Code has handed the user a cached panel from before an update.
+  post("ready", { build: (window.__kx && window.__kx.build) || "" });
 })();
 } /* end _sbRun */

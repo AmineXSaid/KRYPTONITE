@@ -57,7 +57,7 @@ function boot() {
   ok("the views are tabs", d.querySelectorAll(".tabs .tab").length === 3);
   ok("and the address bar is the widest thing in the chrome", !!d.querySelector(".bar .addr input"));
   ok("the address invites rather than instructs",
-    $("bUrl").getAttribute("placeholder") === "Type a URL");
+    $("bUrl").getAttribute("placeholder") === "Search or enter a URL");
   ok("it opens on an explanation rather than a blank frame",
     /Type a URL above to browse/.test($("bStage").textContent), $("bStage").textContent.slice(0, 120));
   // The empty state offers the one thing that can be started from here, on

@@ -310,13 +310,40 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 .hp[data-band="down"] { color: var(--kx-error); }
 .hp[data-band="wait"] { color: var(--kx-fg-3); }
 
-/* Three arcs on their own periods: one ring reads as a stalled image. */
-.kx-spin .a1 { transform-origin: 50% 50%; animation: kxspin 1.1s linear infinite; }
-.kx-spin .a2 { transform-origin: 50% 50%; animation: kxspin 1.7s linear infinite reverse; }
-.kx-spin .a3 { transform-origin: 50% 50%; animation: kxspin 2.6s linear infinite; }
+/* ── the waiting mark ──────────────────────────────────────────────────────
+   One arc travelling one faint track, in the panel's own vocabulary - the
+   same figure `liveMark` draws for a background conversation. It replaced
+   three concentric arcs in three hues on three coprime periods, which inside
+   13px was under two pixels of gap between strokes, one muddy colour, and
+   three unrelated speeds reading as jitter.
+
+   THE ARC'S LENGTH IS WHAT STOPS IT LOOKING FROZEN, not a second ring. 2πr at
+   r=9 is 56.5, and the dash runs between 9 of that and 30 of it - a sixth of
+   the circle to a little over half - so no two frames of a turn look alike.
+
+   The two periods are exactly 2:1. Coprime periods were the old mark's whole
+   idea and they are what made it read as noise; a whole ratio gives the same
+   never-quite-repeating figure a rhythm, with the arc at its longest at the
+   same two points of every turn. */
+.kx-spin { flex: none; }
+.kx-spin .kx-track { fill: none; stroke: var(--kx-link); stroke-opacity: .24; }
+.kx-spin .kx-arc {
+  fill: none; stroke: var(--kx-link);
+  stroke-dasharray: 14 43;
+  transform-origin: 50% 50%;
+  animation: kxspin 1.15s linear infinite, kxdraw 2.3s ease-in-out infinite;
+}
 @keyframes kxspin { to { transform: rotate(360deg); } }
+@keyframes kxdraw {
+  0%, 100% { stroke-dasharray: 9 48; }
+  50%      { stroke-dasharray: 30 27; }
+}
+/* Motion off: a three-quarter arc, held still. Not `animation: none` on a
+   FULL ring - a closed circle is the shape every progress control uses for
+   "finished", and the one thing this mark must never say while waiting is
+   that the wait is over. */
 @media (prefers-reduced-motion: reduce) {
-  .kx-spin .a1, .kx-spin .a2, .kx-spin .a3 { animation: none; }
+  .kx-spin .kx-arc { animation: none; stroke-dasharray: 42 15; }
 }
 
 /* Sync bar. It sits above the table because it governs the Health column the
@@ -559,6 +586,53 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
   font-family: var(--kx-mono); font-size: 11px; line-height: 1.65;
   white-space: pre-wrap; overflow-x: auto; max-height: 240px; overflow-y: auto;
 }
+/* A copyable template: a header row naming the file, and the copy button.
+   
+   The button is IN the row rather than floating over the block, because `.pre`
+   scrolls in both axes - an absolutely-positioned button over it is clear only
+   for content that happens to wrap before reaching it, and any line can be
+   scrolled under it by hand. This is the same treatment the transcript's code
+   blocks already use (`.cb` / `.cb-h` in sidebar.css), so copy works the same
+   way on both surfaces. */
+.pre-wrap {
+  margin: 0; border: 1px solid var(--kx-line); border-radius: 4px;
+  overflow: hidden; background: var(--kx-surface-2);
+}
+.pre-h {
+  display: flex; align-items: center; gap: 8px;
+  padding: 3px 6px 3px 10px;
+  border-bottom: 1px solid var(--kx-line);
+}
+/* The filename, so the row says what the block IS as well as offering to copy
+   it - "SKILL.md" answers the question the guide's prose has to spend a
+   sentence on. `min-width: 0` because it is a flex item that may need to
+   ellipsise before the button gives up any width. */
+.pre-l {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--kx-mono); font-size: 9px; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--kx-fg-2);
+}
+/* The block inside a wrapper has the wrapper's border and corners already. */
+.pre-wrap .pre { border-radius: 0; background: none; }
+.pre-copy {
+  margin-left: auto; flex: none;
+  padding: 3px 8px; border-radius: 4px;
+  background: var(--kx-surface-4); border: 1px solid var(--kx-line);
+  color: var(--kx-fg-2);
+  font-family: var(--kx-mono); font-size: 9px; letter-spacing: .1em;
+  text-transform: uppercase; text-indent: .1em;
+  /* 24px is the floor for a pointer target and 9px type does not reach it on
+     its own; the padding above puts it at 24 exactly. */
+  min-height: 24px;
+  transition: background .14s ease, color .14s ease, border-color .14s ease;
+}
+.pre-copy:hover { background: var(--kx-line); color: var(--kx-fg); }
+.pre-copy:focus-visible { outline: 1px solid var(--kx-link); outline-offset: 1px; }
+/* The confirmation. Oxide is the panel's "this worked" colour everywhere else,
+   and the word changes too - a colour alone is not a message to anyone who
+   cannot separate these two hues. */
+.pre-copy[data-done="1"] { color: var(--kx-accent); border-color: var(--kx-accent); }
+
 .ok-mark { color: var(--kx-accent); display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; }
 .empty { font-size: 11.5px; color: var(--kx-fg-2); }
 .warn-line { font-size: 11px; color: var(--kx-warn); margin-top: 6px; }

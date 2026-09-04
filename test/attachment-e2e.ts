@@ -1,6 +1,9 @@
 /**
  * Does an attached file actually reach the model? Real API, real answer.
  *
+ * @requires-network - this calls a live endpoint with a real key, so it is not
+ * part of the default run. `npm run test:live` is where it belongs.
+ *
  * Run: npx esbuild test/attachment-e2e.ts --bundle --outfile=dist/att.cjs \n *        --format=cjs --platform=node --target=node20 && OR_KEY=... node dist/att.cjs
  *
  * compose() mirrors SessionController.send() exactly. If that diverges this
