@@ -60,20 +60,29 @@ alternative is silently seeding the wrong capabilities.
 
 ### Typography
 
-The panel is set in one family: **JetBrains Mono**, under the SIL Open Font
-License, shipped as the variable cut so a single 40 KB file covers every weight
-— prose, labels, the wordmark and code alike. It replaced IBM Plex Sans, Space
-Mono and Michroma, which were 96 KB and three separate voices.
+Two families, both under the SIL Open Font License, both shipped as variable
+cuts — 85 KB together — and split by what the text is for rather than by taste:
 
-It has to be bundled rather than linked: the webview CSP is `default-src 'none'`
-with `font-src` scoped to the extension origin, so a family merely named in the
-CSS renders in the platform fallback and nothing reports it.
-`media/fonts/LICENSE-NOTE.md` has the details.
+- **IBM Plex Sans** for anything a person *reads*: the model's prose, and the
+  chrome around it — labels, tabs, buttons, headings, the composer.
+- **JetBrains Mono** for anything a person *aligns or compares character by
+  character*: code, diffs, terminal output, file paths, elapsed times, model
+  ids — and the wordmark, which is the one place the older all-monospace
+  "Terminal" direction still speaks.
 
-Setting long-form model output in a monospace is the deliberate cost of this
-direction rather than an oversight. `--kx-prose` in `tokens.css` exists to undo
-exactly that one part: point it at a humanist sans and the transcript reads
-easily again without disturbing the rest of the interface.
+The panel was briefly set in JetBrains Mono alone. A monospace gives every
+character a full advance, and measured against the bundled files the cost on
+mixed-case text is steep: the composer placeholder is 30% narrower in Plex, a
+line of prose 24%, the tab strip 18%. Three type sizes had been shrunk to buy
+that width back; they are back at full size now. An uppercase micro-label at
+9px with wide tracking is within 1% either way, so those stayed monospace.
+
+Fonts have to be bundled rather than linked: the webview CSP is
+`default-src 'none'` with `font-src` scoped to the extension origin, so a family
+merely named in the CSS renders in the platform fallback and nothing reports it.
+`media/fonts/LICENSE-NOTE.md` has the details, and the five `--kx-*` type tokens
+in `tokens.css` are roles rather than families, so any one role can move without
+disturbing the others.
 
 ### Why the transport is hand-built
 

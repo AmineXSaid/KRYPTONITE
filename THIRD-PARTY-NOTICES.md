@@ -4,22 +4,6 @@ THE FOLLOWING SETS FORTH ATTRIBUTION NOTICES FOR THIRD PARTY SOFTWARE THAT MAY B
 
 ---
 
-## **UNRESOLVED — Anthropic Sans (bundled fonts)**
-
-`media/fonts/*.woff2` contains **Anthropic Sans**, a proprietary typeface. It is not
-published under an open licence, and the files were obtained from a third-party
-mirror, which is not a licence grant. Because the folder ships inside the packaged
-`.vsix`, the extension redistributes it.
-
-**This is not cleared for public release.** Before publishing, either obtain written
-permission from Anthropic to redistribute the binaries, or remove `media/fonts/` from
-the package — `src/ui/shell.ts` emits `@font-face` only for files that exist, so
-deleting the folder needs no code change.
-
-Full detail, provenance and the fallback path: `media/fonts/LICENSE-NOTE.md`.
-
----
-
 ## **BSD 2-Clause License**
 
 The following components are licensed under BSD 2-Clause License reproduced below:
@@ -340,11 +324,14 @@ The following fonts are licensed under SIL Open Font License v1.1 reproduced bel
 
 **IBM Plex Mono**, Copyright © 2017 IBM Corp., with Reserved Font Name "Plex"
 
+**IBM Plex Sans**, Copyright 2017 IBM Corp. ([https://github.com/IBM/plex](https://github.com/IBM/plex)), with Reserved Font Name "Plex"
+
 **Instrument Sans**, Copyright 2022 The Instrument Sans Project Authors ([https://github.com/Instrument/instrument-sans](https://github.com/Instrument/instrument-sans))
 
 **Italiana**, Copyright (c) 2011, Santiago Orozco ([hi@typemade.mx](mailto:hi@typemade.mx)), with Reserved Font Name "Italiana"
 
 **JetBrains Mono**, Copyright 2020 The JetBrains Mono Project Authors ([https://github.com/JetBrains/JetBrainsMono](https://github.com/JetBrains/JetBrainsMono))
+
 
 **Jura**, Copyright 2019 The Jura Project Authors ([https://github.com/ossobuffo/jura](https://github.com/ossobuffo/jura))
 

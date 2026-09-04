@@ -115,7 +115,13 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 .mono { font-family: var(--kx-mono); }
 .tnum { font-variant-numeric: tabular-nums; }
 /* ── the type scale ────────────────────────────────────────────────────────
- * Eleven sizes, and each of the eleven does a job the one beside it does not.
+ * Ten sizes, and each of the ten does a job the one beside it does not.
+ *
+ * It was eleven until the retype. The eleventh was 14px, and it was never
+ * painted once: it sat on `.w-mark`, which the TERMINAL block re-sets with a
+ * clamp at every width, so the only rule carrying that step overrode itself.
+ * A size in the scale that nothing renders is not a step, it is a typo with a
+ * comment defending it, so it is gone rather than recounted.
  *
  * It was thirteen, and two of the extras were half-pixel neighbours of a size
  * already in use: 9.5 sat beside 9 on the same uppercase micro-labels, and 10
@@ -166,11 +172,13 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   flex: none; display: flex; align-items: center; color: var(--kx-fg);
   height: 18px; padding-right: 8px; border-right: 1px solid var(--kx-line);
 }
-/* The wordmark: static, and the one place Michroma is allowed to speak.
-   Kept for the welcome screen's .w-mark, which shares this family and tracking.
-   Michroma has a single weight, so `font-weight: 700` here would synthesise a
-   bold the face does not have. The design sets it at 400 and lets the tracking
-   do the work. */
+/* The wordmark: static, and one of only two users of --kx-brand (the other is
+   .w-mark on the welcome screen, which shares this family and tracking).
+   This comment used to explain a `font-weight: 400` chosen because MICHROMA had
+   a single weight and 700 would synthesise a bold it did not have. Michroma was
+   deleted three commits before this one. The 400 below is now dead in any case -
+   the TERMINAL block at the foot of the file re-sets this rule to 700/.22em -
+   and it is left only because the shorthand it sits in is still load-bearing. */
 .kx-wordmark {
   font-family: var(--kx-brand); font-size: 11px; font-weight: 400;
   letter-spacing: .2em; text-transform: uppercase; color: var(--kx-fg);
@@ -384,7 +392,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
    the header's border is. */
 .kx-tab {
   height: 100%; display: flex; align-items: center; gap: 6px;
-  font-family: var(--kx-mono); font-size: 9px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+  font-family: var(--kx-ui); font-size: 9px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
   color: var(--kx-fg-3);
 }
 .kx-tab:hover { color: var(--kx-fg-2); }
@@ -401,7 +409,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 #tabAgents[aria-selected="true"]  { box-shadow: inset 0 -2px 0 var(--kx-tab-agents); }
 #tabDiag[aria-selected="true"]    { box-shadow: inset 0 -2px 0 var(--kx-tab-diag); }
 .tab-count {
-  font-family: var(--kx-mono); font-size: 11px; font-weight: 500;
+  font-family: var(--kx-ui); font-size: 11px; font-weight: 500;
   letter-spacing: 0; color: var(--kx-error);
 }
 
@@ -646,9 +654,15 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   .welcome .crystal,
   .welcome .crystal.spin-in { animation: none; }
 }
-/* Michroma, at the one size and tracking it is drawn for. */
+/* The welcome screen's wordmark, in --kx-brand - the monospace the Terminal
+   direction kept. (This said "Michroma", which has not shipped since that face
+   was deleted.)
+   NO font-size HERE. It carried 14px, which the TERMINAL block's
+   `clamp(13px, 4.6vw, 19px)` overrode at every width, so the value never once
+   painted - and being the file's only 14px, it made the type scale's count
+   wrong as well. The size lives with the clamp that actually sets it. */
 .w-mark {
-  font-family: var(--kx-brand); font-size: 14px; font-weight: 400;
+  font-family: var(--kx-brand); font-weight: 400;
   letter-spacing: .16em; text-transform: uppercase; color: var(--kx-fg);
   margin-bottom: 9px;
 }
@@ -826,10 +840,13 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
  */
 /* A question and its answer are one exchange, and the gap between exchanges
    has to be larger than the gap inside one or the transcript reads as a flat
-   list. The question sits close to the answer it produced (10px) and well
-   clear of the previous turn (22px). */
+   list. The question sits close to the answer it produced (8px) and well
+   clear of the previous turn (16px).
+   Both came down from 10 and 22. The RATIO is what carries the grouping, not
+   the absolute size, so tightening each by the same proportion keeps the
+   exchange reading as one object while giving the screen a turn back. */
 .msg-user {
-  display: flex; gap: 10px; margin: 22px 0 10px;
+  display: flex; gap: 10px; margin: 16px 0 8px;
   font-family: var(--kx-ui); font-size: 12.5px; font-weight: 500; line-height: 1.5;
   color: var(--kx-fg-3);
   white-space: pre-wrap; overflow-wrap: anywhere;
@@ -874,16 +891,31 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 .u-att-chip .sz { font-family: var(--kx-mono); font-size: 10.5px; color: var(--kx-fg-4); }
 .msg-img { max-width: 100%; max-height: 200px; border-radius: 4px; margin-bottom: 6px; display: block; }
 
-/* â”€â”€ the answer: prose, with room to breathe â”€â”€
-   13.5/1.72 instead of 13/1.6. In a 340px panel this is the single highest
-   leverage readability change available. */
+/* -- the answer: prose, with room to breathe --
+ *
+ * 13px at 1.5. The comment here used to claim "13.5/1.72 instead of 13/1.6",
+ * which is a description of a rule this file has never set - the values below
+ * were 13/1.6 the whole time. Stating a number a stylesheet does not carry is
+ * worse than stating none, so it is now what the rule does.
+ *
+ * The leading came down from 1.6, and it is the largest single saving in the
+ * transcript: at 13px that is 20.8px a line against 19.5, and a measured 13.8%
+ * off the height of a four-turn transcript at a 360px dock. 1.5 is still
+ * comfortable for a face at this size - it is the panel's own body leading -
+ * and the size did NOT come down with it, because IBM Plex Sans has a slightly
+ * smaller x-height than the monospace it sits beside (0.732 against 0.753 of
+ * cap height) and already reads a touch smaller at equal pixels.
+ *
+ * The reading measure is NOT capped here. `#log > *` owns it - see "Measure at
+ * wide widths" at the foot of the file - and an id selector beats this class,
+ * so a max-width written here would be dead on arrival. */
 .msg-ai {
   margin-bottom: 12px; overflow-wrap: anywhere;
-  font-family: var(--kx-prose); font-size: 13px; line-height: 1.6;
+  font-family: var(--kx-prose); font-size: 13px; line-height: 1.5;
   color: var(--kx-fg);
   text-wrap: pretty;
 }
-.msg-ai p { margin: 0 0 9px; }
+.msg-ai p { margin: 0 0 7px; }
 .msg-ai p:last-child { margin-bottom: 0; }
 /* Inline code gets a chip so identifiers pop out of prose instead of
    blending into it. */
@@ -1682,7 +1714,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .err-fix { font-size: 11.5px; color: var(--kx-fg-2); }
 .err-more {
   display: flex; align-items: center; gap: 5px; align-self: flex-start;
-  padding: 0; font-family: var(--kx-mono); font-size: 10.5px;
+  padding: 0; font-family: var(--kx-ui); font-size: 10.5px;
   letter-spacing: .06em; text-transform: uppercase; color: var(--kx-fg-3);
 }
 .err-more:hover { color: var(--kx-fg-2); }
@@ -2194,7 +2226,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 .ed-pill .nm { min-width: 0; }
 .ed-pill .prob {
-  flex: none; font-family: var(--kx-mono); font-size: 10.5px; padding: 0 5px;
+  flex: none; font-family: var(--kx-ui); font-size: 10.5px; padding: 0 5px;
   border-radius: 3px; background: var(--kx-surface-3); color: var(--kx-fg-2);
 }
 .ed-pill .prob[data-err="1"] { color: var(--kx-error); }
@@ -3020,7 +3052,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   display: flex; align-items: center; gap: 7px;
   width: 100%; padding: 5px 9px;
   background: none; border: none; text-align: left;
-  font-family: var(--kx-mono); font-size: 11px; color: var(--kx-fg-2);
+  font-family: var(--kx-ui); font-size: 11px; color: var(--kx-fg-2);
 }
 .mdl-pick + .mdl-pick { border-top: 1px solid var(--kx-hairline); }
 .mdl-pick:hover { background: var(--kx-hover); color: var(--kx-fg); }
@@ -3149,7 +3181,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 .mcp-row .sub {
   display: block; margin-top: 2px;
-  font-family: var(--kx-mono); font-size: 11px; color: var(--kx-fg-3);
+  font-family: var(--kx-ui); font-size: 11px; color: var(--kx-fg-3);
 }
 /* `align-self: start` rather than the row's centre: once `.top` can wrap, a
    two-line row would drift the count into the vertical middle of a block it
@@ -3203,7 +3235,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   /* A hairline of the same hue: the wash alone bleeds into the panel at this
      size, and a stack of chips reads as one block rather than several tools. */
   border: 1px solid color-mix(in srgb, var(--kx-info) 22%, transparent);
-  font-family: var(--kx-mono); font-size: 11px; color: var(--kx-ask);
+  font-family: var(--kx-ui); font-size: 11px; color: var(--kx-ask);
 }
 /* A WRITE CHIP IS MARKED BY MORE THAN ITS COLOUR.
  *
@@ -3229,7 +3261,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 .mcp-more {
   display: inline-flex; align-items: center; padding: 3px 8px;
-  font-family: var(--kx-mono); font-size: 11px; color: var(--kx-fg-3); cursor: default;
+  font-family: var(--kx-ui); font-size: 11px; color: var(--kx-fg-3); cursor: default;
 }
 
 /* A failure is an object with actions, not a red line of text. */
@@ -3254,7 +3286,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   margin-top: auto; flex: none;
   display: flex; align-items: center; gap: 8px; padding: 10px 14px;
   border-top: 1px solid var(--kx-hairline);
-  font-family: var(--kx-mono); font-size: 11px; color: var(--kx-fg-2);
+  font-family: var(--kx-ui); font-size: 11px; color: var(--kx-fg-2);
 }
 .mcp-foot .bad { display: flex; align-items: center; gap: 5px; color: var(--kx-error); }
 
@@ -3685,9 +3717,30 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    prose ran the full width and became genuinely hard to track line to line.
    Cap the reading column; leave the composer, trays and code/diff surfaces
    full-bleed, since those are scanned rather than read and their content
-   carries its own horizontal scroll. */
-#log > * { max-width: 78ch; }
+   carries its own horizontal scroll.
+
+   IN PIXELS, NOT `ch`, and the unit is why this rule was not doing its job.
+   `78ch` computed to 765px, because `ch` resolved against a fallback metric
+   (9.81px a unit) rather than the loaded webfont, whose own zero is 7.8px at
+   this size. A 600px dock offers 572px of content, so the cap sat 193px WIDER
+   than the box it was meant to constrain and never bound at anything: prose
+   still ran 95 characters to the line, which is the measure this rule exists to
+   prevent. A cap that quietly exceeds its own container is worse than no cap,
+   because it reads as solved.
+
+   440px is measured rather than derived: the prose face runs about 5.98px to
+   the average character at 13px, so this is roughly 74 characters - inside the
+   65-75 band that reads comfortably. Below a ~470px dock it has no effect,
+   which is most docks; this is a rule for the wide end only. */
+#log > * { max-width: 440px; }
 #log > .diff-card, #log > .code-block, #log > pre, #log > .tool { max-width: none; }
+/* And the welcome screen, which is not a reading column: it centres itself and
+   already caps its own content at 340px (`.welcome > *`), so capping the block
+   too left it sitting off-centre in the panel with a lopsided gutter - this
+   rule does not centre what it narrows. Above 640px the split layout sets its
+   own 820px measure and would have overridden this anyway; below it, this is
+   what keeps the greeting in the middle of the panel. */
+#log > .welcome { max-width: none; }
 
 /* Model kind: the one form field the panel refuses to save without, so the
    asterisk is the only accent a label carries here. */
@@ -3839,17 +3892,24 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 
 
 /* ══════════════════════════════════════════════════════════════════════════
-   TERMINAL - the treatment that comes with the one-family type system.
+   TERMINAL - what survives of the one-family type system.
 
-   The font change alone is most of this direction; these are the details that
-   make it read as deliberate rather than as a panel whose sans went missing.
+   This block was written when the whole panel was JetBrains Mono, and most of
+   the direction WAS the font. The chrome has since gone back to IBM Plex Sans,
+   so what is left here is the part that never depended on the face: the
+   wordmark's weight and tracking, the tab strip's sentence case, the bracketed
+   section labels, the dashed rules, the tip's comment marker. Read it as the
+   treatment rather than the typeface.
+
    Every rule here is a late override on purpose: it keeps the direction in one
    block that can be lifted out whole, rather than smeared through the file.
    ══════════════════════════════════════════════════════════════════════════ */
 
-/* The wordmark is the body face at its heaviest with wide tracking, not a
+/* The wordmark is the MONOSPACE at its heaviest with wide tracking, not a
    display cut. JetBrains Mono's caps are drawn square enough to carry it, and
-   dropping Michroma is what let the design go to one file. */
+   dropping Michroma is what let the design go to one file - it is two again
+   now that the chrome is set in Plex, but the wordmark stayed here rather than
+   following it, so no third face came back with the split. */
 .kx-wordmark { font-weight: 700; letter-spacing: .22em; font-size: 10.5px; }
 /* The identity block: the mark, then the wordmark under it.
    
@@ -3909,13 +3969,28 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    placeholder, and the placeholder text itself is written in sidebar.js. */
 .tipbar .tip-k::before { content: "# "; }
 
-/* Mono is wider than the sans it replaced - roughly 8% more advance at the same
-   size - and the panel is 340px at its narrowest. These are the places where
-   that difference had nowhere to go; test/render.cjs measures each of them. */
-.welcome p { font-size: 11.5px; line-height: 1.72; }
-.w-row .t { font-size: 11.5px; }
-/* The placeholder only. Typed text stays at its own size - what comes down is
-   the hint, which is the longest string in the panel and the one that decides
-   whether the empty composer is one row or two. Shrinking the words was the
-   alternative, and the words are the product's copy, not the type system's. */
-#draft::placeholder { font-size: 11px; }
+/* THREE SIZES THAT WERE SHRUNK TO PAY FOR THE MONOSPACE, AND ARE GIVEN BACK.
+ *
+ * What stood here said: "Mono is wider than the sans it replaced - roughly 8%
+ * more advance at the same size - and the panel is 340px at its narrowest.
+ * These are the places where that difference had nowhere to go." That was
+ * true, and it stopped being true when the chrome moved back to IBM Plex Sans.
+ * The width these three were paying for is no longer being spent, so keeping
+ * them small would be a compensation for a cost that has gone.
+ *
+ * The placeholder is the clearest case, and it is measured rather than argued.
+ * Against the ~338px of content width a 400px panel gives #draft:
+ *
+ *   JetBrains Mono 13px   335.4px    3px of room - which is why it was cut
+ *   JetBrains Mono 11px   283.8px   54px  (what shipped)
+ *   IBM Plex Sans  13px   238.0px  100px  (this)
+ *
+ * So the hint goes back to the size the typed text is set at, with nearly
+ * twice the headroom the 11px version had, and test/render.cjs's one-line
+ * assertion at 400px gets easier rather than harder. Typed text was always
+ * 13px; the two only ever differed because of the face. */
+/* `.welcome p` needs no rule here at all any more: its base at the top of the
+   file is already 12.5px/1.6, and restoring it means DELETING the override
+   rather than restating it. */
+.w-row .t { font-size: 12px; }
+#draft::placeholder { font-size: 13px; }

@@ -254,13 +254,34 @@
   --kx-shadow:       rgba(7, 10, 15, .7);   /* the mockup's dialog shadow    */
 
   /* ── type ──
-   * ONE family. The whole design is set in JetBrains Mono - prose, labels, the
-   * wordmark, code - and it ships; see src/ui/shell.ts and
+   * TWO families, split by role, and both ship; see src/ui/shell.ts and
    * media/fonts/LICENSE-NOTE.md.
    *
-   * This replaced IBM Plex Sans for the UI, Space Mono for mono runs and
-   * Michroma for the wordmark: three families, three voices, 96 KB. The one
-   * variable cut is 40 KB and covers every weight the design asks for.
+   *   IBM Plex Sans   what a person READS: prose, and the chrome around it -
+   *                   labels, tabs, buttons, headings, the composer.
+   *   JetBrains Mono  what a person ALIGNS or compares character by character:
+   *                   code, diffs, terminal output, file paths, elapsed times,
+   *                   model ids, and the wordmark.
+   *
+   * This started as one family. The whole design was set in JetBrains Mono for
+   * the Terminal direction, and the cost is written down in sidebar.css's own
+   * TERMINAL block: "Mono is wider than the sans it replaced - roughly 8% more
+   * advance at the same size", and three type sizes were shrunk to pay for it.
+   * Measured against the bundled files, the real gap on mixed-case running text
+   * is wider than 8%: the composer placeholder is 30% narrower in Plex, a line
+   * of prose 24%, the tab strip 18%. A monospace gives every character a full
+   * advance and there is no narrow "l" or "i" to absorb a long string, so the
+   * panel was spending width on chrome and buying it back by shrinking text.
+   *
+   * The mono stays wherever the fixed advance is the POINT. It is not a
+   * fallback - a diff whose gutters do not line up is a broken diff, and a
+   * model id read digit by digit needs even spacing. And it keeps the wordmark,
+   * so the Terminal direction still opens the panel.
+   *
+   * NOT worth moving: an uppercase micro-label at 9px with .1em tracking is
+   * within 1% of the same width in either face, because the tracking dominates.
+   * Those stay mono - see .seg button and .btn in sidebar.css - which also
+   * leaves test/render.cjs's equal-width segment assertion untouched.
    *
    * The CSP is `default-src 'none'` with `font-src` scoped to the extension, so
    * a named family that is not bundled cannot be fetched - it falls back
@@ -268,24 +289,19 @@
    * how the panel once shipped with no mono and no display face at all. Naming
    * a font is not shipping one, so if you add a family here, add the file too.
    *
-   * The five tokens stay separate even though all five now resolve to the same
-   * stack. They are ROLES, not families: --kx-mono is "this must align in a
-   * column", --kx-brand is "this is the wordmark", --kx-prose is "this is
-   * something a person reads at length". Collapsing them into one token would
-   * save a line and cost the ability to change any one role on its own - and
-   * --kx-prose in particular is the one to reach for first, because setting
-   * long-form model output in a monospace is the deliberate cost of this
-   * direction rather than an oversight. Point it at a humanist sans and the
-   * transcript goes back to being easy to read without disturbing the UI. */
-  --kx-ui:      'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-  --kx-display: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+   * The five tokens stay separate because they are ROLES, not families:
+   * --kx-mono is "this must align in a column", --kx-brand is "this is the
+   * wordmark", --kx-prose is "this is something a person reads at length".
+   * Collapsing them would save a line and cost the ability to move any one role
+   * on its own - which is exactly what this change did. */
+  --kx-ui:      'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --kx-display: 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --kx-mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  /* The wordmark keeps the monospace on purpose: GENESIS at 700 with .22em of
+     tracking is the one place the Terminal direction still speaks, and a
+     wordmark is a picture of a word rather than something read at length. */
   --kx-brand:   'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-  /* NOT var(--kx-ui). This is the one role that left the monospace, and the
-     comment above predicted it would be the first to: a mono sets every
-     character at a full advance, so a line of prose with no narrow letters in
-     it wraps early, and the transcript was breaking mid-sentence while a
-     proportional face still had room on the same line. The UI keeps the mono;
-     what a person READS AT LENGTH does not. */
+  /* Long-form model output. Unchanged - it left the monospace first, for the
+     reason the whole UI has now followed it. */
   --kx-prose:   'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 }

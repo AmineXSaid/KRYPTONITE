@@ -8,18 +8,28 @@ own and the licence travels with them.
 
 | File | Family | Role | Licence | Upstream |
 | --- | --- | --- | --- | --- |
-| `JetBrainsMono-Variable.woff2` | JetBrains Mono | the interface | OFL 1.1 | github.com/JetBrains/JetBrainsMono |
-| `IBMPlexSans-Variable.woff2` | IBM Plex Sans | prose only | OFL 1.1 | github.com/IBM/plex |
+| `JetBrainsMono-Variable.woff2` | JetBrains Mono | code, columns, the wordmark | OFL 1.1 | github.com/JetBrains/JetBrainsMono |
+| `IBMPlexSans-Variable.woff2` | IBM Plex Sans | prose and the interface | OFL 1.1 | github.com/IBM/plex |
 
 Both are the **latin subset** as served by Google Fonts, in the variable cut, so
 one file per family covers every weight the design uses. 85 KB together.
 
-The split is by ROLE, not by taste. JetBrains Mono carries labels, tabs, the
-wordmark, code, and every id that has to line up in a column. IBM Plex Sans
-carries prose and nothing else — `--kx-prose` in `tokens.css` names the exact
-surfaces. A monospace sets every character at a full advance, so a line of prose
-with no narrow letters wraps early; the transcript was breaking mid-sentence at
-a dock width where a proportional face still had room.
+The split is by ROLE, not by taste, and the line moved once. JetBrains Mono
+began by carrying the entire interface as well as code; it now carries what the
+fixed advance is actually *for* — code, diffs, terminal output, file paths,
+elapsed times, model ids, every id that has to line up in a column — plus the
+wordmark, where the older all-monospace direction still speaks. IBM Plex Sans
+carries prose and the chrome around it.
+
+A monospace sets every character at a full advance, so a line with no narrow
+letters wraps early. That first cost the transcript, which broke mid-sentence at
+a dock width where a proportional face still had room, and `--kx-prose` moved.
+It was costing the chrome too: measured against these two files, the composer
+placeholder is 30% narrower in Plex, a line of prose 24%, the tab strip 18% —
+and three type sizes had been shrunk purely to buy that width back. One
+exception, measured rather than assumed: an uppercase micro-label at 9px with
+wide tracking is within 1% either way, because the tracking dominates, so those
+stayed monospace.
 
 `test/vsix.cjs` ties each family declared in `src/ui/shell.ts` to a licence file
 naming it, in both directions: a family with no licence fails, and a licence for
