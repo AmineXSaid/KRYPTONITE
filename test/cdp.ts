@@ -66,6 +66,22 @@ const SECOND = `<!doctype html><html><head><title>Second Page</title></head>
     ck(over[0]?.path === self, "GENESIS_BROWSER takes precedence", over[0]?.path);
     ck(listBrowsers({ GENESIS_BROWSER: "C:/nope/none.exe" } as any).every((f) => f.path !== "C:/nope/none.exe"),
       "an override pointing at nothing is ignored rather than trusted");
+    // CHROME_PATH is the variable other headless tooling reads; honouring it
+    // means a machine set up for one of those is set up for this too.
+    ck(listBrowsers({ CHROME_PATH: self } as any).some((f) => f.path === self),
+      "CHROME_PATH is honoured as an override");
+
+    // A browser reachable only through PATH - the prefix nobody hard-codes -
+    // is found. A temp directory stands in for such a prefix, with the running
+    // node binary copied in under a browser name we look for.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "kx-path-"));
+    const onPathExe = path.join(tmp, process.platform === "win32" ? "chromium.exe" : "chromium");
+    fs.copyFileSync(self, onPathExe);
+    ck(listBrowsers({ PATH: tmp } as any).some((f) => f.path === onPathExe),
+      "a browser found only on PATH is listed", onPathExe);
+    ck(listBrowsers({} as any).every((f) => f.path !== onPathExe),
+      "and PATH is not consulted when the environment has none");
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 
   /* ── Playwright's Chromium ───────────────────────────────────────────

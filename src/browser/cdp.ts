@@ -66,6 +66,12 @@ export interface FoundBrowser {
  *
  * Ordered by what a person is most likely to have configured the way they
  * expect - their default Chrome first, the always-present Edge after it.
+ *
+ * Four sources are consulted, best first: an explicit override, the well-known
+ * install locations, whatever is on PATH (which catches Homebrew, Nix and
+ * container prefixes nobody hard-codes), and finally a Chromium that Playwright
+ * already downloaded. Every one is keyed on the environment, so an empty one
+ * still finds nothing.
  */
 export function listBrowsers(env: NodeJS.ProcessEnv = process.env): FoundBrowser[] {
   const candidates: FoundBrowser[] = [];
@@ -91,15 +97,37 @@ export function listBrowsers(env: NodeJS.ProcessEnv = process.env): FoundBrowser
   } else {
     add("Chrome", "/usr/bin/google-chrome");
     add("Chrome", "/usr/bin/google-chrome-stable");
+    add("Chrome", "/opt/google/chrome/chrome");
     add("Brave", "/usr/bin/brave-browser");
+    add("Brave", "/opt/brave.com/brave/brave-browser");
+    add("Vivaldi", "/usr/bin/vivaldi");
+    add("Vivaldi", "/opt/vivaldi/vivaldi");
     add("Chromium", "/usr/bin/chromium");
     add("Chromium", "/usr/bin/chromium-browser");
     add("Chromium", "/snap/bin/chromium");
     add("Edge", "/usr/bin/microsoft-edge");
+    add("Edge", "/usr/bin/microsoft-edge-stable");
+    add("Edge", "/opt/microsoft/msedge/msedge");
   }
 
   const seen = new Set<string>();
+  const seenReal = new Set<string>();
   const found: FoundBrowser[] = [];
+  const take = (b: FoundBrowser) => {
+    const key = b.path.toLowerCase();
+    if (seen.has(key) || !exists(b.path)) return;
+    // Also dedupe by where the path really points, so a symlink and its target
+    // are one browser rather than two - Playwright's `<root>/chromium` link and
+    // the versioned build it points at are the same binary, and listing both
+    // would put a browser in its own "also available" line.
+    let real = b.path;
+    try { real = fs.realpathSync(b.path); } catch { /* keep the literal path */ }
+    const realKey = real.toLowerCase();
+    if (seenReal.has(realKey)) return;
+    seen.add(key);
+    seenReal.add(realKey);
+    found.push(b);
+  };
 
   // An explicit override leads, for a browser installed somewhere unusual or
   // a specific build somebody wants driven.
@@ -108,16 +136,20 @@ export function listBrowsers(env: NodeJS.ProcessEnv = process.env): FoundBrowser
   // still works because it is an environment variable somebody may already
   // have exported in a shell profile or a devcontainer, and a rename that
   // silently stops honouring it would look like the override had broken.
-  const explicit = env.GENESIS_BROWSER || env.KRYPTONITE_BROWSER;
-  if (explicit && exists(explicit)) {
-    found.push({ name: "Configured", path: explicit });
-    seen.add(explicit.toLowerCase());
-  }
-  for (const c of candidates) {
-    if (seen.has(c.path.toLowerCase()) || !exists(c.path)) continue;
-    seen.add(c.path.toLowerCase());
-    found.push(c);
-  }
+  // CHROME_PATH is honoured too: it is the de-facto variable other headless
+  // tooling reads, so a machine already set up for one of those is set up for
+  // this without a second export.
+  const explicit = env.GENESIS_BROWSER || env.KRYPTONITE_BROWSER || env.CHROME_PATH;
+  if (explicit) take({ name: "Configured", path: explicit });
+
+  // The install locations above, in their best-first order.
+  for (const c of candidates) take(c);
+
+  // Anything on PATH that we did not already have by absolute path. This is
+  // what catches a browser in a prefix nobody hard-codes - Homebrew on Apple
+  // silicon (/opt/homebrew/bin), Nix, a container that puts it in /usr/local,
+  // a distro package under a name not listed above.
+  for (const b of onPath(env)) take(b);
 
   // Playwright's own Chromium, last. A real Chrome or Edge the person chose is
   // preferable to a headless build an installer dropped in a cache - it has
@@ -125,12 +157,40 @@ export function listBrowsers(env: NodeJS.ProcessEnv = process.env): FoundBrowser
   // browsers win the ordering. But when the machine has none, this is the one
   // browser that is still reliably present, and finding it is the difference
   // between the browser tool working and refusing every page.
-  for (const pw of playwrightBrowsers(env)) {
-    if (seen.has(pw.path.toLowerCase())) continue;
-    seen.add(pw.path.toLowerCase());
-    found.push(pw);
-  }
+  for (const pw of playwrightBrowsers(env)) take(pw);
+
   return found;
+}
+
+/**
+ * Browsers reachable through PATH, best-first by family.
+ *
+ * Keyed on `env.PATH` rather than a hard-coded prefix so an empty environment
+ * finds nothing (the same contract the absolute-path list keeps), and so this
+ * follows whatever PATH the extension host was actually launched with.
+ */
+function onPath(env: NodeJS.ProcessEnv): FoundBrowser[] {
+  const raw = env.PATH ?? env.Path ?? "";
+  if (!raw) return [];
+  const dirs = raw.split(process.platform === "win32" ? ";" : ":").filter(Boolean);
+  const suffix = process.platform === "win32" ? ".exe" : "";
+  const families: Array<[string, string[]]> = [
+    ["Chrome", ["google-chrome", "google-chrome-stable", "chrome"]],
+    ["Brave", ["brave-browser", "brave"]],
+    ["Vivaldi", ["vivaldi", "vivaldi-stable"]],
+    ["Chromium", ["chromium", "chromium-browser"]],
+    ["Edge", ["microsoft-edge", "microsoft-edge-stable", "msedge"]],
+  ];
+  const out: FoundBrowser[] = [];
+  for (const [name, bins] of families) {
+    for (const bin of bins) {
+      for (const dir of dirs) {
+        const p = path.join(dir, bin + suffix);
+        if (exists(p)) out.push({ name, path: p });
+      }
+    }
+  }
+  return out;
 }
 
 /**
