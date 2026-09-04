@@ -2496,7 +2496,14 @@ function _sbRun() {
        56 gives the mark presence without crowding the column it sits in; the
        CSS scales it down with the panel so a narrow dock does not have a mark
        wider than the text under it. */
-    var body = crystal(56, "crystal w-crystal" + spin) +
+    // SPLIT · IDENTITY / ACTIONS.
+    // Below the breakpoint (see .w-split in sidebar.css) this is one centred
+    // column, exactly as before. Above it the identity block and the action
+    // lists sit side by side, so a wide dock is used rather than framed by
+    // empty margin on both sides. The two wrappers are all the row lays out;
+    // every part inside them is unchanged.
+    var body = '<div class="w-split"><div class="w-identity">' +
+      crystal(56, "crystal w-crystal" + spin) +
       '<div class="w-mark">Genesis</div>' +
       '<p>' + (recent.length
         ? "Pick up where you left off, or start something new."
@@ -2509,7 +2516,10 @@ function _sbRun() {
            unasked, and every change is reviewable and revertible. */
         : "I read your workspace and ask before I change anything. Every edit " +
           "arrives as a diff you can review and undo. Ask anything about this " +
-          "repository.") + "</p>";
+          "repository.") + "</p>" +
+      // Close .w-identity, open .w-actions - the Try list and, when present, the
+      // Recent section append into it below.
+      '</div><div class="w-actions">';
 
     // Openers. These were removed once for being invented examples about a
     // function nobody in the workspace has - and that objection was right about
@@ -2562,6 +2572,8 @@ function _sbRun() {
       }
       body += "</div></div>";
     }
+    // Close .w-actions and .w-split.
+    body += "</div></div>";
     logEl.appendChild(div("welcome", body));
     // Long titles and starters reveal themselves by scrolling rather than an
     // ellipsis; measure them now the rows are in the document.

@@ -19,6 +19,11 @@ test/**
 .gitattributes
 .editorconfig
 
+# Design studies and layout mockups — documentation of UI decisions, read in a
+# browser during development. Nothing loads them at runtime, so they have no
+# business in the .vsix.
+design/**
+
 # Workspace fixtures that must never travel inside the extension
 .agent/**
 

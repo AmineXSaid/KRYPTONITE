@@ -540,6 +540,58 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 /* The mark and the wordmark size themselves; a 340px box around them would
    stretch nothing but would break `align-items: center` for the SVG. */
 .welcome > svg, .welcome > .w-mark { width: auto; }
+
+/* ── SPLIT · IDENTITY / ACTIONS ──────────────────────────────────────────
+ *
+ * The one thing the centred 340px column gets wrong is a WIDE dock: undocked
+ * into the editor, or on a wide screen, the cap leaves a column of empty
+ * margin on each side and the identity reads as stranded rather than composed.
+ *
+ * Below the breakpoint nothing changes - .w-split is a single centred column
+ * and .w-identity / .w-actions are transparent flex wrappers that reproduce
+ * the old stack (mark, wordmark and intro centred; the lists left-aligned and
+ * full width). The greeting is the one screen with nothing to line up
+ * against, so at dock widths it stays centred, which is why it was centred to
+ * begin with.
+ *
+ * Above the breakpoint there ARE two things to line up - the identity and the
+ * action lists - so they become a row with a shared top edge, and the measure
+ * grows past 340 to hold both. Now the width is spent, not framed. */
+/* Narrow: plain block flow, so the two wrappers stack exactly like the old
+   column. They are deliberately NOT flex here - a flex column would size the
+   wordmark to its content and it would stop growing with the panel (the mark
+   is a block that fills its column, which is what render.cjs 5t measures).
+   Centring is inherited from `.welcome`'s text-align; the crystal is an inline
+   SVG and the wordmark and intro are blocks that fill the column. */
+.w-split { width: 100%; }
+.w-identity, .w-actions { width: 100%; min-width: 0; }
+
+/* 640 is the width at which two ~300px columns and the gap between them fit
+   without either falling under the measure a list needs to stay readable.
+   Below it the row would be two cramped columns - worse than the tall stack -
+   so it holds the stack until there is genuinely room. */
+@media (min-width: 640px) {
+  /* Lift the 340 cap for the split only; every other welcome child (the
+     first-run and no-endpoint states) keeps it. Equal specificity to
+     `.welcome > *`, later in source, so this wins for .w-split alone.
+     In practice `#log > * { max-width: 78ch }` on the transcript caps the
+     welcome around 600px first, so the split fills the same reading measure
+     the conversation uses and then centres - the panel's own margin, not a
+     welcome-only void. 720 is only the ceiling for the day that measure grows. */
+  .w-split {
+    max-width: 720px;
+    display: flex; flex-direction: row; align-items: flex-start;
+    gap: 40px;
+  }
+  /* The mark led a centred column; in the row it anchors the left edge, and
+     the intro copy goes left-aligned with it - one axis per column. */
+  .w-identity {
+    flex: 1 1 0; text-align: left;
+    padding-top: 4px;
+  }
+  .w-actions { flex: 1.1 1 0; }
+}
+
 /* Left-aligned, as the design draws it, and not only for fidelity: everything
    below the intro is a list of rows, and a centred mark above a left-aligned
    list gives the column two different axes. One edge, top to bottom. */
