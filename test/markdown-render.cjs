@@ -364,13 +364,40 @@ console.log("\n──── mermaid ────");
   const inj = md(F + "mermaid\nflowchart TD\n A[<img src=x onerror=alert(1)>] --> B\n" + F);
   ck(!/<img/i.test(inj) && /&lt;img/.test(inj), "markup in a label is escaped, never rendered");
 
-  // Anything that is not a flowchart, or is still streaming, falls back to a
-  // code block - never an error, never a broken SVG.
-  const seq = md(F + "mermaid\nsequenceDiagram\n A->>B: hi\n" + F);
-  ck(!/mm-svg/.test(seq) && /<pre>/.test(seq), "an unsupported diagram falls back to code", seq.slice(0, 50));
-  let okStream = true;
-  try { md(F + "mermaid\nflowchart LR\n A --> "); } catch (e) { okStream = false; }
-  ck(okStream, "a half-streamed mermaid block does not throw");
+  // A sequence diagram draws too, from the same fence: participant boxes on
+  // lifelines, a message between them, and its label escaped like any other.
+  const seq = md(F + "mermaid\nsequenceDiagram\n Alice->>Bob: hi\n Bob-->>Alice: <b>ok</b>\n" + F);
+  ck(/class="mm-svg"/.test(seq) && /mermaid-fig/.test(seq), "a sequence diagram renders an inline SVG", seq.slice(0, 40));
+  ck(/mm-lifeline/.test(seq), "with a lifeline dropping from each participant");
+  ck(/mm-msg\b/.test(seq), "and a message drawn between them");
+  ck(!/<b>ok<\/b>/.test(seq) && /&lt;b&gt;ok/.test(seq), "a message label is escaped, never rendered as markup");
+  ck((seq.match(/mm-node/g) || []).length >= 2, "one box per participant");
+
+  // The other common diagram types draw from the same fence.
+  const state = md(F + "mermaid\nstateDiagram-v2\n [*] --> Idle\n Idle --> Run : go\n" + F);
+  ck(/class="mm-svg"/.test(state) && /mm-startend/.test(state), "a state diagram renders, with its start dot");
+  const cls = md(F + "mermaid\nclassDiagram\n class A {\n +int x\n +run()\n }\n A <|-- B\n" + F);
+  ck(/class="mm-svg"/.test(cls) && /mm-class-name/.test(cls) && /url\(#mm-tri\)/.test(cls),
+    "a class diagram renders, with a UML inheritance marker");
+  const er = md(F + "mermaid\nerDiagram\n A ||--o{ B : has\n" + F);
+  ck(/class="mm-svg"/.test(er) && /mm-er-mark/.test(er), "an ER diagram renders, with crow's-foot marks");
+  const pie = md(F + "mermaid\npie title Pets\n \"Dogs\" : 5\n \"Cats\" : 3\n" + F);
+  ck(/class="mm-svg"/.test(pie) && /mm-slice/.test(pie) && /mm-legend/.test(pie), "a pie chart renders, with slices and a legend");
+
+  // The diagram carries its own stylesheet and a ground rect, so a copied or
+  // exported SVG keeps its colours with no external CSS.
+  ck(/<style>/.test(flow) && /class="mm-bg"/.test(flow) && /var\(--kx-fg,\s*#/.test(flow),
+    "every diagram embeds its own theme-aware styles");
+
+  // A type this subset still does not draw, or a half-streamed block, falls
+  // back to a code block - never an error, never a broken SVG.
+  const gantt = md(F + "mermaid\ngantt\n title X\n section S\n task :a1, 2020-01-01, 3d\n" + F);
+  ck(!/mm-svg/.test(gantt) && /<pre>/.test(gantt), "an unsupported diagram falls back to code", gantt.slice(0, 50));
+  for (const half of ["flowchart LR\n A --> ", "sequenceDiagram\n Alice->>", "stateDiagram-v2\n [*] -->", "classDiagram\n class ", "erDiagram\n A ||--", "pie title x"]) {
+    let okHalf = true;
+    try { md(F + "mermaid\n" + half); } catch (e) { okHalf = false; }
+    ck(okHalf, "a half-streamed block does not throw: " + half.split("\n")[0]);
+  }
 }
 
 console.log("\n──── degenerate input ────");

@@ -101,13 +101,19 @@
   withholds the tool from the model entirely rather than offering it and refusing
   it; `fetch_url` and the browser are unaffected. It sits beside the browser
   window control in the Control Center as a switch.
-- **Mermaid flowcharts render in the transcript.** A non-multimodal model can
+- **Mermaid diagrams render in the transcript.** A non-multimodal model can
   only emit a ` ```mermaid ` block as text; the panel now draws it, turning the
-  source into an SVG in place. A hand-rolled subset — `flowchart`/`graph`,
-  the common node shapes, labelled edges, `<br/>`, and `subgraph` boxes — not the
-  2.8 MB library, so it renders air-gapped and adds one small file to the bundle.
-  Every label is escaped, and anything it cannot parse falls back to a code
-  block. Covered by `test/markdown-render.cjs`.
+  source into an SVG in place. A hand-rolled subset covers six diagram types —
+  `flowchart`/`graph` (node shapes, labelled edges, `<br/>`, `subgraph` boxes),
+  `sequenceDiagram` (participants, the message arrows, activations, notes, and
+  `loop`/`alt`/`opt`/`par` fragments), `stateDiagram-v2`, `classDiagram` (UML
+  compartments and relation markers), `erDiagram` (crow's-foot cardinality), and
+  `pie` — not the 2.8 MB library, so it renders air-gapped and adds one small
+  file to the bundle. Each SVG embeds its own theme-aware stylesheet and a ground
+  rect, so a diagram copied or exported out of the panel keeps its colours. Every
+  label is escaped, and a type it cannot parse (e.g. `gantt`) or a half-streamed
+  block falls back to a code block. Covered by `test/markdown-render.cjs` and
+  `test/mermaid-render.cjs`.
 
 ### Fixed
 - **The waiting mark was the busiest thing in a quiet panel.** It was three

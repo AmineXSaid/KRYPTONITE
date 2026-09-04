@@ -133,6 +133,26 @@ const DECISION = [
   "```",
 ].join("\n");
 
+/* A sequence diagram: participants on lifelines, messages with a labelled
+   solid and a dashed reply, an activation, a note, and an alt fragment. This is
+   the second grammar, and the claim is the same - it draws, it does not fall
+   back to source. */
+const SEQUENCE = [
+  "```mermaid",
+  "sequenceDiagram",
+  "    participant T as Tester",
+  "    participant D as DUT / LIN master",
+  "    T->>+D: request diagnostic frame",
+  "    D-->>-T: response frame",
+  "    Note over T,D: one LIN diagnostic exchange",
+  "    alt frame valid",
+  "        D->>T: ack",
+  "    else invalid",
+  "        D->>T: nak",
+  "    end",
+  "```",
+].join("\n");
+
 (async () => {
   const browser = await chromium.launch({ executablePath: EXE, args: ["--no-sandbox"] });
   try {
@@ -236,6 +256,72 @@ const DECISION = [
     ok("and say what the model wrote",
       ["single", "first", "invalid"].every((w) => two.elabels.includes(w)), two.elabels.join(","));
 
+    /* ── 2b. a sequence diagram: the second grammar ─────────────────── */
+    console.log("\n──── sequence diagram ────");
+    await send({ type: "streamDelta", text: "\n\nAnd the exchange over time:\n\n" + SEQUENCE + "\n" });
+    await send({ type: "turnEnd" });
+    await page.waitForTimeout(120);
+    const seq = await page.evaluate(() => {
+      const figs = [...document.querySelectorAll("#log .mermaid-fig svg.mm-svg")];
+      const last = figs[figs.length - 1];
+      const q = (sel) => last ? last.querySelectorAll(sel).length : 0;
+      const box = last ? last.getBoundingClientRect() : { width: 0, height: 0 };
+      return {
+        figs: document.querySelectorAll("#log .mermaid-fig").length,
+        w: Math.round(box.width), h: Math.round(box.height),
+        lifelines: q(".mm-lifeline"),
+        boxes: q(".mm-node"),
+        messages: q("line.mm-msg"),
+        activation: q(".mm-activation"),
+        notes: q(".mm-note"),
+        frags: q(".mm-frag"),
+        labels: last ? [...last.querySelectorAll(".mm-msg-label")].map((t) => t.textContent) : [],
+        // The source must not be sitting visible as code.
+        visibleSource: [...document.querySelectorAll("#log pre")]
+          .filter((p) => p.offsetParent !== null && /sequenceDiagram/.test(p.textContent)).length,
+      };
+    });
+    ok("the sequence diagram renders as a figure", seq.figs === 3, String(seq.figs));
+    ok("laid out on screen", seq.w > 150 && seq.h > 80, `${seq.w}x${seq.h}`);
+    ok("a lifeline for each of the two participants", seq.lifelines === 2, String(seq.lifelines));
+    ok("a participant box at the head of each", seq.boxes === 2, String(seq.boxes));
+    ok("the messages between them are drawn", seq.messages >= 4, String(seq.messages));
+    ok("the + activation is a bar on the lifeline", seq.activation >= 1, String(seq.activation));
+    ok("the note over both is drawn", seq.notes === 1, String(seq.notes));
+    ok("the alt fragment is a frame", seq.frags === 1, String(seq.frags));
+    ok("and the message labels say what the model wrote",
+      seq.labels.includes("request diagnostic frame") && seq.labels.includes("ack"), seq.labels.join(" | "));
+    ok("the sequence source is NOT left visible as code", seq.visibleSource === 0);
+
+    /* ── 2c. the other diagram types ─────────────────────────────────── */
+    console.log("\n──── state, class, ER, pie ────");
+    const MORE = [
+      "```mermaid", "stateDiagram-v2", "  [*] --> Idle", "  Idle --> Busy : start", "  Busy --> [*]", "```",
+      "", "```mermaid", "classDiagram", "  class Node {", "    +int id", "    +run()", "  }", "  Node <|-- Leaf", "```",
+      "", "```mermaid", "erDiagram", "  BUS ||--o{ FRAME : carries", "```",
+      "", "```mermaid", "pie title Split", "  \"A\" : 60", "  \"B\" : 40", "```",
+    ].join("\n");
+    await send({ type: "streamDelta", text: "\n\n" + MORE + "\n" });
+    await send({ type: "turnEnd" });
+    await page.waitForTimeout(150);
+    const more = await page.evaluate(() => ({
+      figs: document.querySelectorAll("#log .mermaid-fig").length,
+      startDot: document.querySelectorAll("#log .mm-startend").length,
+      umlTri: [...document.querySelectorAll("#log svg")].some((s) => /mm-tri/.test(s.innerHTML)),
+      crow: document.querySelectorAll("#log .mm-er-mark").length,
+      slices: document.querySelectorAll("#log .mm-slice").length,
+      legend: document.querySelectorAll("#log .mm-legend").length,
+      // No fenced source of any of these should be left visible as code.
+      visibleSource: [...document.querySelectorAll("#log pre")]
+        .filter((p) => p.offsetParent !== null && /(stateDiagram|classDiagram|erDiagram|^pie)/m.test(p.textContent)).length,
+    }));
+    ok("all four extra diagrams render as figures", more.figs >= 7, String(more.figs));
+    ok("the state diagram draws its start/end dots", more.startDot >= 2, String(more.startDot));
+    ok("the class diagram draws a UML inheritance marker", more.umlTri);
+    ok("the ER diagram draws crow's-foot marks", more.crow >= 1, String(more.crow));
+    ok("the pie chart draws slices and a legend", more.slices >= 2 && more.legend >= 2, `slices=${more.slices} legend=${more.legend}`);
+    ok("none of them are left as visible source", more.visibleSource === 0);
+
     /* ── 3. restored transcript ──────────────────────────────────────── */
     console.log("\n──── reopened conversation ────");
     await send({
@@ -267,7 +353,7 @@ const DECISION = [
         ...STATE.state,
         session: { id: "s3", title: "LIN frame layout", messages: [
           { role: "user", content: "explain the LIN diagnostic frame layout" },
-          { role: "assistant", content: ANSWER + "\n" + DECISION + "\n" },
+          { role: "assistant", content: ANSWER + "\n" + DECISION + "\n\n" + SEQUENCE + "\n" },
         ] },
       },
     });

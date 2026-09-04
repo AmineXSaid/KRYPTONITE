@@ -328,15 +328,20 @@ with more room can still send them.
 ## Diagrams
 
 A model that is not multimodal cannot draw a picture — it can only describe one.
-So when it writes a ` ```mermaid ` flowchart, the transcript renders it: the
-source becomes an SVG in place, laid out by a hand-rolled subset of the mermaid
-syntax (`flowchart`/`graph` with the common node shapes, labelled edges, `<br/>`
-in labels, and `subgraph` boxes). It is not the 2.8 MB mermaid library — the
-same reason the browser is driven over raw CDP and code is highlighted by an
-in-house tokenizer, so it renders air-gapped and adds nothing to the bundle.
-Every label is escaped on the way in, and anything the subset cannot parse — a
-sequence diagram, a half-streamed block — falls back to a plain code block, so a
-diagram is never worse than the fence it arrived in.
+So when it writes a ` ```mermaid ` block, the transcript renders it: the source
+becomes an SVG in place, laid out by a hand-rolled subset of the mermaid syntax.
+Six diagram types are drawn — `flowchart`/`graph` (node shapes, labelled edges,
+`<br/>` in labels, `subgraph` boxes), `sequenceDiagram` (participants, the
+message arrows, activations, notes, and the `loop`/`alt`/`opt`/`par` fragments),
+`stateDiagram-v2`, `classDiagram` (compartments and the UML relation markers),
+`erDiagram` (crow's-foot cardinality), and `pie`. It is not the 2.8 MB mermaid
+library — the same reason the browser is driven over raw CDP and code is
+highlighted by an in-house tokenizer, so it renders air-gapped and adds nothing
+to the bundle. Each SVG carries its own theme-aware stylesheet, so a diagram
+copied or exported out of the panel keeps its colours. Every label is escaped on
+the way in, and anything the subset cannot parse — a `gantt` chart, a
+half-streamed block — falls back to a plain code block, so a diagram is never
+worse than the fence it arrived in.
 
 ## Sessions
 
