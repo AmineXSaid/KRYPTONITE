@@ -17,6 +17,7 @@ jira-mcp = "jira_mcp.server:main"
 confluence-mcp = "confluence_mcp.server:main"
 gitlab-mcp = "gitlab_mcp.server:main"
 jenkins-mcp = "jenkins_mcp.server:main"
+deepwiki-mcp = "deepwiki_mcp.server:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -29,6 +30,7 @@ packages = [
     "src/confluence_mcp",
     "src/gitlab_mcp",
     "src/jenkins_mcp",
+    "src/deepwiki_mcp",
 ]
 
 [tool.pytest.ini_options]

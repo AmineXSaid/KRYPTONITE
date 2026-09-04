@@ -11,7 +11,15 @@ never write to. Search-only, by construction rather than by convention.
 | `src/confluence_mcp/` | Confluence — CQL search, pages, spaces — [README](docs/confluence.md) |
 | `src/gitlab_mcp/` | GitLab — projects, code search, files, merge requests — [README](docs/gitlab.md) |
 | `src/jenkins_mcp/` | Jenkins — jobs, builds, console logs, artifacts — [README](docs/jenkins.md) |
+| `src/deepwiki_mcp/` | DeepWiki — a local, endpoint-generated wiki of the repo the agent is in — [README](docs/deepwiki.md) |
 | `probe.py` | standalone connectivity + capability check. **Run this first.** |
+
+`deepwiki-mcp` is the odd one out here: it is not a read-only client to an
+external system. It reads the local workspace, generates a wiki *through a
+Genesis endpoint profile*, writes it into the repo under `.agent/wiki/`, and
+serves it back so any agent can understand the codebase before editing it. Its
+read tools need no endpoint and work offline; only generating and asking reach
+the model. See [docs/deepwiki.md](docs/deepwiki.md).
 
 The shared core is named for the property it enforces, not for the first vendor
 that used it: it began as `atlassian_client`, and that name stopped being true
