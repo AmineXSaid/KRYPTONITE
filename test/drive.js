@@ -570,8 +570,11 @@ const pasteTests = (async () => {
   const banner = d.getElementById("phaseBanner");
   ok("13 Ask shows the read-only banner", banner.hidden === false);
   ok("13 banner names the phase", banner.getAttribute("data-phase") === "ask");
-  ok("13 Ask's banner promises no plan either",
-    /no edits, no plan/.test(banner.querySelector(".sub").textContent));
+  ok("13 Ask's banner still promises no edits",
+    /never edits/.test(banner.querySelector(".sub").textContent));
+  ok("13 and says what the mode is for",
+    /teaches/.test(banner.querySelector(".sub").textContent),
+    banner.querySelector(".sub").textContent);
   ok("13 Ask's placeholder asks a question",
     /^\u203A\u00A0Ask Genesis anything/.test(d.getElementById("draft").placeholder),
     d.getElementById("draft").placeholder);

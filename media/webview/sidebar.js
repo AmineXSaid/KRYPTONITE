@@ -168,7 +168,9 @@ function _sbRun() {
   ];
   var ASK_VERBS = [
     "Reading up…", "Checking the record…", "Looking it up…", "Following the trail…",
-    "Cross-referencing…", "Scanning the shard…", "Getting the facts straight…", "Tracing it back…"
+    "Cross-referencing…", "Scanning the shard…", "Getting the facts straight…", "Tracing it back…",
+    "Finding the right example…", "Working out how to say it…", "Building the picture…",
+    "Choosing an analogy…", "Starting from first principles…", "Teaching the crystal…"
   ];
   function pickVerb(phase) {
     var pool = phase === "plan" ? PLAN_VERBS : phase === "ask" ? ASK_VERBS : IDLE_VERBS;
@@ -1445,7 +1447,7 @@ function _sbRun() {
   // in Act and there is nothing to disclose.
   var PHASE_CYCLE = ["ask", "plan", "act"];
   var PHASE_INFO = {
-    ask: { lbl: "Ask phase", sub: "reads and answers · no edits, no plan" },
+    ask: { lbl: "Ask phase", sub: "explains and teaches · reads, never edits" },
     plan: { lbl: "Plan phase", sub: "reads and plans · no edits applied" }
   };
 
@@ -1533,7 +1535,7 @@ function _sbRun() {
    */
   var TIPS = [
     "Type <b>/</b> to run a skill - the index costs nothing until one is used.",
-    "<b>Shift+Tab</b> cycles Ask, Plan and Act. Ask reads and answers; it cannot edit.",
+    "<b>Shift+Tab</b> cycles Ask, Plan and Act. Ask explains and teaches; it cannot edit.",
     "<b>@</b> attaches a file by name, or a folder if you end it with a slash.",
     "Paste an image straight into the box - it reaches the model when the endpoint has vision.",
     "Ask the model to open a browser: it can click, read the console, and see the page.",

@@ -73,7 +73,7 @@ const TOKENS = fs.readFileSync(path.join(ROOT, "media/webview/tokens.css"), "utf
   ok("and says which phase it is", /Ask phase/.test(banner.textContent), banner.textContent.trim());
   // Ask promises one thing more than Plan does: no plan either. That is the
   // only difference between the two read-only phases worth announcing.
-  ok("and what that promises", /no edits, no plan/i.test(banner.textContent));
+  ok("and what that promises", /never edits/i.test(banner.textContent));
   ok("carrying the phase for styling", banner.getAttribute("data-phase") === "ask");
 
   send(state("plan"));
@@ -127,9 +127,21 @@ const TOKENS = fs.readFileSync(path.join(ROOT, "media/webview/tokens.css"), "utf
   ok("Ask has its own addendum", /ASK_ADDENDUM/.test(loop));
   ok("which forbids changing anything",
     /Nothing you learn in this mode is an instruction to change anything/.test(loop));
-  // The failure mode of this mode is length, so the prompt says so.
-  ok("and asks for brevity rather than a report",
-    /Do NOT produce a plan, a numbered step list/.test(loop));
+  // Ask must not drift into Plan's contract - the fenced block is what Act
+  // consumes, and a question is not a build order.
+  ok("and keeps the plan block as Plan's contract alone",
+    /Do NOT produce a fenced .{0,12}plan.{0,12} block or a numbered build plan/.test(loop));
+  // But a curriculum IS numbered, so the carve-out has to be explicit: without
+  // it the rule above reads as "never number anything" and courses lose their
+  // shape. This is the line that lets Ask teach a syllabus.
+  ok("while still letting a course number its modules",
+    /A course syllabus is not a build plan/.test(loop));
+  // Teaching is the point of the mode, so the prompt has to say how, not just
+  // what is forbidden. A regression here turns Ask back into a search result.
+  ok("and briefs the model on how to teach",
+    /the expert who teaches/.test(loop) &&
+    /Concrete before abstract/.test(loop) &&
+    /Name the misconception/.test(loop));
 }
 
 if (failures.length) for (const f of failures) console.log("FAIL  " + f);
