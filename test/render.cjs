@@ -141,6 +141,7 @@ const HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
                   surface: "sidebar" };
 </script>
 <script src="webview/crystal.js"></script>
+<script src="webview/mermaid.js"></script>
 <script src="webview/sidebar.js"></script>
 </body></html>`;
 
@@ -174,6 +175,10 @@ fs.writeFileSync(LIGHT_PATH, LIGHT_HTML);
 const CC_HTML = HTML
   .replace("webview/sidebar.css", "webview/controlCenter.css")
   .replace("webview/sidebar.js", "webview/controlCenter.js")
+  // The flowchart renderer is loaded for the sidebar only, because only the
+  // transcript draws diagrams. shell() makes the same distinction, so the
+  // harness has to, or this page would be a shell the extension never serves.
+  .replace('<script src="webview/mermaid.js"></script>\n', "")
   .replace('surface: "sidebar"', 'surface: "cc"');
 const CC_PATH = path.join(MEDIA, "__render-cc.html");
 fs.writeFileSync(CC_PATH, CC_HTML);
