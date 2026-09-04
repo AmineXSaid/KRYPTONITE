@@ -2496,7 +2496,21 @@ function _sbRun() {
        56 gives the mark presence without crowding the column it sits in; the
        CSS scales it down with the panel so a narrow dock does not have a mark
        wider than the text under it. */
-    var body = crystal(56, "crystal w-crystal" + spin) +
+    /* TWO WRAPPERS, AND THEY EXIST FOR THE WIDE DOCK.
+     *
+     * Stacked, these change nothing: `.welcome > *` caps whatever the direct
+     * children are at 340, and that is now these two instead of the five
+     * elements inside them. Above 640px they become the two columns of the
+     * split - identity on the left, the lists on the right - which is a grid
+     * that needs exactly two grid items and cannot be built from five.
+     *
+     * The two states of this screen above (no folder, no endpoint) keep the
+     * plain stack: they are one mark, one sentence and a button, so there is
+     * no second column to fill and a grid would only spread three elements
+     * across a width they do not want. Hence the modifier on the container
+     * rather than a rule on `.welcome` itself. */
+    var body = '<div class="w-id">' +
+      crystal(56, "crystal w-crystal" + spin) +
       '<div class="w-mark">Genesis</div>' +
       '<p>' + (recent.length
         ? "Pick up where you left off, or start something new."
@@ -2509,7 +2523,12 @@ function _sbRun() {
            unasked, and every change is reviewable and revertible. */
         : "I read your workspace and ask before I change anything. Every edit " +
           "arrives as a diff you can review and undo. Ask anything about this " +
-          "repository.") + "</p>";
+          "repository.") + "</p></div>";
+
+    // Everything that is a row goes in the second wrapper: Try, and Recent
+    // when there is one. Split, this is the right-hand column; stacked, it is
+    // the same list under the same identity it has always been under.
+    body += '<div class="w-acts">';
 
     // Openers. These were removed once for being invented examples about a
     // function nobody in the workspace has - and that objection was right about
@@ -2562,7 +2581,8 @@ function _sbRun() {
       }
       body += "</div></div>";
     }
-    logEl.appendChild(div("welcome", body));
+    body += "</div>";
+    logEl.appendChild(div("welcome w-split", body));
     // Long titles and starters reveal themselves by scrolling rather than an
     // ellipsis; measure them now the rows are in the document.
     mqAll();

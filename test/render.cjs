@@ -1819,7 +1819,14 @@ function contrast(a, b) {
         if (!wel) return { missing: true };
         const w = wel.getBoundingClientRect();
         const log = document.getElementById("log").getBoundingClientRect();
-        const kids = [...wel.children].map((e) => e.getBoundingClientRect());
+        /* The CONTENT, not `wel.children`. The welcome wraps its identity and
+           its lists in `.w-id` / `.w-acts` for the wide split, so the direct
+           children are two boxes that are trivially concentric; measuring
+           those would keep this assertion green while the five things a
+           reader actually sees drifted apart. */
+        const kids = [...wel.querySelectorAll(
+          ":scope > *, :scope > .w-id > *, :scope > .w-acts > *"
+        )].map((e) => e.getBoundingClientRect());
         const mid = (w.left + w.right) / 2;
         return {
           above: Math.round(w.top - log.top),
@@ -1893,6 +1900,65 @@ function contrast(a, b) {
       Object.values(sizes).every((s) => s.fits), JSON.stringify(sizes));
     ok("and the wordmark grows with it, so the pair stays in proportion",
       sizes[520].word > sizes[300].word, JSON.stringify(sizes));
+
+    /* ── the wide dock splits, and the narrow one does not ────────────
+     *
+     * Every width above is 520 or below, which is the whole of the stacked
+     * case and none of the split. The cap those assertions pin - 340, centred
+     * - is exactly what the split stops doing, so without this the treatment
+     * could break in either direction unnoticed: fail to engage at 900px, or
+     * engage at 500px where two columns do not fit.
+     *
+     * The pair either side of 640 is the assertion that matters. A breakpoint
+     * tested only at its extremes is a breakpoint whose value nothing pins. */
+    const split = {};
+    for (const width of [520, 639, 640, 900]) {
+      const { ctx, page } = await open(width, { sessions, session: { id: "s1", title: "", messages: [] } });
+      await page.setViewportSize({ width, height: 900 });
+      await page.waitForTimeout(250);
+      split[width] = await page.evaluate(() => {
+        const wel = document.querySelector(".welcome");
+        const id = document.querySelector(".w-id");
+        const acts = document.querySelector(".w-acts");
+        if (!wel || !id || !acts) return { missing: true };
+        const W = wel.getBoundingClientRect();
+        const I = id.getBoundingClientRect();
+        const A = acts.getBoundingClientRect();
+        const log = document.getElementById("log").getBoundingClientRect();
+        return {
+          // Side by side means the identity ENDS before the lists begin and
+          // the two overlap vertically. Geometry, so it holds however the
+          // layout is built.
+          side: I.right <= A.left + 1 && I.top < A.bottom && A.top < I.bottom,
+          stacked: I.bottom <= A.top + 1,
+          welW: Math.round(W.width),
+          // Centred in the transcript, so a very wide dock does not leave the
+          // block hard against one edge - the failure the 760 cap invites.
+          offset: Math.round((W.left + W.right) / 2 - (log.left + log.right) / 2),
+          // The panel must never scroll sideways. The split is the one layout
+          // here with two columns to overflow.
+          hScroll: document.documentElement.scrollWidth >
+                   document.documentElement.clientWidth + 1,
+        };
+      });
+      await ctx.close();
+    }
+    ok("the welcome stacks in a narrow dock", split[520].stacked, JSON.stringify(split[520]));
+    ok("and still stacks one pixel below the breakpoint", split[639].stacked, JSON.stringify(split[639]));
+    ok("it splits into two columns at the breakpoint", split[640].side, JSON.stringify(split[640]));
+    ok("and stays split on a wide dock", split[900].side, JSON.stringify(split[900]));
+    // The point of the treatment: the block uses the width instead of sitting
+    // in a 340px column with the panel empty either side. #log caps its
+    // children at 78ch for prose, and the split has to out-rank that or it
+    // renders inside a 610px box at every width above it.
+    ok("the split uses the width the stack left empty",
+      split[900].welW > split[639].welW + 80, JSON.stringify(split));
+    ok("and is capped rather than growing for ever",
+      split[900].welW <= 860, JSON.stringify(split[900]));
+    ok("and stays centred in the transcript",
+      Object.values(split).every((v) => Math.abs(v.offset) <= 2), JSON.stringify(split));
+    ok("and never scrolls the panel sideways",
+      Object.values(split).every((v) => !v.hScroll), JSON.stringify(split));
   }
 
   /* ── 5u. the permission glyphs are a set, and all three paint ──────── */

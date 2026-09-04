@@ -538,8 +538,19 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
    panel and must still shrink. */
 .welcome > * { width: 100%; max-width: 340px; }
 /* The mark and the wordmark size themselves; a 340px box around them would
-   stretch nothing but would break `align-items: center` for the SVG. */
-.welcome > svg, .welcome > .w-mark { width: auto; }
+   stretch nothing but would break `align-items: center` for the SVG.
+   Both parents are listed because the main welcome nests them in `.w-id` for
+   the split below, while the no-folder and no-endpoint screens still put the
+   mark straight into `.welcome`. */
+.welcome > svg, .welcome > .w-mark,
+.w-id > svg, .w-id > .w-mark { width: auto; }
+
+/* The identity half: mark, wordmark, one line of copy. A column of its own so
+   it keeps the centred stack when there is no room to split, and so it has
+   something to become the left cell of the grid. `.w-acts` needs no display of
+   its own - its children are already full-width blocks - but it is named here
+   because the two are a pair and a reader looking for one will look for both. */
+.w-id { display: flex; flex-direction: column; align-items: center; }
 /* Left-aligned, as the design draws it, and not only for fidelity: everything
    below the intro is a list of rows, and a centred mark above a left-aligned
    list gives the column two different axes. One edge, top to bottom. */
@@ -650,6 +661,100 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   text-wrap: pretty;
 }
 .welcome .w-sec { width: 100%; margin-top: 22px; }
+
+/* ── THE WIDE DOCK: IDENTITY BESIDE THE ACTIONS, NOT ABOVE THEM ──────────
+ *
+ * The column above is capped at 340 and centred, which is right in a narrow
+ * dock - there is nothing to line up against, so a left-aligned mark would sit
+ * against the panel edge with the whole width empty beside it. Undocked into
+ * the editor the same cap leaves a void down BOTH sides and the identity reads
+ * as lost rather than composed.
+ *
+ * So above the breakpoint the same five elements become two columns: what the
+ * product IS on the left, what you can DO on the right. Nothing is invented
+ * for the wide case - the Try list and the Recent list are the ones already
+ * there, moved rather than added - which is why this degrades to the stack by
+ * deleting one rule rather than by having a second design to maintain.
+ *
+ * 640, AND NOT LOWER. Two columns need about 260px each before the Try rows
+ * start wrapping their own labels, and 640 is the first width where that fits
+ * with a gap and the panel's own padding. A 500px dock is wide enough to look
+ * like it should split and too narrow to survive it, which is the failure this
+ * number exists to avoid. Below it nothing here applies and the stack is
+ * untouched.
+ *
+ * The columns are `fr` rather than fixed so the pair grows with the panel, and
+ * the whole grid is capped at 760 and centred: past that the two columns start
+ * drifting apart into two unrelated things rather than reading as one block.
+ * The right column is the wider of the two because it holds rows of text and
+ * the left holds a mark, a word and a sentence. */
+@media (min-width: 640px) {
+  /* `#log >` is not decoration. The transcript caps its children at 78ch so
+     PROSE keeps a readable measure at a wide dock, and that cap is an ID
+     selector: a bare `.welcome.w-split` loses to it and the split renders
+     inside a 610px box with the panel's width still empty either side - the
+     exact puddle this treatment exists to fill. The same rule already exempts
+     diff cards, code blocks and tool output, all for one reason: they are
+     SCANNED, not read. A mark, a wordmark, one line and two lists of rows is
+     scanned too, so this joins them rather than arguing with them - and takes
+     on the duty that comes with the exemption by setting a measure of its own
+     below. */
+  #log > .welcome.w-split {
+    display: grid;
+    grid-template-columns: minmax(0, .92fr) minmax(0, 1.08fr);
+    /* The gap was clamp(32px, 5vw, 56px) and it was the loudest thing on the
+       screen: at a wide dock the two columns sat 56px apart with the identity's
+       own column half empty behind it, so the pair read as two unrelated
+       blocks rather than one. A gap only has to separate; the columns
+       themselves do the composing. */
+    column-gap: clamp(24px, 3vw, 36px);
+    /* `align-content` centres the single row in the block. `align-items` was
+       `center`, which hung the identity halfway down its column - the mark
+       ended up level with the middle of the Try list and the two tops had
+       nothing to do with each other. `start` puts both columns on one top
+       edge, which is what makes them read as a band. */
+    align-content: center;
+    align-items: start;
+    text-align: left;
+    width: 100%; max-width: 820px; margin-inline: auto;
+    padding: 24px 20px;
+  }
+  /* The 340 cap is the stacked measure. Here the grid track is the measure,
+     and leaving the cap on would put both columns back at 340 with the gap
+     between them growing for ever. */
+  #log > .welcome.w-split > * { width: 100%; max-width: none; }
+  /* Left-aligned, because the column now has something to line up against:
+     the list beside it. This is the one thing the split changes about the
+     identity itself. */
+  .w-split .w-id { align-items: flex-start; }
+  /* The paragraph's bottom margin was the gap to the Try label underneath it.
+     Side by side there is nothing underneath. */
+  .w-split .w-id p { margin-bottom: 0; }
+
+  /* THE IDENTITY HAS TO EARN THE COLUMN IT WAS GIVEN.
+   *
+   * At the stacked sizes - a 64px mark over a 14px wordmark - the left column
+   * was a small thing adrift in 340px of nothing while the right column was a
+   * full-height list, and no gap value fixes that: the imbalance is between
+   * the two blocks, not between their edges. Sized for the split, the identity
+   * is the same height as the list beside it, which is what "identity and
+   * actions" is supposed to look like.
+   *
+   * The mark overrides the `clamp(38px, 15vw, 64px)` above rather than
+   * extending it: 15vw of a 900px editor is 135px, and the clamp's ceiling is
+   * there to stop the mark outgrowing a 340px column that no longer applies. */
+  .w-split .w-crystal { width: 88px; height: 88px; margin-bottom: 22px; }
+  .w-split .w-mark { font-size: 20px; letter-spacing: .18em; margin-bottom: 14px; }
+  /* A measure, so the line wraps into the column instead of running its full
+     width and leaving the block one line tall. Two or three lines of copy is
+     what gives the left side its height. */
+  .w-split .w-id p { font-size: 13px; line-height: 1.66; max-width: 30ch; }
+  /* The list starts with a 9px label; the identity starts with an 88px mark.
+     Sharing a top edge exactly puts the label's baseline against the mark's
+     shoulder, so the identity drops by the label's own height and the mark
+     lines up with the first ROW instead. */
+  .w-split .w-id { padding-top: 6px; }
+}
 .w-label {
   width: 100%; text-align: left;
   font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
