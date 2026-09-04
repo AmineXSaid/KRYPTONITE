@@ -613,26 +613,23 @@ const pasteTests = (async () => {
   ok("13 aria-checked follows", btn("ask").getAttribute("aria-checked") === "true" &&
     btn("act").getAttribute("aria-checked") === "false");
 
-  // The banner is the read-only disclosure. Ask and Plan each get their own
-  // wording; Act withholds nothing, so it must not appear at all.
-  const banner = d.getElementById("phaseBanner");
-  ok("13 Ask shows the read-only banner", banner.hidden === false);
-  ok("13 banner names the phase", banner.getAttribute("data-phase") === "ask");
-  ok("13 Ask's banner promises no plan either",
-    /no edits, no plan/.test(banner.querySelector(".sub").textContent));
+  // The rail replaced the read-only banner. It is painted from data-phase on
+  // the session view, and unlike the banner it paints ALL THREE phases - Act
+  // included, because Act is the one that edits the workspace.
+  const rail = () => d.getElementById("viewSession").getAttribute("data-phase");
+  ok("13 the rail follows into Ask", rail() === "ask");
   ok("13 Ask's placeholder asks a question",
     /^\u203A\u00A0Ask Genesis anything/.test(d.getElementById("draft").placeholder),
     d.getElementById("draft").placeholder);
 
   btn("plan").click();
-  ok("13 Plan's banner is its own", banner.getAttribute("data-phase") === "plan" &&
-    /no edits applied/.test(banner.querySelector(".sub").textContent));
+  ok("13 the rail follows into Plan", rail() === "plan");
   ok("13 Plan's placeholder describes planning",
     /^\u203A\u00A0Describe what to plan/.test(d.getElementById("draft").placeholder),
     d.getElementById("draft").placeholder);
 
   btn("act").click();
-  ok("13 Act hides the banner", banner.hidden === true);
+  ok("13 and Act paints it too, where the banner showed nothing", rail() === "act");
   ok("13 Act's placeholder is a work order",
     /^\u203A\u00A0Tell Genesis what to do/.test(d.getElementById("draft").placeholder),
     d.getElementById("draft").placeholder);
@@ -663,7 +660,7 @@ const pasteTests = (async () => {
   // badge over a session the host would still run a write in.
   inbound({ type: "phaseChanged", phase: "sideways" });
   ok("13 an unknown phase falls back to act rather than blanking",
-    lit() === "act" && banner.hidden === true);
+    lit() === "act" && rail() === "act");
   ok("13 nothing rendered undefined",
     !/undefined|NaN|\[object Object\]/.test(d.getElementById("root").innerHTML));
 }
@@ -1386,8 +1383,11 @@ const AGENTS = [
 {
   const { d, sent, inbound } = boot();
   inbound(STATE({ agents: AGENTS, activeAgent: "" }));
-  ok("AG nothing is drawn while no agent is selected",
-    d.getElementById("agentBar").hidden === true);
+  // The bar is gone; the composer's agent button is the one place that shows
+  // an agent, and with none set it is the bare glyph the other tools are.
+  ok("AG nothing is named while no agent is selected",
+    d.getElementById("agentBtn").getAttribute("data-on") === "0" &&
+    d.getElementById("agentName").textContent === "");
 
   // Agents have a tab of their own now, after MCP. It was a collapsed section
   // inside Diagnostics, which is where a thing goes to be inspected rather than
@@ -1448,11 +1448,13 @@ const AGENTS = [
   const { d, sent, inbound } = boot();
   inbound(STATE({ agents: AGENTS, activeAgent: "" }));
   inbound({ type: "agentChanged", agent: { ...AGENTS[0], active: true } });
-  const bar = d.getElementById("agentBar");
-  ok("AG selecting one reveals the bar", bar.hidden === false);
-  ok("AG which names it", /reader/.test(d.getElementById("agentBarName").textContent));
-  ok("AG and states what it can reach",
-    /MCP: filesystem/.test(d.getElementById("agentBarScope").textContent));
+  const agBtn = d.getElementById("agentBtn");
+  ok("AG selecting one lights the button", agBtn.getAttribute("data-on") === "1");
+  ok("AG which names it", /reader/.test(d.getElementById("agentName").textContent));
+  // The scope the bar used to print moved onto this button's tooltip when the
+  // bar was removed - it is the only place left that says what the agent can
+  // reach without opening the Agents tab.
+  ok("AG and states what it can reach", /MCP: filesystem/.test(agBtn.title), agBtn.title);
   d.getElementById("tabDiag").click();
   ok("AG the row marks itself active",
     d.querySelector('[data-name="reader"]').closest(".ag-row").getAttribute("data-on") === "1");
@@ -1463,7 +1465,9 @@ const AGENTS = [
     sent.some((m) => m.type === "setAgent" && m.name === ""));
 
   inbound({ type: "agentChanged", agent: null });
-  ok("AG leaving hides the bar again", d.getElementById("agentBar").hidden === true);
+  ok("AG leaving returns it to the bare glyph",
+    d.getElementById("agentBtn").getAttribute("data-on") === "0" &&
+    d.getElementById("agentName").textContent === "");
 }
 {
   // The composer's own picker.
