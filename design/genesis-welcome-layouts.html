@@ -1,0 +1,485 @@
+<title>Genesis Welcome Layouts</title>
+<meta name="description" content="Eight layout treatments for the Genesis welcome screen when the panel is wide and the centered column leaves the sides empty.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Michroma&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+  /* ── Genesis palette, lifted from media/webview/tokens.css ── */
+  :root{
+    --g-ground:#181818; --g-recess:#0f0f11;
+    --g-fg:#fbfafd; --g-fg2:#bcbbbf; --g-fg3:#a3a2a5; --g-fg4:#747179;
+    --g-line:rgba(255,255,255,.14); --g-line-2:rgba(255,255,255,.22);
+    --g-s1:rgba(255,255,255,.045); --g-s2:rgba(255,255,255,.075); --g-s3:rgba(255,255,255,.11);
+    --g-green:#2ea562; --g-agent:#9a7edd; --g-orange:#d99530;
+    --g-ask:#63a6e9; --g-oxide:#1f75cb; --g-red:#ec624c; --g-blue:#4692dd;
+
+    /* ── page (studio review canvas), committed dark ── */
+    --bg:#0e0e10; --bg2:#141416; --card:#161618; --card-2:#1b1b1e;
+    --edge:rgba(255,255,255,.08); --edge-2:rgba(255,255,255,.14);
+    --ink:#f4f4f6; --ink2:#b6b6bb; --ink3:#87878d;
+    --accent:#63a6e9;           /* the page's chosen accent = Genesis ask-blue */
+    --good:#2ea562; --warn:#d99530; --hot:#ec624c;
+
+    --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+    --sans:"IBM Plex Sans",-apple-system,system-ui,sans-serif;
+    --mark:"Michroma","IBM Plex Sans",sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--ink2);font-family:var(--sans);line-height:1.55;
+       -webkit-font-smoothing:antialiased;font-size:15px}
+  h1,h2,h3{color:var(--ink);text-wrap:balance;margin:0}
+  a{color:var(--accent)}
+  .wrap{max-width:1120px;margin:0 auto;padding:0 20px}
+
+  /* ── masthead ── */
+  header{border-bottom:1px solid var(--edge);
+         background:radial-gradient(1200px 340px at 20% -40%,rgba(99,166,233,.10),transparent 70%)}
+  .mast{padding:44px 0 34px}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;
+           color:var(--accent);margin:0 0 14px}
+  .mast h1{font-size:clamp(28px,5vw,46px);line-height:1.05;letter-spacing:-.01em}
+  .mast h1 b{font-family:var(--mark);font-weight:400;letter-spacing:.02em}
+  .lede{margin:16px 0 0;max-width:64ch;font-size:16px;color:var(--ink2)}
+  .metabar{display:flex;flex-wrap:wrap;gap:8px 10px;margin-top:22px}
+  .tagpill{font-family:var(--mono);font-size:11px;letter-spacing:.04em;color:var(--ink3);
+           border:1px solid var(--edge);border-radius:999px;padding:5px 11px}
+
+  /* ── problem strip ── */
+  .problem{padding:34px 0 6px}
+  .problem-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:26px;align-items:center}
+  @media(max-width:760px){.problem-grid{grid-template-columns:1fr}}
+  .problem h2{font-size:20px;letter-spacing:-.01em;margin-bottom:8px}
+  .problem p{margin:0 0 12px;max-width:56ch}
+  .note{font-family:var(--mono);font-size:12px;color:var(--ink3)}
+
+  /* ── the panel-preview primitives (a literal miniature of the dark webview) ── */
+  .frame{background:var(--g-ground);border:1px solid var(--g-line);border-radius:9px;
+         overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.45);position:relative}
+  .frame .tabs{display:flex;gap:16px;align-items:center;height:30px;padding:0 12px;
+       border-bottom:1px solid var(--g-line);font-family:var(--mono);font-size:9.5px;color:var(--g-fg3)}
+  .frame .tabs .on{color:var(--g-fg);position:relative}
+  .frame .tabs .on::after{content:"";position:absolute;left:0;right:0;bottom:-9px;height:2px;
+       background:var(--g-blue);border-radius:2px}
+  .frame .tabs .dot{margin-left:auto;width:5px;height:5px;border-radius:50%;background:var(--g-green)}
+  .stage{position:relative}
+
+  /* miniature type + parts */
+  .mk{color:var(--g-fg);display:block}
+  .wm{font-family:var(--mark);color:var(--g-fg);letter-spacing:.05em}
+  .tag{color:var(--g-fg3);font-size:9px;line-height:1.5}
+  .lab{font-family:var(--mono);font-size:8px;letter-spacing:.16em;text-transform:uppercase;color:var(--g-fg4)}
+  .row{display:flex;align-items:center;gap:7px;padding:7px 9px;border-top:1px solid var(--g-line);
+       font-size:9.5px;color:var(--g-fg2)}
+  .row .ic{width:11px;height:11px;border-radius:3px;background:var(--g-s3);flex:none}
+  .row .ch{margin-left:auto;color:var(--g-fg4);font-family:var(--mono);font-size:9px}
+  .row .rdot{width:5px;height:5px;border-radius:50%;background:var(--g-fg4);flex:none}
+  .row .rdot.live{background:var(--g-green)}
+  .list{border-top:1px solid var(--g-line)}
+  .list .row:first-child{border-top:none}
+  .composer{margin:0 10px 10px;border:1px solid var(--g-line);border-radius:7px;background:var(--g-s1);
+       padding:8px 9px;font-size:9px;color:var(--g-fg4);display:flex;align-items:center;gap:7px}
+  .composer .send{margin-left:auto;width:16px;height:16px;border-radius:5px;background:var(--g-oxide)}
+  .seg{display:inline-flex;border:1px solid var(--g-line);border-radius:5px;overflow:hidden;font-family:var(--mono);font-size:8px}
+  .seg span{padding:3px 7px;color:var(--g-fg3)}
+  .seg span.on{background:var(--g-oxide);color:#fff}
+  .card{background:var(--g-s1);border:1px solid var(--g-line);border-radius:7px;padding:9px}
+  .hatch{background-image:repeating-linear-gradient(-45deg,rgba(236,98,76,.16) 0 6px,transparent 6px 12px);
+         border:1px dashed rgba(236,98,76,.45)}
+
+  /* mark svg sizing */
+  svg.roundel{display:block}
+
+  /* ── mockups grid ── */
+  .mocks{padding:30px 0 10px}
+  .mocks-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:18px}
+  .mocks-head h2{font-size:22px;letter-spacing:-.01em}
+  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:20px}
+  @media(max-width:820px){.grid{grid-template-columns:1fr}}
+
+  .mock{background:var(--card);border:1px solid var(--edge);border-radius:14px;overflow:hidden;
+        display:flex;flex-direction:column}
+  .mock-hd{padding:16px 18px 12px;border-bottom:1px solid var(--edge)}
+  .mock-no{font-family:var(--mono);font-size:11px;letter-spacing:.14em;color:var(--accent)}
+  .mock-hd h3{font-size:17px;margin:5px 0 4px;letter-spacing:-.01em}
+  .mock-hd .thesis{font-size:13px;color:var(--ink2);margin:0}
+  .mock-stage{padding:16px 16px 4px;background:
+     radial-gradient(90% 120% at 50% 0%,rgba(255,255,255,.02),transparent)}
+  .mock-ft{padding:12px 18px 16px;margin-top:auto}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+  .chip{font-family:var(--mono);font-size:10.5px;letter-spacing:.02em;padding:3px 8px;border-radius:6px;
+        border:1px solid var(--edge-2);color:var(--ink2);display:inline-flex;align-items:center;gap:5px}
+  .chip b{color:var(--ink);font-weight:600}
+  .chip::before{content:"";width:6px;height:6px;border-radius:50%}
+  .chip.eff-low::before{background:var(--good)} .chip.eff-med::before{background:var(--warn)}
+  .chip.eff-high::before{background:var(--hot)}
+  .chip.fill::before{background:var(--accent)}
+  .tradeoff{font-size:12.5px;color:var(--ink3);margin:0}
+  .tradeoff b{color:var(--ink2);font-weight:600}
+
+  /* ── recommendation ── */
+  .rec{margin:34px 0 60px;border:1px solid var(--edge);border-radius:14px;overflow:hidden}
+  .rec-hd{padding:18px 20px;background:linear-gradient(90deg,rgba(99,166,233,.12),transparent);
+          border-bottom:1px solid var(--edge)}
+  .rec-hd h2{font-size:19px}
+  .rec-body{padding:8px 20px 18px}
+  .rec-body ul{margin:10px 0 0;padding-left:0;list-style:none}
+  .rec-body li{padding:11px 0;border-top:1px solid var(--edge);display:grid;
+       grid-template-columns:132px 1fr;gap:14px;align-items:baseline}
+  @media(max-width:600px){.rec-body li{grid-template-columns:1fr;gap:3px}}
+  .rec-body li:first-child{border-top:none}
+  .rec-k{font-family:var(--mono);font-size:12px;color:var(--accent);letter-spacing:.02em}
+  .rec-v{font-size:13.5px;color:var(--ink2)}
+  .rec-v b{color:var(--ink)}
+  footer{border-top:1px solid var(--edge);padding:22px 0 40px;font-family:var(--mono);
+         font-size:11px;color:var(--ink3)}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="roundel" viewBox="0 0 100 100">
+      <circle cx="50" cy="50" r="38" fill="none" stroke="currentColor" stroke-width="6"/>
+      <circle cx="50" cy="50" r="11" fill="currentColor"/>
+      <rect x="47" y="2"  width="6" height="13" rx="2" fill="currentColor"/>
+      <rect x="47" y="85" width="6" height="13" rx="2" fill="currentColor"/>
+      <rect x="2"  y="47" width="13" height="6" rx="2" fill="currentColor"/>
+      <rect x="85" y="47" width="13" height="6" rx="2" fill="currentColor"/>
+    </symbol>
+  </defs>
+</svg>
+
+<header>
+  <div class="wrap mast">
+    <p class="eyebrow">Genesis · Welcome screen · Layout study</p>
+    <h1>When the panel goes wide, <b>Genesis</b> shouldn't float in a puddle of empty margin.</h1>
+    <p class="lede">The welcome column is capped at 340&nbsp;px and centered. In a narrow dock that's right —
+      there's nothing to line up against. But undocked into the editor or on a wide screen, the same cap leaves
+      a big void on each side and the identity reads as lost, not composed. Here are eight ways to spend that width.</p>
+    <div class="metabar">
+      <span class="tagpill">source: media/webview/sidebar.css · .welcome</span>
+      <span class="tagpill">current cap: max-width 340px</span>
+      <span class="tagpill">8 treatments · low → high effort</span>
+    </div>
+  </div>
+</header>
+
+<section class="wrap problem">
+  <div class="problem-grid">
+    <div>
+      <h2>The situation today</h2>
+      <p>The <span class="note">.welcome</span> block is a single centered axis: mark, wordmark, one line of
+        copy, a <b>Try</b> list, and (when they exist) recent threads — all inside a 340&nbsp;px measure. It was
+        centered on purpose so a left-aligned mark wouldn't sit against the panel edge with the whole width empty
+        beside it.</p>
+      <p>That trade is correct at ~320–420&nbsp;px. Past roughly 560&nbsp;px the centered cap stops helping and the
+        two dead columns start hurting — which is exactly the wide view in the screenshot.</p>
+      <p class="note">The goal isn't "stretch everything." It's to make the width feel <b>intended</b> at every dock size.</p>
+    </div>
+    <div class="frame" aria-label="Current layout: centered column with empty side margins">
+      <div class="tabs"><span class="on">Session</span><span>MCP</span><span>Agents</span><span>Diagnostics</span><span class="dot"></span></div>
+      <div class="stage" style="display:flex;height:210px">
+        <div class="hatch" style="flex:1;display:flex;align-items:center;justify-content:center">
+          <span class="lab" style="color:var(--g-red);opacity:.8;transform:rotate(-90deg);white-space:nowrap">empty</span>
+        </div>
+        <div style="width:150px;flex:none;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:6px;padding:8px 0">
+          <svg class="roundel mk" width="30" height="30"><use href="#roundel"/></svg>
+          <div class="wm" style="font-size:14px">GENESIS</div>
+          <div class="tag">I read your workspace and<br>ask before I change anything.</div>
+          <div style="width:100%;margin-top:6px" class="list">
+            <div class="row"><span class="ic"></span>Explain the file<span class="ch">›</span></div>
+            <div class="row"><span class="ic"></span>Review changes<span class="ch">›</span></div>
+          </div>
+        </div>
+        <div class="hatch" style="flex:1;display:flex;align-items:center;justify-content:center">
+          <span class="lab" style="color:var(--g-red);opacity:.8;transform:rotate(90deg);white-space:nowrap">empty</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="wrap mocks">
+  <div class="mocks-head">
+    <h2>Eight treatments</h2>
+    <span class="note">each preview = a wide dock (~900px), to scale</span>
+  </div>
+  <div class="grid">
+
+    <!-- 1 -->
+    <article class="mock">
+      <div class="mock-hd">
+        <div class="mock-no">01 — MINIMAL FIX</div>
+        <h3>Anchored Center</h3>
+        <p class="thesis">Keep the column exactly where it is, but make the space around it read as chosen: an oversized, dimmed roundel watermark and a hairline frame that catches the measure.</p>
+      </div>
+      <div class="mock-stage">
+        <div class="frame">
+          <div class="tabs"><span class="on">Session</span><span>MCP</span><span>Agents</span><span>Diagnostics</span><span class="dot"></span></div>
+          <div class="stage" style="height:200px;display:flex;align-items:center;justify-content:center;overflow:hidden">
+            <svg class="roundel" width="230" height="230" style="position:absolute;color:var(--g-fg);opacity:.035;right:-30px;top:-20px"><use href="#roundel"/></svg>
+            <div style="width:200px;text-align:center;border:1px solid var(--g-line);border-radius:10px;padding:14px 12px;background:var(--g-s1);position:relative;z-index:1">
+              <svg class="roundel mk" width="26" height="26" style="margin:0 auto"><use href="#roundel"/></svg>
+              <div class="wm" style="font-size:14px;margin-top:6px">GENESIS</div>
+              <div class="tag" style="margin-top:5px">Ask anything about this repository.</div>
+              <div class="list" style="margin-top:9px;text-align:left">
+                <div class="row"><span class="ic"></span>Explain the file I have open<span class="ch">›</span></div>
+                <div class="row"><span class="ic"></span>Review my uncommitted changes<span class="ch">›</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="mock-ft">
+        <div class="chips"><span class="chip eff-low"><b>Effort</b> Low</span><span class="chip fill"><b>Fills</b> Framed</span></div>
+        <p class="tradeoff"><b>Why:</b> zero layout risk, ships in one CSS block. <b>Watch:</b> it dresses the void rather than using it — best as a safety net, not the ambition.</p>
+      </div>
+    </article>
+
+    <!-- 2 -->
+    <article class="mock">
+      <div class="mock-hd">
+        <div class="mock-no">02 — SAFE BASELINE</div>
+        <h3>Fluid Measure</h3>
+        <p class="thesis">Let the column and its type grow with the panel. One <span class="note" style="font-size:11px">clamp()</span> takes the cap from 340&nbsp;px toward ~560&nbsp;px and scales the mark and copy with it.</p>
+      </div>
+      <div class="mock-stage">
+        <div class="frame">
+          <div class="tabs"><span class="on">Session</span><span>MCP</span><span>Agents</span><span>Diagnostics</span><span class="dot"></span></div>
+          <div class="stage" style="height:200px;display:flex;align-items:center;justify-content:center">
+            <div style="width:330px;text-align:center">
+              <svg class="roundel mk" width="40" height="40" style="margin:0 auto"><use href="#roundel"/></svg>
+              <div class="wm" style="font-size:22px;margin-top:8px">GENESIS</div>
+              <div class="tag" style="font-size:11px;margin-top:6px">I read your workspace and ask before I change anything.</div>
+              <div class="list" style="margin-top:11px;text-align:left">
+                <div class="row" style="font-size:11px;padding:9px 11px"><span class="ic"></span>Explain the file I have open<span class="ch">›</span></div>
+                <div class="row" style="font-size:11px;padding:9px 11px"><span class="ic"></span>Review my uncommitted changes<span class="ch">›</span></div>
+                <div class="row" style="font-size:11px;padding:9px 11px"><span class="ic"></span>Write tests for the selection<span class="ch">›</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="mock-ft">
+        <div class="chips"><span class="chip eff-low"><b>Effort</b> Low</span><span class="chip fill"><b>Fills</b> Partial</span></div>
+        <p class="tradeoff"><b>Why:</b> keeps the one-axis design the team already argued for, just less starved. <b>Watch:</b> still centered — very wide docks keep some margin (that's fine).</p>
+      </div>
+    </article>
+
+    <!-- 3 -->
+    <article class="mock">
+      <div class="mock-hd">
+        <div class="mock-no">03 — BALANCED</div>
+        <h3>Split · Identity / Actions</h3>
+        <p class="thesis">Two columns above a breakpoint: identity and tagline on the left, the <b>Try</b> and <b>Recent</b> lists on the right. Collapses back to today's stack when narrow.</p>
+      </div>
+      <div class="mock-stage">
+        <div class="frame">
+          <div class="tabs"><span class="on">Session</span><span>MCP</span><span>Agents</span><span>Diagnostics</span><span class="dot"></span></div>
+          <div class="stage" style="height:200px;display:flex;align-items:center;gap:26px;padding:0 26px">
+            <div style="flex:1">
+              <svg class="roundel mk" width="38" height="38"><use href="#roundel"/></svg>
+              <div class="wm" style="font-size:22px;margin-top:9px">GENESIS</div>
+              <div class="tag" style="font-size:11px;margin-top:7px;max-width:22ch">Every edit arrives as a diff you can review and undo.</div>
+            </div>
+            <div style="flex:1.05">
+              <div class="lab">Try</div>
+              <div class="list" style="margin-top:6px">
+                <div class="row"><span class="ic"></span>Explain the file I have open<span class="ch">›</span></div>
+                <div class="row"><span class="ic"></span>Review my uncommitted changes<span class="ch">›</span></div>
+              </div>
+              <div class="lab" style="margin-top:11px">Recent</div>
+              <div class="list" style="margin-top:6px">
+                <div class="row"><span class="rdot live"></span>Refactor auth guard<span class="ch">2h</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="mock-ft">
+        <div class="chips"><span class="chip eff-med"><b>Effort</b> Med</span><span class="chip fill"><b>Fills</b> Full</span></div>
+        <p class="tradeoff"><b>Why:</b> uses width the way a landing hero does — nothing invented, just the existing parts side by side. <b>Watch:</b> needs a clean breakpoint so it doesn't split at ~500px.</p>
+      </div>
+    </article>
+
+    <!-- 4 -->
+    <article class="mock">
+      <div class="mock-hd">
+        <div class="mock-no">04 — LAUNCHER</div>
+        <h3>Command Gallery</h3>
+        <p class="thesis">The <b>Try</b> rows become a responsive card grid — a launcher of real commands. The column count follows the width, so cards fill the row instead of trailing off.</p>
+      </div>
+      <div class="mock-stage">
+        <div class="frame">
+          <div class="tabs"><span class="on">Session</span><span>MCP</span><span>Agents</span><span>Diagnostics</span><span class="dot"></span></div>
+          <div class="stage" style="height:200px;padding:16px 22px;text-align:center">
+            <svg class="roundel mk" width="26" height="26" style="margin:0 auto"><use href="#roundel"/></svg>
+            <div class="wm" style="font-size:15px;margin-top:5px">GENESIS</div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:14px;text-align:left">
+              <div class="card"><span class="ic" style="display:block"></span><div style="font-size:9.5px;color:var(--g-fg2);margin-top:7px">Explain the file I have open</div></div>
+              <div class="card"><span class="ic" style="display:block"></span><div style="font-size:9.5px;color:var(--g-fg2);margin-top:7px">Review my uncommitted changes</div></div>
+              <div class="card"><span class="ic" style="display:block"></span><div style="font-size:9.5px;color:var(--g-fg2);margin-top:7px">Write tests for the selection</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="mock-ft">
+        <div class="chips"><span class="chip eff-med"><b>Effort</b> Med</span><span class="chip fill"><b>Fills</b> Full</span></div>
+        <p class="tradeoff"><b>Why:</b> the starters become the hero and scale cleanly to any width. <b>Watch:</b> cards read more "app launcher" than "quiet assistant" — a tone shift to sign off on.</p>
+      </div>
+    </article>
+
+    <!-- 5 -->
+    <article class="mock">
+      <div class="mock-hd">
+        <div class="mock-no">05 — HIGH VALUE</div>
+        <h3>Workspace Dashboard</h3>
+        <p class="thesis">Three columns turn dead space into signal: <b>Start</b> (Try), <b>Recent</b> threads, and <b>Workspace</b> — branch, dirty files, the file you have open. The empty margin becomes context.</p>
+      </div>
+      <div class="mock-stage">
+        <div class="frame">
+          <div class="tabs"><span class="on">Session</span><span>MCP</span><span>Agents</span><span>Diagnostics</span><span class="dot"></span></div>
+          <div class="stage" style="height:200px;padding:14px 16px">
+            <div style="display:flex;align-items:center;gap:8px;justify-content:center;margin-bottom:11px">
+              <svg class="roundel mk" width="18" height="18"><use href="#roundel"/></svg>
+              <span class="wm" style="font-size:12px">GENESIS</span>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:11px;text-align:left">
+              <div><div class="lab">Start</div><div class="list" style="margin-top:5px">
+                <div class="row" style="padding:6px 8px"><span class="ic"></span>Explain file</div>
+                <div class="row" style="padding:6px 8px"><span class="ic"></span>Review diff</div></div></div>
+              <div><div class="lab">Recent</div><div class="list" style="margin-top:5px">
+                <div class="row" style="padding:6px 8px"><span class="rdot live"></span>Auth guard<span class="ch">2h</span></div>
+                <div class="row" style="padding:6px 8px"><span class="rdot"></span>CSS tokens<span class="ch">1d</span></div></div></div>
+              <div><div class="lab">Workspace</div>
+                <div class="card" style="margin-top:5px;font-size:9px;color:var(--g-fg2);line-height:1.7">
+                  <div style="color:var(--g-green)">⎇ main · <span style="color:var(--g-orange)">3 dirty</span></div>
+                  <div style="color:var(--g-fg3)">open: sidebar.css</div>
+                  <div style="color:var(--g-fg3)">42 files · TS</div></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="mock-ft">
+        <div class="chips"><span class="chip eff-high"><b>Effort</b> High</span><span class="chip fill"><b>Fills</b> Full</span></div>
+        <p class="tradeoff"><b>Why:</b> the most useful width — the panel greets you with the state of your repo. <b>Watch:</b> new data plumbing (git, open editor) and the most surface to keep honest.</p>
+      </div>
+    </article>
+
+    <!-- 6 -->
+    <article class="mock">
+      <div class="mock-hd">
+        <div class="mock-no">06 — STRUCTURAL</div>
+        <h3>Left Rail + Canvas</h3>
+        <p class="thesis">A slim persistent rail on the left holds recent threads and a “new”; the greeting lives in the canvas beside it — offset, not floating, so nothing is centered in a void.</p>
+      </div>
+      <div class="mock-stage">
+        <div class="frame">
+          <div class="tabs"><span class="on">Session</span><span>MCP</span><span>Agents</span><span>Diagnostics</span><span class="dot"></span></div>
+          <div class="stage" style="height:200px;display:flex">
+            <div style="width:118px;flex:none;border-right:1px solid var(--g-line);padding:10px 9px;background:var(--g-recess)">
+              <div class="lab">Recent</div>
+              <div style="margin-top:7px;display:flex;flex-direction:column;gap:7px">
+                <div class="row" style="border:none;padding:0;font-size:9px"><span class="rdot live"></span>Auth guard</div>
+                <div class="row" style="border:none;padding:0;font-size:9px"><span class="rdot"></span>CSS tokens</div>
+                <div class="row" style="border:none;padding:0;font-size:9px"><span class="rdot"></span>MCP setup</div>
+              </div>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;justify-content:center;padding:0 26px">
+              <svg class="roundel mk" width="34" height="34"><use href="#roundel"/></svg>
+              <div class="wm" style="font-size:19px;margin-top:8px">GENESIS</div>
+              <div class="tag" style="font-size:11px;margin-top:7px;max-width:26ch">Pick up where you left off, or start something new.</div>
+              <div class="list" style="margin-top:10px;max-width:250px">
+                <div class="row"><span class="ic"></span>Explain the file I have open<span class="ch">›</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="mock-ft">
+        <div class="chips"><span class="chip eff-med"><b>Effort</b> Med</span><span class="chip fill"><b>Fills</b> Full</span></div>
+        <p class="tradeoff"><b>Why:</b> the rail earns its keep on every later screen too, not just the welcome. <b>Watch:</b> costs horizontal room a narrow dock can't spare — rail must hide under a breakpoint.</p>
+      </div>
+    </article>
+
+    <!-- 7 -->
+    <article class="mock">
+      <div class="mock-hd">
+        <div class="mock-no">07 — EXPRESSIVE</div>
+        <h3>Bento Grid</h3>
+        <p class="thesis">Asymmetric tiles fill the whole area: a large identity tile, a workspace tile, and starter tiles at mixed sizes. Composed to read as one board, not five stacked widths.</p>
+      </div>
+      <div class="mock-stage">
+        <div class="frame">
+          <div class="tabs"><span class="on">Session</span><span>MCP</span><span>Agents</span><span>Diagnostics</span><span class="dot"></span></div>
+          <div class="stage" style="height:200px;padding:14px;display:grid;grid-template-columns:1.4fr 1fr 1fr;grid-template-rows:1fr 1fr;gap:10px">
+            <div class="card" style="grid-row:span 2;display:flex;flex-direction:column;justify-content:center">
+              <svg class="roundel mk" width="30" height="30"><use href="#roundel"/></svg>
+              <div class="wm" style="font-size:16px;margin-top:7px">GENESIS</div>
+              <div class="tag" style="margin-top:5px">Ask anything about this repository.</div>
+            </div>
+            <div class="card" style="font-size:9px;color:var(--g-fg2)"><span class="ic" style="display:block;margin-bottom:6px"></span>Explain file</div>
+            <div class="card" style="font-size:9px;color:var(--g-fg2)"><span class="ic" style="display:block;margin-bottom:6px"></span>Review diff</div>
+            <div class="card" style="grid-column:span 2;font-size:9px;color:var(--g-fg3);line-height:1.7">
+              <span style="color:var(--g-green)">⎇ main</span> · <span style="color:var(--g-orange)">3 dirty</span> · open: sidebar.css</div>
+          </div>
+        </div>
+      </div>
+      <div class="mock-ft">
+        <div class="chips"><span class="chip eff-high"><b>Effort</b> High</span><span class="chip fill"><b>Fills</b> Full</span></div>
+        <p class="tradeoff"><b>Why:</b> the most distinctive, most "brand" option. <b>Watch:</b> reflowing a bento to narrow docks without it turning to mush is the real work here.</p>
+      </div>
+    </article>
+
+    <!-- 8 -->
+    <article class="mock">
+      <div class="mock-hd">
+        <div class="mock-no">08 — HERO</div>
+        <h3>Hero Band + Grid</h3>
+        <p class="thesis">Spend the width horizontally at the top: a full-bleed identity band with the mark and tagline stretched across it, then the starters as a grid below. The band carries the width so the body needn't.</p>
+      </div>
+      <div class="mock-stage">
+        <div class="frame">
+          <div class="tabs"><span class="on">Session</span><span>MCP</span><span>Agents</span><span>Diagnostics</span><span class="dot"></span></div>
+          <div class="stage" style="height:200px">
+            <div style="display:flex;align-items:center;gap:14px;padding:18px 22px;border-bottom:1px solid var(--g-line);
+                        background:radial-gradient(120% 200% at 0% 0%,rgba(31,117,203,.16),transparent 60%)">
+              <svg class="roundel mk" width="40" height="40"><use href="#roundel"/></svg>
+              <div>
+                <div class="wm" style="font-size:22px">GENESIS</div>
+                <div class="tag" style="font-size:11px;margin-top:4px">I read your workspace and ask before I change anything.</div>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:16px 22px;text-align:left">
+              <div class="card" style="font-size:9px;color:var(--g-fg2)"><span class="ic" style="display:block;margin-bottom:6px"></span>Explain the file</div>
+              <div class="card" style="font-size:9px;color:var(--g-fg2)"><span class="ic" style="display:block;margin-bottom:6px"></span>Review changes</div>
+              <div class="card" style="font-size:9px;color:var(--g-fg2)"><span class="ic" style="display:block;margin-bottom:6px"></span>Write tests</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="mock-ft">
+        <div class="chips"><span class="chip eff-med"><b>Effort</b> Med</span><span class="chip fill"><b>Fills</b> Full</span></div>
+        <p class="tradeoff"><b>Why:</b> the identity finally gets to be big, and the band naturally spans any width. <b>Watch:</b> a tall hero can crowd the composer on short panels — cap the band height.</p>
+      </div>
+    </article>
+
+  </div>
+</section>
+
+<section class="wrap">
+  <div class="rec">
+    <div class="rec-hd"><h2>What I'd actually ship</h2></div>
+    <div class="rec-body">
+      <p style="margin:12px 0 2px;max-width:62ch;color:var(--ink2)">These aren't mutually exclusive — the strongest plan is layered by effort. Pick a floor, then decide how far up to go.</p>
+      <ul>
+        <li><span class="rec-k">Ship now</span><span class="rec-v"><b>02 Fluid Measure</b> as the baseline — one <span class="note">clamp()</span> removes the "puddle" feeling everywhere for near-zero risk, and keeps the design the team already committed to.</span></li>
+        <li><span class="rec-k">Then layer</span><span class="rec-v"><b>03 Split</b> above a ~640px breakpoint. It reuses only existing parts (Try + Recent), so there's nothing new to invent and it degrades cleanly to the stack.</span></li>
+        <li><span class="rec-k">The bet</span><span class="rec-v"><b>05 Workspace Dashboard</b> if you want the wide panel to earn its space — greeting the user with branch, dirty files and the open file is the one option that makes width a feature, not a fix.</span></li>
+        <li><span class="rec-k">Keep in pocket</span><span class="rec-v"><b>01 Anchored Center</b> as the guaranteed fallback if any responsive option slips the release.</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">Genesis welcome-screen layout study · previews use the shipping palette from <span style="color:var(--ink2)">media/webview/tokens.css</span> · 8 treatments, not final pixels.</div>
+</footer>
