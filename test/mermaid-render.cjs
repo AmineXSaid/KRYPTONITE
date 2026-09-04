@@ -30,7 +30,10 @@ const os = require("node:os");
 const path = require("node:path");
 
 const ROOT = path.join(__dirname, "..");
-const MEDIA = path.join(ROOT, "media");
+// Defaults to the working tree, but can be pointed at the media unpacked from
+// a built .vsix, so the same proof can be run against the archive the user
+// actually installs rather than only against the sources it was built from.
+const MEDIA = process.env.GENESIS_MEDIA || path.join(ROOT, "media");
 // Everything this suite writes goes to a temp directory, never into media/:
 // that folder is packaged into the .vsix, and a proof screenshot is not
 // something users should be shipped. The page reaches the real assets through
