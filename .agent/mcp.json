@@ -32,8 +32,10 @@
     "Ask and Plan mode - neither promises the model can only look, and MCP has",
     "no way to declare a tool read-only, so there is nothing to check.",
     "",
-    "Both servers below are live, and both are verified for real by",
+    "filesystem and memory below are live, and both are verified for real by",
     "test/mcp-live.ts - not parsed, actually spawned, and actually called.",
+    "deepwiki is this repo's own server (see below); it is exercised by its own",
+    "Python test suite under mcp-servers/tests rather than by mcp-live.ts.",
     "",
     "filesystem exposes read/write tools scoped to the directory named in args -",
     "the workspace root here, and nothing above it. approval is 'ask', so every",
@@ -43,7 +45,22 @@
     "another filesystem reader, so it demonstrates a stateful tool - create an",
     "entity, search for it later. It keeps its graph in its own process, next to",
     "the installed package, not inside this workspace; set the MEMORY_FILE_PATH",
-    "env var here if you want it to persist somewhere specific instead."
+    "env var here if you want it to persist somewhere specific instead.",
+    "",
+    "deepwiki is one of THIS repo's own servers (mcp-servers/), and the odd one",
+    "out: it does not reach an external system, it reads this workspace and",
+    "generates a wiki of it through a Genesis endpoint - then serves that wiki",
+    "back so any agent can understand the codebase before editing it. It runs",
+    "straight from the checkout via 'python -m deepwiki_mcp.server' with",
+    "PYTHONPATH set to mcp-servers/src (cwd is the workspace root, so the",
+    "relative path resolves and DEEPWIKI_WORKSPACE defaults to this repo). After",
+    "'pip install ./mcp-servers' the console script 'deepwiki-mcp' is the",
+    "equivalent command. Its READ tools - wiki_status, list_wiki_pages,",
+    "read_wiki_page, search_wiki - need no endpoint and work offline; only",
+    "generate_wiki and ask_wiki reach the model, and they name the missing",
+    "DEEPWIKI_ENDPOINT_URL/_MODEL at call time rather than blocking startup. Set",
+    "those two (and DEEPWIKI_ENDPOINT_KEY unless the endpoint needs none) in your",
+    "environment - the ${VAR:-} passthroughs below keep them out of this file."
   ],
   "mcpServers": {
     "filesystem": {
@@ -58,6 +75,21 @@
       "args": ["-y", "@modelcontextprotocol/server-memory"],
       "approval": "ask",
       "timeoutMs": 120000,
+      "enabled": true
+    },
+    "deepwiki": {
+      "command": "python",
+      "args": ["-m", "deepwiki_mcp.server"],
+      "env": {
+        "PYTHONPATH": "mcp-servers/src",
+        "DEEPWIKI_ENDPOINT_URL": "${DEEPWIKI_ENDPOINT_URL:-}",
+        "DEEPWIKI_ENDPOINT_WIRE": "${DEEPWIKI_ENDPOINT_WIRE:-openai}",
+        "DEEPWIKI_MODEL": "${DEEPWIKI_MODEL:-}",
+        "DEEPWIKI_ENDPOINT_KEY": "${DEEPWIKI_ENDPOINT_KEY:-}",
+        "DEEPWIKI_ENDPOINT_KIND": "${DEEPWIKI_ENDPOINT_KIND:-reasoning}"
+      },
+      "approval": "ask",
+      "timeoutMs": 600000,
       "enabled": true
     }
   }
