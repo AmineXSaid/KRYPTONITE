@@ -68,7 +68,13 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 .cc-wordmark { font-size: 11px; font-weight: 700; letter-spacing: .22em; text-transform: uppercase; }
 .cc-sub { flex: 0 1 auto; min-width: 0; font-size: 11.5px; color: var(--kx-fg-2); }
 .profile-chip {
-  flex: none; font-family: var(--kx-mono); font-size: 10.5px; padding: 2px 8px;
+  /* Shrinkable, so its own `.ell` ellipsis can engage. `flex: none` pinned it
+     to the profile id's full width - and a long id (the ordinary case for a
+     descriptive profile name) then overran the header and scrolled the whole
+     page sideways on a narrow panel. It shrinks and truncates now, with the
+     full id still on the title tooltip. */
+  flex: 0 1 auto; min-width: 3ch; max-width: 22ch;
+  font-family: var(--kx-mono); font-size: 10.5px; padding: 2px 8px;
   border: 1px solid var(--kx-line); color: var(--kx-fg-2); border-radius: 4px;
 }
 .hdr-btn {
@@ -79,23 +85,21 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 
 /* ───────────────────────── section strip ───────────────────────── */
 
-/* Ten sections never fit, so this strip has always scrolled - it just never
-   said so, and a clipped last tab reads as the end of the list rather than the
-   middle of it. Same mask as the sidebar's tab strip, for the same reason. */
+/* Ten sections never fit on one line, and the strip used to answer that by
+   SCROLLING sideways with the scrollbar hidden and only a fade to hint at it.
+   The whole tab row is a constant ~1083px wide, so at every realistic panel
+   width the tabs past the fold - Skills, Checkpoints, Logs, Documentation,
+   About - sat off-screen with no visible way to reach them. Dragging the panel
+   narrower did not reflow them; it hid them.
+
+   So the strip WRAPS instead of scrolls. Every tab stays on screen and
+   reachable at any width: one row when there is room, two or three rows when
+   there is not. Nothing is ever clipped, which is the whole point - a section
+   you cannot see is a section you cannot open. */
 .strip {
-  flex: none; display: flex; gap: 0; overflow-x: auto; overflow-y: hidden;
+  flex: none; display: flex; flex-wrap: wrap; gap: 0;
   border-bottom: 1px solid var(--kx-line);
-  scrollbar-width: none;
-  /* Exactly the width of the fade below, so the LAST tab can scroll clear of
-     it. Without this the mask sits on top of the final tab at the end of the
-     scroll - and since the More menu navigates straight to About, which is
-     last, the tab being faded was the selected one. The mask only ever means
-     "there is more this way", so it must never cover the end of the list. */
-  padding-right: 28px;
-  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
-  mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
 }
-.strip::-webkit-scrollbar { display: none; }
 .strip button {
   display: flex; align-items: center; gap: 6px; flex: none; padding: 9px;
   font-size: 11.5px; white-space: nowrap;
@@ -355,7 +359,11 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 }
 .tbl-bar .btn { display: inline-flex; align-items: center; gap: 6px; }
 .tbl-bar .btn.sync:disabled { opacity: 1; color: var(--kx-fg-3); }
-.bar-note { flex: none; }
+/* Elastic, not fixed. `flex: none` pinned this note to its full single-line
+   width (~417px), so on a narrow panel it wrapped to its own row and then
+   overran it - pushing the whole pane, and the page, into a sideways scroll.
+   Letting it shrink below its content width lets the text wrap instead. */
+.bar-note { flex: 1 1 auto; min-width: 0; }
 
 /* Period picker. The lit segment is the whole state, which is what a checkbox
    labelled "Check every 10 min" could not do: there the on/off lived in the
