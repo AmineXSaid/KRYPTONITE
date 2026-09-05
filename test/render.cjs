@@ -1794,171 +1794,119 @@ function contrast(a, b) {
     }
   }
 
-  /* ── 5t. the welcome screen is centred, and is one column ──────────── */
+  /* ── 5t. the welcome is a workspace boot sequence ─────────────────── */
+  //
+  // The centred one-column greeting and the wide-dock split it grew are both
+  // gone: the welcome comes up like a terminal now - a masthead, a boot log, a
+  // live prompt, and the openers as cards - with the split-screen mark bled in
+  // behind it as a watermark. These assertions test that screen, and two of
+  // them pin what the owner asked for by name: the cursor must blink like a
+  // terminal's, and the background logo must be there.
   {
-    // `.welcome` already carried `justify-content: center`, and it did nothing
-    // visible: it centres the welcome's CHILDREN inside the welcome, and the
-    // welcome was `min-height: 340px` inside a transcript up to 591px tall. So
-    // the block sat at the top with a measured 237px of dead space beneath it
-    // and 14px above. Everything was centred inside a box that was not.
     const sessions = [
       { id: "a", title: "can you explain this code?", count: 4, when: "1m ago" },
       { id: "b", title: "why dlc? here and what used for?", count: 9, when: "3d ago" },
     ];
-    for (const width of [300, 360, 420, 520]) {
+    // It renders as the boot screen at every dock width, reports what mounted,
+    // offers three cards, and never scrolls the panel sideways.
+    for (const width of [300, 360, 420, 520, 900]) {
       const { ctx, page } = await open(width, { sessions, session: { id: "s1", title: "", messages: [] } });
-      /* Taller than open()'s 640, deliberately. The reported bug is dead space
-         BELOW the block, which only exists when the block fits - at 640 the
-         welcome overflows at every width and the scroll branch below passes
-         without testing anything. 900 is an ordinary editor height and it is
-         the shape the screenshot showed. */
       await page.setViewportSize({ width, height: 900 });
-      await page.waitForTimeout(250);
+      await page.waitForTimeout(200);
       const m = await page.evaluate(() => {
-        const wel = document.querySelector(".welcome");
+        const wel = document.querySelector(".welcome.boot");
         if (!wel) return { missing: true };
-        const w = wel.getBoundingClientRect();
-        const log = document.getElementById("log").getBoundingClientRect();
-        /* The CONTENT, not `wel.children`. The welcome wraps its identity and
-           its lists in `.w-id` / `.w-acts` for the wide split, so the direct
-           children are two boxes that are trivially concentric; measuring
-           those would keep this assertion green while the five things a
-           reader actually sees drifted apart. */
-        const kids = [...wel.querySelectorAll(
-          ":scope > *, :scope > .w-id > *, :scope > .w-acts > *"
-        )].map((e) => e.getBoundingClientRect());
-        const mid = (w.left + w.right) / 2;
         return {
-          above: Math.round(w.top - log.top),
-          below: Math.round(log.bottom - w.bottom),
-          widest: Math.max(...kids.map((r) => Math.round(r.width))),
-          // Every child's own centre against the block's centre. Geometry, so
-          // a child that is centred by luck of its content still counts.
-          offsets: kids.map((r) => Math.round((r.left + r.right) / 2 - mid)),
-          // Whether the transcript is scrolling. When it is, the content is
-          // taller than the panel and there is no vertical centring to do -
-          // asking for symmetric space then is asking for the block to be
-          // clipped at both ends.
-          scrolls: document.getElementById("log").scrollHeight >
-                   document.getElementById("log").clientHeight + 1,
-        };
-      });
-      ok(`the welcome screen renders at ${width}px`, !m.missing, JSON.stringify(m));
-      /* The consequence, not the rule: dead space below the block IS the
-         "not centred" that was reported - 237px of it, against 14px above.
-      
-         Two cases, and only one of them is about centring. When the content
-         fits, the space above and below must match. When it does not - a
-         narrow dock in a short panel, where the list alone is taller than the
-         transcript - there is nothing to centre, and what matters instead is
-         that it SCROLLS rather than being clipped. Asserting symmetry in that
-         case would be asking for the block to be cut off at both ends. */
-      if (m.scrolls) {
-        ok(`the welcome scrolls rather than clipping when it does not fit at ${width}px`,
-          m.below <= 0 && m.above >= 0, JSON.stringify(m));
-      } else {
-        ok(`the welcome block is vertically centred in the transcript at ${width}px`,
-          Math.abs(m.above - m.below) <= 16, JSON.stringify(m));
-      }
-      ok(`and every element is centred on the same axis at ${width}px`,
-        m.offsets.every((o) => Math.abs(o) <= 1), JSON.stringify(m));
-      // One column. The lists used to take the full panel - 484px at a 520px
-      // dock - under a 290px paragraph and a 71px wordmark, so five stacked
-      // elements had five different widths and the widest grew every time the
-      // panel did.
-      ok(`the column is capped rather than growing with the panel at ${width}px`,
-        m.widest <= 340, JSON.stringify(m));
-      await ctx.close();
-    }
-
-    // The mark: bigger, and scaled to the panel rather than fixed. It was 34px
-    // on the one screen that exists to carry it, with a 19px wordmark under
-    // it - a 56px identity block in a 340px column.
-    const sizes = {};
-    for (const width of [300, 420, 520]) {
-      const { ctx, page } = await open(width, { session: { id: "s1", title: "", messages: [] } });
-      sizes[width] = await page.evaluate(() => {
-        const mark = document.querySelector(".welcome .w-crystal");
-        const word = document.querySelector(".welcome .w-mark");
-        const wel = document.querySelector(".welcome").getBoundingClientRect();
-        const m = mark ? mark.getBoundingClientRect() : null;
-        return {
-          mark: m ? Math.round(m.width) : 0,
-          word: word ? Math.round(word.getBoundingClientRect().width) : 0,
-          // A mark wider than the column it sits in is the failure mode of
-          // scaling it up, so this is measured rather than assumed.
-          fits: !!m && m.width <= wel.width,
-        };
-      });
-      await ctx.close();
-    }
-    ok("the welcome mark is bigger than the 34px it was",
-      sizes[420].mark > 34, JSON.stringify(sizes));
-    ok("and it scales with the panel rather than sitting at one size",
-      sizes[520].mark > sizes[300].mark, JSON.stringify(sizes));
-    ok("and it never outgrows the column at any width",
-      Object.values(sizes).every((s) => s.fits), JSON.stringify(sizes));
-    ok("and the wordmark grows with it, so the pair stays in proportion",
-      sizes[520].word > sizes[300].word, JSON.stringify(sizes));
-
-    /* ── the wide dock splits, and the narrow one does not ────────────
-     *
-     * Every width above is 520 or below, which is the whole of the stacked
-     * case and none of the split. The cap those assertions pin - 340, centred
-     * - is exactly what the split stops doing, so without this the treatment
-     * could break in either direction unnoticed: fail to engage at 900px, or
-     * engage at 500px where two columns do not fit.
-     *
-     * The pair either side of 640 is the assertion that matters. A breakpoint
-     * tested only at its extremes is a breakpoint whose value nothing pins. */
-    const split = {};
-    for (const width of [520, 639, 640, 900]) {
-      const { ctx, page } = await open(width, { sessions, session: { id: "s1", title: "", messages: [] } });
-      await page.setViewportSize({ width, height: 900 });
-      await page.waitForTimeout(250);
-      split[width] = await page.evaluate(() => {
-        const wel = document.querySelector(".welcome");
-        const id = document.querySelector(".w-id");
-        const acts = document.querySelector(".w-acts");
-        if (!wel || !id || !acts) return { missing: true };
-        const W = wel.getBoundingClientRect();
-        const I = id.getBoundingClientRect();
-        const A = acts.getBoundingClientRect();
-        const log = document.getElementById("log").getBoundingClientRect();
-        return {
-          // Side by side means the identity ENDS before the lists begin and
-          // the two overlap vertically. Geometry, so it holds however the
-          // layout is built.
-          side: I.right <= A.left + 1 && I.top < A.bottom && A.top < I.bottom,
-          stacked: I.bottom <= A.top + 1,
-          welW: Math.round(W.width),
-          // Centred in the transcript, so a very wide dock does not leave the
-          // block hard against one edge - the failure the 760 cap invites.
-          offset: Math.round((W.left + W.right) / 2 - (log.left + log.right) / 2),
-          // The panel must never scroll sideways. The split is the one layout
-          // here with two columns to overflow.
+          text: wel.textContent,
+          panel: !!document.querySelector(".boot-panel"),
+          cards: document.querySelectorAll(".boot-card[data-starter]").length,
           hScroll: document.documentElement.scrollWidth >
                    document.documentElement.clientWidth + 1,
         };
       });
+      ok(`the boot welcome renders at ${width}px`, !m.missing && m.panel, JSON.stringify(m));
+      ok(`its log reports what mounted at ${width}px`,
+        /initializing workspace/.test(m.text || "") && /workspace mounted/.test(m.text || "") &&
+        /endpoint ready/.test(m.text || "") && /skills loaded/.test(m.text || ""),
+        (m.text || "").slice(0, 80));
+      ok(`the openers are three cards at ${width}px`, m.cards === 3, JSON.stringify(m));
+      ok(`and it never scrolls the panel sideways at ${width}px`, !m.hScroll, JSON.stringify(m));
       await ctx.close();
     }
-    ok("the welcome stacks in a narrow dock", split[520].stacked, JSON.stringify(split[520]));
-    ok("and still stacks one pixel below the breakpoint", split[639].stacked, JSON.stringify(split[639]));
-    ok("it splits into two columns at the breakpoint", split[640].side, JSON.stringify(split[640]));
-    ok("and stays split on a wide dock", split[900].side, JSON.stringify(split[900]));
-    // The point of the treatment: the block uses the width instead of sitting
-    // in a 340px column with the panel empty either side. #log caps its
-    // children at 78ch for prose, and the split has to out-rank that or it
-    // renders inside a 610px box at every width above it.
-    ok("the split uses the width the stack left empty",
-      split[900].welW > split[639].welW + 80, JSON.stringify(split));
-    ok("and is capped rather than growing for ever",
-      split[900].welW <= 860, JSON.stringify(split[900]));
-    ok("and stays centred in the transcript",
-      Object.values(split).every((v) => Math.abs(v.offset) <= 2), JSON.stringify(split));
-    ok("and never scrolls the panel sideways",
-      Object.values(split).every((v) => !v.hScroll), JSON.stringify(split));
+
+    /* THE BACKGROUND LOGO OF THE SPLIT-SCREEN DIRECTION, brought onto the boot
+     * screen. It is one oversized mark bled off the corner at a whisper of
+     * opacity - texture, not a control - so it is aria-hidden, click-through,
+     * behind the content, and NOT the `.crystal`: that class names the single
+     * turning roundel in the masthead, which the animation suite counts. */
+    {
+      const { ctx, page } = await open(420, { session: { id: "s1", title: "", messages: [] } });
+      const wm = await page.evaluate(() => {
+        const bg = document.querySelector(".boot-bg");
+        const mark = document.querySelector(".boot-bg-mark");
+        if (!bg || !mark) return { missing: true };
+        const cs = getComputedStyle(mark);
+        const bgcs = getComputedStyle(bg);
+        return {
+          crystals: document.querySelectorAll(".welcome .crystal").length,
+          opacity: parseFloat(cs.opacity),
+          hidden: bg.getAttribute("aria-hidden") === "true",
+          behind: (parseInt(bgcs.zIndex || "0", 10) || 0) <= 0,
+          pe: bgcs.pointerEvents,
+        };
+      });
+      ok("the split-screen watermark is on the boot screen", !wm.missing, JSON.stringify(wm));
+      ok("and it is one mark: the masthead's is still the only .crystal",
+        wm.crystals === 1, JSON.stringify(wm));
+      ok("the watermark is a whisper, not a foreground",
+        wm.opacity > 0 && wm.opacity <= 0.16, JSON.stringify(wm));
+      ok("it sits behind the content", wm.behind, JSON.stringify(wm));
+      ok("it is texture: aria-hidden and click-through",
+        wm.hidden && wm.pe === "none", JSON.stringify(wm));
+      await ctx.close();
+    }
+
+    /* THE GREEN PROMPT CURSOR BLINKS LIKE A TERMINAL'S. A steady block that
+     * appears and disappears is what a terminal draws, so it has an animation
+     * and its pixels change across a blink - and it holds still for a reader
+     * who asked for no motion, because a blink is exactly what that setting is
+     * asking not to see. */
+    {
+      const { ctx, page } = await open(420, { session: { id: "s1", title: "", messages: [] } });
+      const cur = page.locator(".boot-cursor").first();
+      ok("the boot prompt has a cursor", (await cur.count()) === 1);
+      const anim = await cur.evaluate((el) => getComputedStyle(el).animationName);
+      ok("and it blinks like a terminal cursor", anim !== "none" && anim.length > 0, anim);
+      const box = await cur.boundingBox();
+      const shot = async () =>
+        (await page.screenshot({ clip: box, animations: "allow" })).toString("base64");
+      const a = await shot();
+      await page.waitForTimeout(370);
+      const b = await shot();
+      await page.waitForTimeout(370);
+      const c = await shot();
+      ok("and the blink actually paints on and off",
+        a !== b || b !== c, "sampled three frames across a 1.1s blink");
+      await ctx.close();
+
+      const ctx2 = await browser.newContext({
+        viewport: { width: 420, height: 900 }, deviceScaleFactor: 2,
+        colorScheme: "dark", reducedMotion: "reduce",
+      });
+      const p2 = await ctx2.newPage();
+      await p2.goto("file://" + HTML_PATH);
+      await p2.evaluate((s) => window.dispatchEvent(new MessageEvent("message",
+        { data: { type: "stateSync", state: s } })),
+        Object.assign({}, BASE, { session: { id: "s1", title: "", messages: [] } }));
+      await p2.waitForTimeout(300);
+      const c2 = p2.locator(".boot-cursor").first();
+      const box2 = await c2.boundingBox();
+      const r1 = (await p2.screenshot({ clip: box2, animations: "allow" })).toString("base64");
+      await p2.waitForTimeout(560);
+      const r2 = (await p2.screenshot({ clip: box2, animations: "allow" })).toString("base64");
+      ok("and it holds still for a reader who asked for no motion", r1 === r2);
+      await ctx2.close();
+    }
   }
 
   /* ── 5u. the permission glyphs are a set, and all three paint ──────── */

@@ -60,6 +60,29 @@
   Center.
 
 ### Added
+- **The welcome screen is a workspace boot sequence.** An open workspace now
+  comes up like a terminal rather than opening on a greeting: a masthead with
+  the version line, a boot log that reports what actually mounted, a live prompt
+  with a blinking cursor, and the openers as cards. Every line of the log reads
+  a fact the panel already holds — the folder name, the active model, the skill
+  count, the count of uncommitted changes — so none of it is a placeholder; a
+  green tick marks what came up and an amber marker marks the one thing waiting
+  on you, the changes to review. A fact the panel does not have, a git branch or
+  a file count, is left off rather than invented.
+
+  Behind the log, one oversized mark bleeds off the bottom-left corner at a
+  whisper of opacity — the split-screen watermark, brought onto the boot screen.
+  It is texture, not a control: `aria-hidden`, `pointer-events: none`, and *not*
+  the one animated mark the masthead carries and the render suite counts, so the
+  screen still has exactly one turning roundel. The watermark holds still; a
+  watermark that spun would pull the eye off the log that is the actual content.
+
+  "Pick up where you left off" is withheld until there is a thread to resume, so
+  a genuinely first run shows the log and the openers and nothing it cannot back
+  up. The openers still carry `data-starter`, so `/explain`, `review` and
+  `/tests` route exactly as before, and the Recent rows keep the marquee that
+  reveals a long title by scrolling it.
+
 - **An approved plan now becomes the todo list.** The plan card has always
   parsed the fenced `plan` block into steps, and `update_todos` has always
   backed a todo card, but the two shipped in 0.2.0 as separate features and

@@ -2592,67 +2592,76 @@ function _sbRun() {
       recent.push(sess);
     }
 
-    // The wordmark, not a sentence. "How can I help?" is what every assistant
-    // says; the mark says which one this is, and it is the one place Michroma
-    // appears outside the header.
-    /* ONE MARK, AND IT TURNS ONCE.
-     *
-     * It was briefly a pair that blinked. The roundel is a ring around a core,
-     * so two of them read as eyes - and as eyes they were ugly. The mark is a
-     * BEZEL: four notches on a ring, which is a thing that turns. So it turns,
-     * once, a beat after the panel arrives, and then it is a logo again. */
-    /* 34 was too small to be the brand mark on the one screen that exists to
-       carry it: at 34px it read as an icon beside the wordmark rather than as
-       the thing the screen is built around, and the wordmark under it is only
-       19px tall - so the whole identity block was 56px in a 340px column.
-       56 gives the mark presence without crowding the column it sits in; the
-       CSS scales it down with the panel so a narrow dock does not have a mark
-       wider than the text under it. */
-    /* TWO WRAPPERS, AND THEY EXIST FOR THE WIDE DOCK.
-     *
-     * Stacked, these change nothing: `.welcome > *` caps whatever the direct
-     * children are at 340, and that is now these two instead of the five
-     * elements inside them. Above 640px they become the two columns of the
-     * split - identity on the left, the lists on the right - which is a grid
-     * that needs exactly two grid items and cannot be built from five.
-     *
-     * The two states of this screen above (no folder, no endpoint) keep the
-     * plain stack: they are one mark, one sentence and a button, so there is
-     * no second column to fill and a grid would only spread three elements
-     * across a width they do not want. Hence the modifier on the container
-     * rather than a rule on `.welcome` itself. */
-    var body = '<div class="w-id">' +
-      crystal(56, "crystal w-crystal" + spin) +
-      '<div class="w-mark">Genesis</div>' +
-      '<p>' + (recent.length
-        ? "Pick up where you left off, or start something new."
-        /* This used to say "never write a file until you accept it", which is
-           the first sentence a new user reads and is not what happens: a write
-           lands on disk as soon as the approval card is answered, and the diff
-           card afterwards is a review with an undo behind it. In edits-auto or
-           full-auto, and after one "Always allow", there is no card at all.
-           The honest version is still the reassuring one - nothing happens
-           unasked, and every change is reviewable and revertible. */
-        : "I read your workspace and ask before I change anything. Every edit " +
-          "arrives as a diff you can review and undo. Ask anything about this " +
-          "repository.") + "</p></div>";
+    // THE WORKSPACE BOOT SEQUENCE.
+    //
+    // The welcome is a terminal coming up: a masthead, a boot log that reports
+    // what actually mounted, a live prompt, and the openers as cards. It reads
+    // the same facts the panel already holds - the folder, the active model,
+    // the skill count, the count of uncommitted changes - so no line of it is
+    // a mockup's placeholder. A fact the panel does not have (a git branch, a
+    // file count) is simply not printed rather than invented.
+    //
+    // Behind all of it, one oversized mark bleeds off the bottom-left corner:
+    // the split-screen watermark, at a whisper of opacity. It is NOT the
+    // `.crystal` - that class, and the single animated mark it names, stays in
+    // the masthead where it turns once on arrival.
+    var ver = (S.config && S.config.extensionVersion) || "";
+    var ap = activeProfile();
+    var model = ap && ap.model ? ap.model : "";
+    var skillN = S.skills.length;
+    var changeN = (S.changes || []).length;
 
-    // Everything that is a row goes in the second wrapper: Try, and Recent
-    // when there is one. Split, this is the right-hand column; stacked, it is
-    // the same list under the same identity it has always been under.
-    body += '<div class="w-acts">';
+    // The background logo: the full mark, huge and dim, anchored off the
+    // corner. aria-hidden - it is texture, and the masthead mark is the one
+    // that names the product to a screen reader.
+    var body = '<div class="boot-bg" aria-hidden="true">' + crystal(340, "boot-bg-mark") + "</div>";
 
-    // Openers. These were removed once for being invented examples about a
-    // function nobody in the workspace has - and that objection was right about
-    // the old ones and does not apply to these. Every one is a real command
-    // this extension already has, aimed at what the user has open right now:
-    // no invented identifiers, nothing that can refer to somebody else's code.
-    body += '<div class="w-label">Try</div><div class="w-list">';
+    // The masthead. The one turning mark, the wordmark, and the version line
+    // the design writes as "v0.9.0 · workspace boot".
+    body += '<div class="boot-head">' +
+      crystal(22, "crystal" + spin) +
+      '<span class="w-mark">Genesis</span>' +
+      '<span class="boot-ver">' + (ver ? "v" + esc(ver) + " · " : "") +
+        "workspace boot</span></div>";
+
+    // The boot log. A green tick for what came up, an amber marker for the one
+    // thing waiting on the user. `boot-meta` is the dim tail after the em dash.
+    function tick(label, meta) {
+      return '<div class="boot-line ok"><span class="boot-tick">✓</span>' +
+        '<span class="boot-what">' + esc(label) + "</span>" +
+        (meta ? '<span class="boot-meta">— ' + esc(meta) + "</span>" : "") +
+        "</div>";
+    }
+    body += '<div class="boot-panel">' +
+      '<div class="boot-line cmd"><span class="boot-g">genesis</span>' +
+        '<span class="boot-arrow">▸</span>initializing workspace</div>' +
+      tick("workspace mounted", S.workspace.name || "workspace") +
+      (model ? tick("endpoint ready", model) : "") +
+      tick("skills loaded", skillN + " available");
+    if (changeN) {
+      body += '<div class="boot-line pending"><span class="boot-tick">›</span>' +
+        '<span class="boot-meta">' + changeN +
+        (changeN === 1 ? " uncommitted change" : " uncommitted changes") +
+        " — ask me to review them</span></div>";
+    }
+    body += '<div class="boot-line prompt"><span class="boot-g">genesis</span>' +
+      '<span class="boot-caret">❯</span><span class="boot-cursor"></span></div>' +
+      "</div>";
+
+    // The design's "Pick up where you left off" copy earns its place only when
+    // there is a thread to come back to; the Recent list below is what it
+    // points at.
+    if (recent.length) body += '<p class="boot-note">Pick up where you left off, or start something new.</p>';
+
+    // Openers, as the design's cards: the command in the accent, the plain-language
+    // description under it. `data-starter` is unchanged, so the click handler that
+    // routes /explain, review and /tests still fires whatever the card looks like.
+    body += '<div class="w-label">Start here</div><div class="boot-cards">';
     for (var si = 0; si < STARTERS.length; si++) {
-      body += '<button class="w-row" data-starter="' + esc(STARTERS[si].run) + '">' +
-        icon(STARTERS[si].icon, "ic-11") +
-        '<span class="t mq"><span class="mq-i">' + esc(STARTERS[si].text) + "</span></span>" +
-        icon("i-chev", "ic-9") + "</button>";
+      body += '<button class="boot-card" data-starter="' + esc(STARTERS[si].run) + '">' +
+        '<span class="boot-card-cmd">' + esc(STARTERS[si].run) + "</span>" +
+        '<span class="boot-card-desc">' + esc(STARTERS[si].text) + "</span>" +
+        "</button>";
     }
     body += "</div>";
 
@@ -2693,10 +2702,10 @@ function _sbRun() {
       }
       body += "</div></div>";
     }
-    body += "</div>";
-    logEl.appendChild(div("welcome w-split", body));
-    // Long titles and starters reveal themselves by scrolling rather than an
-    // ellipsis; measure them now the rows are in the document.
+    logEl.appendChild(div("welcome boot", body));
+    // The Recent rows below still reveal a long title by scrolling it rather
+    // than cutting it with an ellipsis, so measure them now they are in the
+    // document. The boot cards wrap instead, so they carry no `.mq`.
     mqAll();
   }
 

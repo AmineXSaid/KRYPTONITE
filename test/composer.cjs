@@ -431,8 +431,13 @@ function boot() {
     // says, and the mark says which one this is.
     ok("a first run still welcomes", !!w.querySelector(".w-mark"));
     ok("and offers nothing to resume", w.querySelectorAll("[data-session]").length === 0);
-    ok("saying so in the copy", /Ask anything about this repository/.test(w.textContent),
+    // The welcome is a boot sequence now: the copy that once introduced the tool
+    // in a sentence is the boot log reporting the workspace came up. "Pick up
+    // where you left off" is withheld until there is a thread to resume (see the
+    // recent-sessions case below), so a first run shows the log and the openers.
+    ok("saying so in the copy", /initializing workspace/.test(w.textContent),
       w.textContent.slice(0, 90));
+    ok("and does not yet invite a resume", !/Pick up where you left off/.test(w.textContent));
     // The invented examples are gone. Asserted on the markup rather than the
     // words, because the comment recording why they went still names them.
     ok("no fabricated suggestion buttons remain",
