@@ -3415,6 +3415,48 @@ function _sbRun() {
     return base.replace(/…$/, "") + " " + short;
   }
 
+  /**
+   * The exit code a shell result mentions, or "" if it names none.
+   *
+   * The host appends "exit code N" / "exit status N" to a failed command's
+   * output; this pulls it back out for the header pill, where the code is the
+   * first thing anyone reads on a failure - 127 is "command not found", 130 is
+   * a Ctrl-C. Bounded to three digits so a stray "exit 4004 rows" in real
+   * output is never mistaken for a status.
+   */
+  function exitCode(text) {
+    var m = /\bexit(?:\s+(?:code|status))?\s+(\d{1,3})\b/i.exec(String(text || ""));
+    return m ? m[1] : "";
+  }
+
+  /**
+   * The terminal surface a command card shows: a $-prompted command line and,
+   * beneath it, the output. One box rather than the old IN/OUT pair, and shared
+   * by the live path and session replay so a command renders the same way
+   * whether it just ran or was restored from disk. Only the output carries a
+   * failure - the command itself never failed, so it stays neutral.
+   */
+  function commandTerm(command, text, isError) {
+    var term = div("term" + (isError ? " term-fail" : ""));
+    var cmdLine = div("term-cmd");
+    cmdLine.innerHTML = '<span class="term-prompt" aria-hidden="true">$</span>';
+    var cmdText = document.createElement("span");
+    cmdText.className = "term-cmd-text";
+    /* Highlighted, not `textContent`: the command the user is being asked to
+       approve should not be the one shell string in the panel shown with no
+       colour. `highlight()` escapes everything it emits, so it is safe as
+       innerHTML. */
+    cmdText.innerHTML = highlight(String(command), "sh");
+    cmdLine.appendChild(cmdText);
+    term.appendChild(cmdLine);
+    if (text) {
+      var out = div("term-out");
+      out.appendChild(resultBlock(String(text), "run_command"));
+      term.appendChild(out);
+    }
+    return term;
+  }
+
   function toolEnd(name, args, result, isError) {
     var el = pendingTool;
     pendingTool = null;
@@ -3423,17 +3465,23 @@ function _sbRun() {
     // Drives the rail dot. Separate from data-error so "finished cleanly" has
     // its own colour rather than being the absence of a failure.
     el.setAttribute("data-done", isError ? "0" : "1");
+
+    var body = el.querySelector(".tool-body");
+    body.innerHTML = "";
+    var text = result == null ? "" : String(result);
+
+    // The failed-run marker, and - when the shell reported one - the exit code
+    // beside it. The code earns a place in the header rather than being buried
+    // in output the card starts collapsed over.
+    var exit = isError && name === "run_command" ? exitCode(text) : "";
     el.querySelector(".tool-meta").innerHTML = isError
-      ? '<span class="tool-fail">' + icon("i-x", "ic-13") + "</span>"
+      ? (exit ? '<span class="tool-exit">exit ' + esc(exit) + "</span>" : "") +
+          '<span class="tool-fail">' + icon("i-x", "ic-13") + "</span>"
       : '<span class="tool-ok">' + icon("i-check", "ic-13") + "</span>";
     if (toolGroup) {
       if (isError) toolGroup.setAttribute("data-error", "1");
       stampGroup(toolGroup);
     }
-
-    var body = el.querySelector(".tool-body");
-    body.innerHTML = "";
-    var text = result == null ? "" : String(result);
     // A write reports itself as "Wrote 30 lines to x.md", which the card header
     // already says. Expanding it to read the same sentence twice is the whole
     // payload of the card. The arguments hold what was actually written, and
@@ -3441,19 +3489,9 @@ function _sbRun() {
     // because none of this is sent back to it.
     var preview = !isError && argPreview(name, args);
     if (name === "run_command" && args && args.command) {
-      // A command is the one tool whose input is worth as much as its output:
-      // the header truncates it to fit a 340px row, so the full line lives
-      // here. Shown even on failure, where "what was actually run" is the
-      // first thing anyone checks.
-      var cmd = div("term-block cmd-in");
-      /* Highlighted, not `textContent`. This was the one place in the panel
-         showing a shell command with no colour at all - the command the user
-         is being asked to approve, in a card whose whole job is to say what
-         is about to run. `highlight()` escapes everything it emits, so its
-         output is safe as innerHTML. */
-      cmd.innerHTML = highlight(String(args.command), "sh");
-      body.appendChild(ioRow("IN", cmd));
-      if (text) body.appendChild(ioRow("OUT", resultBlock(text, name, args)));
+      // A command and its output are one exchange, so they live in one
+      // terminal surface rather than the old IN/OUT pair of bordered boxes.
+      body.appendChild(commandTerm(args.command, text, isError));
     } else if (preview) body.appendChild(preview);
     else if (text) body.appendChild(resultBlock(text, name, args));
     if (text.length > MODEL_TRUNCATION) {
@@ -3507,23 +3545,6 @@ function _sbRun() {
    * Large results are assigned as a single textContent write. Splitting them
    * per line would build tens of thousands of nodes and lock the webview.
    */
-  /**
-   * One labelled row of an IO card: a small uppercase gutter tag and a body.
-   *
-   * The tag is what makes a command card self-describing. Without it the
-   * command and its output are two mono blocks of the same weight, and which
-   * one was typed has to be inferred from position - fine on the row you just
-   * watched run, guesswork three screens up in restored scrollback.
-   */
-  function ioRow(label, node) {
-    var row = div("io-row");
-    row.appendChild(div("io-tag", esc(label)));
-    var body = div("io-body");
-    body.appendChild(node);
-    row.appendChild(body);
-    return row;
-  }
-
   /** Tools whose result IS file content, and so should be coloured as code. */
   var CODE_TOOLS = { read_file: 1, write_file: 1, edit_file: 1 };
 
@@ -6041,13 +6062,10 @@ function _sbRun() {
         // row.
         el.setAttribute("data-done", "1");
         var res = resultFor[call.id];
-        // Same IN/OUT shape the live path builds, so reopening a session does
-        // not quietly downgrade its command cards to a bare output block.
+        // Same terminal surface the live path builds, so reopening a session
+        // does not quietly downgrade its command cards to a bare output block.
         if (call.name === "run_command" && call.arguments && call.arguments.command) {
-          var rcmd = div("term-block cmd-in");
-          rcmd.textContent = String(call.arguments.command);
-          el.querySelector(".tool-body").appendChild(ioRow("IN", rcmd));
-          if (res) el.querySelector(".tool-body").appendChild(ioRow("OUT", resultBlock(res, call.name)));
+          el.querySelector(".tool-body").appendChild(commandTerm(call.arguments.command, res, false));
         } else if (res) el.querySelector(".tool-body").appendChild(resultBlock(res, call.name));
         g.querySelector(".tool-group-body").appendChild(el);
         g._count++;

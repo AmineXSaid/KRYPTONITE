@@ -1177,6 +1177,47 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    on exactly the cards where it matters most. */
 .tool[data-error="1"] .term-block:not(.cmd-in) { border-left-color: var(--kx-error); }
 
+/* ── command card: one terminal surface ────────────────────────────────────
+   A command and its output are one exchange, so they share one box - a $
+   prompt line and the output beneath it - instead of two bordered blocks
+   behind IN/OUT gutter tags. The command stays neutral; only the output
+   carries a failure, so a red edge no longer sits on the line that never
+   failed. */
+.term {
+  margin: 6px 0; border-radius: 5px; overflow: hidden;
+  border: 1px solid var(--kx-line); border-left: 2px solid var(--kx-fg-2);
+  background: var(--kx-bg-deep);
+  font-family: var(--kx-mono); font-size: 11px; line-height: 1.6;
+}
+.term-cmd {
+  display: flex; gap: 8px; align-items: baseline;
+  padding: 7px 10px; color: var(--kx-fg);
+  border-bottom: 1px solid var(--kx-line);
+}
+.term-prompt { flex: none; color: var(--kx-accent); font-weight: 600; user-select: none; }
+.term-cmd-text { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.term-out {
+  padding: 7px 10px; color: var(--kx-fg-2);
+  white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: auto;
+}
+/* The nested result block is stripped of its own chrome - the .term is the box
+   now - so it does not draw a border inside a border. Three classes so it wins
+   over the `.tool-body .term-block` rail treatment further down. */
+.term .term-out .term-block { border: 0; background: none; padding: 0; margin: 0; border-radius: 0; }
+/* Failure reads on the surface, softly: a red edge and a tinted output area,
+   not a shout. */
+.term.term-fail { border-color: var(--kx-error); border-left-color: var(--kx-error); }
+.term.term-fail .term-cmd { border-bottom-color: var(--kx-error-wash); }
+.term.term-fail .term-out { background: var(--kx-error-wash); color: var(--kx-error-2); }
+
+/* The exit-code pill in the card header, beside the failure cross. */
+.tool-exit {
+  flex: none; font-family: var(--kx-mono); font-size: 9.5px; font-weight: 600;
+  letter-spacing: .03em; padding: 1px 6px; border-radius: 999px;
+  color: var(--kx-error-2); background: var(--kx-error-wash);
+  border: 1px solid var(--kx-error);
+}
+
 /* â”€â”€ turn footer: hover actions + cost â”€â”€
    Copy / Retry / Branch appear at the end of a turn with elapsed time and
    token cost in mono, then a divider gives the transcript a pulse. */
@@ -1358,34 +1399,17 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   margin: 4px 0 8px 20px; padding-left: 10px;
   border-left: 1px solid var(--kx-line);
 }
-/* IN / OUT rows inside a command card. The tag column is a fixed width so the
-   two bodies share a left edge: a command and its output read as one exchange
-   rather than two unrelated blocks. */
-.io-row { display: flex; gap: 8px; align-items: flex-start; margin-top: 4px; }
-.io-tag {
-  flex: none; width: 26px; padding-top: 5px;
-  font-family: var(--kx-mono); font-size: 9px; font-weight: 600;
-  letter-spacing: .08em; color: var(--kx-fg-4); text-align: right;
-}
-.io-body { min-width: 0; flex: 1; }
-/* The command itself is the one line in the card the user typed nothing of but
-   is answerable for, so it gets foreground weight where output stays muted. */
-.cmd-in { color: var(--kx-fg); }
+/* ── INSIDE A TOOL CARD, A BARE RESULT BLOCK IS NOT AN OBJECT ──
 
-/* ── INSIDE A TOOL CARD, THE COMMAND AND ITS OUTPUT ARE NOT OBJECTS ──
-   
    `.term-block` gives a filled, bordered, rounded panel, which is right in the
    transcript where a block of shell output is a THING the model produced and
-   sits among prose. Inside a tool card it is wrong twice over: the card is
-   already a bordered object, so this nested a dark box inside a dark box
-   inside a dark box, and the two panels made the command and its output look
-   like two unrelated artefacts rather than one exchange.
-   
-   A rail instead. No fill, no border, no corners - the indent carries the
-   structure and the colour of the rail says which half you are looking at:
-   oxide for what was RUN, a hairline for what came BACK. Same shape the rest
-   of this panel uses for the model's working (`.think-body`), and the same
-   shape Claude Code uses beside it, which is the point. */
+   sits among prose. Inside a tool card it is wrong: the card is already a
+   bordered object, so this nested a dark box inside a dark box.
+
+   A rail instead - no fill, no border, no corners - the same shape the model's
+   working (`.think-body`) uses. This still reaches a non-command tool's error
+   output (a failed read, say); the command card's own output is inside `.term`
+   and overrides this to sit flush, since `.term` is the box there. */
 .tool-body .term-block {
   background: none;
   border: none;
@@ -1394,10 +1418,6 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   padding: 1px 0 1px 10px;
   margin: 0;
 }
-/* The command gets the accent rail: it is the half that had an effect. */
-.tool-body .cmd-in { border-left-color: var(--kx-accent); }
-/* The failed-run rail lives with the other `.term-block` rules further up,
-   corrected there rather than duplicated here. */
 
 /* The command name, coloured like the thing it is: something being invoked.
    `.tk-fn` is unused by the shell grammar, so this borrows the same "a call"
