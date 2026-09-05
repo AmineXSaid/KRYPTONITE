@@ -1644,7 +1644,11 @@ export class SessionController {
       );
     }
 
-    this.app.broadcast({ type: "browserProvisioning", message: "Getting a browser…" });
+    const opening =
+      "No browser is installed here, so a Chromium is being downloaded to launch one. " +
+      "This happens once; it is then cached and reused.";
+    this.app.log("info", "Browser: " + opening);
+    this.app.broadcast({ type: "browserProvisioning", message: opening });
     try {
       const got = await fetchBrowser({
         cacheDir,
