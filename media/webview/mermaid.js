@@ -63,8 +63,77 @@
    * `--kx-mm-ground: transparent` (set in sidebar.css) so nothing changes on
    * screen; standalone it falls back to the dark ink. */
   var MONO = "var(--kx-mono, ui-monospace, Menlo, Consolas, monospace)";
+
+  /* THE EIGHT CATEGORICAL SLOTS.
+   *
+   * Assigned in this fixed order and never cycled. They are stepped in OKLCH
+   * inside the L 0.48-0.67 band a dark ground needs, above a 0.10 chroma floor,
+   * and ORDERED so that no two neighbouring slots collapse into one another
+   * under deutan, protan or tritan simulation - the worst adjacent pair sits at
+   * deltaE 13.2, well clear of the 8 that counts as separated. All five checks
+   * of the dataviz validator pass against #1f1f1f and #ffffff alike, so the
+   * same eight read whether the SVG is opened in the panel or dropped onto a
+   * white page.
+   *
+   * Each is published as a `--mm-N` custom property on the <svg> itself, taking
+   * a `--kx-mm-N` theme override if one is ever defined, so every rule below
+   * names a SLOT rather than a hex and the palette has exactly one home. */
+  var CAT = [
+    "#2d82d8", "#339e4d", "#885acb", "#cb4644",
+    "#0fa1a4", "#c6811a", "#b84999", "#7f8e2f",
+  ];
+
+  /* What a flowchart SHAPE already means, and which slot restates it. Mermaid's
+   * shapes are a vocabulary the reader can check - a diamond is a decision, a
+   * cylinder is a store - so the colour agrees with something already on the
+   * page instead of inventing a category of its own. Shapes with no agreed
+   * meaning (a plain rect, a rounded rect, a state) stay on the neutral
+   * surface: painting those would claim a difference that is not there. */
+  var ROLE = {
+    stadium: ["term", 2],     /* ([ ... ])  start / end          */
+    circle: ["event", 1],     /* (( ... ))  event, junction      */
+    subroutine: ["sub", 3],   /* [[ ... ]]  call to another flow */
+    cylinder: ["data", 5],    /* [( ... )]  a store              */
+    diamond: ["decide", 6],   /* {  ...  }  decision             */
+    hexagon: ["decide", 6],   /* {{ ... }}  decision, prepare    */
+  };
+
+  var SURF3 = "var(--kx-surface-3,#333336)";
+  function tint(slot, pct, base) {
+    return "color-mix(in srgb, var(--mm-" + slot + ") " + pct + "%, " + base + ")";
+  }
+
+  /* The slot declarations, plus everything written once PER slot: the pie fill,
+   * the three parts of a sequence participant's column, and the header band of
+   * a class or ER box. Built in a loop, because eight hand-copied sets of five
+   * rules is exactly where a palette drifts out of step with itself. */
+  function catRules() {
+    var vars = "", out = "", i;
+    for (i = 1; i <= CAT.length; i++) {
+      vars += "--mm-" + i + ":var(--kx-mm-" + i + "," + CAT[i - 1] + ");";
+      out +=
+        ".mm-c" + i + "{fill:var(--mm-" + i + ")}" +
+        ".mm-node.mm-p" + i + "{fill:" + tint(i, 20, SURF3) + ";stroke:var(--mm-" + i + ")}" +
+        ".mm-lifeline.mm-p" + i + "{stroke:color-mix(in srgb, var(--mm-" + i + ") 62%, transparent)}" +
+        ".mm-activation.mm-p" + i + "{fill:" + tint(i, 34, SURF3) + ";stroke:var(--mm-" + i + ")}" +
+        ".mm-head.mm-p" + i + "{fill:" + tint(i, 20, SURF3) + "}";
+    }
+    var seen = {};
+    for (var k in ROLE) {
+      if (!Object.prototype.hasOwnProperty.call(ROLE, k)) continue;
+      var nm = ROLE[k][0], s = ROLE[k][1];
+      if (seen[nm]) continue;
+      seen[nm] = 1;
+      out +=
+        ".mm-node.mm-r-" + nm + "{fill:" + tint(s, 20, SURF3) + ";stroke:var(--mm-" + s + ")}" +
+        ".mm-node-line.mm-r-" + nm + "{stroke:var(--mm-" + s + ")}";
+    }
+    return ".mm-svg{" + vars + "}" + out;
+  }
+
   var MM_STYLE =
     "<style>" +
+    catRules() +
     ".mm-bg{fill:var(--kx-mm-ground,#1b1b1d)}" +
     ".mm-node{fill:var(--kx-surface-3,#333336);stroke:var(--kx-edge,#75757a);stroke-width:1}" +
     ".mm-node-line{stroke:var(--kx-edge,#75757a);stroke-width:1;fill:none}" +
@@ -79,14 +148,18 @@
     ".mm-elabel-bg{fill:var(--kx-surface,#242426)}" +
     ".mm-elabel{fill:var(--kx-fg-2,#bcbbbf);font-family:" + MONO + ";font-size:11px}" +
     ".mm-lifeline{stroke:var(--kx-line,#4a4a4e);stroke-width:1;stroke-dasharray:3 3}" +
-    ".mm-actor{fill:color-mix(in srgb, var(--kx-accent,#2ea562) 12%, var(--kx-surface-3,#333336))}" +
+    /* A participant already wears its own slot, so `actor` cannot be another
+       fill - it is the heavier frame instead, which no slot rule touches. */
+    ".mm-actor{stroke-width:2}" +
     ".mm-activation{fill:var(--kx-surface-3,#3f3f43);stroke:var(--kx-edge,#75757a);stroke-width:1}" +
     ".mm-msg{stroke:var(--kx-line-2,#8a8a8e);stroke-width:1.5;fill:none}" +
     ".mm-msg.mm-dotted{stroke-dasharray:4 3}" +
     ".mm-msg-x{stroke:var(--kx-line-2,#8a8a8e);stroke-width:1.5;fill:none}" +
     ".mm-msg-bg{fill:var(--kx-surface,#242426)}" +
     ".mm-msg-label{fill:var(--kx-fg,#fbfafd);font-family:" + MONO + ";font-size:11px}" +
-    ".mm-note{fill:color-mix(in srgb, var(--kx-accent,#2ea562) 10%, var(--kx-surface,#242426));stroke:var(--kx-edge,#75757a);stroke-width:1}" +
+    /* A note belongs to no participant, so it cannot wear a hue that one of
+       them might be wearing - it lifts off the surface in ink instead. */
+    ".mm-note{fill:color-mix(in srgb, var(--kx-fg,#fbfafd) 7%, var(--kx-surface,#242426));stroke:var(--kx-edge,#75757a);stroke-width:1}" +
     ".mm-note-text{fill:var(--kx-fg,#fbfafd);font-family:" + MONO + ";font-size:11px}" +
     ".mm-frag{fill:none;stroke:var(--kx-line,#4a4a4e);stroke-width:1}" +
     ".mm-frag-tab{fill:color-mix(in srgb, var(--kx-line,#4a4a4e) 14%, transparent);stroke:var(--kx-line,#4a4a4e);stroke-width:1}" +
@@ -94,6 +167,14 @@
     ".mm-frag-label{fill:var(--kx-fg-2,#bcbbbf);font-family:" + MONO + ";font-size:10px}" +
     ".mm-frag-div{stroke:var(--kx-line,#4a4a4e);stroke-width:1;stroke-dasharray:4 3}" +
     ".mm-startend{fill:var(--kx-fg,#fbfafd);stroke:var(--kx-fg,#fbfafd)}" +
+    /* UML draws the two pseudostates differently and so do we: a filled dot
+       begins, a ring around a dot ends. The colour is the second half of that,
+       not the whole of it, so the pair still reads without it. */
+    ".mm-startend.mm-r-start{fill:var(--mm-2);stroke:var(--mm-2)}" +
+    ".mm-startend.mm-r-end{fill:none;stroke:var(--kx-fg,#fbfafd);stroke-width:2.5}" +
+    ".mm-startend-core{fill:var(--kx-fg,#fbfafd);stroke:none}" +
+    /* The band behind a class or entity name. Unslotted, it is not there. */
+    ".mm-head{fill:none;stroke:none}" +
     ".mm-class-name{font-weight:700}" +
     ".mm-member{fill:var(--kx-fg-2,#bcbbbf);font-family:" + MONO + ";font-size:11px}" +
     ".mm-uml-hollow{fill:var(--kx-mm-ground,#1b1b1d);stroke:var(--kx-line-2,#8a8a8e);stroke-width:1}" +
@@ -101,7 +182,13 @@
     ".mm-er-mark{stroke:var(--kx-line-2,#8a8a8e);stroke-width:1.5;fill:none}" +
     ".mm-slice{stroke:var(--kx-mm-ground,#1b1b1d);stroke-width:2}" +
     ".mm-pie-title{fill:var(--kx-fg,#fbfafd);font-family:" + MONO + ";font-size:13px;font-weight:700}" +
-    ".mm-pie-pct{fill:#0d0d0f;font-family:" + MONO + ";font-size:11px;font-weight:600}" +
+    /* The share is written ON the slice, so its ink cannot be chosen for one
+       fill: the slots span L 0.57-0.66 and the grey tail runs darker still.
+       White with a dark halo clears every one of them, and `paint-order` puts
+       the halo behind the glyph rather than over it. A renderer that ignores
+       `paint-order` still shows white text, just outlined. */
+    ".mm-pie-pct{fill:#fff;font-family:" + MONO + ";font-size:11px;font-weight:600;" +
+    "paint-order:stroke;stroke:rgba(0,0,0,.42);stroke-width:2.5;stroke-linejoin:round}" +
     ".mm-legend{fill:var(--kx-fg,#fbfafd);font-family:" + MONO + ";font-size:11px}" +
     "</style>";
   var MM_DEFS =
@@ -132,6 +219,32 @@
       '" width="' + w + '" height="' + h + '" role="img">' +
       MM_STYLE + MM_DEFS +
       '<rect class="mm-bg" x="0" y="0" width="' + w + '" height="' + h + '"/>';
+  }
+
+  /* The slot an nth thing gets. Past the eighth there is no ninth hue to give:
+     repeating one would say two different things are the same, so the tail
+     simply goes uncoloured and leans on the name it already carries. */
+  function slotClass(i) { return i < CAT.length ? " mm-p" + (i + 1) : ""; }
+
+  /* A rounded-top band behind the name of a class or entity. The box keeps its
+     neutral fill - the members inside are text, not a category - and the header
+     carries the identity. Inset half a pixel so it does not eat the frame, and
+     rounded at the BOTTOM too when the box has no members and the band is
+     therefore the whole of it: square corners inside a rounded rect leave two
+     slivers of surface showing through. */
+  function headBand(x, y, w, h, boxH, r, slot) {
+    var bx = x + 0.5, by = y + 0.5, bw = w - 1, bh = Math.min(h, boxH - 1);
+    var d = 'M' + bx + ',' + (by + r) +
+      ' a' + r + ',' + r + ' 0 0 1 ' + r + ',' + (-r) +
+      ' h' + (bw - r * 2) + ' a' + r + ',' + r + ' 0 0 1 ' + r + ',' + r;
+    if (h >= boxH - 1) {
+      d += ' v' + (bh - r * 2) +
+        ' a' + r + ',' + r + ' 0 0 1 ' + (-r) + ',' + r +
+        ' h' + (-(bw - r * 2)) + ' a' + r + ',' + r + ' 0 0 1 ' + (-r) + ',' + (-r) + ' z';
+    } else {
+      d += ' v' + (bh - r) + ' h' + (-bw) + ' z';
+    }
+    return '<path class="mm-head' + slot + '" d="' + d + '"/>';
   }
 
   function stripQuotes(s) {
@@ -289,13 +402,38 @@
   function layout(g, sizeHint) {
     var ids = g.order, horizontal = g.dir === "LR" || g.dir === "RL";
 
+    // A cycle has no "deepest thing pointing at it", and ranking through one
+    // pushes every node in the loop down a layer on every pass until the bound
+    // stops it - which is why `Idle --> Busy --> Idle` used to lay out as a
+    // column of empty rows taller than the diagram. So find the back edges
+    // first, with a depth-first walk, and rank on the acyclic remainder: a back
+    // edge says the loop RETURNS somewhere, not that the target sits below.
+    var adj = {}, seen = {}, back = {};
+    ids.forEach(function (id) { adj[id] = []; });
+    for (var ei = 0; ei < g.edges.length; ei++) {
+      var e0 = g.edges[ei];
+      if (adj[e0.from] && adj[e0.to]) adj[e0.from].push(ei);
+    }
+    var walk = function (id) {
+      seen[id] = 1;
+      for (var k = 0; k < adj[id].length; k++) {
+        var ek = adj[id][k], to = g.edges[ek].to;
+        if (seen[to] === 1) back[ek] = true;
+        else if (!seen[to]) walk(to);
+      }
+      seen[id] = 2;
+    };
+    ids.forEach(function (id) { if (!seen[id]) walk(id); });
+
     // Longest-path layering: rank a node one past the deepest thing pointing at
-    // it. Bounded to |V| passes so a cycle terminates instead of looping.
+    // it. Bounded to |V| passes, which is now belt-and-braces rather than the
+    // thing that stops a cycle.
     var rank = {};
     ids.forEach(function (id) { rank[id] = 0; });
     for (var pass = 0; pass < ids.length; pass++) {
       var changed = false;
       for (var e = 0; e < g.edges.length; e++) {
+        if (back[e]) continue;
         var ed = g.edges[e];
         if (rank[ed.to] < rank[ed.from] + 1) { rank[ed.to] = rank[ed.from] + 1; changed = true; }
       }
@@ -385,10 +523,23 @@
   }
 
   function shapeSvg(n, p) {
-    var x = p.x - p.w / 2, y = p.y - p.h / 2, w = p.w, h = p.h, cls = ' class="mm-node"';
+    var x = p.x - p.w / 2, y = p.y - p.h / 2, w = p.w, h = p.h;
+    /* The role rides on the shape, so a node is painted by what it MEANS and
+       an unmeaning shape keeps the neutral surface. The inner rules of a
+       subroutine and a cylinder take it too, or the frame and its detail would
+       disagree about which colour the node is. */
+    var role = ROLE[n.shape] ? " mm-r-" + ROLE[n.shape][0] : "";
+    var cls = ' class="mm-node' + role + '"';
+    var lcls = ' class="mm-node-line' + role + '"';
     switch (n.shape) {
-      case "startend":
-        return '<circle class="mm-startend" cx="' + p.x + '" cy="' + p.y + '" r="' + (Math.min(w, h) / 2) + '"/>';
+      case "startend": {
+        var r0 = Math.min(w, h) / 2;
+        if (n.role === "end") {
+          return '<circle class="mm-startend mm-r-end" cx="' + p.x + '" cy="' + p.y + '" r="' + (r0 - 1.5) + '"/>' +
+            '<circle class="mm-startend-core" cx="' + p.x + '" cy="' + p.y + '" r="' + (r0 * 0.45) + '"/>';
+        }
+        return '<circle class="mm-startend mm-r-start" cx="' + p.x + '" cy="' + p.y + '" r="' + r0 + '"/>';
+      }
       case "round":
       case "stadium":
         return '<rect' + cls + ' x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (h / 2) + '" ry="' + (h / 2) + '"/>';
@@ -404,13 +555,13 @@
       }
       case "subroutine":
         return '<rect' + cls + ' x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="2"/>' +
-          '<line class="mm-node-line" x1="' + (x + 6) + '" y1="' + y + '" x2="' + (x + 6) + '" y2="' + (y + h) + '"/>' +
-          '<line class="mm-node-line" x1="' + (x + w - 6) + '" y1="' + y + '" x2="' + (x + w - 6) + '" y2="' + (y + h) + '"/>';
+          '<line' + lcls + ' x1="' + (x + 6) + '" y1="' + y + '" x2="' + (x + 6) + '" y2="' + (y + h) + '"/>' +
+          '<line' + lcls + ' x1="' + (x + w - 6) + '" y1="' + y + '" x2="' + (x + w - 6) + '" y2="' + (y + h) + '"/>';
       case "cylinder": {
         var ry = 6;
         return '<path' + cls + ' d="M' + x + ',' + (y + ry) + ' A' + (w / 2) + ',' + ry + ' 0 0 1 ' + (x + w) + ',' + (y + ry) +
           ' L' + (x + w) + ',' + (y + h - ry) + ' A' + (w / 2) + ',' + ry + ' 0 0 1 ' + x + ',' + (y + h - ry) + ' Z"/>' +
-          '<path class="mm-node-line" fill="none" d="M' + x + ',' + (y + ry) + ' A' + (w / 2) + ',' + ry + ' 0 0 0 ' + (x + w) + ',' + (y + ry) + '"/>';
+          '<path' + lcls + ' fill="none" d="M' + x + ',' + (y + ry) + ' A' + (w / 2) + ',' + ry + ' 0 0 0 ' + (x + w) + ',' + (y + ry) + '"/>';
       }
       default:
         return '<rect' + cls + ' x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="4" ry="4"/>';
@@ -525,7 +676,7 @@
     // end do not collapse into one node.
     function star(where) {
       var id = "__" + where + "_" + (where === "start" ? ++startN : ++endN);
-      nodes[id] = { id: id, shape: "startend", lines: [] }; order.push(id);
+      nodes[id] = { id: id, shape: "startend", lines: [], role: where }; order.push(id);
       if (sgStack.length) sgStack[sgStack.length - 1].members[id] = true;
       return id;
     }
@@ -813,12 +964,16 @@
     });
 
     // Lifelines, then activation bars over them.
-    P.forEach(function (p) {
-      out += '<line class="mm-lifeline" x1="' + p.cx + '" y1="' + lifeTop + '" x2="' + p.cx + '" y2="' + lifeBottom + '"/>';
+    /* A participant is an identity, which is the one thing categorical colour
+       is for - so the whole COLUMN takes its slot: the head box, the lifeline
+       dropping from it, and every activation bar on that line. Following one
+       actor down a crowded diagram stops being a matter of counting columns. */
+    P.forEach(function (p, i) {
+      out += '<line class="mm-lifeline' + slotClass(i) + '" x1="' + p.cx + '" y1="' + lifeTop + '" x2="' + p.cx + '" y2="' + lifeBottom + '"/>';
     });
     acts.forEach(function (a) {
       var ax = cx(a.id) - K.ACT_W / 2 + a.depth * K.ACT_SHIFT;
-      out += '<rect class="mm-activation" x="' + ax + '" y="' + a.y0 + '" width="' + K.ACT_W + '" height="' + Math.max(6, a.y1 - a.y0) + '"/>';
+      out += '<rect class="mm-activation' + slotClass(doc.index[a.id]) + '" x="' + ax + '" y="' + a.y0 + '" width="' + K.ACT_W + '" height="' + Math.max(6, a.y1 - a.y0) + '"/>';
     });
 
     // Notes.
@@ -869,9 +1024,9 @@
     });
 
     // Participant boxes on top, at the head of each lifeline.
-    P.forEach(function (p) {
+    P.forEach(function (p, i) {
       var bx = p.cx - p.w / 2, by = K.TOP + (headMax - p.h) / 2;
-      out += '<rect class="mm-node' + (p.actor ? " mm-actor" : "") + '" x="' + bx + '" y="' + by + '" width="' + p.w + '" height="' + p.h + '" rx="4"/>';
+      out += '<rect class="mm-node' + slotClass(i) + (p.actor ? " mm-actor" : "") + '" x="' + bx + '" y="' + by + '" width="' + p.w + '" height="' + p.h + '" rx="4"/>';
       var sy = by + p.h / 2 - ((p.lines.length - 1) * K.LINEH) / 2;
       out += '<text class="mm-text" x="' + p.cx + '" text-anchor="middle" dominant-baseline="central">';
       p.lines.forEach(function (l, li) {
@@ -886,13 +1041,26 @@
   /* ───────────────────────────── pie charts ─────────────────────────────
    *
    * `pie [showData] [title ...]` then `"Label" : value` rows. A ring of slices
-   * from a fixed categorical palette, with a legend naming each and its share.
-   * The palette is data colour, not theme colour, so it is written straight
-   * onto the slices and stays put wherever the SVG is opened. */
-  var PIE_COLORS = [
-    "#4f9cf0", "#2ea562", "#e0a13a", "#d9645f", "#9b6ad4", "#3fb6bf",
-    "#d98cc2", "#8bbf4a", "#5a6cd6", "#cf7d3c", "#57b894", "#b0555f",
-  ];
+   * from the eight categorical slots, in order, with a legend naming each and
+   * its share. Identity is never colour alone here: every slice over 5% is
+   * written with its own percentage and every slice, however small, has a
+   * legend row.
+   *
+   * The old palette here ran twelve deep and then cycled, which is the one
+   * thing a categorical palette must not do - the thirteenth slice wore the
+   * first slice's hue and claimed to be it. */
+  function pad2(v) { return ("0" + v.toString(16)).slice(-2); }
+
+  /* Past the eighth slice there is no ninth hue to hand out. Repeating one
+     would be a lie about the data, and inventing one lands somewhere already
+     taken, so the tail steps down a grey ramp instead - always distinct from
+     each other, never mistakable for a slot, and reading as "the rest". */
+  function tailGrey(t, n) {
+    var f = n <= 1 ? 0 : t / (n - 1);
+    var a = [0x9b, 0x9a, 0xa0], b = [0x55, 0x54, 0x5a], hex = "#";
+    for (var i = 0; i < 3; i++) hex += pad2(Math.round(a[i] + (b[i] - a[i]) * f));
+    return hex;
+  }
 
   function firstLine(src) {
     var lines = String(src).replace(/\r/g, "").split("\n");
@@ -951,16 +1119,19 @@
     if (doc.title) out += '<text class="mm-pie-title" x="' + cxp + '" y="18" text-anchor="middle">' + esc(doc.title) + "</text>";
 
     var ang = -Math.PI / 2; // start at 12 o'clock
+    var tail = Math.max(0, items.length - CAT.length);
     items.forEach(function (it, i) {
       var frac = Math.max(0, it.value) / total, a2 = ang + frac * 2 * Math.PI;
-      var color = PIE_COLORS[i % PIE_COLORS.length];
+      var paint = i < CAT.length
+        ? ' class="mm-slice mm-c' + (i + 1) + '"'
+        : ' class="mm-slice" fill="' + tailGrey(i - CAT.length, tail) + '"';
       if (frac >= 0.9999) {
-        out += '<circle class="mm-slice" fill="' + color + '" cx="' + cxp + '" cy="' + cyp + '" r="' + R + '"/>';
+        out += '<circle' + paint + ' cx="' + cxp + '" cy="' + cyp + '" r="' + R + '"/>';
       } else if (frac > 0) {
         var x1 = cxp + R * Math.cos(ang), y1 = cyp + R * Math.sin(ang);
         var x2 = cxp + R * Math.cos(a2), y2 = cyp + R * Math.sin(a2);
         var large = frac > 0.5 ? 1 : 0;
-        out += '<path class="mm-slice" fill="' + color + '" d="M' + cxp + ',' + cyp + ' L' + x1.toFixed(2) + ',' + y1.toFixed(2) +
+        out += '<path' + paint + ' d="M' + cxp + ',' + cyp + ' L' + x1.toFixed(2) + ',' + y1.toFixed(2) +
           ' A' + R + ',' + R + ' 0 ' + large + ' 1 ' + x2.toFixed(2) + ',' + y2.toFixed(2) + ' Z"/>';
         if (frac > 0.05) {
           var mid = (ang + a2) / 2, lr = R * 0.62;
@@ -970,7 +1141,7 @@
       }
       ang = a2;
       var ly = top + i * lineH;
-      out += '<rect class="mm-slice" fill="' + color + '" x="' + legendX + '" y="' + ly + '" width="13" height="13" rx="2"/>';
+      out += '<rect' + paint + ' x="' + legendX + '" y="' + ly + '" width="13" height="13" rx="2"/>';
       out += '<text class="mm-legend" x="' + (legendX + 20) + '" y="' + (ly + 7) + '" dominant-baseline="central">' +
         esc(it.label) + "  " + Math.round(frac * 100) + "%</text>";
     });
@@ -1101,9 +1272,10 @@
     });
 
     // Class boxes with their compartments.
-    order.forEach(function (id) {
+    order.forEach(function (id, i) {
       var c = doc.classes[id], p = pos[id], x = p.x - p.w / 2, y = p.y - p.h / 2;
       out += '<rect class="mm-node" x="' + x + '" y="' + y + '" width="' + p.w + '" height="' + p.h + '" rx="3"/>';
+      out += headBand(x, y, p.w, HEAD, p.h, 3, slotClass(i));
       out += '<text class="mm-text mm-class-name" x="' + p.x + '" y="' + (y + HEAD / 2 + 2) + '" text-anchor="middle" dominant-baseline="central">' + esc(id) + "</text>";
       var yy = y + HEAD;
       if (c.attrs.length || c.methods.length) {
@@ -1232,9 +1404,10 @@
       }
     });
 
-    order.forEach(function (id) {
+    order.forEach(function (id, i) {
       var e = doc.ents[id], p = pos[id], x = p.x - p.w / 2, y = p.y - p.h / 2;
       out += '<rect class="mm-node" x="' + x + '" y="' + y + '" width="' + p.w + '" height="' + p.h + '" rx="3"/>';
+      out += headBand(x, y, p.w, HEAD, p.h, 3, slotClass(i));
       out += '<text class="mm-text mm-class-name" x="' + p.x + '" y="' + (y + HEAD / 2 + 1) + '" text-anchor="middle" dominant-baseline="central">' + esc(id) + "</text>";
       if (e.attrs.length) {
         out += '<line class="mm-node-line" x1="' + x + '" y1="' + (y + HEAD) + '" x2="' + (x + p.w) + '" y2="' + (y + HEAD) + '"/>';

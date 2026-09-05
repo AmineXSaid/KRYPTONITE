@@ -194,6 +194,15 @@
   --kx-on-accent: #18171d;  /* ink text on a filled accent                   */
   --kx-on-action: #fbfafd;  /* cream text on the oxide action fill           */
 
+  /* ── diagram data colour ──
+   * NOT declared here, and that is deliberate. A rendered mermaid SVG has to
+   * survive being copied out of the panel - saved to a file, handed to the
+   * model as an image - and a token declared in this file does not travel with
+   * it. So the eight categorical slots live in media/webview/mermaid.js, which
+   * writes them onto the <svg> itself as --mm-1 … --mm-8, each taking a
+   * --kx-mm-1 … --kx-mm-8 override if one is ever declared here. That is the
+   * hook; the values, and the reasoning behind them, are in mermaid.js. */
+
   /* ── washes ── */
   --kx-accent-wash: rgba(45, 161, 96, .14);
   --kx-agent-wash:  rgba(148, 117, 219, .16);

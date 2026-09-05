@@ -343,6 +343,18 @@ the way in, and anything the subset cannot parse — a `gantt` chart, a
 half-streamed block — falls back to a plain code block, so a diagram is never
 worse than the fence it arrived in.
 
+Colour in those diagrams is an assertion, so it is checked rather than chosen.
+Eight categorical slots, stepped in OKLCH inside the lightness band a dark
+ground needs and **ordered** so that no two neighbours collapse into each other
+under simulated deutan or protan vision — `test/diagram-palette.cjs` measures
+every adjacent pair and every fill against both the panel and a white page. The
+slots are never cycled: a ninth pie slice takes a grey from a ramp rather than
+wearing the first slice's hue while claiming to be something else. And they are
+spent on things that mean something — a flowchart node is painted by what its
+*shape* already says (a diamond decides, a cylinder stores, a stadium starts or
+ends), a sequence participant owns its whole column, a plain box stays neutral
+because a plain box means nothing in particular.
+
 ## Sessions
 
 Each conversation is one transcript, stored as a single JSON file under
