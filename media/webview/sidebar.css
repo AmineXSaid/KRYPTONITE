@@ -1210,6 +1210,21 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .term.term-fail .term-cmd { border-bottom-color: var(--kx-error-wash); }
 .term.term-fail .term-out { background: var(--kx-error-wash); color: var(--kx-error-2); }
 
+/* Copy actions, a footnote to the card: muted until the surface is hovered or
+   a button inside it is focused, so a run that nobody needs to copy stays
+   quiet. Space is reserved even when dimmed, so nothing shifts on hover. */
+.term-foot {
+  display: flex; gap: 6px; justify-content: flex-end;
+  padding: 5px 8px; border-top: 1px solid var(--kx-line);
+  opacity: .5; transition: opacity .12s;
+}
+.term:hover .term-foot, .term:focus-within .term-foot { opacity: 1; }
+.term.term-fail .term-foot { border-top-color: var(--kx-error-wash); }
+.term-foot .btn { display: inline-flex; align-items: center; gap: 5px; }
+/* The moment-long "Copied" state, in the success accent. */
+.term-copy[data-copied="1"] { color: var(--kx-accent); border-color: var(--kx-accent); }
+@media (prefers-reduced-motion: reduce) { .term-foot { transition: none; } }
+
 /* The exit-code pill in the card header, beside the failure cross. */
 .tool-exit {
   flex: none; font-family: var(--kx-mono); font-size: 9.5px; font-weight: 600;

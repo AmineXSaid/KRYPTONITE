@@ -3454,7 +3454,42 @@ function _sbRun() {
       out.appendChild(resultBlock(String(text), "run_command"));
       term.appendChild(out);
     }
+
+    // A footer of copy actions, revealed on hover of the surface. The command
+    // is the line worth copying most often - to paste into a terminal and see
+    // the failure firsthand - and the output next, so both are one click away
+    // rather than a manual text selection inside a card that scrolls.
+    var foot = div("term-foot");
+    foot.appendChild(copyBtn("Copy command", String(command)));
+    if (text) foot.appendChild(copyBtn("Copy output", String(text)));
+    term.appendChild(foot);
     return term;
+  }
+
+  /**
+   * A small copy button that hands its text to the host clipboard and confirms
+   * in place for a moment, so a click that opens no dialog still visibly did
+   * something.
+   */
+  function copyBtn(label, text) {
+    var b = document.createElement("button");
+    b.className = "btn sm term-copy";
+    b.type = "button";
+    var rest = '<span>' + esc(label) + "</span>";
+    b.innerHTML = icon("i-copy", "ic-11") + rest;
+    var timer = null;
+    b.addEventListener("click", function (e) {
+      e.stopPropagation();
+      post("copyText", { text: text });
+      b.setAttribute("data-copied", "1");
+      b.innerHTML = icon("i-check", "ic-11") + "<span>Copied</span>";
+      clearTimeout(timer);
+      timer = setTimeout(function () {
+        b.removeAttribute("data-copied");
+        b.innerHTML = icon("i-copy", "ic-11") + rest;
+      }, 1200);
+    });
+    return b;
   }
 
   function toolEnd(name, args, result, isError) {
