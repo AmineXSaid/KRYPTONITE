@@ -1018,6 +1018,63 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 .mm-frag-kind { fill: var(--kx-fg-2); font-family: var(--kx-mono); font-size: 10px; font-weight: 700; }
 .mm-frag-label { fill: var(--kx-fg-2); font-family: var(--kx-mono); font-size: 10px; }
 .mm-frag-div { stroke: var(--kx-line); stroke-width: 1; stroke-dasharray: 4 3; }
+/* ── the diagram, larger ────────────────────────────────────────────────
+   Fixed to the panel rather than to the figure: the figure is as wide as the
+   transcript, and getting out of that width is the whole point. Same treatment
+   as the mode sheet - the panel dims behind it and the card sits over
+   everything - because it is the same kind of thing: one object asking for the
+   whole surface while it is open. */
+.mm-zoom {
+  position: fixed; inset: 0; z-index: 40;
+  display: flex; align-items: center; justify-content: center;
+  padding: 10px;
+  background: color-mix(in srgb, var(--kx-shadow) 72%, transparent);
+  backdrop-filter: blur(3px);
+}
+.mm-zoom-card {
+  display: flex; flex-direction: column; min-width: 0;
+  width: 100%; height: 100%;
+  /* A GROUND, not a wash.
+     Every `--kx-surface-*` token is a translucent white over whatever the panel
+     is sitting on - they are designed to layer ON a ground, not to be one. This
+     card covers the transcript, so a wash here means the conversation shows
+     through the diagram, which is the state this replaced. Near-opaque black,
+     the same treatment the Agents tab's sticky header uses for the same reason:
+     the content behind it has to stop. */
+  background: rgba(9, 9, 11, .97);
+  border: 1px solid var(--kx-line); border-radius: 6px;
+  box-shadow: 0 8px 28px var(--kx-shadow);
+  overflow: hidden;
+}
+.mm-zoom-bar {
+  display: flex; align-items: center; gap: 6px; flex: none;
+  padding: 6px 8px; border-bottom: 1px solid var(--kx-line);
+  background: color-mix(in srgb, var(--kx-line) 22%, transparent);
+}
+.mm-zoom-t {
+  font-family: var(--kx-mono); font-size: 9px; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--kx-fg-2);
+}
+/* Tabular figures, so the percentage does not shuffle the buttons beside it
+   every time it crosses a digit. */
+.mm-zoom-pct {
+  min-width: 5ch; text-align: center;
+  font-family: var(--kx-mono); font-size: 10.5px; color: var(--kx-fg-2);
+  font-variant-numeric: tabular-nums;
+}
+/* The drawing can be larger than the card in both directions - that is what
+   zooming in is for - so this is the thing that scrolls, and it is centred
+   while the drawing is still smaller than it. */
+.mm-zoom-body {
+  flex: 1; min-height: 0; overflow: auto;
+  display: flex; align-items: center; justify-content: center;
+  padding: 14px;
+  background: color-mix(in srgb, var(--kx-line) 8%, transparent);
+}
+/* `flex-shrink: 0` or the flex centring squashes a diagram wider than the card
+   back down to fit, which silently undoes the zoom it was asked for. */
+.mm-zoom-body > svg { flex: none; display: block; margin: auto; }
+@media (prefers-reduced-motion: reduce) { .mm-zoom { backdrop-filter: none; } }
 
 .md-h { font-family: var(--kx-ui); line-height: 1.3; margin: 14px 0 6px; }
 .md-h:first-child { margin-top: 0; }

@@ -106,7 +106,18 @@
     "</style>";
   var MM_DEFS =
     '<defs>' +
-    '<marker id="mm-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mm-arrow" d="M0,0 L10,5 L0,10 z"/></marker>' +
+    /* A narrow, swept head rather than a blunt triangle.
+     *
+     * The old one was an isoceles triangle as wide as it was long, which at the
+     * end of a short edge reads as a wedge stuck on the line rather than as a
+     * direction. This is drawn back from BOTH sides to a notch behind the tip,
+     * so the two barbs taper and the head points instead of blocking.
+     *
+     * `markerUnits="userSpaceOnUse"` because the default scales a marker by the
+     * line's own stroke-width: a thick `==>` edge is 3px, which gave it a head
+     * three times the size of every other head in the same diagram. The head is
+     * one fixed size now and only the shaft changes weight. */
+    '<marker id="mm-arrow" viewBox="0 0 12 10" refX="11" refY="5" markerWidth="12" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="mm-arrow" d="M0,0.9 L12,5 L0,9.1 L3.4,5 z"/></marker>' +
     '<marker id="mm-open" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="mm-arrow-open" d="M0,0 L9,5 L0,10" fill="none"/></marker>' +
     '<marker id="mm-tri" viewBox="0 0 14 12" refX="13" refY="6" markerWidth="14" markerHeight="12" orient="auto-start-reverse"><path class="mm-uml-hollow" d="M0,0 L13,6 L0,12 z"/></marker>' +
     '<marker id="mm-diamond" viewBox="0 0 16 10" refX="15" refY="5" markerWidth="16" markerHeight="10" orient="auto-start-reverse"><path class="mm-uml-fill" d="M0,5 L8,0 L16,5 L8,10 z"/></marker>' +

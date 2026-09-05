@@ -61,6 +61,11 @@ function _sbRun() {
     // falls back to being the absence of one, which is where pass and fail
     // started.
     '<symbol id="i-minus" viewBox="0 0 24 24"><path d="M6 12h12" ' + S6 + ' stroke-width="2"/></symbol>' +
+    // The pair the diagram viewer zooms with, and the corners that open it.
+    // `i-plus` is `i-minus` with the upright, so the two read as one control.
+    '<symbol id="i-plus" viewBox="0 0 24 24"><path d="M6 12h12M12 6v12" ' + S6 + ' stroke-width="2"/></symbol>' +
+    '<symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9.5V4h5.5M14.5 20H20v-5.5" ' + S6 +
+      ' stroke-width="1.8"/><path d="M4 4l6.5 6.5M20 20l-6.5-6.5" ' + S6 + ' stroke-width="1.8"/></symbol>' +
     '<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" ' + S6 + ' stroke-width="2"/></symbol>' +
     '<symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 3l9.5 17H2.5z" ' + S6 + ' stroke-width="1.5"/><path d="M12 9.5v5M12 17v.5" ' + S6 + ' stroke-width="1.6"/></symbol>' +
     '<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" ' + S6 + ' stroke-width="1.5"/><path d="M12 11v5.5M12 7.5v.5" ' + S6 + ' stroke-width="1.7"/></symbol>' +
@@ -821,10 +826,91 @@ function _sbRun() {
     if (!svg) return "";
     return '<div class="cb mermaid-fig">' +
       '<div class="cb-h"><span class="cb-l">mermaid</span><span class="sp"></span>' +
+      // A diagram that fits a 320px dock is a diagram nobody can read. This
+      // opens the same SVG over the whole panel with the zoom under the user's
+      // hand; it is vector, so it is the drawing that grows rather than a
+      // bitmap of it.
+      '<button class="cb-copy" data-mm-zoom title="Open the diagram larger" ' +
+        'aria-label="Open the diagram larger">' + icon("i-expand", "ic-11") + "</button>" +
       '<button class="cb-copy" data-cb-copy title="Copy diagram source" aria-label="Copy diagram source">' +
         icon("i-copy", "ic-11") + "</button></div>" +
       '<div class="mermaid-svg">' + svg + "</div>" +
       '<pre class="mermaid-src" hidden>' + esc(code) + "</pre></div>";
+  }
+
+  /* ── the diagram, larger ────────────────────────────────────────────────
+   *
+   * `natural` is the SVG's own width and height, and every scale is computed
+   * from it rather than from the size the picture currently happens to be.
+   * Compounding the last scale is how a zoom control drifts: ten steps in and
+   * ten steps out has to land back where it started, and multiplying a running
+   * number does not. `opener` is the button that opened it, so focus goes back
+   * where it came from rather than to the top of the document. */
+  var mmZoom = { natural: null, scale: 1, opener: null };
+
+  var MM_MIN = 0.25, MM_MAX = 6;
+
+  function mmApplyScale(s) {
+    var body = $("mmZoomBody");
+    var svg = body && body.querySelector("svg");
+    if (!svg || !mmZoom.natural) return;
+    var next = Math.min(MM_MAX, Math.max(MM_MIN, s));
+    mmZoom.scale = next;
+    svg.setAttribute("width", String(Math.round(mmZoom.natural.w * next)));
+    svg.setAttribute("height", String(Math.round(mmZoom.natural.h * next)));
+    var pct = $("mmZoomPct");
+    if (pct) pct.textContent = Math.round(next * 100) + "%";
+  }
+
+  /* The whole drawing, as large as it will go and still fit.
+   *
+   * Both axes, not just the width: a tall flowchart fitted on width alone is
+   * bigger and still cut off, which is the complaint this feature exists for.
+   * It is allowed to scale UP as well as down, so a three-box diagram in a wide
+   * dock fills the space instead of sitting tiny in the middle of it. */
+  function mmFit() {
+    var body = $("mmZoomBody");
+    if (!body || !mmZoom.natural) return;
+    var pad = 28;
+    var w = Math.max(80, body.clientWidth - pad);
+    var h = Math.max(80, body.clientHeight - pad);
+    mmApplyScale(Math.min(w / mmZoom.natural.w, h / mmZoom.natural.h));
+  }
+
+  function openMermaidZoom(fig, opener) {
+    var src = fig && fig.querySelector("svg.mm-svg");
+    var wrap = $("mmZoom"), body = $("mmZoomBody");
+    if (!src || !wrap || !body) return;
+    // Cloned rather than re-rendered from the source: the picture in the
+    // viewer is then the same object the transcript is showing, and cannot
+    // disagree with it.
+    var copy = src.cloneNode(true);
+    mmZoom.natural = {
+      w: Number(copy.getAttribute("width")) || 640,
+      h: Number(copy.getAttribute("height")) || 360,
+    };
+    copy.removeAttribute("class");
+    body.textContent = "";
+    body.appendChild(copy);
+    mmZoom.opener = opener || null;
+    wrap.hidden = false;
+    // After the layout exists, or clientWidth is zero and the fit is nonsense.
+    requestAnimationFrame(function () { mmFit(); });
+    var close = $("mmZoomClose");
+    if (close) close.focus();
+  }
+
+  function closeMermaidZoom() {
+    var wrap = $("mmZoom"), body = $("mmZoomBody");
+    if (!wrap || wrap.hidden) return;
+    wrap.hidden = true;
+    // Emptied on the way out: a cloned SVG left in the tree is a second copy of
+    // every diagram anyone has looked at, kept for the life of the panel.
+    if (body) body.textContent = "";
+    var back = mmZoom.opener;
+    mmZoom.opener = null;
+    mmZoom.natural = null;
+    if (back && document.contains(back)) back.focus();
   }
 
   function md(t) {
@@ -1404,6 +1490,32 @@ function _sbRun() {
           sectionShell("secEp", "Endpoints", "epBadge", "epBody", false) +
           sectionShell("secSk", "Skills", "skBadge", "skBody", false) +
         '</section>' +
+        /* The diagram, larger.
+         *
+         * At panel level rather than inside the figure, because a figure is as
+         * wide as the transcript and escaping that width is the entire point.
+         * One viewer serves every diagram in the conversation: it is filled
+         * from whichever figure was opened and emptied when it closes, so a
+         * transcript with twenty flowcharts still carries one copy of this. */
+        '<div class="mm-zoom" id="mmZoom" hidden>' +
+          '<div class="mm-zoom-card" role="dialog" aria-modal="true" aria-label="Diagram">' +
+            '<div class="mm-zoom-bar">' +
+              '<span class="mm-zoom-t">Diagram</span><span class="sp"></span>' +
+              '<button class="tb-btn" data-mmz="out" title="Zoom out" aria-label="Zoom out">' +
+                icon("i-minus", "ic-13") + '</button>' +
+              // Announced, because the two zoom buttons are otherwise a control
+              // whose only feedback is a picture changing size.
+              '<span class="mm-zoom-pct" id="mmZoomPct" aria-live="polite">100%</span>' +
+              '<button class="tb-btn" data-mmz="in" title="Zoom in" aria-label="Zoom in">' +
+                icon("i-plus", "ic-13") + '</button>' +
+              '<button class="tb-btn" data-mmz="fit" title="Fit the whole diagram" aria-label="Fit the whole diagram">' +
+                icon("i-expand", "ic-13") + '</button>' +
+              '<button class="tb-btn" id="mmZoomClose" data-mmz="close" title="Close (Esc)" aria-label="Close">' +
+                icon("i-x", "ic-13") + '</button>' +
+            '</div>' +
+            '<div class="mm-zoom-body" id="mmZoomBody"></div>' +
+          '</div>' +
+        '</div>' +
       '</div>';
     logEl = $("log");
   }
@@ -6539,6 +6651,57 @@ function _sbRun() {
       openMsgMenu(el, x, y);
     });
 
+    /* The diagram viewer's own controls.
+     *
+     * On the overlay rather than delegated from the transcript: #mmZoom is a
+     * sibling of #log, so the transcript's click listener never sees these -
+     * which is exactly the bug this replaced, where every control except
+     * Escape was inert. A direct listener is safe because #mmZoom is built once
+     * in mount() and never rewritten, and it keeps the document-level click
+     * path from growing another branch to skip on every click in the panel. */
+    $("mmZoom").addEventListener("click", function (e) {
+      // The backdrop, but never the card sitting on it.
+      if (e.target === this) { closeMermaidZoom(); return; }
+      var c = e.target.closest("[data-mmz]");
+      if (!c) return;
+      var act = c.getAttribute("data-mmz");
+      // Steps of 1.25 off the CURRENT scale rather than a counter, so the
+      // buttons stay meaningful after a Fit has set an arbitrary one. Each step
+      // re-derives the size from the drawing's natural size, so in-then-out
+      // lands exactly where it started instead of drifting.
+      if (act === "in") mmApplyScale(mmZoom.scale * 1.25);
+      else if (act === "out") mmApplyScale(mmZoom.scale / 1.25);
+      else if (act === "fit") mmFit();
+      else closeMermaidZoom();
+    });
+
+    /* Tab stays inside the dialog while it is open.
+     *
+     * The card says `aria-modal="true"`, and that is a claim about behaviour,
+     * not a decoration: without this, Tab walks out of the viewer and into a
+     * transcript the user cannot see behind the backdrop. Same shape as the
+     * mode sheet's trap, for the same reason. */
+    $("mmZoom").addEventListener("keydown", function (e) {
+      if (e.key !== "Tab") return;
+      var f = [].slice.call(this.querySelectorAll("button:not([disabled])"));
+      if (!f.length) return;
+      var first = f[0], last = f[f.length - 1];
+      var here = f.indexOf(document.activeElement);
+      // Already outside - pull it back rather than let Tab walk further away.
+      if (here === -1) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+        return;
+      }
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    });
+
     $("msgMenu").addEventListener("click", function (e) {
       var row = e.target.closest("[data-mm]");
       if (!row) return;
@@ -6574,6 +6737,19 @@ function _sbRun() {
     logEl.addEventListener("click", function (e) {
       // Code-block copy is delegated because md() writes blocks as innerHTML on
       // every repaint - a listener bound per block would be lost each flush.
+      /* Opening the diagram viewer. Delegated for the same reason Copy is:
+         md() writes the transcript as innerHTML on every repaint, so a listener
+         bound to a figure is lost on the next flush.
+
+         Only the OPEN button belongs here. The viewer's own controls sit in
+         #mmZoom, which is a sibling of #log at panel level, so a click on them
+         never reaches this listener - they are wired on the overlay itself. */
+      var mmOpen = e.target.closest("[data-mm-zoom]");
+      if (mmOpen) {
+        openMermaidZoom(mmOpen.closest(".mermaid-fig"), mmOpen);
+        return;
+      }
+
       var cbc = e.target.closest("[data-cb-copy]");
       if (cbc) {
         var pre = cbc.closest(".cb") && cbc.closest(".cb").querySelector("pre");
@@ -6845,6 +7021,13 @@ function _sbRun() {
          wanted to dismiss a menu is the wrong reading of one keystroke. */
       if (e.key === "Escape" && $("msgMenu") && !$("msgMenu").hidden) {
         closeMsgMenu(true);
+        return;
+      }
+      /* And the diagram viewer before the turn, for exactly the same reason:
+         Escape means "shut the thing that is over everything else" while one
+         is open, not "stop the model". */
+      if (e.key === "Escape" && $("mmZoom") && !$("mmZoom").hidden) {
+        closeMermaidZoom();
         return;
       }
       msgMenuKeys(e);

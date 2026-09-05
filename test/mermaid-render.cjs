@@ -321,6 +321,150 @@ const SEQUENCE = [
     ok("the ER diagram draws crow's-foot marks", more.crow >= 1, String(more.crow));
     ok("the pie chart draws slices and a legend", more.slices >= 2 && more.legend >= 2, `slices=${more.slices} legend=${more.legend}`);
     ok("none of them are left as visible source", more.visibleSource === 0);
+    /* ── 2b. the arrowheads ──────────────────────────────────────────── */
+    console.log("\n──── the arrowheads ────");
+    const head = await page.evaluate(() => {
+      const m = document.querySelector("#log marker#mm-arrow");
+      if (!m) return null;
+      const p = m.querySelector("path");
+      const d = (p && p.getAttribute("d")) || "";
+      // The four y values of the barb, in viewBox units.
+      const ys = (d.match(/,(\d+(?:\.\d+)?)/g) || []).map((v) => Number(v.slice(1)));
+      const vb = (m.getAttribute("viewBox") || "").split(/\s+/).map(Number);
+      return { d, ys, vb, units: m.getAttribute("markerUnits"), pts: (d.match(/L/g) || []).length };
+    });
+    ok("the edges carry an arrowhead", !!head);
+    // Narrowed from both sides: the barb spans less than the full height of its
+    // own box, and by the same margin top and bottom.
+    if (head) {
+      const top = Math.min(...head.ys), bot = Math.max(...head.ys), h = head.vb[3];
+      ok("the head is narrowed from the top", top > 0.5, `y=${top} of ${h}`);
+      ok("and by the same amount from the bottom", Math.abs((h - bot) - top) < 0.3,
+        `top ${top}, bottom gap ${(h - bot).toFixed(2)}`);
+      ok("so it is longer than it is wide", head.vb[2] > h, `${head.vb[2]}x${h}`);
+      // Three L segments means a notch behind the tip - a swept barb rather
+      // than a plain triangle, which has two.
+      ok("and swept back to a notch rather than a flat triangle", head.pts === 3, String(head.pts));
+      // Fixed size, or a thick edge gets a head three times everyone else's.
+      ok("its size does not ride on the line's stroke width",
+        head.units === "userSpaceOnUse", String(head.units));
+    }
+
+    /* ── 2c. opening a diagram larger ────────────────────────────────── */
+    console.log("\n──── the diagram, larger ────");
+    const inlineW = await page.evaluate(
+      () => Math.round(document.querySelector("#log .mermaid-fig svg.mm-svg").getBoundingClientRect().width));
+    ok("every figure offers a way to open it", await page.evaluate(() => {
+      const figs = document.querySelectorAll("#log .mermaid-fig").length;
+      return figs > 0 && document.querySelectorAll("#log .mermaid-fig [data-mm-zoom]").length === figs;
+    }));
+    ok("the viewer starts closed", await page.evaluate(() => document.getElementById("mmZoom").hidden));
+
+    await page.click("#log .mermaid-fig [data-mm-zoom]");
+    await page.waitForTimeout(120);
+    const opened = await page.evaluate(() => {
+      const wrap = document.getElementById("mmZoom");
+      const svg = document.querySelector("#mmZoomBody svg");
+      const b = svg ? svg.getBoundingClientRect() : null;
+      return {
+        open: !wrap.hidden,
+        w: b ? Math.round(b.width) : 0,
+        h: b ? Math.round(b.height) : 0,
+        pct: document.getElementById("mmZoomPct").textContent,
+        nodes: document.querySelectorAll("#mmZoomBody .mm-node").length,
+        focused: document.activeElement && document.activeElement.id,
+        // The transcript keeps its own copy; the viewer works on a clone.
+        stillInLog: document.querySelectorAll("#log .mermaid-fig svg.mm-svg").length,
+        figsInLog: document.querySelectorAll("#log .mermaid-fig").length,
+      };
+    });
+    ok("clicking it opens the viewer", opened.open);
+    ok("showing the same diagram", opened.nodes === 3, String(opened.nodes));
+    ok("BIGGER than it was in the transcript", opened.w > inlineW,
+      `${opened.w}px vs ${inlineW}px inline`);
+    ok("scaled to fit rather than cropped", opened.h > 0 && opened.h <= 900, `${opened.h}px tall`);
+    ok("the zoom level is stated", /%$/.test(opened.pct), opened.pct);
+    ok("focus moves into the dialog", opened.focused === "mmZoomClose", String(opened.focused));
+
+    /* THE CARD HAS TO STOP THE TRANSCRIPT BEHIND IT.
+       Every --kx-surface-* token is a translucent white meant to layer ON a
+       ground rather than to be one, so a card painted with one lets the
+       conversation show through the diagram. That is invisible to every
+       structural assertion above - it renders, it is the right size, it is in
+       the right place - and obvious the moment anyone looks at it. Measured on
+       the COMPUTED colour, which is the only thing that knows. */
+    const ground = await page.evaluate(() => {
+      const bg = getComputedStyle(document.querySelector(".mm-zoom-card")).backgroundColor;
+      const m = bg.match(/rgba?\(([^)]+)\)/);
+      const parts = m ? m[1].split(",").map((n) => parseFloat(n)) : [];
+      return { bg, alpha: parts.length > 3 ? parts[3] : 1 };
+    });
+    ok("the card is an opaque ground, not a see-through wash",
+      ground.alpha >= 0.9, `${ground.bg} (alpha ${ground.alpha})`);
+    ok("and the transcript keeps its own copy",
+      opened.stillInLog === opened.figsInLog && opened.figsInLog > 0,
+      `${opened.stillInLog} of ${opened.figsInLog}`);
+
+    const pctOf = () => page.evaluate(
+      () => Number(document.getElementById("mmZoomPct").textContent.replace("%", "")));
+    const widthOf = () => page.evaluate(
+      () => Math.round(document.querySelector("#mmZoomBody svg").getBoundingClientRect().width));
+    const before = await pctOf(), wBefore = await widthOf();
+    await page.click('[data-mmz="in"]');
+    await page.waitForTimeout(60);
+    ok("zoom in enlarges it", (await widthOf()) > wBefore, `${wBefore} -> ${await widthOf()}`);
+    ok("and says so", (await pctOf()) > before, `${before}% -> ${await pctOf()}%`);
+    await page.click('[data-mmz="out"]');
+    await page.waitForTimeout(60);
+    // In then out returns exactly, because each step is computed from the
+    // scale rather than compounded onto the rendered size.
+    ok("zooming out again lands back where it started",
+      Math.abs((await pctOf()) - before) <= 1, `${before}% -> ${await pctOf()}%`);
+
+    // Tab wraps inside the card rather than walking out into a transcript the
+    // backdrop is covering. aria-modal="true" is a claim; this is the check.
+    await page.evaluate(() => document.querySelector('[data-mmz="close"]').focus());
+    await page.keyboard.press("Tab");
+    const wrapped = await page.evaluate(
+      () => document.activeElement && document.activeElement.getAttribute("data-mmz"));
+    ok("Tab from the last control wraps to the first", wrapped === "out", String(wrapped));
+    await page.keyboard.down("Shift"); await page.keyboard.press("Tab"); await page.keyboard.up("Shift");
+    const back = await page.evaluate(
+      () => document.activeElement && document.activeElement.getAttribute("data-mmz"));
+    ok("and Shift+Tab wraps back the other way", back === "close", String(back));
+
+    // The close button, which lived in the transcript's click listener and so
+    // never fired: only Escape used to shut this.
+    await page.click('[data-mmz="close"]');
+    await page.waitForTimeout(80);
+    ok("the close button shuts it", await page.evaluate(
+      () => document.getElementById("mmZoom").hidden));
+
+    // The backdrop closes it; the card on top of the backdrop does not.
+    await page.click("#log .mermaid-fig [data-mm-zoom]");
+    await page.waitForTimeout(100);
+    await page.click(".mm-zoom-card .mm-zoom-body", { position: { x: 4, y: 4 } });
+    await page.waitForTimeout(60);
+    ok("clicking inside the card keeps it open", await page.evaluate(
+      () => !document.getElementById("mmZoom").hidden));
+    await page.evaluate(() => document.getElementById("mmZoom").click());
+    await page.waitForTimeout(60);
+    ok("clicking the backdrop closes it", await page.evaluate(
+      () => document.getElementById("mmZoom").hidden));
+
+    // Reopen so the Escape path below is exercised from an open viewer.
+    await page.click("#log .mermaid-fig [data-mm-zoom]");
+    await page.waitForTimeout(100);
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(80);
+    const closed = await page.evaluate(() => ({
+      hidden: document.getElementById("mmZoom").hidden,
+      emptied: document.getElementById("mmZoomBody").childElementCount === 0,
+      focused: document.activeElement && document.activeElement.hasAttribute("data-mm-zoom"),
+    }));
+    ok("Escape closes it", closed.hidden);
+    ok("the clone is not left in the tree", closed.emptied);
+    ok("and focus returns to the button that opened it", closed.focused);
 
     /* ── 3. restored transcript ──────────────────────────────────────── */
     console.log("\n──── reopened conversation ────");
@@ -360,6 +504,15 @@ const SEQUENCE = [
     await page.waitForTimeout(200);
     await page.screenshot({ path: OUT });
     console.log("\nscreenshot: " + OUT);
+
+    // And one of the viewer open, because "you can see it bigger" is a visual
+    // claim and the inline shot cannot make it.
+    const ZOOM_OUT = OUT.replace(/\.png$/, "-zoomed.png");
+    await page.click("#log .mermaid-fig [data-mm-zoom]");
+    await page.waitForTimeout(220);
+    await page.screenshot({ path: ZOOM_OUT });
+    console.log("screenshot: " + ZOOM_OUT);
+    await page.keyboard.press("Escape");
 
     await ctx.close();
   } finally {
