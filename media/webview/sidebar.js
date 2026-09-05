@@ -2496,42 +2496,76 @@ function _sbRun() {
        56 gives the mark presence without crowding the column it sits in; the
        CSS scales it down with the panel so a narrow dock does not have a mark
        wider than the text under it. */
-    // SPLIT · IDENTITY / ACTIONS.
-    // Below the breakpoint (see .w-split in sidebar.css) this is one centred
-    // column, exactly as before. Above it the identity block and the action
-    // lists sit side by side, so a wide dock is used rather than framed by
-    // empty margin on both sides. The two wrappers are all the row lays out;
-    // every part inside them is unchanged.
-    var body = '<div class="w-split"><div class="w-identity">' +
-      crystal(56, "crystal w-crystal" + spin) +
-      '<div class="w-mark">Genesis</div>' +
-      '<p>' + (recent.length
-        ? "Pick up where you left off, or start something new."
-        /* This used to say "never write a file until you accept it", which is
-           the first sentence a new user reads and is not what happens: a write
-           lands on disk as soon as the approval card is answered, and the diff
-           card afterwards is a review with an undo behind it. In edits-auto or
-           full-auto, and after one "Always allow", there is no card at all.
-           The honest version is still the reassuring one - nothing happens
-           unasked, and every change is reviewable and revertible. */
-        : "I read your workspace and ask before I change anything. Every edit " +
-          "arrives as a diff you can review and undo. Ask anything about this " +
-          "repository.") + "</p>" +
-      // Close .w-identity, open .w-actions - the Try list and, when present, the
-      // Recent section append into it below.
-      '</div><div class="w-actions">';
+    // BOOT SEQUENCE. The greeting reads as the workspace coming up: the
+    // identity, a real boot log of what Genesis just read, the openers as
+    // command cards, and (when present) recent threads - laid out left on a
+    // terminal over a dim oversized mark. See .welcome-boot in sidebar.css.
+    //
+    // Every figure in the log comes from state; anything state does not carry
+    // (a file count, a git branch) is left out rather than faked.
+    var prof = activeProfile();
+    var bModel = (prof && prof.model) || "";
+    var bWs = (S.workspace && S.workspace.name) || "workspace";
+    var bSkills = (S.skills || []).length;
+    var bChanges = (S.changes || []).length;
+
+    // One boot line: an optional status glyph, a label, and dim meta after it.
+    function bootLine(glyph, glyphCls, label, meta) {
+      return '<div class="w-tline">' +
+        (glyph ? '<span class="' + glyphCls + '">' + glyph + "</span> " : "") +
+        esc(label) +
+        (meta ? ' <span class="w-meta">— ' + esc(meta) + "</span>" : "") +
+        "</div>";
+    }
+    var term = '<div class="w-tline dim">genesis ▸ initializing workspace</div>' +
+      bootLine("✓", "ok", "workspace mounted", bWs);
+    if (bModel) term += bootLine("✓", "ok", "endpoint ready", bModel);
+    term += bootLine("✓", "ok", "skills loaded", bSkills + " available");
+    if (bChanges) {
+      term += bootLine("›", "warn",
+        bChanges + (bChanges === 1 ? " uncommitted change" : " uncommitted changes"),
+        "ask me to review them");
+    }
+    // A ready line, not a prompt: a steady status dot reads as "online" (the
+    // same green the endpoint dot uses), never as a cursor to type into, and the
+    // dim hint points at the one real input - the composer below.
+    term += '<div class="w-tline w-ready"><span class="ok">●</span> ready' +
+      ' <span class="w-meta">· ask anything below</span></div>';
+
+    var body =
+      // ONE mark, and it is the backdrop. A dim oversized roundel behind the
+      // log, in its own clip wrapper so it never reaches the panel's scroll.
+      // It is the welcome's only mark now - it carries `.crystal`, so it is the
+      // one the render suite counts and the one the "turn once on arrival" motion
+      // plays on.
+      '<div class="w-bg">' + crystal(300, "crystal w-bg-mark" + spin) + "</div>" +
+      '<div class="w-boot">' +
+        '<div class="w-id">' +
+          '<div class="w-mark">Genesis</div>' +
+        "</div>" +
+        // The copy switches once there is a thread to come back to; both
+        // composer.cjs and render.cjs assert this exact line.
+        '<p class="w-sub">' + (recent.length
+          ? "Pick up where you left off, or start something new."
+          /* The honest reassurance for a first run: a write lands on disk when
+             the approval card is answered, and the diff card after it is a
+             review with an undo behind it - nothing happens unasked. */
+          : "I read your workspace and ask before I change anything. Every edit " +
+            "arrives as a diff you can review and undo. Ask anything about this " +
+            "repository.") + "</p>" +
+        '<div class="w-term" role="img" aria-label="Workspace ready">' + term + "</div>";
 
     // Openers. These were removed once for being invented examples about a
     // function nobody in the workspace has - and that objection was right about
     // the old ones and does not apply to these. Every one is a real command
     // this extension already has, aimed at what the user has open right now:
     // no invented identifiers, nothing that can refer to somebody else's code.
-    body += '<div class="w-label">Try</div><div class="w-list">';
+    body += '<div class="w-label">Try</div><div class="w-cmds">';
     for (var si = 0; si < STARTERS.length; si++) {
-      body += '<button class="w-row" data-starter="' + esc(STARTERS[si].run) + '">' +
-        icon(STARTERS[si].icon, "ic-11") +
-        '<span class="t mq"><span class="mq-i">' + esc(STARTERS[si].text) + "</span></span>" +
-        icon("i-chev", "ic-9") + "</button>";
+      body += '<button class="w-cmd" data-starter="' + esc(STARTERS[si].run) + '">' +
+        '<span class="w-cmd-run">' + esc(STARTERS[si].run) + "</span>" +
+        '<span class="w-cmd-txt mq"><span class="mq-i">' + esc(STARTERS[si].text) + "</span></span>" +
+        "</button>";
     }
     body += "</div>";
 
@@ -2572,9 +2606,9 @@ function _sbRun() {
       }
       body += "</div></div>";
     }
-    // Close .w-actions and .w-split.
-    body += "</div></div>";
-    logEl.appendChild(div("welcome", body));
+    // Close .w-boot.
+    body += "</div>";
+    logEl.appendChild(div("welcome welcome-boot", body));
     // Long titles and starters reveal themselves by scrolling rather than an
     // ellipsis; measure them now the rows are in the document.
     mqAll();

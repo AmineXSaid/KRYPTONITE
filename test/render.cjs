@@ -455,24 +455,23 @@ function contrast(a, b) {
       /cubic-bezier/.test(timings[0] || ""), anim.timing);
 
     // The computed style only says an animation was DECLARED. Whether the mark
-    // moves is a question about pixels, and it is the question the owner asked.
-    // locator.screenshot() waits for the element to be stable and would time
-    // out here, which is why this clips the page instead.
-    const box = await mark.boundingBox();
-    const shot = async () =>
-      (await page.screenshot({ clip: box, animations: "allow" })).toString("base64");
-    const a = await shot();
+    // moves is a question about its transform over time. The mark is the faint
+    // background watermark now, so a screenshot diff is unreliable (it is dim
+    // and bleeds off the corner) - read the transform matrix instead, the way
+    // section 5f does.
+    const tf = () => mark.evaluate((el) => getComputedStyle(el).transform);
+    const a = await tf();
     await page.waitForTimeout(180);
-    const b = await shot();
-    ok("and the painted mark actually moves while it arrives", a !== b,
-      "two frames 180ms apart, inside the 1000ms entrance");
-    // And then stops, which is the whole point of the change.
+    const b = await tf();
+    ok("and the mark actually turns while it arrives", a !== b,
+      `two samples 180ms apart, inside the 1000ms entrance: ${a} -> ${b}`);
+    // And then rests, which is the whole point of the change.
     await page.waitForTimeout(1200);
-    const settled1 = await shot();
+    const settled1 = await tf();
     await page.waitForTimeout(700);
-    const settled2 = await shot();
-    ok("then stops, instead of turning for ever", settled1 === settled2,
-      "two frames 700ms apart, after the entrance");
+    const settled2 = await tf();
+    ok("then rests, instead of turning for ever", settled1 === settled2,
+      `two samples 700ms apart, after the entrance: ${settled1}`);
 
     // Same page, motion off: the pixels must settle.
     await ctx.close();
@@ -486,11 +485,10 @@ function contrast(a, b) {
       { data: { type: "stateSync", state: s } })), BASE);
     await p2.waitForTimeout(400);
     const m2 = p2.locator(".welcome .crystal").first();
-    const box2 = await m2.boundingBox();
-    const s1 = (await p2.screenshot({ clip: box2, animations: "allow" })).toString("base64");
+    const s1 = await m2.evaluate((el) => getComputedStyle(el).transform);
     await p2.waitForTimeout(700);
-    const s2 = (await p2.screenshot({ clip: box2, animations: "allow" })).toString("base64");
-    ok("and it holds still for a reader who asked for no motion", s1 === s2);
+    const s2 = await m2.evaluate((el) => getComputedStyle(el).transform);
+    ok("and it holds still for a reader who asked for no motion", s1 === s2, `${s1} -> ${s2}`);
     await ctx2.close();
   }
 
@@ -1794,105 +1792,98 @@ function contrast(a, b) {
     }
   }
 
-  /* ── 5t. the welcome screen is centred, and is one column ──────────── */
+  /* ── 5t. the boot-sequence welcome: left axis, real measure, centred ── */
   {
-    // `.welcome` already carried `justify-content: center`, and it did nothing
-    // visible: it centres the welcome's CHILDREN inside the welcome, and the
-    // welcome was `min-height: 340px` inside a transcript up to 591px tall. So
-    // the block sat at the top with a measured 237px of dead space beneath it
-    // and 14px above. Everything was centred inside a box that was not.
+    // The welcome is the workspace booting: an identity header, a terminal
+    // boot log, and command cards, laid out LEFT on one axis and filling the
+    // transcript's own reading measure rather than a 340px column stranded in
+    // empty margin. Two things are still true of the OLD design and stay
+    // asserted: the block is vertically centred when it fits (or scrolls, not
+    // clips, when it does not), and the mark scales with the panel.
     const sessions = [
       { id: "a", title: "can you explain this code?", count: 4, when: "1m ago" },
       { id: "b", title: "why dlc? here and what used for?", count: 9, when: "3d ago" },
     ];
+    const boot = {};
     for (const width of [300, 360, 420, 520]) {
       const { ctx, page } = await open(width, { sessions, session: { id: "s1", title: "", messages: [] } });
-      /* Taller than open()'s 640, deliberately. The reported bug is dead space
-         BELOW the block, which only exists when the block fits - at 640 the
-         welcome overflows at every width and the scroll branch below passes
-         without testing anything. 900 is an ordinary editor height and it is
-         the shape the screenshot showed. */
+      /* Taller than open()'s 640, deliberately: the vertical-centring case only
+         exists when the block fits, and 900 is an ordinary editor height. */
       await page.setViewportSize({ width, height: 900 });
       await page.waitForTimeout(250);
       const m = await page.evaluate(() => {
         const wel = document.querySelector(".welcome");
         if (!wel) return { missing: true };
+        const boot = wel.querySelector(".w-boot");
+        const id = wel.querySelector(".w-id");
+        const term = wel.querySelector(".w-term");
+        if (!boot || !id || !term) return { missing: true };
         const w = wel.getBoundingClientRect();
+        const b = boot.getBoundingClientRect();
         const log = document.getElementById("log").getBoundingClientRect();
-        const kids = [...wel.children].map((e) => e.getBoundingClientRect());
-        const mid = (w.left + w.right) / 2;
         return {
           above: Math.round(w.top - log.top),
           below: Math.round(log.bottom - w.bottom),
-          widest: Math.max(...kids.map((r) => Math.round(r.width))),
-          // Every child's own centre against the block's centre. Geometry, so
-          // a child that is centred by luck of its content still counts.
-          offsets: kids.map((r) => Math.round((r.left + r.right) / 2 - mid)),
-          // Whether the transcript is scrolling. When it is, the content is
-          // taller than the panel and there is no vertical centring to do -
-          // asking for symmetric space then is asking for the block to be
-          // clipped at both ends.
+          bootW: Math.round(b.width),
+          // The identity and the terminal share ONE left edge - the boot
+          // design's axis is a left edge, top to bottom, not a centre line.
+          axis: Math.round(id.getBoundingClientRect().left - term.getBoundingClientRect().left),
           scrolls: document.getElementById("log").scrollHeight >
                    document.getElementById("log").clientHeight + 1,
         };
       });
-      ok(`the welcome screen renders at ${width}px`, !m.missing, JSON.stringify(m));
-      /* The consequence, not the rule: dead space below the block IS the
-         "not centred" that was reported - 237px of it, against 14px above.
-      
-         Two cases, and only one of them is about centring. When the content
-         fits, the space above and below must match. When it does not - a
-         narrow dock in a short panel, where the list alone is taller than the
-         transcript - there is nothing to centre, and what matters instead is
-         that it SCROLLS rather than being clipped. Asserting symmetry in that
-         case would be asking for the block to be cut off at both ends. */
-      if (m.scrolls) {
-        ok(`the welcome scrolls rather than clipping when it does not fit at ${width}px`,
-          m.below <= 0 && m.above >= 0, JSON.stringify(m));
-      } else {
+      ok(`the boot welcome renders at ${width}px`, !m.missing, JSON.stringify(m));
+      boot[width] = m;
+      // The top is NEVER clipped - `safe center` in the CSS is exactly what
+      // guarantees this: the boot log is taller than the old column, so plain
+      // centring would push the mark off the top on a short dock. It centres
+      // when it fits and falls back to the top (which scrolls) when it does not.
+      ok(`the welcome top is never clipped at ${width}px`, m.above >= 0, JSON.stringify(m));
+      // And when it comfortably fits, it is vertically centred as before.
+      if (!m.scrolls) {
         ok(`the welcome block is vertically centred in the transcript at ${width}px`,
           Math.abs(m.above - m.below) <= 16, JSON.stringify(m));
       }
-      ok(`and every element is centred on the same axis at ${width}px`,
-        m.offsets.every((o) => Math.abs(o) <= 1), JSON.stringify(m));
-      // One column. The lists used to take the full panel - 484px at a 520px
-      // dock - under a 290px paragraph and a 71px wordmark, so five stacked
-      // elements had five different widths and the widest grew every time the
-      // panel did.
-      ok(`the column is capped rather than growing with the panel at ${width}px`,
-        m.widest <= 340, JSON.stringify(m));
+      ok(`the identity and the boot log share one left edge at ${width}px`,
+        Math.abs(m.axis) <= 2, JSON.stringify(m));
       await ctx.close();
     }
+    // The whole point of the redesign: the block fills a real measure instead
+    // of the old 340 cap, so a wide dock is used rather than framed. It grows
+    // with the panel, and past ~340 once there is room.
+    ok("the boot block grows with the panel rather than sitting at 340",
+      boot[520].bootW > boot[300].bootW && boot[520].bootW > 340, JSON.stringify(boot));
+    // ...but it is still a measure, not the whole panel - it does not run edge
+    // to edge on a wide dock.
+    ok("the boot block stays within a reading measure",
+      boot[520].bootW <= 660, JSON.stringify(boot));
 
-    // The mark: bigger, and scaled to the panel rather than fixed. It was 34px
-    // on the one screen that exists to carry it, with a 19px wordmark under
-    // it - a 56px identity block in a 340px column.
+    // The mark: there is exactly ONE on this screen now, and it is the large,
+    // faint background watermark - not a foreground identity mark. The old
+    // `.w-crystal` beside the wordmark is gone; the wordmark stands alone.
     const sizes = {};
     for (const width of [300, 420, 520]) {
       const { ctx, page } = await open(width, { session: { id: "s1", title: "", messages: [] } });
       sizes[width] = await page.evaluate(() => {
-        const mark = document.querySelector(".welcome .w-crystal");
+        const marks = document.querySelectorAll(".welcome .crystal");
+        const bg = document.querySelector(".welcome .w-bg-mark");
         const word = document.querySelector(".welcome .w-mark");
-        const wel = document.querySelector(".welcome").getBoundingClientRect();
-        const m = mark ? mark.getBoundingClientRect() : null;
         return {
-          mark: m ? Math.round(m.width) : 0,
-          word: word ? Math.round(word.getBoundingClientRect().width) : 0,
-          // A mark wider than the column it sits in is the failure mode of
-          // scaling it up, so this is measured rather than assumed.
-          fits: !!m && m.width <= wel.width,
+          markCount: marks.length,
+          foreground: !!document.querySelector(".welcome .w-crystal"),
+          bgWidth: bg ? Math.round(bg.getBoundingClientRect().width) : 0,
+          faint: bg ? Number(getComputedStyle(bg).opacity) : 1,
+          word: word ? word.textContent.trim() : "",
         };
       });
       await ctx.close();
     }
-    ok("the welcome mark is bigger than the 34px it was",
-      sizes[420].mark > 34, JSON.stringify(sizes));
-    ok("and it scales with the panel rather than sitting at one size",
-      sizes[520].mark > sizes[300].mark, JSON.stringify(sizes));
-    ok("and it never outgrows the column at any width",
-      Object.values(sizes).every((s) => s.fits), JSON.stringify(sizes));
-    ok("and the wordmark grows with it, so the pair stays in proportion",
-      sizes[520].word > sizes[300].word, JSON.stringify(sizes));
+    ok("the welcome carries exactly one mark",
+      Object.values(sizes).every((s) => s.markCount === 1), JSON.stringify(sizes));
+    ok("and it is the background watermark, not a foreground logo",
+      Object.values(sizes).every((s) => !s.foreground && s.bgWidth > 120 && s.faint < 0.2),
+      JSON.stringify(sizes));
+    ok("the wordmark still reads GENESIS", /genesis/i.test(sizes[420].word), JSON.stringify(sizes));
   }
 
   /* ── 5u. the permission glyphs are a set, and all three paint ──────── */
