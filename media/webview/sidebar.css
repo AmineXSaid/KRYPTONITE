@@ -760,8 +760,11 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
      dock is 300px or 900px wide - it grows and shrinks with the window instead of
      the old fixed 340px that swamped a narrow panel and shrank to nothing on a
      wide one. `overflow:hidden` on `.welcome.boot` makes the crop. */
-  width: clamp(200px, 62%, 460px);
-  left: -12%; bottom: -14%;
+  width: clamp(240px, 74%, 560px);
+  /* Anchored INTO the bottom-left corner and bled off both the left and bottom
+     edges, so the mark sits flush against the phase rail with no dark wedge
+     between the two. The panel's `overflow:hidden` crops the off-edge part. */
+  left: -26%; bottom: -22%;
   /* No transition on size/position: these track the window, and a live drag-
      resize should follow the cursor instantly rather than lag behind an ease. */
 }

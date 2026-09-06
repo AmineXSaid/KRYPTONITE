@@ -1149,14 +1149,11 @@ function _sbRun() {
       CRYSTAL_DEFS + ICON_DEFS + '</defs></svg>' +
       '<div id="app">' +
         '<header class="kx-header">' +
-          // The brand mark, kept as the bar's one identity now that the
-          // "Genesis" wordmark text is gone. The wordmark still lives on the
-          // welcome screen (.w-mark); here the mark alone, plus the divider to
-          // its right, buys the row back for the tabs.
-          '<span class="kx-mark" aria-hidden="true">' + crystal(20) + '</span>' +
-          // The tabs move up into this bar, between the mark and the action
-          // buttons, so the panel spends one short row on what used to be a
-          // 40px header plus a separate 32px tab strip.
+          // No brand mark in the bar. The only logo the panel shows is the
+          // background watermark on the welcome screen; a small live mark here
+          // (and a second one in the welcome masthead) was a third copy of the
+          // same identity, so both are gone and the bar opens straight on the
+          // tabs.
           '<nav class="kx-tabs" role="tablist">' +
             '<button class="kx-tab" id="tabSession" role="tab" aria-selected="true" tabindex="0" aria-label="Session" aria-controls="viewSession">Session</button>' +
             '<button class="kx-tab" id="tabMcp" role="tab" aria-selected="false" tabindex="-1" aria-label="MCP" aria-controls="viewMcp">MCP<span class="tab-count" id="mcpCount" hidden></span></button>' +
@@ -2616,10 +2613,11 @@ function _sbRun() {
     // that names the product to a screen reader.
     var body = '<div class="boot-bg" aria-hidden="true">' + crystal(340, "boot-bg-mark") + "</div>";
 
-    // The masthead. The one turning mark, the wordmark, and the version line
-    // the design writes as "v0.9.0 · workspace boot".
+    // The masthead: the wordmark and the version line. No mark here - the only
+    // logo on this screen is the background watermark bleeding off the corner
+    // behind the boot log. The turning mark that used to sit beside the wordmark
+    // was a second copy of it and has been removed.
     body += '<div class="boot-head">' +
-      crystal(22, "crystal" + spin) +
       '<span class="w-mark">Genesis</span>' +
       '<span class="boot-ver">' + (ver ? "v" + esc(ver) + " · " : "") +
         "workspace boot</span></div>";

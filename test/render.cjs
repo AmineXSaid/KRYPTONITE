@@ -254,9 +254,9 @@ function contrast(a, b) {
 
     const header = page.locator(".kx-header");
     ok("the header renders", (await header.count()) === 1);
-    // The header no longer carries a "Genesis" wordmark - just the brand mark
-    // and a divider before the tabs - so the wordmark is read from the welcome
-    // screen (.w-mark), which is where it moved and which the boot state shows.
+    // The header carries no wordmark and no brand mark now - it opens straight
+    // on the tabs - so the wordmark is read from the welcome screen (.w-mark),
+    // which is where it lives and which the boot state shows.
     const wordmark = await page.locator(".welcome .w-mark").first().textContent();
     ok("the wordmark reads GENESIS", /genesis/i.test(wordmark || ""), wordmark);
 
@@ -405,93 +405,18 @@ function contrast(a, b) {
     await ctx.close();
   }
 
-  /* ── 4. the mark turns ─────────────────────────────────────────────── */
+  /* ── 4. the welcome shows no foreground mark ───────────────
+     The masthead turning crystal and the header bar mark were both removed:
+     the only logo on the welcome is the background watermark (section 5t). */
   {
     const { ctx, page } = await open(400, {});
-    const mark = page.locator(".welcome .crystal").first();
-    ok("the welcome mark renders", (await mark.count()) === 1);
-
-    const anim = await mark.evaluate((el) => {
-      const cs = getComputedStyle(el);
-      return { name: cs.animationName, count: cs.animationIterationCount,
-               duration: cs.animationDuration, timing: cs.animationTimingFunction,
-               delay: cs.animationDelay };
-    });
-    // TWO animations now, and the pair is the design: a finite eased entrance
-    // in front of the endless linear turn it settles into. These used to read
-    // `name === "g-sweep"`, `count === "infinite"` and `timing === "linear"`,
-    // which described the mark correctly right up until it grew an arrival -
-    // so they are not relaxed here, they are re-aimed at each phase, and the
-    // motion itself is measured in section 5f rather than inferred from names.
-    // Split on TOP-LEVEL commas only: `cubic-bezier(0.15, 0.45, 0.4, 0.985)`
-    // carries three of its own, and a naive split reports five phases.
-    const phases = (v) => {
-      const out = []; let depth = 0, cur = "";
-      for (const ch of String(v || "")) {
-        if (ch === "(") depth++;
-        else if (ch === ")") depth--;
-        if (ch === "," && depth === 0) { out.push(cur.trim()); cur = ""; continue; }
-        cur += ch;
-      }
-      if (cur.trim()) out.push(cur.trim());
-      return out;
-    };
-    /* ONE ANIMATION, AND IT ENDS.
-     *
-     * A steady 6s turn used to run behind the entrance for ever. The argument
-     * was that the two other g-sweep users - the streaming notch at 1.4s and
-     * the working-conversation mark at 2.4s - mean "something is happening",
-     * and a quarter of their speed reads as idle instead. It does not: motion
-     * is the signal, and its rate is a detail nobody measures against a mark
-     * they are not already watching. An idle panel looked like a busy one and
-     * spent a compositor frame every 16ms saying so. */
-    const [entrance, counts] = [phases(anim.name), phases(anim.count)];
-    ok("it runs one animation: the arrival", entrance.length === 1, anim.name);
-    ok("and it runs exactly once", counts[0] === "1", anim.count);
-    ok("with nothing left running behind it",
-      !/infinite/.test(anim.count), anim.count);
-    const timings = phases(anim.timing);
-    ok("the entrance is eased, which is what makes it decelerate",
-      /cubic-bezier/.test(timings[0] || ""), anim.timing);
-
-    // The computed style only says an animation was DECLARED. Whether the mark
-    // moves is a question about pixels, and it is the question the owner asked.
-    // locator.screenshot() waits for the element to be stable and would time
-    // out here, which is why this clips the page instead.
-    const box = await mark.boundingBox();
-    const shot = async () =>
-      (await page.screenshot({ clip: box, animations: "allow" })).toString("base64");
-    const a = await shot();
-    await page.waitForTimeout(180);
-    const b = await shot();
-    ok("and the painted mark actually moves while it arrives", a !== b,
-      "two frames 180ms apart, inside the 1000ms entrance");
-    // And then stops, which is the whole point of the change.
-    await page.waitForTimeout(1200);
-    const settled1 = await shot();
-    await page.waitForTimeout(700);
-    const settled2 = await shot();
-    ok("then stops, instead of turning for ever", settled1 === settled2,
-      "two frames 700ms apart, after the entrance");
-
-    // Same page, motion off: the pixels must settle.
+    ok("the welcome wordmark renders",
+      (await page.locator(".welcome .w-mark").count()) === 1);
+    ok("and there is no foreground mark beside it",
+      (await page.locator(".welcome .crystal").count()) === 0);
+    ok("and the header bar carries no mark either",
+      (await page.locator(".kx-mark").count()) === 0);
     await ctx.close();
-    const ctx2 = await browser.newContext({
-      viewport: { width: 400, height: 640 }, deviceScaleFactor: 2,
-      colorScheme: "dark", reducedMotion: "reduce",
-    });
-    const p2 = await ctx2.newPage();
-    await p2.goto("file://" + HTML_PATH);
-    await p2.evaluate((s) => window.dispatchEvent(new MessageEvent("message",
-      { data: { type: "stateSync", state: s } })), BASE);
-    await p2.waitForTimeout(400);
-    const m2 = p2.locator(".welcome .crystal").first();
-    const box2 = await m2.boundingBox();
-    const s1 = (await p2.screenshot({ clip: box2, animations: "allow" })).toString("base64");
-    await p2.waitForTimeout(700);
-    const s2 = (await p2.screenshot({ clip: box2, animations: "allow" })).toString("base64");
-    ok("and it holds still for a reader who asked for no motion", s1 === s2);
-    await ctx2.close();
   }
 
   /* ── 5. nothing overflows, at either width ─────────────────────────── */
@@ -828,97 +753,20 @@ function contrast(a, b) {
     await ctx.close();
   }
 
-  /* ── 5f. the welcome mark arrives spinning, and settles ────────────── */
+  /* ── 5f. a data refresh still redraws the welcome ─────────────
+     The turning masthead mark is gone, so there is no entrance to replay; what
+     still matters is that a session list landing under the panel redraws the
+     welcome rather than blanking it. Keyed on the wordmark now, not the mark. */
   {
-    // A motion bug is invisible to a screenshot and to every static
-    // assertion, so this samples the real transform matrix over two seconds
-    // and reads the angle out of it.
-    //
-    // The one it exists for actually happened. The steady turn is a second
-    // animation layered behind the entrance, and `g-sweep` declares only a
-    // `to` - so its implicit start resolved to the entrance's filled 720deg
-    // and the mark handed off into rotating BACKWARDS at 120deg/s, forever.
-    // Both keyframe sets read as correct on their own; only the composition
-    // is wrong, and only a measurement can see it.
     const { ctx, page } = await open(400, {});
-    const spin = await page.evaluate(() => new Promise((resolve) => {
-      const el = document.querySelector(".welcome .crystal");
-      if (!el) return resolve({ err: "no mark on the welcome screen" });
-      const anims = el.getAnimations();
-      if (!anims.length) return resolve({ err: "the mark is not animated" });
-      // Restart from a known zero: the harness has already waited, so the
-      // entrance would otherwise be sampled half-finished.
-      anims.forEach((a) => { a.cancel(); a.play(); });
-      const t0 = performance.now();
-      const out = [];
-      let turns = 0, prev = null;
-      (function tick() {
-        const m = new DOMMatrixReadOnly(getComputedStyle(el).transform);
-        let a = Math.atan2(m.b, m.a) * 180 / Math.PI;
-        // atan2 wraps at 180; unwrap so the angle keeps climbing past a turn.
-        if (prev !== null && a - prev < -180) turns++;
-        prev = a;
-        out.push({ t: performance.now() - t0, deg: a + turns * 360 });
-        if (performance.now() - t0 < 2100) requestAnimationFrame(tick);
-        else resolve({ samples: out });
-      })();
-    }));
-
-    if (spin.err) {
-      ok("the welcome mark is animated", false, spin.err);
-    } else {
-      const r = spin.samples;
-      const at = (ms) => r.reduce((b, x) => (Math.abs(x.t - ms) < Math.abs(b.t - ms) ? x : b), r[0]);
-      const vel = (ms, win = 120) =>
-        (at(ms + win / 2).deg - at(ms - win / 2).deg) / ((at(ms + win / 2).t - at(ms - win / 2).t) / 1000);
-
-      // THE REGRESSION. Any frame lower than the one before it is the mark
-      // going the wrong way; the tolerance is for sampling noise, not for a
-      // little reversal being acceptable.
-      const back = r.filter((x, i) => i && x.deg < r[i - 1].deg - 1);
-      ok("the mark never rotates backwards", back.length === 0,
-        back.length ? `${back.length} frames, first at ${Math.round(back[0].t)}ms` : "");
-
-      // Position continuity. The entrance has to end on a whole number of
-      // turns or the handoff to the steady turn is a visible jump.
-      const landed = at(1000).deg;
-      ok("the entrance lands on a whole number of turns",
-        Math.abs(landed % 360) < 6 || Math.abs((landed % 360) - 360) < 6,
-        `${landed.toFixed(1)}deg after the entrance`);
-
-      // It comes to REST now rather than handing off, so what has to be true
-      // at the end is that nothing is still moving.
-      const after = vel(1600);
-      ok("and it is at rest a second after landing",
-        Math.abs(after) < 4, `${Math.round(after)}deg/s at 1600ms`);
-
-      // It is an ENTRANCE: it has to decelerate, or it stops dead.
-      let peak = 0;
-      for (let ms = 50; ms < 500; ms += 25) peak = Math.max(peak, vel(ms));
-      const tail = vel(930);
-      ok("the entrance decelerates into its landing",
-        peak > 4 * Math.max(tail, 1), `peak ${Math.round(peak)}deg/s vs tail ${Math.round(tail)}`);
-
-      // And not SO fast that it aliases. The bezel repeats every 90deg, so a
-      // frame that advances it more than 45 reverses its apparent direction -
-      // the wagon-wheel effect, which reads as a strobe rather than a spin.
-      ok("but slow enough to read as a spin rather than a strobe",
-        peak / 60 < 45, `${(peak / 60).toFixed(1)}deg per frame at 60Hz`);
-    }
-    // ARRIVAL ONLY. `renderWelcome` runs on a data refresh as well as on a
-    // real arrival, and a session list landing under the panel used to redraw
-    // the whole screen. With an entrance attached that would throw the logo
-    // across the screen while the user is reading it - which is exactly why
-    // the flag this asserts was removed once and had to come back.
+    ok("the welcome renders", (await page.locator(".welcome .w-mark").count()) === 1);
     const refreshed = await page.evaluate(() => {
       window.dispatchEvent(new MessageEvent("message", {
         data: { type: "sessionsListed", sessions: [] },
       }));
-      const el = document.querySelector(".welcome .crystal");
-      return { present: !!el, spins: !!el && el.classList.contains("spin-in") };
+      return !!document.querySelector(".welcome .w-mark");
     });
-    ok("a session list arriving still redraws the welcome", refreshed.present);
-    ok("but does not replay the entrance", !refreshed.spins);
+    ok("a session list arriving still redraws the welcome", refreshed);
     await ctx.close();
   }
 
@@ -1856,8 +1704,8 @@ function contrast(a, b) {
         };
       });
       ok("the split-screen watermark is on the boot screen", !wm.missing, JSON.stringify(wm));
-      ok("and it is one mark: the masthead's is still the only .crystal",
-        wm.crystals === 1, JSON.stringify(wm));
+      ok("and it is the only logo: no foreground .crystal on the welcome",
+        wm.crystals === 0, JSON.stringify(wm));
       ok("the watermark is a whisper, not a foreground",
         wm.opacity > 0 && wm.opacity <= 0.16, JSON.stringify(wm));
       ok("it sits behind the content", wm.behind, JSON.stringify(wm));
