@@ -544,7 +544,12 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
    screen, so the two states of this screen share a measure. `width: 100%` with
    `max-width` rather than a fixed width, because below 340 the column is the
    panel and must still shrink. */
-.welcome > * { width: 100%; max-width: 340px; }
+/* `:not(.boot)` - the 340px reading column is for the CENTRED greeting screens
+   (no folder, no endpoint). The boot screen lays out its own full-width masthead,
+   panel and cards, and its background watermark sizes itself in proportion to the
+   panel; a blanket 340px cap here clamped that watermark to a fixed 340px and was
+   the reason it would not grow or shrink with the window. */
+.welcome:not(.boot) > * { width: 100%; max-width: 340px; }
 /* The mark and the wordmark size themselves; a 340px box around them would
    stretch nothing but would break `align-items: center` for the SVG. This
    reaches the no-folder and no-endpoint screens, which put the mark straight
@@ -748,10 +753,22 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
  * `.crystal` the render test counts and animates. It does not turn; a watermark
  * that spun would pull the eye off the log that is the actual content. */
 .boot-bg {
-  position: absolute; left: -104px; bottom: -96px; z-index: 0;
+  position: absolute; z-index: 0;
   pointer-events: none; line-height: 0;
+  /* CUT, AND IN PROPORTION. Sized and offset as a fraction of the panel, not in
+     fixed pixels, so the same slice of the mark bleeds off the corner whether the
+     dock is 300px or 900px wide - it grows and shrinks with the window instead of
+     the old fixed 340px that swamped a narrow panel and shrank to nothing on a
+     wide one. `overflow:hidden` on `.welcome.boot` makes the crop. */
+  width: clamp(200px, 62%, 460px);
+  left: -12%; bottom: -14%;
+  /* No transition on size/position: these track the window, and a live drag-
+     resize should follow the cursor instantly rather than lag behind an ease. */
 }
-.boot-bg-mark { color: var(--kx-fg-3); opacity: .09; }
+.boot-bg-mark {
+  width: 100%; height: auto; display: block;
+  color: var(--kx-fg-3); opacity: .09;
+}
 
 /* The masthead: the one turning mark, the wordmark, the version line. */
 .boot-head { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
