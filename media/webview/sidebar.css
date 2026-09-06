@@ -3817,28 +3817,14 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    button is a 30px icon in the action group now, the same at every width, so
    there is nothing left for a breakpoint to take away from it. */
 
-/* ── Measure at wide widths ──
-   The panel is draggable to ~900px and the transcript had no measure cap, so
-   prose ran the full width and became genuinely hard to track line to line.
-   Cap the reading column; leave the composer, trays and code/diff surfaces
-   full-bleed, since those are scanned rather than read and their content
-   carries its own horizontal scroll.
-
-   IN PIXELS, NOT `ch`, and the unit is why this rule was not doing its job.
-   `78ch` computed to 765px, because `ch` resolved against a fallback metric
-   (9.81px a unit) rather than the loaded webfont, whose own zero is 7.8px at
-   this size. A 600px dock offers 572px of content, so the cap sat 193px WIDER
-   than the box it was meant to constrain and never bound at anything: prose
-   still ran 95 characters to the line, which is the measure this rule exists to
-   prevent. A cap that quietly exceeds its own container is worse than no cap,
-   because it reads as solved.
-
-   440px is measured rather than derived: the prose face runs about 5.98px to
-   the average character at 13px, so this is roughly 74 characters - inside the
-   65-75 band that reads comfortably. Below a ~470px dock it has no effect,
-   which is most docks; this is a rule for the wide end only. */
-#log > * { max-width: 440px; }
-#log > .diff-card, #log > .code-block, #log > pre, #log > .tool { max-width: none; }
+/* ── The transcript is elastic ──
+   No reading-measure cap. The panel is draggable to ~900px and the transcript
+   fills it: prose, code, diffs, tool cards and every other block track the real
+   width of the dock and grow with it, rather than a fixed column sitting inside
+   a widening gutter of empty space. Widen the panel and the text widens with it;
+   narrow it and everything reflows down to the transcript's `min-width` floor,
+   below which it scrolls sideways rather than crushing. */
+#log > * { max-width: none; }
 /* And the welcome screen, which is not a reading column: it centres itself and
    already caps its own content at 340px (`.welcome > *`), so capping the block
    too left it sitting off-centre in the panel with a lopsided gutter - this

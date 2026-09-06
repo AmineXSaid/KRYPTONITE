@@ -705,10 +705,22 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
      section's primary action, which it is not. */
   .sec-head .btn { align-self: flex-start; }
 
-  /* The scroll lives on the bordered box, so the rounded corners still clip
-     it and the scrollbar sits inside the frame rather than under it. */
-  .tbl { overflow-x: auto; }
-  .tbl > .tr, .tbl > .tr2, .tbl > .tr3, .tbl > .tr4 { min-width: 520px; }
+  /* Tables STACK instead of scrolling sideways. The fixed grid tracks could
+     not fit a narrow panel, and the old answer - a horizontal scroll inside the
+     box - meant the Status column and the row actions sat off the right edge,
+     hidden until you scrolled. Nothing that matters may hide on resize, so each
+     row drops to a single column and every cell takes its own line: name over
+     URL, model over wire, health, status, actions - all on screen. The bare
+     column-name header makes no sense once the columns are stacked, so it goes;
+     each data row is self-describing. */
+  .tbl { overflow: hidden; }
+  .tr.head { display: none; }
+  .tbl > .tr, .tbl > .tr2, .tbl > .tr3, .tbl > .tr4 {
+    grid-template-columns: minmax(0, 1fr); gap: 4px;
+  }
+  /* Row actions and the leading toggle/icon go to the left edge once stacked,
+     rather than floating to a right edge that no longer means anything. */
+  .tr .acts { justify-content: flex-start; }
 
   /* Definition grids and the endpoint form read better stacked than scrolled:
      the label is short, the value is what needs the width, and a form field
