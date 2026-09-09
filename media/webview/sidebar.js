@@ -2393,7 +2393,9 @@ function _sbRun() {
     flushAi();
     var stick = atBottom();
     var welcome = logEl.querySelector(".welcome");
-    if (welcome) welcome.remove();
+    // The welcome is giving way to a transcript, so the composer returns to its
+    // normal, always-present place (it was floated/hidden by the boot hand-off).
+    if (welcome) { welcome.remove(); clearWelcomeFocus(); }
     logEl.appendChild(el);
     if (stick) scroll();
     syncToLatest();
@@ -2434,6 +2436,9 @@ function _sbRun() {
   function renderWelcome(arriving) {
     var spin = arriving !== false ? " spin-in" : "";
     clearTranscript();
+    // The first-run and no-endpoint states below are not the boot welcome and
+    // never hide the composer; only the boot path (bottom) arms focus mode.
+    if (!S.workspace.open || !hasEndpoint()) clearWelcomeFocus();
     if (!S.workspace.open) {
       /* A BUTTON, not only a sentence. This screen said the right thing and
          offered no way to act on it, while the endpoint screen below it -
@@ -2514,7 +2519,7 @@ function _sbRun() {
       return '<div class="w-tline">' +
         (glyph ? '<span class="' + glyphCls + '">' + glyph + "</span> " : "") +
         esc(label) +
-        (meta ? ' <span class="w-meta">— ' + esc(meta) + "</span>" : "") +
+        (meta ? ' <span class="w-meta">\u2014 ' + esc(meta) + "</span>" : "") +
         "</div>";
     }
     var term = '<div class="w-tline dim">genesis ▸ initializing workspace</div>' +
@@ -2526,11 +2531,13 @@ function _sbRun() {
         bChanges + (bChanges === 1 ? " uncommitted change" : " uncommitted changes"),
         "ask me to review them");
     }
-    // A ready line, not a prompt: a steady status dot reads as "online" (the
-    // same green the endpoint dot uses), never as a cursor to type into, and the
-    // dim hint points at the one real input - the composer below.
-    term += '<div class="w-tline w-ready"><span class="ok">●</span> ready' +
-      ' <span class="w-meta">· ask anything below</span></div>';
+    // The prompt IS the input affordance now: the composer is hidden until this
+    // terminal is engaged (click, Enter, or just start typing), so a blinking
+    // caret here invites typing rather than competing with a visible box. The
+    // hand-off is wired in engageCompose(); the CSS lives under
+    // `#viewSession.welcome-focus / .welcome-engaged`.
+    term += '<div class="w-prompt">genesis ❯<span class="w-cur"></span>' +
+      '<span class="w-hint">click, or start typing</span></div>';
 
     var body =
       // ONE mark, and it is the backdrop. A dim oversized roundel behind the
@@ -2553,7 +2560,8 @@ function _sbRun() {
           : "I read your workspace and ask before I change anything. Every edit " +
             "arrives as a diff you can review and undo. Ask anything about this " +
             "repository.") + "</p>" +
-        '<div class="w-term" role="img" aria-label="Workspace ready">' + term + "</div>";
+        '<div class="w-term" id="wTerm" role="button" tabindex="0" data-act="focusCompose"' +
+          ' aria-label="Start typing to Genesis">' + term + "</div>";
 
     // Openers. These were removed once for being invented examples about a
     // function nobody in the workspace has - and that objection was right about
@@ -2612,6 +2620,47 @@ function _sbRun() {
     // Long titles and starters reveal themselves by scrolling rather than an
     // ellipsis; measure them now the rows are in the document.
     mqAll();
+    // ARM the focus hand-off: the composer is hidden and the terminal invites
+    // typing. A refresh under the panel (a session list landing) must not throw
+    // an ALREADY-engaged screen back to armed, so this only arms a fresh one.
+    var vs = $("viewSession");
+    if (vs && !vs.classList.contains("welcome-engaged")) {
+      vs.classList.add("welcome-focus");
+    }
+  }
+
+  /* The boot welcome hides the composer and hands off to it on the first real
+   * intent - a click on the terminal, Enter/Space on it, or just typing. This
+   * clears `welcome-focus`, sets `welcome-engaged` (the CSS clears the welcome,
+   * drifts the mark to the corner, warms the ground and raises the composer),
+   * and lands the caret in the box once it has begun to rise. `seed` is the
+   * first character when the hand-off was a keystroke. */
+  function engageCompose(seed) {
+    var vs = $("viewSession");
+    if (!vs || !vs.classList.contains("welcome-focus")) return;
+    vs.classList.remove("welcome-focus");
+    vs.classList.add("welcome-engaged");
+    var box = $("draft");
+    if (box && seed != null) {
+      box.value += seed;
+      syncComposer();
+      renderDraftMirror();
+    }
+    // After the rise has begun, so the caret lands in the box on screen.
+    setTimeout(function () {
+      if (!box) return;
+      box.focus();
+      var n = box.value.length;
+      try { box.setSelectionRange(n, n); } catch (e) {}
+    }, 220);
+  }
+
+  /* Leaving the boot welcome (a transcript, the first-run or no-endpoint state)
+   * drops both focus classes, so the composer is its normal, always-present self
+   * everywhere else. */
+  function clearWelcomeFocus() {
+    var vs = $("viewSession");
+    if (vs) vs.classList.remove("welcome-focus", "welcome-engaged");
   }
 
   /* The rail is a ::before on .msg-user, so everything else has to sit in a
@@ -5908,6 +5957,9 @@ function _sbRun() {
   function renderSession(messages) {
     clearTranscript();
     if (!messages || !messages.length) { renderWelcome(); return; }
+    // A transcript means the boot welcome is gone, so the composer is its
+    // normal, always-present self again.
+    clearWelcomeFocus();
 
     /* Tool results are consumed by the assistant call that produced them, so a
        restored transcript reads like the live one rather than a raw log. */
@@ -6632,14 +6684,17 @@ function _sbRun() {
       if (st) {
         var run = st.getAttribute("data-starter");
         var box = $("draft");
+        // A starter also hands off to the composer, so the slash ones reveal
+        // the box they populate. engageCompose focuses it once it has risen.
         if (run === "review") sendText(REVIEW_PROMPT);
-        else { runSlash(run.slice(1), box); syncComposer(); box.focus(); }
+        else { engageCompose(); runSlash(run.slice(1), box); syncComposer(); }
         return;
       }
       var act = e.target.closest("[data-act]");
       if (!act) return;
       var a = act.getAttribute("data-act");
-      if (a === "doctor") { setTab("diagnostics"); openSection("secTls"); post("runTrace"); }
+      if (a === "focusCompose") engageCompose();
+      else if (a === "doctor") { setTab("diagnostics"); openSection("secTls"); post("runTrace"); }
       else if (a === "openFolder") post("openFolder");
       else if (a === "newEndpoint") post("newEndpoint");
       else if (a === "ccEndpoints") post("openControlCenter", { section: "endpoints" });
@@ -6653,6 +6708,27 @@ function _sbRun() {
         $("historyPop").hidden = false;
         $("histBtn").setAttribute("aria-expanded", "true");
       }
+    });
+
+    // Enter or Space on the focused terminal hands off, exactly as a button.
+    logEl.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      if (e.target.closest && e.target.closest('[data-act="focusCompose"]')) {
+        e.preventDefault();
+        engageCompose();
+      }
+    });
+
+    // Start typing anywhere on the ARMED boot welcome to hand off - the panel
+    // stays keyboard-first even with the box hidden. Only a bare printable key,
+    // only while armed; modifiers, shortcuts and every other state are untouched.
+    document.addEventListener("keydown", function (e) {
+      var vs = $("viewSession");
+      if (!vs || !vs.classList.contains("welcome-focus")) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      var t = e.target;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (e.key && e.key.length === 1) { e.preventDefault(); engageCompose(e.key); }
     });
 
     var draft = $("draft");

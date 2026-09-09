@@ -244,6 +244,24 @@ function contrast(a, b) {
       { ...BASE, ...state }
     );
     await page.waitForTimeout(400);
+    // The boot welcome hides the composer behind a focus hand-off (see
+    // `.welcome-focus` in sidebar.css). Every test that measures or clicks the
+    // composer needs it revealed, so engage by default - flip to the engaged
+    // state with its transitions killed, so the composer's geometry is stable
+    // at once. The welcome-geometry tests pass `{ welcome: true }` to keep the
+    // armed state and assert the hand-off itself.
+    if (!opts.welcome) {
+      await page.addStyleTag({ content:
+        "#viewSession .composer-wrap,#viewSession .w-boot{transition:none!important}" });
+      await page.evaluate(() => {
+        const vs = document.getElementById("viewSession");
+        if (vs && vs.classList.contains("welcome-focus")) {
+          vs.classList.remove("welcome-focus");
+          vs.classList.add("welcome-engaged");
+        }
+      });
+      await page.waitForTimeout(30);
+    }
     return { ctx, page, errors };
   }
 
@@ -1806,7 +1824,7 @@ function contrast(a, b) {
     ];
     const boot = {};
     for (const width of [300, 360, 420, 520]) {
-      const { ctx, page } = await open(width, { sessions, session: { id: "s1", title: "", messages: [] } });
+      const { ctx, page } = await open(width, { sessions, session: { id: "s1", title: "", messages: [] } }, { welcome: true });
       /* Taller than open()'s 640, deliberately: the vertical-centring case only
          exists when the block fits, and 900 is an ordinary editor height. */
       await page.setViewportSize({ width, height: 900 });
@@ -1863,7 +1881,7 @@ function contrast(a, b) {
     // `.w-crystal` beside the wordmark is gone; the wordmark stands alone.
     const sizes = {};
     for (const width of [300, 420, 520]) {
-      const { ctx, page } = await open(width, { session: { id: "s1", title: "", messages: [] } });
+      const { ctx, page } = await open(width, { session: { id: "s1", title: "", messages: [] } }, { welcome: true });
       sizes[width] = await page.evaluate(() => {
         const marks = document.querySelectorAll(".welcome .crystal");
         const bg = document.querySelector(".welcome .w-bg-mark");
@@ -1884,6 +1902,43 @@ function contrast(a, b) {
       Object.values(sizes).every((s) => !s.foreground && s.bgWidth > 120 && s.faint < 0.2),
       JSON.stringify(sizes));
     ok("the wordmark still reads GENESIS", /genesis/i.test(sizes[420].word), JSON.stringify(sizes));
+  }
+
+  /* ── 5t2. the boot welcome gates the composer, and the terminal hands off ── */
+  {
+    // On the boot welcome the composer is hidden and the terminal invites
+    // typing; engaging it raises the composer, clears the welcome, and lands
+    // the caret in the box. `{ welcome: true }` keeps open() from auto-engaging.
+    const { ctx, page } = await open(420, { session: { id: "s1", title: "", messages: [] } }, { welcome: true });
+    await page.waitForTimeout(500); // let the initial retract settle
+    const armed = await page.evaluate(() => {
+      const cw = document.querySelector(".composer-wrap");
+      const cs = getComputedStyle(cw);
+      return {
+        hidden: parseFloat(cs.opacity) < 0.1 && cs.pointerEvents === "none",
+        prompt: !!document.querySelector(".w-prompt .w-cur"),
+        term: !!document.querySelector('.w-term[data-act="focusCompose"]'),
+      };
+    });
+    ok("the composer is hidden on the armed boot welcome", armed.hidden, JSON.stringify(armed));
+    ok("and the terminal is an engageable prompt", armed.prompt && armed.term, JSON.stringify(armed));
+
+    await page.click(".w-term");
+    await page.waitForTimeout(650);
+    const live = await page.evaluate(() => {
+      const cw = document.querySelector(".composer-wrap");
+      const boot = document.querySelector(".w-boot");
+      return {
+        composerShown: getComputedStyle(cw).opacity === "1" &&
+                       getComputedStyle(cw).pointerEvents !== "none",
+        welcomeCleared: Number(getComputedStyle(boot).opacity) < 0.05,
+        focused: !!document.activeElement && document.activeElement.id === "draft",
+      };
+    });
+    ok("clicking the terminal raises the composer", live.composerShown, JSON.stringify(live));
+    ok("and clears the welcome behind it", live.welcomeCleared, JSON.stringify(live));
+    ok("and lands the caret in the composer", live.focused, JSON.stringify(live));
+    await ctx.close();
   }
 
   /* ── 5u. the permission glyphs are a set, and all three paint ──────── */
