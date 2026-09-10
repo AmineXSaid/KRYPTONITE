@@ -519,6 +519,47 @@ function boot() {
        a number here would be decoration wearing the costume of a fact. */
     ok("and never invents a latency it did not measure",
       !/\+?\d+\s?ms/.test(w.textContent), w.textContent.slice(0, 60));
+    /* ── THE THEME IS THE ONE GENESIS ALREADY SHIPS ──────────────────────
+       `src/theme/palette.ts` maps the ANSI slots onto these tokens for the
+       integrated terminal, and this box reads the same map - so the welcome's
+       terminal and the terminal Genesis paints into VS Code are one palette,
+       not two that resemble each other. Pinned slot by slot, because the
+       resemblance is the whole point and nothing else would notice it
+       drifting. */
+    {
+      const rule = (sel) => {
+        const m = CSS.match(new RegExp("\\n" + sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\{[^}]*\\}"));
+        return m ? m[0] : "";
+      };
+      const SLOTS = [
+        ["ansiBlack  → the ground", ".boot-term", "--kx-bg-deep"],
+        ["ansiGreen  → [ OK ]", '.boot-st[data-st="ok"]', "--kx-accent"],
+        ["ansiYellow → [WARN]", '.boot-st[data-st="warn"]', "--kx-warn"],
+        ["ansiBlue   → the host", ".boot-host", "--kx-link"],
+        ["ansiBlue   → the numbers", ".boot-meta .n", "--kx-link"],
+        ["ansiMagenta→ the sigil", ".boot-sh", "--kx-agent"],
+        ["ansiWhite  → the labels", ".boot-what", "--kx-fg-3"],
+        ["ansiBrightWhite → the values", ".boot-meta", "--kx-fg"],
+      ];
+      SLOTS.forEach(([name, sel, tok]) => {
+        ok("the terminal keeps its ANSI slot: " + name,
+          rule(sel).indexOf("var(" + tok + ")") >= 0, sel);
+      });
+      /* NOT A CRT. The first pass reached for phosphor green on black, a
+         glowing cursor and scanlines over the glass - a costume from a
+         different century wearing none of this product's colours. Pajamas is a
+         clean, blue-primary system, and the retro shorthand is the one
+         aesthetic it has nothing to do with. */
+      ok("and is themed as a terminal rather than as a CRT",
+        !/\.boot-term::after[^}]*repeating-linear-gradient/.test(CSS) &&
+        !/\.boot-cursor\s*\{[^}]*box-shadow/.test(CSS) &&
+        !/\.boot-led\s*\{[^}]*box-shadow/.test(CSS));
+      /* Green is a status, not a theme. If it starts painting the host or the
+         command as well, it has stopped meaning "this succeeded". */
+      ok("green means succeeded, and only that",
+        rule(".boot-host").indexOf("--kx-accent") < 0 &&
+        rule(".boot-cmd").indexOf("--kx-accent") < 0);
+    }
     ok("and does not yet invite a resume", !/Pick up where you left off/.test(w.textContent));
     // The invented examples are gone. Asserted on the markup rather than the
     // words, because the comment recording why they went still names them.

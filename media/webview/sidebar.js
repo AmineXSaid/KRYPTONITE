@@ -2661,13 +2661,27 @@ function _sbRun() {
        number here would be decoration wearing the costume of a fact. The
        terminal reads as a terminal because of its shape, not because it is
        lying about latency. */
+    /* The numbers come out of the value and take the theme's blue, the way a
+       shell colours the numeric fields of `ls -l` differently from the names
+       beside them. It is the one thing that makes a column of values scan as
+       DATA rather than as a column of sentences, and it costs one regex. */
+    function num(v) {
+      /* A STANDALONE NUMBER, not any digit anywhere. The loose version painted
+         the `4-6` inside `claude-sonnet-4-6`, which is part of a model's NAME -
+         it split an identifier down the middle and claimed the halves were
+         data. Only a run of digits that starts the value or follows a space or
+         a separator counts, which catches `18`, `3`, `2/2` and `200k` and
+         leaves every identifier intact. */
+      return esc(v).replace(/(^|[\s\u00B7/])(\d[\d.,]*k?)/g,
+        '$1<span class="n">$2</span>');
+    }
     function line(st, label, meta) {
       return '<div class="boot-line rep" style="--i:' + (li++) + '">' +
         '<span class="boot-st" data-st="' + st + '">' +
           (st === "warn" ? "WARN" : "OK") + "</span>" +
         '<span class="boot-what">' + esc(label) + "</span>" +
         '<span class="boot-lead"></span>' +
-        '<span class="boot-meta">' + esc(meta) + "</span></div>";
+        '<span class="boot-meta">' + num(meta) + "</span></div>";
     }
     body += line("ok", "workspace", S.workspace.name || "workspace");
     if (model) {

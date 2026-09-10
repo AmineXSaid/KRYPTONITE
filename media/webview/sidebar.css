@@ -889,19 +889,33 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 
 /* ── THE TERMINAL ─────────────────────────────────────────────────────────
  *
- * On a black ground the old bordered box read as a small grey rectangle in a
- * lot of nothing, so this is a window rather than a card - and it has to read
- * as a TERMINAL window before a single line of it is understood. Four things
- * do that, and none of them is a fake latency number:
+ * THEMED AS A TERMINAL, NOT AS A CRT. The first pass at this reached for the
+ * retro shorthand - phosphor green on black, a glowing cursor, scanlines over
+ * the glass - and that is a costume from a different century wearing none of
+ * this product's colours. Pajamas is a clean, blue-primary system; a CRT
+ * pastiche is the one aesthetic it has nothing to do with.
  *
- *   the host string   `genesis@workspace:~`, which is what every shell prints
- *   the command echo  `$ genesis init`, so the log is a transcript of
- *                     something that RAN rather than a list of facts
- *   the status column `[ OK ]` / `[WARN]` in brackets, the boot-log signature
- *   the leaders       dotted rules carrying the eye across to the value
+ * So the theme is the one Genesis ALREADY SHIPS. `src/theme/palette.ts` maps
+ * the ANSI slots straight onto these tokens for the integrated terminal, and
+ * this box uses the same map, slot for slot:
  *
- * It is the brightest thing on the screen on purpose. Black gives it somewhere
- * to sit, and the whole screen exists to point at one target. */
+ *     ansiBlack        --kx-bg-deep     the ground
+ *     ansiRed          --kx-error
+ *     ansiGreen        --kx-accent      [ OK ], and the prompt caret
+ *     ansiYellow       --kx-warn        [WARN]
+ *     ansiBlue         --kx-link        the host, the cursor, the numbers
+ *     ansiMagenta      --kx-agent       the shell sigil
+ *     ansiWhite        --kx-fg-3        labels
+ *     ansiBrightBlack  --kx-fg-4        leaders, punctuation
+ *     ansiBrightWhite  --kx-fg          values, the command
+ *
+ * Which means the welcome screen's terminal and the terminal Genesis paints
+ * into VS Code are not two things that resemble each other - they are one
+ * palette, read from one file. Change a token and both move.
+ *
+ * BLUE LEADS, GREEN REPORTS. That is the whole difference from the first
+ * pass: green stops being the theme and goes back to meaning "this succeeded",
+ * which is the only thing it should ever mean. */
 .boot-term {
   /* NEVER SHRINK. `.welcome` is a column flex container, so this is a flex
      item with `flex-shrink: 1` by default - and combined with the
@@ -911,6 +925,8 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
      terminal keeps its height. */
   flex: none;
   width: 100%; box-sizing: border-box;
+  /* ansiBlack. The one surface in the panel that is a colour rather than a
+     translucent step, because a terminal has a ground of its own. */
   background: var(--kx-bg-deep);
   border: 1px solid var(--kx-line);
   border-radius: 8px;
@@ -919,21 +935,17 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   position: relative;
   box-shadow: 0 18px 44px rgba(0, 0, 0, .55);
 }
-/* PHOSPHOR, at a whisper. Horizontal scanlines over the whole window - the one
-   piece of pure costume here, and it earns its place because it is the thing
-   that says "screen" rather than "card" at a glance, before you have read a
-   word. Kept to 2px and a few percent: a CRT pastiche would be a joke, this is
-   a texture you notice only once you look for it. */
+/* One hairline of light along the top edge, which is how every real window
+   catches its environment. This replaced the scanlines: same job - saying the
+   box is a surface and not a rectangle - without the costume. */
 .boot-term::after {
   content: ""; position: absolute; inset: 0; z-index: 2;
   pointer-events: none; border-radius: inherit;
-  background: repeating-linear-gradient(
-    to bottom,
-    rgba(255, 255, 255, .018) 0 1px,
-    transparent 1px 3px
-  );
+  border-top: 1px solid rgba(255, 255, 255, .055);
+  border-radius: 8px 8px 0 0;
+  height: 1px;
 }
-/* The chrome, and the shell host string that is the first thing to read. */
+/* The chrome. A step above the ground, the way a title bar always is. */
 .boot-bar {
   display: flex; align-items: center; gap: 7px;
   height: 30px; padding: 0 11px;
@@ -941,16 +953,17 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   background: var(--kx-surface);
   font-family: var(--kx-mono); font-size: 10.5px;
 }
-/* Green because the boot succeeded - the same dot the endpoint wears
-   everywhere else, saying the same thing. The glow is what makes it read as
-   lit rather than printed. */
+/* The health dot, and the only green in the chrome. No glow: a lit LED is a
+   CRT idea, and this is a status dot - the same one the endpoint wears
+   everywhere else in the panel, saying the same thing. */
 .boot-led {
   flex: none; width: 7px; height: 7px; border-radius: 50%;
   background: var(--kx-accent);
-  box-shadow: 0 0 6px var(--kx-accent);
 }
+/* ansiBlue. The host string is the identity of the machine, and identity is
+   the primary hue in this system - not green, which has a job. */
 .boot-host {
-  color: var(--kx-accent); font-weight: 700; min-width: 0;
+  color: var(--kx-link); font-weight: 700; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .boot-cwd { flex: none; color: var(--kx-fg-4); }
@@ -962,9 +975,13 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   position: relative; z-index: 1;
 }
 .boot-line { display: flex; align-items: baseline; gap: 8px; padding: 2.5px 0; }
-/* The command that produced the log. */
 .boot-line.echo { gap: 7px; margin-bottom: 7px; }
-.boot-sh { flex: none; color: var(--kx-accent); font-weight: 700; }
+/* ansiMagenta for the sigil. A shell's prompt character is conventionally a
+   hue of its own, distinct from both the command and the output, and purple is
+   the note in this palette that appears nowhere else on this screen. */
+.boot-sh { flex: none; color: var(--kx-agent); font-weight: 700; }
+/* ansiBrightWhite. The command you typed is the brightest thing in the log,
+   because everything under it is a consequence of it. */
 .boot-cmd { color: var(--kx-fg); }
 /* ── the status column ────────────────────────────────────────────────────
    Bracketed and fixed-width, so the labels start on one x and the brackets
@@ -977,17 +994,19 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
      to that braces - a fixed-width flex item still wraps its own text. */
   flex: none; width: 54px; text-align: center; white-space: nowrap;
   font-size: 9.5px; font-weight: 700; letter-spacing: .06em;
-  border: 1px solid transparent; border-radius: 3px;
-  padding: 1px 0;
 }
-.boot-st::before { content: "[ "; }
-.boot-st::after  { content: " ]"; }
-.boot-st[data-st="ok"] { color: var(--kx-accent); }
-.boot-st[data-st="warn"] { color: var(--kx-active); }
+/* The brackets are punctuation, so they take the punctuation colour rather
+   than the status colour - which leaves OK and WARN as the only things in the
+   column carrying hue, and makes a WARN findable down a list of OKs. */
+.boot-st::before { content: "["; color: var(--kx-fg-5); margin-right: 3px; }
+.boot-st::after  { content: "]"; color: var(--kx-fg-5); margin-left: 3px; }
+.boot-st[data-st="ok"] { color: var(--kx-accent); }      /* ansiGreen  */
+.boot-st[data-st="warn"] { color: var(--kx-warn); }      /* ansiYellow */
+/* ansiWhite: labels are the quiet half of the line. */
 .boot-what { flex: none; color: var(--kx-fg-3); }
-/* The leader. A boot log's answer to a table: it carries the eye across the
-   gap without drawing a grid, which is why eight lines of wildly different
-   lengths still line up. */
+/* The leader, in ansiBrightBlack. A boot log's answer to a table: it carries
+   the eye across the gap without drawing a grid, which is why eight lines of
+   wildly different lengths still line up. */
 .boot-lead {
   /* 8px, not 12: the leader is the one element on the line with nothing to
      say, so it is the one that should give its width up first when a long
@@ -997,20 +1016,21 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   margin: 0 1px;
 }
 /* Shrinks before it truncates: `flex: 0 1 auto` lets the leader give up its
-   space first, so a long value eats the dots rather than losing its own tail.
-   The leader keeps a 12px floor so the line still reads as a leader line. */
+   space first, so a long value eats the dots rather than losing its own tail. */
 .boot-meta {
   flex: 0 1 auto; min-width: 0; color: var(--kx-fg);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.boot-line.rep[data-warn] .boot-meta { color: var(--kx-fg-2); }
+/* ansiBlue again, on the numbers only. A shell colours the numeric fields of
+   its output differently from the names beside them, and it is the one thing
+   that makes a column of values scan as data rather than as prose. */
+.boot-meta .n { color: var(--kx-link); }
 
 /* ── IT PRINTS, IT DOES NOT APPEAR ────────────────────────────────────────
- * The last piece of terminal spirit, and the cheapest: the lines arrive in
- * sequence off their own index rather than all on one frame. A log that is
- * simply THERE is a picture of a log; one that lands line by line is a
- * machine reporting in. ~34ms apart, which is fast enough to feel like output
- * and far too fast to feel like a loading screen. */
+ * The lines arrive in sequence off their own index rather than all on one
+ * frame. A log that is simply THERE is a picture of a log; one that lands line
+ * by line is a machine reporting in. ~34ms apart, fast enough to feel like
+ * output and far too fast to feel like a loading screen. */
 .welcome .boot-line, .welcome .boot-go {
   animation: boot-print .22s var(--kx-hand) both;
   animation-delay: calc(var(--i, 0) * 34ms);
@@ -1038,16 +1058,20 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   transition: border-color .18s ease, background .18s ease;
 }
 .boot-go .boot-g {
-  color: var(--kx-accent); font-weight: 700; min-width: 0;
+  color: var(--kx-link); font-weight: 700; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.boot-caret { flex: none; color: var(--kx-fg); font-weight: 700; }
-/* A block cursor, glowing, because that is the one element of a terminal
-   everybody can draw from memory. */
+/* GREEN, AND IT MEANS SOMETHING. A prompt caret that reports the last exit
+   status is a real shell convention - green for zero - and the log directly
+   above it is that exit status, line by line. It is the only green in the
+   body, so it reads as the summary of the report rather than as decoration. */
+.boot-caret { flex: none; color: var(--kx-accent); font-weight: 700; }
+/* A block cursor, in the theme's primary. Solid, not glowing: the blink is
+   what says "waiting for you", and a halo only says "this is meant to look
+   like a film prop". */
 .boot-cursor {
   flex: none; display: inline-block; width: 7px; height: 14px;
-  background: var(--kx-accent);
-  box-shadow: 0 0 7px var(--kx-accent);
+  background: var(--kx-link);
   animation: boot-blink 1.1s step-end infinite;
 }
 .boot-go-hint {
@@ -1057,10 +1081,11 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 }
 /* The whole terminal answers the pointer, because the whole terminal is
    clickable - see the click route. Lighting only the button would promise a
-   smaller target than the one that actually works. */
+   smaller target than the one that actually works. Blue, matching the cursor
+   the click is about to put a caret next to. */
 .welcome.boot .boot-term:hover .boot-go,
 .boot-go:hover, .boot-go:focus-visible {
-  border-color: var(--kx-accent); background: var(--kx-accent-wash); outline: none;
+  border-color: var(--kx-link); background: var(--kx-info-wash); outline: none;
 }
 .welcome.boot .boot-term { cursor: text; }
 @keyframes boot-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
@@ -1071,29 +1096,25 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 }
 /* ── THE NARROW DOCK ──────────────────────────────────────────────────────
    Below ~340px the status column, the label and a value like
-   `claude-sonnet-4-6 · 200.0k ctx` cannot share one line, and squeezing them
+   `claude-sonnet-4-6 · 200k ctx` cannot share one line, and squeezing them
    truncated the two values that matter most - the workspace name and the
    model id. So the value wraps to its own row, indented under the label.
 
    That is what a real terminal does with a line too long for the window, and
-   it is the one treatment here that loses NOTHING: the leader goes (it has no
-   gap left to carry the eye across) and every character survives. */
+   it is the one treatment here that loses NOTHING. */
 @media (max-width: 340px) {
   .boot-line.rep { flex-wrap: wrap; row-gap: 0; }
   .boot-lead { display: none; }
   /* PADDING, NOT MARGIN. `flex-basis: 100%` is 100% of the line and a margin
      is added ON TOP of it, so the row came out 62px wider than the box and a
-     model id ran off the right edge instead of wrapping. Padding with
-     `border-box` keeps the indent inside the 100%. */
+     model id ran off the right edge instead of wrapping. */
   .boot-meta {
     flex: 1 0 100%; box-sizing: border-box; padding-left: 62px; margin-left: 0;
     white-space: normal; overflow: hidden; text-overflow: clip;
     overflow-wrap: anywhere;
   }
   /* The prompt says the host a second time, and at this width it does it by
-     eating the hint - which is the half that tells you what to do. The caret
-     and the cursor are enough to say "prompt"; the bar above still names the
-     host. */
+     eating the hint - the half that tells you what to do. */
   .boot-go .boot-g { display: none; }
 }
 
