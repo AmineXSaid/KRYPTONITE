@@ -727,19 +727,29 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   letter-spacing: .12em; text-transform: uppercase; color: var(--kx-fg-3);
 }
 .w-all:hover { color: var(--kx-fg); }
-.w-list { width: 100%; border-top: 1px solid var(--kx-line); }
+/* ── RECENT, AS A LISTING ─────────────────────────────────────────────────
+   The rules between rows are gone. A three-item list does not need five
+   horizontal lines to be read as a list, and on a screen whose terminal draws
+   no rules at all they were the loudest thing under it. What separates the
+   rows now is the same thing that separates the report's: the rows themselves,
+   and the wash under the one you are pointing at. */
+.w-list { width: 100%; border-top: 0; }
 .w-row {
-  display: flex; align-items: center; gap: 10px;
-  width: 100%; padding: 9px 4px; text-align: left;
-  border-bottom: 1px solid var(--kx-line);
+  display: flex; align-items: center; gap: 9px;
+  width: 100%; padding: 5px 12px; margin-left: -12px; width: calc(100% + 24px);
+  text-align: left; border-bottom: 0;
   color: var(--kx-fg-3);
+  transition: background .14s ease;
 }
-.w-row:hover { background: var(--kx-surface-3); }
+.w-row:hover { background: rgba(70, 146, 221, .25); }
 .w-row .t {
-  min-width: 0; flex: 1; font-size: 12px; line-height: 1.4; color: var(--kx-fg-2);
+  min-width: 0; flex: 1; font-size: 12px; line-height: 1.45; color: var(--kx-fg-2);
 }
 .w-row:hover .t { color: var(--kx-fg); }
-.w-dot { flex: none; width: 5px; height: 5px; background: var(--kx-line); }
+/* A square, in the report's punctuation colour - the same mark the boot lines
+   use for a bullet, at the same weight. */
+.w-dot { flex: none; width: 4px; height: 4px; border-radius: 1px; background: var(--kx-fg-5); }
+@media (prefers-reduced-motion: reduce) { .w-row { transition: none; } }
 
 /* A Recent row and its bin. The bin is a sibling of the row, not a child:
    the row is a <button>, and a button inside a button is invalid markup that
@@ -752,16 +762,17 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
    with the bin sitting on it. */
 .w-item { display: flex; align-items: stretch; width: 100%; position: relative; }
 .w-item .w-row { border-bottom: none; }
-.w-item { border-bottom: 1px solid var(--kx-line); }
 .w-del {
   flex: none; width: 26px; display: grid; place-items: center;
   color: var(--kx-fg-3); opacity: 0;
 }
 .w-item:hover .w-del, .w-del:focus-visible { opacity: 1; }
 .w-del:hover { color: var(--kx-error); background: var(--kx-hover); }
+/* ansiBrightBlack, the slot a shell paints `ls` metadata in - which is exactly
+   what a modified-time beside a name is. */
 .w-ago {
-  flex: none; font-family: var(--kx-mono); font-size: 9px;
-  letter-spacing: .06em; color: var(--kx-fg-3);
+  flex: none; font-family: var(--kx-mono); font-size: 9.5px;
+  letter-spacing: .04em; color: var(--kx-fg-4);
 }
 .chips { display: flex; flex-direction: column; gap: 6px; width: 100%; max-width: 300px; }
 .chip-btn {
@@ -1134,28 +1145,66 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   .boot-go .boot-g { display: none; }
 }
 
-.boot-note {
-  font-family: var(--kx-prose); font-size: 11.5px; line-height: 1.6;
-  color: var(--kx-fg-2); margin: 0 0 18px;
+/* A shell comment, heading the two lists below it. Same device as the
+   prompt's hint, same slot (ansiBrightBlack), because it is the same thing:
+   a note to the reader rather than output. */
+.boot-cmt {
+  font-family: var(--kx-mono); font-size: 11px; line-height: 1.5;
+  color: var(--kx-fg-4); margin: 0 0 16px;
 }
 
-/* The openers as cards: the command in the accent, the description under it.
-   A column at the panel's width - the design's three-across row has nowhere to
-   go at 340px, so it stacks. */
-.boot-cards { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+/* ── THE OPENERS ──────────────────────────────────────────────────────────
+ *
+ * These were three bordered, filled, rounded cards sitting under a terminal
+ * whose every line is flush and unboxed - so the screen read as a beautiful
+ * terminal with somebody else's UI parked beneath it.
+ *
+ * They are rows now, and deliberately the SAME ROW the boot report uses: a
+ * fixed left column, the description to the right of it, hover painting the
+ * terminal's own selection wash full-bleed. The command lands where a report
+ * label lands, so the eye running down the screen never has to re-learn where
+ * a line begins.
+ *
+ * The command is what you are choosing, so it takes ansiBlue and the weight;
+ * the description is the gloss, in body ink. */
+.boot-cards { display: flex; flex-direction: column; width: 100%; }
 .boot-card {
-  display: flex; flex-direction: column; gap: 3px; width: 100%;
-  padding: 10px 12px; text-align: left;
-  background: var(--kx-surface); border: 1px solid var(--kx-line);
-  border-radius: 6px;
+  display: flex; align-items: baseline; gap: 8px; width: 100%;
+  padding: 5px 12px; margin-left: -12px; width: calc(100% + 24px);
+  text-align: left; border: 0; border-radius: 0; background: none;
+  transition: background .14s ease;
 }
-.boot-card:hover { background: var(--kx-surface-3); border-color: var(--kx-edge); }
 .boot-card-cmd {
+  /* The report's label column, to the pixel - see `.boot-what`. */
+  flex: none; width: 74px;
   font-family: var(--kx-mono); font-size: 11.5px; font-weight: 700;
-  letter-spacing: .02em; color: var(--kx-link);
+  color: var(--kx-link);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.boot-card-desc { font-size: 11.5px; line-height: 1.4; color: var(--kx-fg-2); }
-.boot-card:hover .boot-card-desc { color: var(--kx-fg); }
+.boot-card-desc {
+  min-width: 0; font-size: 12px; line-height: 1.45; color: var(--kx-fg-2);
+}
+/* The selection wash, exactly as the prompt uses it - `--kx-link` at 25%, the
+   value palette.ts hands VS Code for `terminal.selectionBackground`. */
+.boot-card:hover, .boot-card:focus-visible {
+  background: rgba(70, 146, 221, .25); outline: none;
+}
+.boot-card:hover .boot-card-desc, .boot-card:focus-visible .boot-card-desc {
+  color: var(--kx-fg);
+}
+@media (prefers-reduced-motion: reduce) { .boot-card { transition: none; } }
+/* Under ~340px a 74px command column and a description cannot share a line -
+   the same wall the report hit, and the same answer: the description wraps to
+   its own row under the command. */
+@media (max-width: 340px) {
+  .boot-card { flex-wrap: wrap; row-gap: 1px; padding-bottom: 7px; }
+  /* A SMALL indent, not the column's. The report's values line up under their
+     labels at 62px because they are short; a description is prose, and
+     indenting it to the command column throws away the width the wrap was for
+     - it wrapped to gain a line and then started it 82px in. 14px is enough to
+     say "this belongs to the line above" and costs nothing. */
+  .boot-card-desc { flex: 1 0 100%; box-sizing: border-box; padding-left: 14px; }
+}
 
 /* â”€â”€ the two voices â”€â”€
  *
@@ -4836,18 +4885,24 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 .kx-tab[aria-selected="true"] { font-weight: 700; }
 
-/* Section labels read as a shell prompt's bracketed field. Only the plain
-   variant: `.w-label.row` holds "Recent" plus a spacer and an All button, and
-   the closing bracket would land after the button rather than after the word. */
-.w-label:not(.row)::before { content: "[ "; color: var(--kx-fg-5); }
-.w-label:not(.row)::after  { content: " ]"; color: var(--kx-fg-5); }
+/* Section labels read as a shell prompt's bracketed field. The brackets sit on
+   the TEXT rather than on the label, which is what lets the Recent row - a
+   word, a spacer and an `all` button - close its bracket after the word
+   instead of after the button. That was why only one of the two had them.
 
-/* Dashed rules for the suggestion list. Solid hairlines read as table borders;
-   dashed reads as a terminal's own separators, and at .22 alpha the dashes are
-   still above the 3:1 the edge tokens are held to because they are decorative
-   rather than a control boundary. */
-.w-list { border-top-style: dashed; }
-.w-row  { border-bottom-style: dashed; }
+   Lower-case, because the whole screen is a transcript and a shell does not
+   shout its section names. */
+.w-label .t::before { content: "["; color: var(--kx-fg-5); margin-right: 5px; }
+.w-label .t::after  { content: "]"; color: var(--kx-fg-5); margin-left: 5px; }
+.w-label { text-transform: none; letter-spacing: .1em; }
+.w-all { text-transform: none; letter-spacing: .1em; color: var(--kx-fg-4); }
+.w-all::before { content: "["; color: var(--kx-fg-5); margin-right: 4px; }
+.w-all::after  { content: "]"; color: var(--kx-fg-5); margin-left: 4px; }
+.w-all:hover { color: var(--kx-link); }
+
+/* The dashed rules that used to sit here are gone with the borders they
+   styled - see `.w-list`. A three-item list does not need five horizontal
+   lines to read as a list. */
 
 /* A comment marker on the tip, and a prompt caret on the composer. The caret
    is on the container, not the textarea: `::before` cannot attach to a

@@ -2735,12 +2735,20 @@ function _sbRun() {
     // The design's "Pick up where you left off" copy earns its place only when
     // there is a thread to come back to; the Recent list below is what it
     // points at.
-    if (recent.length) body += '<p class="boot-note">Pick up where you left off, or start something new.</p>';
+    /* A COMMENT, in the shell's voice. This was the one line of prose on a
+       screen that is otherwise a transcript, set in the prose face, and it
+       read as marketing copy that had wandered in. Said as a comment it does
+       the same job - it heads the two lists below - in the voice everything
+       around it already speaks. */
+    if (recent.length) {
+      body += '<div class="boot-cmt"># pick up where you left off, or start something new</div>';
+    }
 
     // Openers, as the design's cards: the command in the accent, the plain-language
     // description under it. `data-starter` is unchanged, so the click handler that
     // routes /explain, review and /tests still fires whatever the card looks like.
-    body += '<div class="w-label">Start here</div><div class="boot-cards">';
+    body += '<div class="w-label"><span class="t">start here</span></div>' +
+      '<div class="boot-cards">';
     for (var si = 0; si < STARTERS.length; si++) {
       body += '<button class="boot-card" data-starter="' + esc(STARTERS[si].run) + '">' +
         '<span class="boot-card-cmd">' + esc(STARTERS[si].run) + "</span>" +
@@ -2751,8 +2759,8 @@ function _sbRun() {
 
     if (recent.length) {
       body += '<div class="w-sec">' +
-        '<div class="w-label row">Recent<span class="sp"></span>' +
-          '<button class="w-all" data-act="history">All</button></div>' +
+        '<div class="w-label row"><span class="t">recent</span><span class="sp"></span>' +
+          '<button class="w-all" data-act="history">all</button></div>' +
         '<div class="w-list">';
       for (var rj = 0; rj < recent.length; rj++) {
         var r = recent[rj];

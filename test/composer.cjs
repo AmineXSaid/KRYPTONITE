@@ -648,8 +648,14 @@ function boot() {
     // A title alone reads the same for a thread of one message and one of
     // forty. The design's row has no room for the count, so it is on the title.
     ok("how big it is is still reachable", /12 messages/.test(chips[0].title), chips[0].title);
+    /* Same sentence, said as a shell comment - it was the one line of prose on
+       a screen that is otherwise a transcript, and it read as marketing copy
+       that had wandered in. Case-insensitive, because a shell does not
+       capitalise and the assertion is about the invitation, not the casing. */
     ok("the copy invites resuming",
-      /Pick up where you left off/.test(b.d.querySelector(".welcome").textContent));
+      /pick up where you left off/i.test(b.d.querySelector(".welcome").textContent));
+    ok("and says it in the shell's voice",
+      !!b.d.querySelector(".welcome .boot-cmt"));
     ok("and the whole history is one click away", !!b.d.querySelector('.welcome [data-act="history"]'));
     b.sent.length = 0;
     b.click('.welcome [data-act="history"]');
