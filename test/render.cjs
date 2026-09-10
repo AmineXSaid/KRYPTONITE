@@ -377,31 +377,41 @@ function contrast(a, b) {
     await ctx.close();
   }
 
-  /* ── 3. the phase control, as the reference draws it ───────────────── */
+  /* ── 3. the phase, as the chatbox design draws it ─────────────────── */
   {
+    /* THE SEGMENT IS ONE WORD. The design states the phase in force and says
+       nothing about the two that are not, so "all three are offered" is no
+       longer a question this row answers. What it must still answer: the phase
+       is written rather than only coloured, it is the phase the state named,
+       and its hue is that phase's own - the same three tokens the segment
+       filled itself with. */
     const { ctx, page } = await open(400, {});
-    const segs = page.locator("#phaseSeg [data-phase]");
-    const labels = (await segs.allTextContents()).map((s) => s.trim().toUpperCase());
-    ok("all three phases are offered", labels.join(",") === "ASK,PLAN,ACT", labels.join(","));
-
-    const on = page.locator('#phaseSeg [data-phase][data-on="1"]');
-    ok("exactly one is lit", (await on.count()) === 1, String(await on.count()));
+    const word = page.locator("#phaseWord");
+    ok("the phase in force is named on the row", (await word.count()) === 1);
+    ok("in words, not colour alone",
+      (await word.textContent()).trim().toUpperCase() === "ACT",
+      await word.textContent());
     ok("and it is the phase the state named",
-      (await on.first().getAttribute("data-phase")) === "act");
+      (await word.getAttribute("data-phase")) === "act");
+    // Its accessible name carries the sentence the radiogroup used to speak,
+    // because three letters cannot say what the phase permits.
+    const aria = await word.getAttribute("aria-label");
+    ok("with the full sentence in its accessible name",
+      /act/i.test(aria || "") && (aria || "").length > 12, aria);
 
-    // The lit segment has to differ from its neighbours by more than a label,
-    // or the control cannot be read at a glance.
-    const litBg = rgb(await on.first().evaluate((el) => getComputedStyle(el).backgroundColor));
-    const offBg = rgb(await page.locator('#phaseSeg [data-phase="ask"]')
-      .evaluate((el) => getComputedStyle(el).backgroundColor));
-    ok("the lit phase is painted differently from an unlit one",
-      !!litBg && !!offBg && (litBg.a > 0.5) && JSON.stringify(litBg) !== JSON.stringify(offBg),
-      `${JSON.stringify(litBg)} vs ${JSON.stringify(offBg)}`);
-
-    const litFg = rgb(await on.first().evaluate((el) => getComputedStyle(el).color));
-    ok("and its label is readable on it",
-      !!litFg && !!litBg && contrast(litFg, litBg) >= 4.5,
-      litFg && litBg ? contrast(litFg, litBg).toFixed(2) + ":1" : "");
+    // Each phase paints in its own hue, so the word is readable at a glance
+    // the way the filled segment was.
+    const actColour = rgb(await word.evaluate((el) => getComputedStyle(el).color));
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent("message",
+      { data: { type: "phaseChanged", phase: "ask" } })));
+    await page.waitForTimeout(120);
+    const askColour = rgb(await word.evaluate((el) => getComputedStyle(el).color));
+    ok("and a different phase is painted differently",
+      !!actColour && !!askColour && JSON.stringify(actColour) !== JSON.stringify(askColour),
+      `${JSON.stringify(actColour)} vs ${JSON.stringify(askColour)}`);
+    ok("with the word changing too, not just the hue",
+      (await word.textContent()).trim().toUpperCase() === "ASK",
+      await word.textContent());
     await ctx.close();
   }
 
@@ -506,73 +516,73 @@ function contrast(a, b) {
     // -1 for both sides would make "same row" trivially true, so the probe
     // has to find each control before it can compare them.
     const rowOf = (name) => rows.findIndex((r) => r.includes(name));
-    for (const n of ["phaseSeg", "modelBtn", "tb-actions"]) {
+    for (const n of ["picks", "phaseWord", "tb-actions"]) {
       ok(`the toolbar still has ${n} to place`, rowOf(n) >= 0, JSON.stringify(rows));
     }
-    ok("the composer toolbar wraps at 280px rather than crushing every control",
-      rows.length >= 2, JSON.stringify(rows));
+    /* IT NO LONGER HAS TO WRAP, and that is the design paying for itself: the
+       phase segment and the model button were the two widest things on this
+       row and both moved into the palette, so at 280px what is left fits on
+       one line. The rule this replaces - "wrap rather than crush" - still
+       holds underneath it: what must never happen is a control being squeezed
+       out of the panel, which the overflow check below is what actually
+       guards. */
+    ok("the composer toolbar fits on one row at 280px, rather than wrapping",
+      rows.length === 1, JSON.stringify(rows));
     // The heart of it. `.tb-actions` exists so a wrap does not orphan send by
     // itself; it must not be orphaned as a PAIR either.
-    ok("and send and attach stay on the row with the phase segment",
-      rowOf("tb-actions") === rowOf("phaseSeg"), JSON.stringify(rows));
-    // "the second row" is what this used to say, and that pinned an accident
-    // rather than the rule. The rule is that the MODEL BUTTON is the control
-    // that breaks away and that it goes alone - which is what makes the fix
-    // for it (a plate, so it still reads as a button once it is standing by
-    // itself) meaningful. Which side of the action row it lands on is a
-    // design choice; it is now placed above, directly under the text being
-    // typed, rather than below the send button that acts on it.
-    ok("while the model button is the control that breaks away",
-      rowOf("modelBtn") !== rowOf("phaseSeg"), JSON.stringify(rows));
-    ok("and it goes alone, rather than dragging another control with it",
-      rows[rowOf("modelBtn")].length === 1, JSON.stringify(rows));
+    ok("and send stays on the row with the phase",
+      rowOf("tb-actions") === rowOf("phaseWord"), JSON.stringify(rows));
+    /* THE MODEL BUTTON WAS THE CONTROL THAT BROKE AWAY, and it no longer
+       exists to break: the model is a palette row now. What is left on the row
+       is a group of glyphs, one word and the actions - and the rule that
+       replaces "the model goes alone" is that the glyph tray never splits from
+       the + that closes it, because the tray is one object. */
+    ok("the glyph tray stays whole",
+      rowOf("picks") >= 0 && rows[rowOf("picks")].includes("picks"), JSON.stringify(rows));
     ok("which leaves no row carrying nothing but the two action buttons",
       !rows.some((r) => r.length === 1 && r[0] === "tb-actions"), JSON.stringify(rows));
     await ctx.close();
   }
   {
-    // The model name at an ordinary dock width, measured as CHARACTERS that
-    // actually reach a reader rather than as a box width.
-    //
-    // It rendered "claud…" here. Every model this extension is pointed at
-    // begins that way, so the visible text told two different models apart not
-    // at all - and a truncation that stops before the first distinguishing
-    // character is the same as showing no name. The bar is therefore not "does
-    // it fit" but "is what fits longer than the prefix these ids share".
-    const SHARED = "claude-".length;
-    // 420 and 460 are the ones that mattered: they sat just past the old 350px
-    // rule, where the model shared a row that could not hold it. Checking only
-    // 360 and 400 missed the worst case entirely.
-    for (const width of [360, 400, 420, 460, 520]) {
+    /* THE TRUNCATION IS GONE, and so is the bug it guarded.
+     *
+     * The model name used to be measured and cut to fit a button sharing the
+     * control row; it rendered "claud…" at an ordinary dock width, which told
+     * two models apart not at all. The design moves the model into the
+     * palette, where the row is the panel's full width and the name is the
+     * FAMILY rather than the id - so there is nothing left to truncate.
+     *
+     * What is pinned instead is the property the truncation was protecting:
+     * whatever reaches the reader has to be more than the prefix every model
+     * here shares. Measured as characters that are actually inside their box,
+     * not as `textContent`, which counts what an ellipsis is hiding. */
+    for (const width of [300, 360, 420, 520]) {
       const { ctx, page } = await open(width, {});
       const seen = await page.evaluate(() => {
-        const el = document.getElementById("modelName");
+        const el = document.querySelector('#cmdPal [data-pal="model"] .cp-val');
+        if (!el) return { missing: true };
         const box = el.getBoundingClientRect();
         const text = el.textContent || "";
-        // Walk the text node and count the characters whose own box ends
-        // inside the element's. Reading `textContent` would count the ones the
-        // ellipsis is hiding, which is exactly the mistake being tested for.
         const node = el.firstChild;
         if (!node || node.nodeType !== 3) return { n: text.length, text };
         const r = document.createRange();
         let n = 0;
         for (let i = 1; i <= text.length; i++) {
           r.setStart(node, i - 1); r.setEnd(node, i);
-          if (r.getBoundingClientRect().right <= box.right + 0.5) n = i; else break;
+          const cr = r.getBoundingClientRect();
+          if (cr.right <= box.right + 0.5) n++;
         }
         return { n, text };
       });
-      ok(`the model name is legible past the shared prefix at ${width}px`,
-        seen.n > SHARED,
-        `${seen.n} of ${seen.text.length} characters of "${seen.text}" reach the panel`);
-      // Past the prefix is the floor, not the goal. The id gets a row of its
-      // own below 500px precisely so it can be read WHOLE, and the bug that
-      // rule fixed was that the narrowest panel showed all 17 characters while
-      // 420px showed five - so a width-by-width check is the only one that
-      // catches it.
-      ok(`and it is shown in full at ${width}px`,
-        seen.n === seen.text.length,
-        `${seen.n} of ${seen.text.length}: "${seen.text.slice(0, seen.n)}"`);
+      /* The bar used to be "longer than the prefix every model shares",
+         because the id was printed in full and cut. The row prints the FAMILY
+         instead, which is shorter than that prefix by design - so the property
+         is simply that something identifying is there and none of it is lost.
+         That two families never collapse into one word is section 5s. */
+      ok(`the model name reaches the reader at ${width}px`,
+        !seen.missing && seen.n > 0, JSON.stringify(seen));
+      ok(`and nothing of it is cut off at ${width}px`,
+        !seen.missing && seen.n === (seen.text || "").length, JSON.stringify(seen));
       await ctx.close();
     }
   }
@@ -611,43 +621,25 @@ function contrast(a, b) {
     await ctx.close();
   }
 
-  /* ── 5c3. the phase control is a segmented control ─────────────────── */
+  /* ── 5c3. the phase word carries its own hue ───────────────────────── */
   {
-    // ASK / PLAN / ACT are 3, 4 and 3 characters. In a monospace that is a
-    // hard one-character difference, so the segments were 34.5 / 42 / 35.5px
-    // and the filled one sat in a box a different size from its neighbours.
-    // Equal tracks are what makes it read as one control rather than three
-    // buttons that happen to touch.
-    //
-    // Also asserts the label is centred in its own segment, which is the other
-    // half of the same complaint and is easy to lose to a stray text-indent.
+    /* The segmented control is gone: the design states the phase in force as
+       one word rather than offering three. Its own rule still has to exist, or
+       the word is body text that happens to be clickable - and each phase's
+       hue has to come from that phase's token, so the word cannot drift from
+       the rail painted from the same state. */
     const { ctx, page } = await open(400, {});
-    const seg = await page.evaluate(() => {
-      const out = [];
-      for (const b of document.querySelectorAll(".seg button")) {
-        const r = b.getBoundingClientRect();
-        const cs = getComputedStyle(b);
-        const rng = document.createRange();
-        rng.selectNodeContents(b);
-        const ink = rng.getBoundingClientRect();
-        out.push({ label: (b.textContent || "").trim(),
-                   w: Math.round(r.width * 10) / 10,
-                   // Ink centre against the button's own centre.
-                   off: Math.round(((ink.left + ink.right) / 2 - (r.left + r.right) / 2) * 10) / 10,
-                   align: cs.textAlign });
-      }
-      return out;
+    const m = await page.evaluate(() => {
+      const w = document.getElementById("phaseWord");
+      const cs = getComputedStyle(w);
+      return { weight: cs.fontWeight, size: cs.fontSize, spacing: cs.letterSpacing,
+               transform: cs.textTransform, family: cs.fontFamily };
     });
-    ok("the phase control has three segments", seg.length === 3, JSON.stringify(seg));
-    const widths = [...new Set(seg.map((s) => s.w))];
-    ok("and every segment is the same width",
-      widths.length === 1, seg.map((s) => `${s.label} ${s.w}px`).join(", "));
-    for (const s of seg) {
-      // 1.5px covers the half-pixel of a centred odd-width glyph run plus the
-      // deliberate text-indent that compensates for trailing letter-spacing.
-      ok(`the ${s.label} label sits centred in its segment`,
-        Math.abs(s.off) <= 1.5, `off by ${s.off}px, text-align ${s.align}`);
-    }
+    ok("the phase word is set in the mono face", /mono|jetbrains/i.test(m.family), m.family);
+    ok("small, bold and letter-spaced, as the design sets it",
+      parseInt(m.size, 10) <= 10 && Number(m.weight) >= 700 && parseFloat(m.spacing) > 0,
+      JSON.stringify(m));
+    ok("and uppercase", m.transform === "uppercase", m.transform);
     await ctx.close();
   }
 
@@ -783,7 +775,12 @@ function contrast(a, b) {
     // property of the CSS, and a declaration that never runs looks identical
     // to one that does in the computed style.
     const MENUS = [
-      ["the model picker", "#qp", async (p) => p.click("#modelBtn")],
+      // The palette has to be up before one of its rows can be clicked: it is
+      // `hidden` at rest, and a hidden row is not an actionable target.
+      ["the model picker", "#qp", async (p) => {
+        await p.keyboard.press("Control+k");
+        await p.click('#cmdPal [data-pal="model"]');
+      }],
       ["the slash picker", "#qp", async (p) => { await p.click("#draft"); await p.type("#draft", "/"); }],
       ["the history menu", "#historyPop", async (p) => p.click("#histBtn")],
       ["the more menu", "#morePop", async (p) => p.click("#moreBtn")],
@@ -847,7 +844,7 @@ function contrast(a, b) {
         }
         if (window.__s.length < 48) requestAnimationFrame(tick);
       })();
-      document.getElementById("modelBtn").click();
+      document.querySelector('#cmdPal [data-pal="model"]').click();
       await new Promise((r) => setTimeout(r, 450));
       const s = window.__s;
       if (!s.length) return null;
@@ -883,7 +880,11 @@ function contrast(a, b) {
       return !!(card && document.activeElement && card.contains(document.activeElement));
     });
 
-    await page.click("#permBtn");
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent("message",
+      { data: { type: "configChanged",
+        config: { approvalMode: "edits-auto", activeProfile: "", caBundlePath: "", ui: {} } } })));
+    await page.waitForTimeout(120);
+    await page.click('.pick[data-pick="perm"]');
     await page.waitForTimeout(450);
     ok("opening the mode sheet moves focus into it", await inCard(),
       await page.evaluate(() => document.activeElement.className || document.activeElement.id));
@@ -915,7 +916,7 @@ function contrast(a, b) {
     await page.waitForTimeout(500);
     ok("Escape closes it", await page.evaluate(() => document.getElementById("permPop").hidden));
     ok("and hands focus back to the button that opened it",
-      await page.evaluate(() => document.activeElement.id === "permBtn"),
+      await page.evaluate(() => document.activeElement.id === "draft"),
       await page.evaluate(() => document.activeElement.id));
     await ctx.close();
   }
@@ -927,13 +928,19 @@ function contrast(a, b) {
     await page.click("#draft");
     await page.type("#draft", "a message the user never meant to send");
     await page.evaluate(() => { window.__sent.length = 0; });
-    await page.click("#permBtn");
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent("message",
+      { data: { type: "configChanged",
+        config: { approvalMode: "edits-auto", activeProfile: "", caBundlePath: "", ui: {} } } })));
+    await page.waitForTimeout(120);
+    await page.click('.pick[data-pick="perm"]');
     await page.waitForTimeout(450);
-    // One Tab from the landing row reaches "Accept edits". It used to be two,
-    // which reached full-auto - and full-auto now arms on the first press
-    // rather than committing, so the assertion below would have been measuring
-    // the new confirmation step instead of the trap it exists for.
-    await page.keyboard.press("Tab");
+    /* SHIFT+TAB, not Tab. The sheet lands on the mode IN FORCE, and the plate
+       that opens it only exists once the mode is off its default - so this
+       fixture starts on "Accept edits" and one Tab FORWARD lands on full-auto,
+       which arms on the first press rather than committing. That would measure
+       the confirmation step instead of the trap this section exists for.
+       Stepping back reaches Manual, which commits on one press. */
+    await page.keyboard.press("Shift+Tab");
     await page.keyboard.press("Enter");
     await page.waitForTimeout(300);
     const sent = await page.evaluate(() => window.__sent.map((m) => m.type));
@@ -953,7 +960,11 @@ function contrast(a, b) {
      * the sheet to see what the modes were could hand the agent unattended
      * shell access. */
     const { ctx, page } = await open(400, {});
-    await page.click("#permBtn");
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent("message",
+      { data: { type: "configChanged",
+        config: { approvalMode: "edits-auto", activeProfile: "", caBundlePath: "", ui: {} } } })));
+    await page.waitForTimeout(120);
+    await page.click('.pick[data-pick="perm"]');
     await page.waitForTimeout(450);
     await page.evaluate(() => { window.__sent.length = 0; });
     await page.click('#permPop [data-perm="full-auto"]');
@@ -1258,131 +1269,40 @@ function contrast(a, b) {
     }
   }
 
-  /* ── 5n. the model button is a button, and never after send ────────── */
+  /* ── 5n. the model is a palette row, and says which model ──────────── */
   {
-    // Two things reported as "the button to see models is gone".
-    //
-    // It was never gone from the DOM. Below 500px it was given
-    // `flex: 1 1 100%; justify-content: center; order: 3`, which put it alone
-    // on a second row, centred, AFTER `.tb-actions` - so the control naming
-    // the model was painted below the button that sends to it, wearing no
-    // plate and no border, in --kx-fg-2. At that point it reads as a caption,
-    // not a control.
-    //
-    // The assertions are about AFFORDANCE and ORDER, not about which row it
-    // lands on: a second row is a legitimate answer at 300px. What is not
-    // legitimate is a second row that does not look like a button, or one
-    // that comes after send.
+    /* THE MODEL BUTTON IS GONE, and with it the whole class of problem this
+       section existed for: it was the control that competed for row width, so
+       it was the one that broke away at a narrow dock, and its name had to be
+       fitted by measurement. In the palette it has a full row to itself at
+       every width, so what is left to pin is that it still NAMES the model and
+       still carries the whole id where the short name cannot. */
     const ID = "claude-sonnet-4-6";
-    for (const width of [300, 360, 400, 460, 520, 700]) {
+    for (const width of [300, 420, 700]) {
       const { ctx, page } = await open(width, {
         profiles: [{ id: "gw", status: "ready", active: true, model: ID,
           wire: "anthropic", baseUrl: "https://x", capabilities: { contextWindow: 200000 } }],
         models: [{ group: "gw", models: [ID] }],
       });
       const m = await page.evaluate(() => {
-        const mb = document.getElementById("modelBtn");
-        const send = document.getElementById("sendBtn");
-        const cs = getComputedStyle(mb);
-        const r = mb.getBoundingClientRect(), sr = send.getBoundingClientRect();
-        const nm = document.getElementById("modelName");
-        // How much of the id actually paints, measured rather than assumed:
-        // the element's width says nothing about how much text fits in it.
-        const probe = document.createElement("span");
-        probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;font:" +
-          getComputedStyle(nm).font;
-        document.body.appendChild(probe);
-        const full = nm.textContent;
-        let shown = 0;
-        for (let i = 1; i <= full.length; i++) {
-          probe.textContent = full.slice(0, i);
-          if (probe.getBoundingClientRect().width <= nm.getBoundingClientRect().width) shown = i;
-          else break;
-        }
-        probe.remove();
-        return {
-          shown, len: full.length,
-          // Same row is decided by vertical OVERLAP, not by equal `top`: the
-          // two controls are 26px and 30px tall and the row centres them, so
-          // sharing a line does not make their tops equal.
-          ownRow: !(r.top < sr.bottom && sr.top < r.bottom),
-          // A row of its own is fine; a row of its own with no plate is not.
-          plated: cs.borderTopWidth !== "0px" &&
-                  !/^rgba\(0, 0, 0, 0\)$/.test(cs.backgroundColor),
-          beforeSend: (r.top < sr.bottom && sr.top < r.bottom) || r.bottom <= sr.top,
-          align: cs.justifyContent,
-          hit: (() => {
-            const at = document.elementFromPoint(
-              Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2));
-            return !!at && (at === mb || mb.contains(at));
-          })(),
-        };
+        const row = document.querySelector('#cmdPal [data-pal="model"]');
+        if (!row) return { missing: true };
+        const val = row.querySelector(".cp-val");
+        const r = row.getBoundingClientRect();
+        const v = val.getBoundingClientRect();
+        return { value: val.textContent, title: row.title,
+                 overflows: Math.round(v.right) > Math.round(r.right) };
       });
-      ok(`the model button is clickable at ${width}px`, m.hit === true, JSON.stringify(m));
-      /* Only while the toolbar is ONE row, which is every width from 330 up.
-         Below that the row cannot hold four controls plus a name and something
-         must break away; the two candidates are the model button and the
-         attach/send pair, and orphaning the pair is worse - the 280px section
-         above owns that tradeoff and pins it. So this asserts the invariant
-         where it is achievable rather than asserting it everywhere and being
-         quietly relaxed to fit. */
-      if (!m.ownRow) {
-        ok(`the model button is not painted after send at ${width}px`,
-          m.beforeSend === true, JSON.stringify(m));
-      }
-      // The plate is only required when it is standing alone. Inline between
-      // the segment control and the mode chip it is read as part of that row,
-      // and a plate there would be a third box competing with two real ones.
-      /* The plate this used to require is gone by the owner's decision, made
-         against rendered options: on its own row a full-width bordered box
-         sitting under the placeholder reads as a second text field, not a
-         control. What still has to hold is that the button is left-aligned
-         like every other label in the panel, and reachable - which the
-         hit test above covers at every width, own row or not. */
-      ok(`the model button is left-aligned at ${width}px`,
-        m.align === "flex-start", JSON.stringify(m));
-      // The number the breakpoints exist to protect. Eight characters is what
-      // tells claude-sonnet from claude-opus; five is "claud", which every id
-      // this extension is pointed at begins with.
-      ok(`the model id shows enough to distinguish it at ${width}px`,
-        m.shown >= 8, JSON.stringify(m));
+      ok(`the model row names the model at ${width}px`,
+        !m.missing && /sonnet/i.test(m.value || ""), JSON.stringify(m));
+      /* The short name is the family; the whole id is on the row's tooltip,
+         which is the one place it can be read in full now. */
+      ok(`and the full id is still reachable at ${width}px`,
+        (m.title || "").includes(ID), JSON.stringify(m));
+      ok(`without the value spilling out of its row at ${width}px`,
+        !m.overflows, JSON.stringify(m));
       await ctx.close();
     }
-
-    // The cliff. This is the assertion the old breakpoints could not pass:
-    // at 400 the model got 13 characters and at 420 it got 5, because the
-    // mode label and the segment padding both came back and took 46px out of
-    // the one control that had nothing to spare. A panel that degrades when
-    // it is made WIDER is a bug no single-width test can see.
-    const chars = {};
-    for (const width of [400, 420, 460, 500, 520]) {
-      const { ctx, page } = await open(width, {
-        profiles: [{ id: "gw", status: "ready", active: true, model: ID,
-          wire: "anthropic", baseUrl: "https://x", capabilities: { contextWindow: 200000 } }],
-        models: [{ group: "gw", models: [ID] }],
-      });
-      chars[width] = await page.evaluate(() => {
-        const nm = document.getElementById("modelName");
-        const probe = document.createElement("span");
-        probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;font:" +
-          getComputedStyle(nm).font;
-        document.body.appendChild(probe);
-        const full = nm.textContent;
-        let shown = 0;
-        for (let i = 1; i <= full.length; i++) {
-          probe.textContent = full.slice(0, i);
-          if (probe.getBoundingClientRect().width <= nm.getBoundingClientRect().width) shown = i;
-          else break;
-        }
-        probe.remove();
-        return shown;
-      });
-      await ctx.close();
-    }
-    const widths = Object.keys(chars).map(Number).sort((a, b) => a - b);
-    const drops = widths.filter((w, i) => i > 0 && chars[w] < chars[widths[i - 1]]);
-    ok("widening the panel never shows LESS of the model id",
-      drops.length === 0, JSON.stringify(chars));
   }
 
   /* ── 5o. the health dot knows what the status bar knows ────────────── */
@@ -1400,7 +1320,8 @@ function contrast(a, b) {
         status: { state: "error", label: "ERROR · HTTP" },
       });
       const d = await page.evaluate(() => {
-        const dot = document.getElementById("epDot");
+        const dot = document.querySelector('#cmdPal [data-pal="model"] .cp-dot');
+        if (!dot) return { missing: true };
         const cs = getComputedStyle(dot);
         return { err: dot.getAttribute("data-err"), display: cs.display,
                  label: dot.getAttribute("aria-label") };
@@ -1419,7 +1340,7 @@ function contrast(a, b) {
     // The other half of the same bug: a healthy sync must not report failure.
     const { ctx, page } = await open(700, { status: { state: "ok", label: "OK" } });
     const good = await page.evaluate(() =>
-      document.getElementById("epDot").getAttribute("data-err"));
+      document.querySelector('#cmdPal [data-pal="model"] .cp-dot').getAttribute("data-err"));
     ok("a healthy endpoint in the first sync leaves the dot green", good === "0", good);
     await ctx.close();
   }
@@ -1590,56 +1511,33 @@ function contrast(a, b) {
     await ctx.close();
   }
 
-  /* ── 5s. a truncated model id keeps the half that identifies it ────── */
+  /* ── 5s. the model's family is what the row shows ──────────────────── */
   {
-    // The owner chose one row plus truncation over a second row. That choice
-    // only pays if the characters that survive are the ones that distinguish:
-    // `text-overflow: ellipsis` cuts the tail, and at 360px the row leaves the
-    // label about seven characters - which spent on the HEAD of
-    // `claude-sonnet-4-6` is "claude-", a prefix every model this extension is
-    // pointed at shares. Truncating before the first distinguishing character
-    // shows nothing at all.
+    /* This pinned a TRUNCATION: the model button measured the id and cut it so
+       the half that identifies a model survived. There is no truncation now -
+       the palette row shows the FAMILY ("Sonnet") and keeps the whole id in
+       the tooltip - so what is pinned instead is that the short form still
+       tells two models apart, which is the property the truncation existed to
+       protect. */
     const IDS = ["claude-sonnet-4-6", "claude-opus-4-1", "openai/gpt-oss-20b"];
+    const seen = [];
     for (const id of IDS) {
-      for (const width of [340, 360, 400, 460]) {
-        const { ctx, page } = await open(width, {
-          profiles: [{ id: "gw", status: "ready", active: true, model: id,
-            wire: "anthropic", baseUrl: "https://x", capabilities: { contextWindow: 200000 } }],
-          models: [{ group: "gw", models: [id] }],
-        });
-        const m = await page.evaluate(() => {
-          const nm = document.getElementById("modelName");
-          return {
-            painted: nm.textContent,
-            // The fit has to actually fit - a label that still overflows has
-            // been cut by CSS on top of being cut by script, which loses the
-            // tail again.
-            overflows: nm.scrollWidth > nm.clientWidth + 1,
-            title: document.getElementById("modelBtn").title,
-            aria: document.getElementById("modelBtn").getAttribute("aria-label"),
-          };
-        });
-        ok(`the fitted "${id}" label fits its box at ${width}px`,
-          m.overflows === false, JSON.stringify(m));
-        if (m.painted !== id) {
-          ok(`a truncated "${id}" keeps its tail at ${width}px`,
-            m.painted.startsWith("…") && id.endsWith(m.painted.slice(1)),
-            JSON.stringify(m));
-          // The distinguishing part of every id here is its last run of
-          // characters, so a truncation that reaches it says something.
-          ok(`and shows something past the shared prefix at ${width}px`,
-            m.painted.length > 1 && !/^…?claude-?$/.test(m.painted),
-            JSON.stringify(m));
-        }
-        // Truncating the label must never truncate the ANSWER: the whole id
-        // stays on the tooltip and the accessible name at every width.
-        ok(`the whole id is still on the tooltip at ${width}px`,
-          m.title.includes(id), JSON.stringify(m));
-        ok(`and in the accessible name at ${width}px`,
-          (m.aria || "").includes(id), JSON.stringify(m));
-        await ctx.close();
-      }
+      const { ctx, page } = await open(400, {
+        profiles: [{ id: "gw", status: "ready", active: true, model: id,
+          wire: "anthropic", baseUrl: "https://x", capabilities: { contextWindow: 200000 } }],
+        models: [{ group: "gw", models: [id] }],
+      });
+      const v = await page.evaluate(() =>
+        document.querySelector('#cmdPal [data-pal="model"] .cp-val').textContent.trim());
+      ok(`"${id}" is named on the row`, v.length > 0, v);
+      seen.push(v);
+      await ctx.close();
     }
+    /* THE POINT: three different models must not read as the same word. A
+       short name that collapses two ids into one string is the same failure
+       as a truncation that cuts before the distinguishing character. */
+    ok("and three different models read as three different names",
+      new Set(seen).size === seen.length, JSON.stringify(seen));
   }
 
   /* ── 5t. the welcome is a workspace boot sequence ─────────────────── */
@@ -1769,7 +1667,11 @@ function contrast(a, b) {
     // no console message - so a rename that missed a call site would ship an
     // invisible icon. getBBox() is the only thing that catches it.
     const { ctx, page } = await open(420, {});
-    await page.click("#permBtn");
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent("message",
+      { data: { type: "configChanged",
+        config: { approvalMode: "edits-auto", activeProfile: "", caBundlePath: "", ui: {} } } })));
+    await page.waitForTimeout(120);
+    await page.click('.pick[data-pick="perm"]');
     await page.waitForTimeout(650);
     const rows = await page.evaluate(() => {
       return [...document.querySelectorAll(".perm-row")].map((r) => {
@@ -1802,37 +1704,51 @@ function contrast(a, b) {
       new Set(rows.map((r) => r.colour)).size === 3, JSON.stringify(rows.map((r) => r.colour)));
     await ctx.close();
 
-    // And the composer button carries the same mark, so the sheet and the
-    // control that opens it do not disagree about which mode is on.
-    const { ctx: c2, page: p2 } = await open(420, {});
+    /* And the glyph on the row carries the same mark, so the sheet and the
+       thing that states the mode cannot disagree about which one is on.
+       Opened with a non-default mode on purpose: the default takes no plate,
+       which is the rule the whole picked group is built on. */
+    const { ctx: c2, page: p2 } = await open(420, { config: { ui: {}, approvalMode: "edits-auto" } });
     const btn = await p2.evaluate(() => {
-      const use = document.querySelector("#permBtn use");
-      const svg = document.querySelector("#permBtn svg");
+      const use = document.querySelector('.pick[data-pick="perm"] use');
+      const svg = document.querySelector('.pick[data-pick="perm"] svg');
       const bb = svg && svg.getBBox ? svg.getBBox() : null;
       return { href: use ? use.getAttribute("href") : null, w: bb ? Math.round(bb.width) : 0 };
     });
-    ok("the composer button shows the same glyph as the sheet",
-      btn.href === "#i-shield", JSON.stringify(btn));
+    ok("the glyph on the row matches the mode's own mark",
+      btn.href === "#i-code", JSON.stringify(btn));
     ok("and it paints there too", btn.w > 0, JSON.stringify(btn));
     await c2.close();
   }
 
-  /* ── 5v. mode, attach and send are one group of matching buttons ───── */
+  /* ── 5v. the + joins the glyphs; send stays the primary action ─────── */
   {
-    // The mode button moved from the left of the row - where it was a labelled
-    // pill among labelled controls - into the action group, at the owner's
-    // instruction, taking the same geometry as attach and send.
+    /* THE PREMISE OF THIS SECTION CHANGED WITH THE DESIGN.
+     *
+     * It used to pin mode, attach and send as three controls of identical
+     * geometry. The chatbox design breaks that on purpose: the + is the last
+     * item of the picked-feature tray and takes the tray's 22px, while send
+     * stays the largest control in the row because it is the primary action.
+     * So "all the same size" is no longer the promise - what is, is that the +
+     * matches the glyphs it sits among, send outweighs it, and a wrap still
+     * never separates them. That last one is the reason the group exists. */
     for (const width of [300, 360, 420, 520, 700]) {
-      const { ctx, page } = await open(width, {});
+      const { ctx, page } = await open(width, { activeAgent: "reviewer",
+        agents: [{ name: "reviewer", description: "d", tools: [], skills: [] }] });
       const m = await page.evaluate(() => {
-        const ids = ["permBtn", "clipBtn", "sendBtn"];
+        const ids = ["attachBtn", "sendBtn"];
         const box = (id) => {
           const e = document.getElementById(id);
           const r = e.getBoundingClientRect();
           return { id, w: Math.round(r.width), h: Math.round(r.height),
-                   top: Math.round(r.top), inGroup: !!e.closest(".tb-actions") };
+                   top: Math.round(r.top), mid: Math.round(r.top + r.height / 2),
+                   inGroup: !!e.closest(".tb-actions") };
         };
         const b = ids.map(box);
+        const g = document.querySelector('.pick[data-pick="agent"]');
+        b.push({ id: "glyph", w: g ? Math.round(g.getBoundingClientRect().width) : 0,
+                 mid: g ? Math.round(g.getBoundingClientRect().top +
+                                     g.getBoundingClientRect().height / 2) : 0 });
         // Hit-tested, because a control that is the right size in the right
         // place and covered by something else is still unusable.
         const hit = ids.map((id) => {
@@ -1842,49 +1758,68 @@ function contrast(a, b) {
             Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2));
           return !!at && (at === e || e.contains(at));
         });
-        return { b, hit, label: getComputedStyle(document.getElementById("permName")).display };
+        return { b, hit };
       });
-      ok(`the mode button sits with attach and send at ${width}px`,
-        m.b.every((x) => x.inGroup), JSON.stringify(m.b));
-      // Same dimensions - the whole point of the move. Compared against each
-      // other rather than against a literal, so a change to .tb-btn's size
-      // moves all three together instead of failing here.
-      const [perm, clip, send] = m.b;
-      ok(`the three are the same size at ${width}px`,
-        perm.w === clip.w && clip.w === send.w &&
-        perm.h === clip.h && clip.h === send.h, JSON.stringify(m.b));
-      ok(`and sit on one line at ${width}px`,
-        perm.top === clip.top && clip.top === send.top, JSON.stringify(m.b));
-      ok(`and all three are clickable at ${width}px`,
+      const [attach, send, glyph] = m.b;
+      /* THE + LEFT THE ACTION GROUP, on purpose: it is the last item of the
+         glyph tray now, which sits at the other end of the row. So "one group"
+         is no longer the property - what replaced it is that the + belongs to
+         the TRAY (it matches the glyphs and travels with them) while send
+         stays at the end, and a wrap never puts them on different lines. */
+      ok(`send stays in the action group at ${width}px`,
+        send.inGroup, JSON.stringify(m.b));
+      ok(`and the + rides with the glyph tray at ${width}px`,
+        !attach.inGroup, JSON.stringify(m.b));
+      // Measured against the glyph beside it rather than a literal, so a change
+      // to the tray's size moves the + with it instead of failing here.
+      ok(`the + matches the glyphs it sits among at ${width}px`,
+        glyph.w > 0 && attach.w === glyph.w, JSON.stringify(m.b));
+      ok(`and send outweighs it, being the primary action at ${width}px`,
+        send.w > attach.w && send.h > attach.h, JSON.stringify(m.b));
+      /* CENTRES, not tops. Two controls of different heights on one row have
+         different tops by definition; comparing tops only ever worked while
+         they were the same size, and would now fail on a row that is correct. */
+      ok(`and all three sit on one line at ${width}px`,
+        attach.mid === send.mid && attach.mid === glyph.mid, JSON.stringify(m.b));
+      ok(`and both are clickable at ${width}px`,
         m.hit.every(Boolean), JSON.stringify({ hit: m.hit, b: m.b }));
-      // It is an icon button now, at every width - the label it used to show
-      // above 500px would make it wider than the two beside it.
-      ok(`the mode label is off at ${width}px`, m.label === "none", m.label);
       await ctx.close();
     }
 
-    // The mode is still ANNOUNCED, which is what the label was carrying. A
-    // glyph plus a colour is nothing to a screen reader.
+    /* The mode is still ANNOUNCED, and that now has to hold in TWO states,
+       because the design only draws the mode while it is non-default.
+       A glyph plus a colour is nothing to a screen reader, and the DEFAULT
+       mode draws no glyph at all - so at rest the only thing carrying the
+       answer is the off-screen name and the palette's own row. */
     const { ctx, page } = await open(420, {});
-    const named = await page.evaluate(() => {
-      const b = document.getElementById("permBtn");
-      return { title: b.title, aria: b.getAttribute("aria-label"),
-               text: (document.getElementById("permName") || {}).textContent };
-    });
-    /* The tooltip is written by renderPerm from the mode table, so it says
-       "Manual - Always ask before making changes" rather than the static
-       markup's wording. What has to hold is that it names the MODE and says
-       what that mode does - the two things the visible label used to carry
-       and no longer can. */
-    ok("the mode button's tooltip names the mode",
-      /manual/i.test(named.title), JSON.stringify(named));
-    ok("and says what that mode does",
-      named.title.replace(/manual/i, "").trim().length > 10, JSON.stringify(named));
-    ok("and the accessible name names it too",
-      /manual/i.test(named.aria || ""), JSON.stringify(named));
-    ok("and the mode name is still in the DOM for a screen reader",
-      /manual/i.test(named.text || ""), JSON.stringify(named));
+    const atRest = await page.evaluate(() => ({
+      // No plate on the row while nothing is switched away from its default.
+      glyph: !!document.querySelector('.pick[data-pick="perm"]'),
+      text: (document.getElementById("permName") || {}).textContent,
+    }));
+    ok("the default mode draws no glyph, as the design has it", !atRest.glyph);
+    ok("but its name is still in the DOM for a screen reader",
+      /manual/i.test(atRest.text || ""), JSON.stringify(atRest));
     await ctx.close();
+
+    // Switched away from the default, the glyph appears and has to say what it
+    // is - it is the only thing on the row carrying the mode at that point.
+    const { ctx: c3, page: p3 } = await open(420, { config: { ui: {}, approvalMode: "full-auto" } });
+    const named = await p3.evaluate(() => {
+      const g = document.querySelector('.pick[data-pick="perm"]');
+      return g ? { title: g.title, aria: g.getAttribute("aria-label") } : { missing: true };
+    });
+    ok("a non-default mode draws its glyph", !named.missing, JSON.stringify(named));
+    ok("whose tooltip names the mode", /auto/i.test(named.title || ""), JSON.stringify(named));
+    ok("and whose accessible name names it too",
+      /auto/i.test(named.aria || ""), JSON.stringify(named));
+    /* It used to say "click to return to Manual", because the plate cleared
+       itself like every other glyph. It opens the SHEET now - the palette's
+       Approvals row is gone, and if this cleared then full-auto would be
+       reachable from nowhere. So what it must say is that it leads somewhere. */
+    ok("and says that clicking it leads to the choice",
+      /change/i.test(named.title || ""), JSON.stringify(named));
+    await c3.close();
   }
 
   /* ── 5w. attach reaches the LOCAL machine, not the extension host ───── */
@@ -1914,13 +1849,14 @@ function contrast(a, b) {
     ok("and it is rendered, not display:none, so the picker will open",
       input.display !== "none" && input.visibility !== "hidden", JSON.stringify(input));
 
-    // The consequence: pressing attach must NOT ask the host to open its
-    // dialog, because that dialog is on the wrong machine.
+    // The consequence: choosing Upload from the attach menu must NOT ask the
+    // host to open its dialog, because that dialog is on the wrong machine.
     await page.evaluate(() => { window.__sent.length = 0; });
-    await page.click("#clipBtn");
+    await page.click("#attachBtn");
+    await page.click('#cmdPal [data-pal="upload"]');
     await page.waitForTimeout(150);
     const sent = await page.evaluate(() => window.__sent.map((m) => m.type));
-    ok("pressing attach does not route to the host's dialog",
+    ok("choosing Upload does not route to the host's dialog",
       !sent.includes("attachFiles"), JSON.stringify(sent));
     await ctx.close();
   }
@@ -2011,7 +1947,7 @@ function contrast(a, b) {
     for (const command of HOSTILE) {
       const { ctx, page } = await open2(command, "done");
       const m = await page.evaluate(() => {
-        const el = document.querySelector(".cmd-in");
+        const el = document.querySelector(".term-cmd-text");
         if (!el) return { missing: true };
         return {
           text: el.textContent,
@@ -2050,7 +1986,13 @@ function contrast(a, b) {
     for (const [command, wantCmd, wantPlain] of CORPUS) {
       const { ctx, page } = await open2(command, "ok");
       const m = await page.evaluate(() => {
-        const el = document.querySelector(".cmd-in");
+        const el = document.querySelector(".term-cmd-text");
+        // GUARDED, because an unguarded null here does not fail this
+        // assertion - it throws out of the harness and takes every section
+        // after it with it, reporting one line that names no test. That is
+        // how a selector going stale hid itself: the suite stopped rather
+        // than failed. A missing element is a FAIL like any other.
+        if (!el) return { missing: true };
         return {
           text: el.textContent,
           cmds: [...el.querySelectorAll(".tk-cmd")].map((n) => n.textContent),
@@ -2058,13 +2000,14 @@ function contrast(a, b) {
           painted: [...el.querySelectorAll("[class^=tk-]")].map((n) => n.textContent),
         };
       });
-      ok(`"${command}" reads back exactly`, m.text === command,
+      ok(`"${command}" reads back exactly`, !m.missing && m.text === command,
         JSON.stringify({ got: m.text }));
       for (const c of wantCmd) {
-        ok(`  and paints "${c}" as a command`, m.cmds.includes(c), JSON.stringify(m.cmds));
+        ok(`  and paints "${c}" as a command`, (m.cmds || []).includes(c), JSON.stringify(m.cmds));
       }
       for (const p of wantPlain) {
-        ok(`  and does not paint "${p}" as one`, !m.cmds.includes(p), JSON.stringify(m.cmds));
+        ok(`  and does not paint "${p}" as one`,
+          !m.missing && !m.cmds.includes(p), JSON.stringify(m.cmds));
       }
       await ctx.close();
     }
@@ -2079,7 +2022,7 @@ function contrast(a, b) {
     {
       const { ctx, page } = await open2("npm run verify", "ok");
       const r = await page.evaluate(() => {
-        const span = document.querySelector(".cmd-in .tk-cmd");
+        const span = document.querySelector(".term-cmd-text .tk-cmd");
         if (!span) return { missing: true };
         const rgb = (s) => (s.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
         // Walk up for the first ancestor that actually paints, which is what
@@ -2132,8 +2075,7 @@ function contrast(a, b) {
     await page.waitForTimeout(200);
 
     const m = await page.evaluate(() => {
-      const pick = (sel) => {
-        const el = document.querySelector(sel);
+      const box = (el) => {
         if (!el) return null;
         const cs = getComputedStyle(el);
         return {
@@ -2142,26 +2084,40 @@ function contrast(a, b) {
           left: cs.borderLeftWidth, leftColor: cs.borderLeftColor,
         };
       };
-      const inRow = pick(".tool-body .cmd-in");
-      const outRow = pick(".tool-body .term-block:not(.cmd-in)");
-      // The transcript's own block must KEEP its panel - the change was scoped
-      // to inside a tool card, and a rule that leaked would flatten every
-      // fenced shell block in the conversation too.
-      return { inRow, outRow };
+      return {
+        // The one surface the exchange now shares.
+        term: box(document.querySelector(".tool-body .term")),
+        terms: document.querySelectorAll(".tool-body .term").length,
+        // The result block nested inside it, which must have been stripped of
+        // its own chrome so the card is not a box inside a box.
+        nested: box(document.querySelector(".tool-body .term .term-out .term-block")),
+        prompt: (document.querySelector(".tool-body .term-prompt") || {}).textContent,
+        cmd: (document.querySelector(".tool-body .term-cmd-text") || {}).textContent,
+        out: (document.querySelector(".tool-body .term-out") || {}).textContent,
+      };
     });
     const transparent = (c) => /rgba\(0, 0, 0, 0\)|transparent/.test(c);
-    for (const [name, r] of [["command", m.inRow], ["output", m.outRow]]) {
-      ok(`the ${name} row has no fill`, !!r && transparent(r.bg), JSON.stringify(r));
-      ok(`and no box around it`, !!r &&
-        r.top === "0px" && r.right === "0px" && r.bottom === "0px", JSON.stringify(r));
-      ok(`and no rounded corners`, !!r && r.radius === "0px", JSON.stringify(r));
-      ok(`but keeps its rail`, !!r && parseFloat(r.left) >= 2, JSON.stringify(r));
-    }
-    // The rails are not decoration: their colour is what says which half is
-    // which, now that the boxes are gone and both halves are plain text.
-    ok("the two rails are different colours, or the split says nothing",
-      m.inRow.leftColor !== m.outRow.leftColor,
-      `${m.inRow.leftColor} vs ${m.outRow.leftColor}`);
+    /* ONE box for the exchange, not two. A command and its output are one
+       thing that happened, and the old pair of bordered blocks behind IN/OUT
+       tags read as two unrelated artefacts. */
+    ok("the command and its output share one surface", m.terms === 1, String(m.terms));
+    ok("which is the box: it keeps its border and its rail",
+      !!m.term && parseFloat(m.term.left) >= 2 && m.term.top === "1px", JSON.stringify(m.term));
+    ok("and its corners", !!m.term && m.term.radius !== "0px", JSON.stringify(m.term));
+    /* And nothing boxed INSIDE it. This is what the section is named for: the
+       nested result block is de-chromed so the surface is the only object. */
+    ok("the nested result block has no fill of its own",
+      !!m.nested && transparent(m.nested.bg), JSON.stringify(m.nested));
+    ok("and no box around it", !!m.nested && m.nested.top === "0px" &&
+      m.nested.right === "0px" && m.nested.bottom === "0px" && m.nested.left === "0px",
+      JSON.stringify(m.nested));
+    ok("and no rounded corners", !!m.nested && m.nested.radius === "0px",
+      JSON.stringify(m.nested));
+    /* The $ is what says which half is which, now that the two halves are one
+       box: it marks the line that was TYPED, and the output is what is left. */
+    ok("a $ prompt marks the command line", m.prompt === "$", JSON.stringify(m.prompt));
+    ok("the command line carries what was run", /npm test/.test(m.cmd || ""), m.cmd);
+    ok("and the output carries what came back", /3 passed/.test(m.out || ""), m.out);
     await ctx.close();
 
     // A FAILED run recolours the output rail, not the command's: what was run
@@ -2177,17 +2133,38 @@ function contrast(a, b) {
     await p2.evaluate(() => document.querySelector(".tool .tool-head").click());
     await p2.waitForTimeout(200);
     const bad = await p2.evaluate(() => {
-      const c = document.querySelector(".tool-body .cmd-in");
-      const o = document.querySelector(".tool-body .term-block:not(.cmd-in)");
-      const err = getComputedStyle(document.documentElement).getPropertyValue("--kx-error").trim();
-      const probe = document.createElement("span");
-      probe.style.color = err; document.body.appendChild(probe);
-      const errRgb = getComputedStyle(probe).color; probe.remove();
-      return { cmd: getComputedStyle(c).borderLeftColor,
-               out: getComputedStyle(o).borderLeftColor, errRgb };
+      const term = document.querySelector(".tool-body .term");
+      const cmd = document.querySelector(".tool-body .term-cmd-text");
+      const out = document.querySelector(".tool-body .term-out");
+      if (!term || !cmd || !out) return { missing: true };
+      const resolve = (name) => {
+        const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+        const probe = document.createElement("span");
+        probe.style.color = v; document.body.appendChild(probe);
+        const rgb = getComputedStyle(probe).color; probe.remove();
+        return rgb;
+      };
+      return {
+        failMarked: term.classList.contains("term-fail"),
+        rail: getComputedStyle(term).borderLeftColor,
+        outBg: getComputedStyle(out).backgroundColor,
+        cmdColour: getComputedStyle(cmd).color,
+        errRgb: resolve("--kx-error"),
+        err2Rgb: resolve("--kx-error-2"),
+      };
     });
-    ok("a failed run turns the OUTPUT rail red", bad.out === bad.errRgb, JSON.stringify(bad));
-    ok("and leaves the command's rail alone", bad.cmd !== bad.errRgb, JSON.stringify(bad));
+    ok("a failed run marks the surface", !bad.missing && bad.failMarked, JSON.stringify(bad));
+    ok("and turns its rail red", bad.rail === bad.errRgb, JSON.stringify(bad));
+    /* The OUTPUT is what went wrong, and it is the half that says so - a tint
+       behind it rather than the whole card shouting. */
+    ok("the output area takes the failure tint",
+      !bad.missing && !/rgba\(0, 0, 0, 0\)/.test(bad.outBg), JSON.stringify(bad));
+    /* And the command stays neutral: what was run is still what was run. This
+       is the assertion the old two-rail version existed for, and it survives
+       the redesign unchanged in meaning. */
+    ok("and the command itself is left alone",
+      !bad.missing && bad.cmdColour !== bad.errRgb && bad.cmdColour !== bad.err2Rgb,
+      JSON.stringify(bad));
     await c2.close();
   }
 

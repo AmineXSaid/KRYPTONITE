@@ -78,7 +78,7 @@ console.log("\n──── the model picker says what each endpoint serves ─�
 {
   const { w, d } = boot();
   w.dispatchEvent(new w.MessageEvent("message", { data: STATE() }));
-  d.getElementById("modelBtn").click();
+  d.querySelector('#cmdPal [data-pal="model"]').click();
 
   const rows = [...d.querySelectorAll("#qp .qp-row.mdl")];
   ok("every model row uses the listbox row shape", rows.length >= 4, `${rows.length} rows`);
@@ -122,7 +122,7 @@ console.log("\n──── the model picker says what each endpoint serves ─�
   w.dispatchEvent(new w.MessageEvent("message", { data: STATE({
     config: { approvalMode: "ask", activeProfile: "think", caBundlePath: "", ui: {} },
   }) }));
-  d.getElementById("modelBtn").click();
+  d.querySelector('#cmdPal [data-pal="model"]').click();
   const on = [...d.querySelectorAll("#qp .qp-row.mdl[data-on='1']")];
   ok("pinning an endpoint moves the selection to it", on.length === 1,
     on.map((r) => r.textContent.trim().slice(0, 30)).join(" / "));
@@ -135,7 +135,7 @@ console.log("\n──── the model picker says what each endpoint serves ─�
     models: [{ group: "gw", kind: "telepathy", models: ["gpt-4o"] }],
     profiles: [PROFILE("gw", "telepathy", "gpt-4o", true)],
   }) }));
-  d.getElementById("modelBtn").click();
+  d.querySelector('#cmdPal [data-pal="model"]').click();
   // It must land in a bucket rather than vanishing: bucketing walks the known
   // kinds, so an unrecognised one has to resolve through llmKind() to chat.
   const head = d.querySelector("#qp .qp-group[data-kind]");

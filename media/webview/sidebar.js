@@ -1281,6 +1281,19 @@ function _sbRun() {
           '</div>' +
           '<div class="composer-wrap">' +
             '<div class="qp" id="qp" role="listbox" hidden></div>' +
+            /* THE COMMAND PALETTE. Sibling of `.qp` for the same reason the
+               attach menu below is: `.composer` clips.
+               Sections rather than one flat list, because the two halves answer
+               different questions - CONTEXT is "what goes in with this turn",
+               MODEL is "what answers it" - and the design gives each a muted,
+               non-interactive label rather than a heading you can land on. */
+            '<div class="cmd-pal" id="cmdPal" role="dialog" aria-label="Commands" aria-modal="false" hidden>' +
+              '<div class="cp-filter">' +
+                '<input id="cpFilter" type="text" placeholder="Search for a command…" ' +
+                  'aria-label="Search for a command" autocomplete="off" spellcheck="false">' +
+              '</div>' +
+              '<div class="cp-body" id="cpBody"></div>' +
+            '</div>' +
             // One line, above the input, rotating. It is where someone
             // finds out a feature exists at all: nothing else in the panel
             // advertises skills, phases or the browser, and a feature
@@ -1322,110 +1335,64 @@ function _sbRun() {
                 '<textarea id="draft" rows="1" aria-label="Message" placeholder="\u203A\u00A0Ask Genesis anything…\u00A0\u00A0(/skills\u00A0·\u00A0@files)"></textarea>' +
               '</div>' +
               '<div class="toolbar">' +
-                // #4 - the control row carries controls only. The keycap that
-                // used to sit here was chrome describing chrome; the shortcut
-                // lives in the group's accessible name and the tooltip, where a
-                // keyboard user finds it and everyone else is not taxed for it.
-                // A radiogroup, not a group of plain buttons. `data-on` drove
-                // the styling and nothing else, so a screen reader read three
-                // equal buttons and never announced which phase was live -
-                // the one thing the control exists to say. aria-checked is
-                // kept in step by applyPhase.
-                '<div class="seg" id="phaseSeg" role="radiogroup" title="Shift+Tab to cycle phase"' +
-                  ' aria-label="Phase - press Shift+Tab to cycle">' +
-                  '<button role="radio" aria-checked="false" data-phase="ask" data-on="0" ' +
-                    'title="Ask - answers from what it reads. Makes no changes.">Ask</button>' +
-                  '<button role="radio" aria-checked="false" data-phase="plan" data-on="0" ' +
-                    'title="Plan - produces a plan. Makes no changes.">Plan</button>' +
-                  '<button role="radio" aria-checked="true" data-phase="act" data-on="1" ' +
-                    'title="Act - full tools, makes changes">Act</button>' +
-                '</div>' +
-                '<button id="modelBtn" aria-haspopup="listbox" aria-expanded="false">' +
-                  // The endpoint's health, on the control that already names
-                  // the endpoint's model. It was a pill of its own in the
-                  // removed footer; as a dot here it costs no space at all and
-                  // still turns red when the gateway is failing.
-                  /* Named, because five pixels of hue is not a state.
-                   * renderFooter keeps the label in step with data-err; the
-                   * dot is the glance and the name is the answer for anyone
-                   * the glance does not reach. */
-                  '<span class="ep-dot" id="epDot" data-err="0" role="img" ' +
-                    'aria-label="Endpoint healthy" title="Endpoint healthy"></span>' +
-                  '<span class="nm ell" id="modelName">No model</span>' + icon("i-caret", "ic-9") +
-                '</button>' +
-                // Approval mode belongs here, beside the phase and the model.
-                // Those three are the whole answer to "what will happen when I
-                // press send": what it may do, which model does it, and
-                // whether it will ask first. It used to sit under the box in a
-                // footer, which is where things go to be ignored.
-                '<span class="sp"></span>' +
-                // Mode, attach and send. THERE IS NO `@` BUTTON, on purpose.
-                //
-                // It typed a single character into the box, which is a thing
-                // the keyboard already does and which the placeholder already
-                // teaches - "( / skills · @ files )". As another control in a
-                // wrapping row it was the one that broke the line: the group
-                // orphaned onto a second row and sat right-aligned with the
-                // whole left half of the composer empty. The design's composer
-                // has five controls and this is the one it does not have.
-                //
-                // These are a GROUP rather than siblings, so a wrap at a narrow
-                // width moves them together instead of leaving send on a row by
-                // itself.
-                //
-                // The MODE button joins them here, at the owner's instruction,
-                // and takes their geometry. It used to sit on the left beside
-                // the model name, where it was a labelled pill among labelled
-                // controls; here it is a 30px icon button in a run of three,
-                // which is what it always was underneath - a glyph, a tooltip
-                // and a sheet. Its label moves to the tooltip and the
-                // accessible name, both of which already carried it.
-                /* THE AGENT, REACHABLE FROM WHERE YOU TYPE.
+                /* THE ROW THE CHATBOX DESIGN DRAWS, in its order.
                  *
-                 * The picker this opens has existed all along and was reachable
-                 * only by typing `/agent` - so choosing one meant knowing the
-                 * command, or leaving the composer for the Agents tab. The
-                 * sheet is unchanged; this is the door.
-                 *
-                 * A DIRECT CHILD OF THE TOOLBAR, not a fourth member of
-                 * `.tb-actions`, which is where it started. That group is
-                 * pinned to the phase segment's row at 280px - the whole reason
-                 * it is a group is that a wrap must not orphan send - and a
-                 * fourth 30px plate plus its gap took it 36px over, which put
-                 * attach and send on a row of their own with the left half of
-                 * the composer empty. Out here it sits beside them when there
-                 * is room and rides down with the model button when there is
-                 * not; see the ordering rule in sidebar.css.
-                 *
-                 * It belongs next to the model on that second row anyway: the
-                 * model and the agent are both WHO you are talking to, while
-                 * shield, attach and send are things you DO. */
-                '<button class="tb-btn agent-btn" id="agentBtn" aria-haspopup="menu"' +
-                  ' title="Choose an agent for this chat">' +
-                  icon("i-spark", "ic-13") + '<span class="nm" id="agentName"></span>' +
+                 * picked glyphs (+ last) · PHASE · rule · what is attached ·
+                 * approvals · send. Two controls the old row carried are NOT
+                 * here, and both moved rather than went: the ASK/PLAN/ACT
+                 * segment is now the one gold word that names the phase in
+                 * force, and the model is a row in the palette. The row states
+                 * what IS, and everything that merely COULD be is one layer
+                 * away - which is the rule the whole design turns on.
+                 */
+                '<span class="picks" id="picks" data-empty="1"></span>' +
+                /* The phase, as a word. It cycles on click and still answers to
+                 * Shift+Tab, so the segment's function survives its removal;
+                 * `aria-label` carries what the three radio buttons used to say
+                 * out loud, because one word cannot say it by itself. */
+                '<button class="phase-word" id="phaseWord" data-phase="act"' +
+                  ' title="Act - full tools, makes changes. Click or Shift+Tab to cycle.">ACT</button>' +
+                '<span class="tb-rule" aria-hidden="true"></span>' +
+                // What is riding along with the turn - the editor's selection,
+                // or the file the cursor is in. Empty most of the time, and it
+                // takes no width when it is.
+                '<span class="ctx-note" id="ctxNote" hidden>' +
+                  icon("i-file", "ic-13") + '<span class="ell" id="ctxNoteText"></span>' +
+                '</span>' +
+                // Approvals, as the word the mode table already gives it. It
+                // opens the same sheet the palette's Approvals row does.
+                /* The glyph is written by renderPerm from PERMS, not declared
+                   here: this markup carried a fixed `i-bolt`, which is
+                   FULL-AUTO's mark, so the panel showed a lightning bolt
+                   beside the word "Manual" - the loudest mode's glyph on the
+                   safest mode. That is the same bug the mode button had with a
+                   fixed shield, fixed once already; a hardcoded glyph beside a
+                   changing label is how it comes back. */
+                '<button class="mode-note" id="modeNote" aria-haspopup="dialog">' +
+                  icon("i-shield", "ic-12") + '<span id="permName">Manual</span>' +
                 '</button>' +
                 '<span class="tb-actions">' +
-                  '<button class="tb-btn perm-btn" id="permBtn" aria-haspopup="menu" aria-expanded="false"' +
-                    ' title="What the agent may do without asking">' +
-                    icon("i-shield", "ic-13") + '<span class="nm" id="permName">Manual</span>' +
-                  '</button>' +
-                  '<button class="tb-btn" id="clipBtn" title="Upload from your computer - or drop files on the box" aria-label="Upload files from your computer">' + icon("i-clip", "ic-13") + '</button>' +
-                  '<button id="sendBtn" data-ready="0" data-mode="send" title="Send" aria-label="Send">' + icon("i-up", "ic-13") + '</button>' +
+                  /* The attach trigger. It is the last item of the picked
+                     group - renderPicks parks it there - and only lives here in
+                     the markup so it keeps one home when the group is empty. */
+                  '<button class="tb-btn attach-btn" id="attachBtn" aria-haspopup="menu" aria-expanded="false"' +
+                    ' title="Attach - upload a file, or mention one from the workspace" aria-label="Attach">' +
+                    icon("i-plus", "ic-12") + '</button>' +
+                  '<button id="sendBtn" data-ready="0" data-mode="send" title="Send" aria-label="Send">' +
+                    icon("i-up", "ic-13") + '</button>' +
                 '</span>' +
                 /* The local file picker.
-                
+
                    `showOpenDialog` runs on the EXTENSION HOST. In a WSL, dev
                    container, SSH or Codespaces window that host is the remote
                    machine, so the dialog browses the remote filesystem and a
-                   file sitting on the user's own Desktop is unreachable
+                   file sitting on the user\'s own Desktop is unreachable
                    through it - which is exactly what was reported.
-                
+
                    The webview renderer is always LOCAL, on the machine with
                    the screen and the mouse, so a plain file input here opens
-                   the user's own OS picker whatever the window is attached to.
-                   The bytes arrive in the page and take the same path a
-                   dropped or pasted file already takes.
-                
+                   the user\'s own OS picker whatever the window is attached to.
+
                    Off-screen rather than `display: none`: a hidden input is
                    not focusable and some engines refuse to open the picker for
                    one that is not rendered. */
@@ -1977,11 +1944,18 @@ function _sbRun() {
     if (PHASE_CYCLE.indexOf(phase) === -1) phase = "act";
     S.phase = phase;
     var view = $("viewSession");
-    var segs = $("phaseSeg").querySelectorAll("[data-phase]");
-    for (var i = 0; i < segs.length; i++) {
-      var on = segs[i].getAttribute("data-phase") === phase;
-      segs[i].setAttribute("data-on", on ? "1" : "0");
-      segs[i].setAttribute("aria-checked", on ? "true" : "false");
+    /* ONE WORD, NOT THREE BUTTONS. The design states the phase in force and
+       says nothing about the two that are not - so the word carries the value
+       and `aria-label` carries what the radiogroup used to announce, which a
+       three-letter label cannot do on its own. */
+    var pw = $("phaseWord");
+    if (pw) {
+      var info = PHASE_INFO[phase] || { lbl: "Act phase", sub: "full tools, makes changes" };
+      pw.textContent = phase.toUpperCase();
+      pw.setAttribute("data-phase", phase);
+      pw.title = info.lbl + " - " + info.sub + ". Click or Shift+Tab to cycle.";
+      pw.setAttribute("aria-label", "Phase: " + info.lbl + ". " + info.sub +
+        ". Click or press Shift+Tab to cycle.");
     }
     /* THE RAIL, WHERE THE BANNER USED TO BE.
      *
@@ -2213,74 +2187,46 @@ function _sbRun() {
   }
 
   /**
-   * The agent button, showing the agent of the conversation on screen.
+   * The agent, on screen.
    *
    * Says "this chat" in every string, deliberately. The agent used to be one
    * value for the whole workspace and nothing near the composer said so, which
    * is how it went unnoticed that choosing one for a diff review had made every
    * later chat a review too. A control that names the scope cannot repeat that.
+   *
+   * The button this used to paint is gone - the agent is a glyph in the picked
+   * group now, and is chosen from the palette's Agent row. Both read
+   * `S.activeAgent`, so repainting them is all that is left to do here.
    */
   function renderAgentBtn() {
-    var btn = $("agentBtn");
-    if (!btn) return;
-    var name = S.activeAgent || "";
-    var nm = $("agentName");
-    if (nm) nm.textContent = name;
-    /* HOW WIDE THIS NAME ACTUALLY IS, for the pill to open to.
-       The label is clamped to max-width 0 while no agent is set, so its own
-       `scrollWidth` is the only place its natural width survives; CSS cannot
-       reach it. Without this the pill animates towards the 118px cap and stops
-       dead as soon as it passes the text, spending most of the transition
-       standing still. Capped at the same 118 so a long name still truncates,
-       and left at the CSS fallback if the measure comes back 0 - which it does
-       while the panel is still display:none behind another tab. */
-    if (nm) {
-      var w = nm.scrollWidth;
-      if (w > 0) btn.style.setProperty("--agent-nm-w", Math.min(w, 118) + "px");
-      else btn.style.removeProperty("--agent-nm-w");
-    }
-    // Drives the dimmed resting state in CSS, the way permBtn's data-mode does.
-    btn.setAttribute("data-on", name ? "1" : "0");
-    btn.setAttribute("aria-label", name ? "Agent: " + name + ", in this chat" : "Choose an agent for this chat");
-    /* THE SCOPE MOVED HERE when the bar under the tabs was removed. That strip
-       was the only thing stating what the agent can actually reach - its tools,
-       its MCP servers, its skills - and dropping it without rehoming the line
-       would have left the panel unable to answer "what can this thing do?"
-       anywhere outside the Agents tab. */
-    var a = name ? activeAgentDto() : null;
-    var scope = a ? agentScope(a) : "";
-    btn.title = name
-      ? name + " is answering in this chat. Other chats are unaffected." +
-        (scope ? "\n" + scope : "")
-      : "Choose an agent for this chat. Other chats are unaffected.";
+    renderPicks();
+    renderCmdPal();
   }
 
   function renderPerm() {
     var mode = (S.config && S.config.approvalMode) || "ask";
     var nm = $("permName");
     if (nm) nm.textContent = permLabel(mode, true);
-    var btn = $("permBtn");
-    if (btn) {
-      btn.setAttribute("data-mode", mode);
-      // Below 340px the label is hidden and the glyph is the whole control, so
-      // the accessible name cannot come from the text any more.
-      btn.setAttribute("aria-label", "Mode: " + permLabel(mode));
-      // The full sentence, for the control that now shows one word.
-      btn.title = permLabel(mode) + " - " + permDetail(mode);
-      // THE MODE'S OWN GLYPH, not a fixed shield.
-      //
-      // The button drew `i-shield` whatever the mode was, while the sheet it
-      // opens drew a different glyph per mode - a raised hand, angle brackets,
-      // a bolt. So the one icon on screen the whole time said nothing about
-      // which mode was in force, and disagreed with the sheet the moment it
-      // opened. A shield also appears nowhere else in this panel, so it read as
-      // a security badge rather than as a control.
-      //
-      // Reading PERMS means the button cannot drift from the sheet: there is
-      // one table, and both render from it.
-      var ic = btn.querySelector("svg");
-      if (ic) ic.outerHTML = icon(permIcon(mode), "ic-15");
+    /* The word beside send, painted here rather than in syncComposer: a mode
+       changed anywhere - the sheet, the palette, the Control Center, a settings
+       edit - lands in this function, and only some of those reach the composer
+       repaint. */
+    var mn = $("modeNote");
+    if (mn) {
+      mn.setAttribute("data-mode", mode);
+      mn.title = permLabel(mode) + " - " + permDetail(mode);
+      mn.setAttribute("aria-label", "Approvals: " + permLabel(mode));
+      // THE MODE'S OWN GLYPH. Read from PERMS so this cannot drift from the
+      // sheet, the palette row or the picked plate - one table, four surfaces.
+      var mic = mn.querySelector("svg");
+      if (mic) mic.outerHTML = icon(permIcon(mode), "ic-12");
     }
+    /* THE MODE'S OWN GLYPH, not a fixed shield, and it survives the button's
+       removal: the glyph in the picked group and the palette's Approvals row
+       both read `permIcon`/`permLabel` from PERMS, so the sheet and everything
+       that states the mode outside it still cannot drift - there is one table
+       and every surface renders from it. */
+    renderPicks();
     var pop = $("permPop");
     if (!pop || pop.hidden) return;
     var list = $("permList");
@@ -2438,9 +2384,17 @@ function _sbRun() {
       // `inert` covers that window without depending on `transitionend` -
       // which the note above explains does not reliably fire.
       pop.inert = true;
-      // Only when the sheet had it. This runs on every document click, and a
-      // click elsewhere has already put focus where the user wanted it.
-      if (held && permReturn && permReturn.focus) permReturn.focus();
+      /* Only when the sheet had it. This runs on every document click, and a
+         click elsewhere has already put focus where the user wanted it.
+       *
+         THE OPENER CAN BE GONE BY NOW. The sheet is opened from the palette's
+         Approvals row, and opening it closes the palette - so the element
+         focus came from has been thrown away, and `.focus()` on a detached
+         node silently puts focus on <body>, which drops the keyboard out of
+         the panel entirely. Falling back to the composer keeps it where the
+         user was actually working. */
+      var back = (permReturn && permReturn.isConnected) ? permReturn : $("draft");
+      if (held && back && back.focus) back.focus();
       permReturn = null;
       // Card 340ms plus the backdrop's 200ms, with a little slack.
       permExit = setTimeout(function () {
@@ -2449,7 +2403,6 @@ function _sbRun() {
       }, 380);
       renderPerm();
     }
-    $("permBtn").setAttribute("aria-expanded", want ? "true" : "false");
   }
 
 
@@ -4649,8 +4602,37 @@ function _sbRun() {
     // that cannot be sent is a dead end. This line used to sit on the `@`
     // button, which is gone; without it the paperclip stayed live on a
     // composer that was otherwise entirely disabled.
-    $("clipBtn").disabled = blocked;
-    $("modelBtn").disabled = !hasEndpoint();
+    /* The context readout states what rides along with the turn. The approvals
+       word is NOT here: it is painted by renderPerm, which is what every path
+       that changes the mode calls - a mode set from the Control Center reaches
+       renderPerm and never reaches this function. */
+    var cn = $("ctxNote");
+    if (cn) {
+      /* `S.context` is the TOKEN BUDGET - {used, limit, exact} - and this read
+         `S.context.path` off it, which is undefined on every sync. So the
+         readout only ever appeared for a selection and never for the file the
+         cursor is in, which is the half it was mostly there for. The editor is
+         `S.editor`, whose `file` is null when no file editor is focused. */
+      var sel = S.selection;
+      var ed = S.editor;
+      var line = sel
+        ? (sel.lines ? sel.lines + " lines selected" : "selection")
+        : (ed && ed.file ? String(ed.file).split(/[\\/]/).pop() : "");
+      cn.hidden = !line;
+      var ct = $("ctxNoteText");
+      if (ct) ct.textContent = line;
+      /* The rule separates the phase from what rides along with the turn. With
+         nothing riding along it separated the phase from empty space - a stray
+         tick floating after the word. A separator with one side is not a
+         separator. */
+      var rule = document.querySelector(".tb-rule");
+      if (rule) rule.hidden = !line;
+    }
+    // The glyph group repaints with the composer, because everything it shows -
+    // the agent, the selection, the approval mode - can change without anything
+    // in the toolbar itself being touched.
+    renderPicks();
+    $("attachBtn").disabled = blocked;
 
     /* Reset to auto so scrollHeight reflects the real content height, not a
        previous clamp. Then set overflow: the scrollbar must only appear once the
@@ -4659,6 +4641,337 @@ function _sbRun() {
     var natural = draft.scrollHeight;
     draft.style.height = Math.min(natural, 120) + "px";
     draft.style.overflow = natural > 120 ? "auto" : "hidden";
+  }
+
+  /* ─────────────────────── the command palette ───────────────────────
+   *
+   * The rows are declared, not drawn by hand, so the filter and the renderer
+   * cannot disagree about what exists. Each carries what it needs to be REAL:
+   * an `on` reader for the switches and a `run` for the actions.
+   *
+   * `live: false` marks a row the design draws and this panel cannot yet
+   * honour. It renders in its designed place and is disabled with the reason
+   * on it, rather than as a switch that moves and changes nothing - the two
+   * of them need a wire that does not exist (see the notes on each).
+   */
+  function palRows() {
+    var mode = (S.config && S.config.approvalMode) || "ask";
+    var n = (S.attachments || []).length;
+    /* The EDIT rows run against whatever the host resolves from the ACTIVE
+       EDITOR, so with no file editor focused they fire and quietly do nothing.
+       Drawn and disabled instead, with the reason on the row - the same
+       treatment the unwired rows get, so "cannot right now" and "not built"
+       look different from "ready". */
+    var hasEditor = !!(S.editor && S.editor.file);
+    var edWhy = "Open a file in the editor - these act on what it has focused";
+    var ed = function (cmd) { return function () { post("editorCommand", { command: cmd }); }; };
+    return [
+      /* ── MODEL first: it states what this conversation IS, which is the thing
+         you open the palette to check. The verbs follow the nouns. ── */
+      { sec: "MODEL", id: "model", label: "Model", kind: "value", live: true,
+        value: modelShortName(), dot: S.epBad ? "1" : "0", why2: S.epHealth || "",
+        title2: S.epTitle || "",
+        run: function () { S.modelOpen = true; S.qp = null; renderQuickPick(); } },
+      /* The mockup has no Agent row and needs one: it turns the agent into a
+         glyph that appears only once set, and a glyph that is absent until it
+         is set cannot be the thing you set it with. */
+      { sec: "MODEL", id: "agent", label: "Agent", kind: "value", live: true,
+        value: S.activeAgent || "None",
+        run: function () { openAgentPicker(); } },
+      /* NOT WIRED. `SelectModelMsg` carries an endpoint and a model and nothing
+         else, so there is nowhere to put a thinking budget - C8/C9 in
+         THEME-NOTES records this as not built rather than as missing. */
+      { sec: "MODEL", id: "think", label: "Extended thinking", kind: "switch", live: false,
+        why: "Not wired yet - the model message carries no thinking budget", on: false },
+      /* NOT WIRED. `ConfigKey` has no key for the search tooling, so a switch
+         here would remember a position nothing reads. */
+      { sec: "MODEL", id: "websearch", label: "Web search", kind: "switch", live: false,
+        why: "Not wired yet - no config key reaches the search tooling", on: false },
+      /* THE ONE REAL SWITCH, and now the only approvals control in the palette:
+         the Approvals row that opened the sheet is gone, so this spans the
+         common case (ask <-> edits-auto) and the plate on the row is the way to
+         all three modes. See the note in pickList. */
+      { sec: "MODEL", id: "autoEdit", label: "Auto-approve edits", kind: "switch", live: true,
+        on: mode === "edits-auto" || mode === "full-auto",
+        run: function () {
+          var now = (S.config && S.config.approvalMode) || "ask";
+          var next = (now === "ask") ? "edits-auto" : "ask";
+          S.config = S.config || {};
+          S.config.approvalMode = next;
+          post("setConfig", { key: "approvalMode", value: next });
+          renderPerm();
+          renderPicks();
+          renderCmdPal();
+        } },
+
+      /* ── CONTEXT: what goes IN with the turn ── */
+      /* Accent like every other action. The mockup drew this row in white, and
+         I read that as a category - but white there was the HOVERED row (note
+         04: "highlighted or hovered row takes a solid gray fill, white text").
+         Baking a hover state into a permanent one left two rows that do the
+         same kind of thing painted two different colours for no reason. */
+      { sec: "CONTEXT", id: "upload", label: "Upload from computer", icon: "i-up",
+        kind: "action", live: true, accent: true, note: n ? n + " attached" : "",
+        run: function () { var i = $("localPick"); i.value = ""; i.click(); } },
+      { sec: "CONTEXT", id: "mention", label: "Mention file from this project…", icon: "i-at",
+        kind: "action", live: true, accent: true,
+        run: function () { insertComposerToken("@"); } },
+      { sec: "CONTEXT", id: "skill", label: "Run a skill…", icon: "i-book",
+        kind: "action", live: true, accent: true,
+        run: function () { insertComposerToken("/"); } },
+      /* NOT WIRED. The extension has browser and search tooling, but no message
+         reaches it from here: `editorCommand` is deliberately locked to five
+         command ids so the webview cannot invoke anything registered, and
+         widening it to open a browser is the hole that note exists to prevent. */
+      { sec: "CONTEXT", id: "web", label: "Browse the web", icon: "i-globe",
+        kind: "action", live: false, accent: true,
+        why: "Not wired yet - the webview has no message that reaches the browser" },
+
+      /* ── EDIT: the lightbulb's features, reached from where you type ── */
+      { sec: "EDIT", id: "fix", label: "Fix this problem", icon: "i-warn",
+        kind: "action", live: hasEditor, why: edWhy, accent: true, run: ed("fix") },
+      { sec: "EDIT", id: "explain", label: "Explain this", icon: "i-info",
+        kind: "action", live: hasEditor, why: edWhy, accent: true, run: ed("explain") },
+      { sec: "EDIT", id: "doc", label: "Document this", icon: "i-file",
+        kind: "action", live: hasEditor, why: edWhy, accent: true, run: ed("doc") },
+      { sec: "EDIT", id: "tests", label: "Write tests for this", icon: "i-check",
+        kind: "action", live: hasEditor, why: edWhy, accent: true, run: ed("tests") },
+      { sec: "EDIT", id: "commit", label: "Generate commit message", icon: "i-branch",
+        kind: "action", live: hasEditor, why: edWhy, accent: true, run: ed("commit") },
+
+      /* ── SESSION: what happens to this conversation ── */
+      { sec: "SESSION", id: "clear", label: "Clear conversation", icon: "i-trash",
+        kind: "action", live: true, accent: true, run: function () { post("newChat"); } },
+      /* Rewind restores the snapshot taken at the top of a turn, so it needs a
+         turn to have happened - drawn and disabled until one has. */
+      { sec: "SESSION", id: "rewind", label: "Rewind", icon: "i-refresh",
+        kind: "action", accent: true,
+        live: !!(S.checkpoints && S.checkpoints.length),
+        why: "Nothing to rewind to yet - a turn has to run first",
+        run: function () {
+          var c = S.checkpoints[S.checkpoints.length - 1];
+          if (c && c.hash) post("restoreCheckpoint", { hash: c.hash });
+        } },
+      { sec: "SESSION", id: "export", label: "Export chat as JSON", icon: "i-download",
+        kind: "action", live: true, accent: true,
+        run: function () { post("exportChat", { scope: "current" }); } },
+
+      /* ── MODEL: who answers, and how far they may go ── */
+      /* ── WORKSPACE: the surfaces around the conversation ── */
+      { sec: "WORKSPACE", id: "control", label: "Control Center", icon: "i-monitor",
+        kind: "action", live: true, accent: true,
+        run: function () { post("openControlCenter", {}); } },
+      { sec: "WORKSPACE", id: "diag", label: "Run connection diagnostics", icon: "i-shield",
+        kind: "action", live: true, accent: true,
+        run: function () { setTab("diagnostics"); S.tracing = true; S.rungs = []; renderTls(); post("runTrace"); } },
+      { sec: "WORKSPACE", id: "skills", label: "Open skills folder", icon: "i-folder",
+        kind: "action", live: true, accent: true,
+        run: function () { post("openSkillsFolder"); } },
+      { sec: "WORKSPACE", id: "settings", label: "Settings", icon: "i-pencil",
+        kind: "action", live: true, accent: true,
+        run: function () { post("openSettings"); } },
+    ];
+  }
+
+  /**
+   * The picked-feature glyphs that ride in the bar, left of the mode word.
+   *
+   * THE RULE THE WHOLE DESIGN TURNS ON: a control that is ON never collapses.
+   * A default sits in the palette and costs the bar nothing; the moment it is
+   * switched away from its default it steps out here as a 22px coloured plate,
+   * so the bar always states what is in force and never what is merely
+   * available. The `+` is the last item in the group, always.
+   *
+   * Clicking a glyph takes the feature back out - which is why each carries an
+   * `off`. That is the half that makes this a control rather than a readout.
+   */
+  function pickList() {
+    var out = [];
+    var mode = (S.config && S.config.approvalMode) || "ask";
+    if (S.activeAgent) {
+      /* THE SCOPE RIDES ON THIS TOOLTIP, and it has to.
+         When the agent bar under the tabs was removed, its statement of what
+         the agent can actually reach - its tools, its MCP servers, its skills -
+         was rehomed onto the agent button's tooltip, because nothing else
+         outside the Agents tab says it. That button is now this glyph, so the
+         sentence moves here rather than being lost with it. */
+      var dto = activeAgentDto();
+      var scope = dto ? agentScope(dto) : "";
+      out.push({ id: "agent", icon: "i-spark", hue: "agent",
+        title: S.activeAgent + " is answering in this chat. Other chats are " +
+          "unaffected. Click to clear." + (scope ? "\n" + scope : ""),
+        off: function () { post("setAgent", { name: "" }); } });
+    }
+    if (S.selection) {
+      out.push({ id: "snippet", icon: "i-code", hue: "plain",
+        title: "Code snippet attached - click to dismiss",
+        off: function () { S.selection = null; renderSelection(); renderPicks(); } });
+    }
+    if (mode !== "ask") {
+      /* THIS PLATE OPENS THE SHEET; IT DOES NOT CLEAR.
+       *
+       * Every other glyph here removes itself on click - the design's "click a
+       * glyph to take it back out". Approvals is the exception, and it has to
+       * be: the palette's Approvals ROW is gone, and the switch beside it only
+       * spans ask <-> edits-auto. If this plate cleared to Manual then FULL-AUTO
+       * would be reachable from nowhere in the panel - the mode that gives
+       * everything away would exist with no door to it.
+       *
+       * So the removal gesture for approvals is the switch, which is the common
+       * case, and the plate is the way to all three modes. */
+      out.push({ id: "perm", icon: permIcon(mode), hue: mode === "full-auto" ? "error" : "agent",
+        title: "Approvals: " + permLabel(mode) + " - click to change",
+        off: function () { togglePerm(true); } });
+    }
+    return out;
+  }
+
+  function renderPicks() {
+    var host = $("picks");
+    if (!host) return;
+    var list = pickList();
+    var html = "";
+    for (var i = 0; i < list.length; i++) {
+      var p = list[i];
+      html += '<button class="pick" data-pick="' + esc(p.id) + '" data-hue="' + p.hue +
+        '" title="' + esc(p.title) + '" aria-label="' + esc(p.title) + '">' +
+        icon(p.icon, "ic-12") + "</button>";
+    }
+    // The + is appended rather than rendered, so it keeps its listener and its
+    // aria-expanded across every repaint of the group beside it.
+    var btn = $("attachBtn");
+    host.innerHTML = html;
+    if (btn) host.appendChild(btn);
+    // An empty group is still a group: with nothing picked it is just the +,
+    // and the plate around a lone button reads as a stray box.
+    host.setAttribute("data-empty", list.length ? "0" : "1");
+  }
+
+  /**
+   * The model name the palette shows, short enough for a right-hand value.
+   *
+   * "claude-sonnet-4-6" becomes "Sonnet", which is the family the design puts
+   * in that slot - the version is in the tooltip, where the whole id lives.
+   *
+   * THE "Auto ·" PREFIX SURVIVES THE SHORTENING, and it has to: it is the only
+   * thing that says the endpoint was CHOSEN FOR YOU rather than pinned, and
+   * dropping it to save six characters would make an automatic choice
+   * indistinguishable from a deliberate one.
+   */
+  function modelShortName() {
+    var m = (S.profiles || []).filter(function (p) { return p.active; })[0];
+    var id = (m && m.model) || "";
+    if (!id) return "No model";
+    var fam = /sonnet|opus|haiku|gpt|llama|mistral|qwen|deepseek/i.exec(id);
+    var short = fam ? fam[0].charAt(0).toUpperCase() + fam[0].slice(1).toLowerCase() : id;
+    var pinned = (S.config && S.config.activeProfile) || "";
+    return (pinned === "" && (S.models || []).length > 1) ? "Auto · " + short : short;
+  }
+
+  function renderCmdPal() {
+    var body = $("cpBody");
+    if (!body) return;
+    var q = (S.palQ || "").toLowerCase();
+    var rows = palRows().filter(function (r) {
+      return !q || r.label.toLowerCase().indexOf(q) >= 0;
+    });
+    var html = "";
+    var sec = "";
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      if (r.sec !== sec) {
+        sec = r.sec;
+        html += '<div class="cp-sec">' + esc(sec) + "</div>";
+      }
+      var dis = r.live ? "" : " disabled";
+      var title = r.live ? "" : ' title="' + esc(r.why || "Not wired yet") + '"';
+      if (r.kind === "switch") {
+        html += '<button class="cp-row cp-sw" role="switch" aria-checked="' +
+          (r.on ? "true" : "false") + '" data-pal="' + esc(r.id) + '"' + dis + title + '>' +
+          '<span class="t">' + esc(r.label) + "</span>" +
+          '<span class="cp-toggle" data-on="' + (r.on ? "1" : "0") + '"><span class="knob"></span></span>' +
+          "</button>";
+      } else if (r.kind === "value") {
+        html += '<button class="cp-row" data-pal="' + esc(r.id) + '"' + dis +
+          (r.title2 ? ' title="' + esc(r.title2 + (r.why2 ? " - " + r.why2 : "")) + '"' : title) + '>' +
+          (r.dot !== undefined
+            ? '<span class="cp-dot" data-err="' + esc(r.dot) + '" role="img" aria-label="' +
+              esc(r.why2 || "") + '"></span>'
+            : "") +
+          '<span class="t">' + esc(r.label) + "</span>" +
+          '<span class="cp-val">' + esc(r.value || "") + "</span></button>";
+      } else {
+        html += '<button class="cp-row' + (r.accent ? " act" : "") + '" data-pal="' +
+          esc(r.id) + '"' + dis + title + '>' +
+          (r.icon ? icon(r.icon, "ic-14") : "") +
+          '<span class="t">' + esc(r.label) + "</span>" +
+          (r.note ? '<span class="cp-note">' + esc(r.note) + "</span>" : "") + "</button>";
+      }
+    }
+    if (!html) html = '<div class="cp-empty">No matching command</div>';
+    body.innerHTML = html;
+  }
+
+  /** Sit the palette on the bar's top edge, 8px clear, for the same reason
+   *  placeAttachPop measures rather than declares. */
+  function placeCmdPal() {
+    var pal = $("cmdPal");
+    var bar = document.querySelector(".composer");
+    var wrap = pal && pal.parentElement;
+    if (!pal || !bar || !wrap) return;
+    var b = bar.getBoundingClientRect();
+    var w = wrap.getBoundingClientRect();
+    if (!b.width || !w.width) return;
+    pal.style.bottom = Math.round(w.bottom - b.top + 8) + "px";
+  }
+
+  function toggleCmdPal(open) {
+    var pal = $("cmdPal");
+    if (!pal) return;
+    var want = open === undefined ? pal.hidden : open;
+    if (want) {
+      closePops();
+      togglePerm(false);
+      S.palQ = "";
+      var f = $("cpFilter");
+      if (f) f.value = "";
+      renderCmdPal();
+      pal.hidden = false;
+      placeCmdPal();
+      // The + is the trigger, so it wears the open state - that is what the
+      // gold ring keys off.
+      $("attachBtn").setAttribute("aria-expanded", "true");
+      if (f) f.focus();
+    } else {
+      pal.hidden = true;
+      $("attachBtn").setAttribute("aria-expanded", "false");
+      var d = $("draft");
+      // Focus goes back where it came from, which is the box you were typing
+      // in - a palette that closes onto nothing loses the keyboard.
+      if (d && pal.contains(document.activeElement)) d.focus();
+    }
+  }
+
+  /**
+   * Drop a trigger character at the end of the draft and let it behave exactly
+   * as if it had been typed - same regex, same picker, same everything.
+   *
+   * Used by the attach menu's "Mention a file" row, so choosing it from a menu
+   * reaches the same `@` picker a keystroke does instead of a second, parallel
+   * path that could disagree with it. A space is inserted first when the draft
+   * does not already end in whitespace, because `detectQuickPick`'s mention
+   * regex requires one before the `@` (or the start of the string) - typing it
+   * by hand would need the same space, so this does not skip a step, it does
+   * the one the keyboard would have.
+   */
+  function insertComposerToken(token) {
+    var draft = $("draft");
+    var v = draft.value;
+    if (v && !/\s$/.test(v)) v += " ";
+    draft.value = v + token;
+    draft.focus();
+    draft.setSelectionRange(draft.value.length, draft.value.length);
+    draft.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
   function detectQuickPick() {
@@ -4926,7 +5239,6 @@ function _sbRun() {
       } else {
         qp.hidden = true;
       }
-      $("modelBtn").setAttribute("aria-expanded", "false");
       return;
     }
     if (S.qpIndex >= selectable.length) S.qpIndex = 0;
@@ -5020,7 +5332,6 @@ function _sbRun() {
     // rather than guessing from the rows it happens to contain.
     qp.setAttribute("data-mode", S.modelOpen ? "model" : S.agentOpen ? "agent" : "find");
     qp.hidden = false;
-    $("modelBtn").setAttribute("aria-expanded", S.modelOpen ? "true" : "false");
     var active = qp.querySelector('[data-active="1"]');
     if (active && active.scrollIntoView) active.scrollIntoView({ block: "nearest" });
   }
@@ -5350,51 +5661,7 @@ function _sbRun() {
      truncated copy of itself converges on the wrong answer. */
   var modelLabel = "No model";
 
-  /**
-   * Show the END of the model id when the whole of it will not fit.
-   *
-   * `text-overflow: ellipsis` cuts the tail, which is the wrong half here.
-   * Model ids share their prefixes - `claude-sonnet-4-6`, `claude-opus-4-1`,
-   * `openai/gpt-oss-20b` - so the row's narrowest case, about seven characters
-   * at a 360px panel, spends all seven on "claude-" and distinguishes nothing.
-   * Truncating before the first distinguishing character is the same as
-   * showing no name at all.
-   *
-   * Binary search rather than a character-width estimate: the face is
-   * proportional at some weights and the id carries digits, slashes and
-   * hyphens whose advances differ, so anything averaged is wrong by a
-   * character or two exactly when the budget is a character or two.
-   */
-  function fitModelName() {
-    var el = $("modelName");
-    if (!el) return;
-    el.textContent = modelLabel;
-    var room = el.clientWidth;
-    // Zero while the panel is hidden or not yet laid out. Leave the full text:
-    // a fit computed against no width would cut everything, and renderFooter
-    // runs again on the next state sync.
-    if (room <= 0 || el.scrollWidth <= room) return;
 
-    // Measured in a detached span carrying the element's own computed font, so
-    // the answer holds whatever the type system is doing today.
-    var probe = document.createElement("span");
-    probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;left:-9999px;font:" +
-      getComputedStyle(el).font;
-    document.body.appendChild(probe);
-    var fits = function (n) {
-      probe.textContent = "\u2026" + modelLabel.slice(modelLabel.length - n);
-      return probe.getBoundingClientRect().width <= room;
-    };
-    var lo = 0, hi = modelLabel.length;
-    while (lo < hi) {
-      var mid = Math.ceil((lo + hi) / 2);
-      if (fits(mid)) lo = mid; else hi = mid - 1;
-    }
-    probe.remove();
-    // Nothing fits, not even one character behind the ellipsis. Leave the full
-    // label and let the CSS clip it: a bare ellipsis names nothing at all.
-    el.textContent = lo > 0 ? "\u2026" + modelLabel.slice(modelLabel.length - lo) : modelLabel;
-  }
 
   function renderFooter() {
     var active = activeProfile();
@@ -5414,20 +5681,25 @@ function _sbRun() {
      * button whose accessible name is the model, so a screen reader was never
      * told the endpoint's health at all. */
     var bad = !!S.tlsError || (S.status && S.status.state === "error");
+    /* The health used to be a dot inside the model button. That button is a
+       palette row now, so the fact is stored and the row paints it - see
+       `palRows`. Storing rather than dropping: this is the one signal that
+       says the gateway is failing, and losing it with the button would make a
+       broken endpoint silent until the first turn failed. */
+    S.epBad = bad;
     var dot = $("epDot");
-    dot.setAttribute("data-err", bad ? "1" : "0");
+    if (dot) dot.setAttribute("data-err", bad ? "1" : "0");
     var health = bad
       ? (S.tlsError ? "Endpoint failing - TLS error" : "Endpoint failing")
       : active ? "Endpoint healthy" : "No endpoint";
-    dot.setAttribute("aria-label", health);
-    dot.title = health;
+    S.epHealth = health;
+    if (dot) { dot.setAttribute("aria-label", health); dot.title = health; }
     // "Auto" when no profile is pinned and there is more than one to
     // choose from: the label has to say the choice is being made for you.
     var pinnedTo = (S.config && S.config.activeProfile) || "";
     modelLabel = active
       ? (pinnedTo === "" && S.models.length > 1 ? "Auto · " + active.model : active.model)
       : "No model";
-    fitModelName();
     // THE MODEL FIRST, THEN THE ENDPOINT.
     //
     // This named only the endpoint. That was defensible while the button was
@@ -5437,13 +5709,10 @@ function _sbRun() {
     // the tooltip is the only place the whole id can be read. A tooltip that
     // answers a question the label already answered, while withholding the one
     // it does not, is worse than no tooltip.
-    $("modelBtn").title =
-      (active ? active.model + " · " + name : name) +
+    S.epTitle = (active ? active.model + " · " + name : name) +
       (S.tlsError ? " - TLS error" : "");
-    // The button's own name carries the health too, because the dot inside it
-    // is decoration to anything that reads names rather than pixels.
-    $("modelBtn").setAttribute("aria-label",
-      "Model: " + (active ? active.model + " on " + name : "none") + " - " + health);
+    renderCmdPal();
+
   }
 
   /* ─────────────────────── diagnostics: TLS ─────────────────────── */
@@ -6657,8 +6926,13 @@ function _sbRun() {
           !e.target.closest(".popover") && !e.target.closest('[data-act="history"]')) closePops();
       // The sheet covers the panel and handles its own backdrop click, so the
       // document-level closer must not also fire on it.
-      if (!e.target.closest("#permBtn") && !e.target.closest("#permPop")) togglePerm(false);
-      if (S.modelOpen && !e.target.closest("#modelBtn") && !e.target.closest("#qp")) {
+      if (!e.target.closest("#permPop") && !e.target.closest("#cmdPal")) togglePerm(false);
+      // The palette dismisses like every other layer here, but NOT on a click
+      // inside the bar it is anchored to: the + lives there, and opening the
+      // attach menu must leave the palette up (both layers open at once is the
+      // state the design draws).
+      if (!e.target.closest("#cmdPal") && !e.target.closest(".composer")) toggleCmdPal(false);
+      if (S.modelOpen && !e.target.closest("#cmdPal") && !e.target.closest("#qp")) {
         S.modelOpen = false;
         renderQuickPick();
       }
@@ -6683,9 +6957,13 @@ function _sbRun() {
       saveUiState();
     });
 
-    $("phaseSeg").addEventListener("click", function (e) {
-      var b = e.target.closest("[data-phase]");
-      if (b) applyPhase(b.getAttribute("data-phase"));
+    $("phaseWord").addEventListener("click", function () {
+      var i = PHASE_CYCLE.indexOf(S.phase);
+      applyPhase(PHASE_CYCLE[(i + 1) % PHASE_CYCLE.length]);
+    });
+    $("modeNote").addEventListener("click", function (e) {
+      e.stopPropagation();
+      togglePerm(true);
     });
 
     /* RIGHT-CLICK ON A MESSAGE, AND ONLY ON A MESSAGE.
@@ -6912,16 +7190,8 @@ function _sbRun() {
        Observed on the button rather than the window: the button's width is
        what the fit is against, and it changes for reasons other than a window
        resize - the mode label appearing at 500px takes 46px out of it. */
-    if (typeof ResizeObserver === "function") {
-      new ResizeObserver(function () { fitModelName(); }).observe($("modelBtn"));
-    }
-    $("modelBtn").addEventListener("click", function (e) {
-      e.stopPropagation();
-      S.modelOpen = !S.modelOpen;
-      S.qp = null;
-      S.qpIndex = 0;
-      renderQuickPick();
-    });
+
+
     /* THE LOCAL PICKER, not the host's dialog.
     
        This posted `attachFiles`, which reaches `showOpenDialog` on the
@@ -6930,18 +7200,43 @@ function _sbRun() {
        remote machine, the dialog browses the remote disk, and the button
        labelled "Upload from your computer" could not reach the user's
        computer. Reported from exactly that setup.
-    
+
        The input runs in the renderer, which is always on the machine the user
        is sitting at, so it opens their own OS picker in every window type.
        Files on the REMOTE side are still reachable, and by a better route than
        a dialog: `@` completes workspace paths, and the host reads them. */
-    $("clipBtn").addEventListener("click", function () {
-      var input = $("localPick");
-      // The value is cleared first so picking the SAME file twice in a row
-      // still fires `change`. Without it the second pick is silent, which
-      // reads as the button being broken.
-      input.value = "";
-      input.click();
+    /* The palette: its filter, its rows, and the group of glyphs it feeds. */
+    $("cpFilter").addEventListener("input", function () {
+      S.palQ = this.value;
+      renderCmdPal();
+    });
+    $("cmdPal").addEventListener("click", function (e) {
+      var b = e.target.closest("[data-pal]");
+      if (!b || b.disabled) return;
+      var id = b.getAttribute("data-pal");
+      var row = palRows().filter(function (r) { return r.id === id; })[0];
+      if (!row || !row.run) return;
+      // A switch keeps the palette open - flipping one is a setting, not a
+      // destination. Everything else has done its job and the palette goes.
+      if (row.kind !== "switch") toggleCmdPal(false);
+      row.run();
+    });
+    $("picks").addEventListener("click", function (e) {
+      var b = e.target.closest("[data-pick]");
+      if (!b) return;
+      e.stopPropagation();
+      var id = b.getAttribute("data-pick");
+      var p = pickList().filter(function (x) { return x.id === id; })[0];
+      if (p && p.off) p.off();
+    });
+    /* ONE LAYER, NOT TWO. The + used to open a three-item menu of its own
+       while the palette opened separately - two popovers over one bar, each
+       holding part of the answer to "what can this thing do". They are one
+       list now: the + opens the palette, and everything the small menu carried
+       is a row in it. */
+    $("attachBtn").addEventListener("click", function (e) {
+      e.stopPropagation();
+      toggleCmdPal();
     });
     $("localPick").addEventListener("change", function () {
       var files = this.files;
@@ -7014,14 +7309,6 @@ function _sbRun() {
     });
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(mqAll);
 
-    $("permBtn").addEventListener("click", function (e) {
-      e.stopPropagation();
-      togglePerm();
-    });
-    $("agentBtn").addEventListener("click", function (e) {
-      e.stopPropagation();
-      openAgentPicker();
-    });
     $("permPop").addEventListener("click", function (e) {
       // The X, and the dimmed backdrop itself. A modal sheet that can only be
       // dismissed by choosing something is a trap; clicking away is how every
@@ -7088,6 +7375,22 @@ function _sbRun() {
          is open, not "stop the model". */
       if (e.key === "Escape" && $("mmZoom") && !$("mmZoom").hidden) {
         closeMermaidZoom();
+        return;
+      }
+      /* ⌘K / Ctrl+K opens the palette. The panel has no menu bar to hang a
+         command off and the composer's own keys are all taken, so this is the
+         one gesture that is idiomatic everywhere and collides with nothing
+         here. It toggles, so the same keystroke puts it away. */
+      if ((e.key === "k" || e.key === "K") && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        toggleCmdPal();
+        return;
+      }
+      /* ESCAPE CLOSES THEM IN ORDER: the popup is over the palette, so it goes
+         first, and a second Escape takes the palette. Closing both on one key
+         would take away a layer the user never asked about. */
+      if (e.key === "Escape" && $("cmdPal") && !$("cmdPal").hidden) {
+        toggleCmdPal(false);
         return;
       }
       msgMenuKeys(e);

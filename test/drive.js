@@ -498,21 +498,29 @@ const pasteTests = (async () => {
 {
   const { d, sent, inbound } = boot();
   inbound(STATE());
-  const clip = d.getElementById("clipBtn");
-  ok("attach button exists", !!clip);
-  ok("attach button is NOT disabled", !clip.disabled);
-  clip.click();
+  const attach = d.getElementById("attachBtn");
+  ok("attach button exists", !!attach);
+  ok("attach button is NOT disabled", !attach.disabled);
+  attach.click();
+  /* ONE LAYER NOW. The + used to open a small attach menu of its own beside
+     the palette; the two are merged, so the + opens the palette and Upload is
+     one of its rows. */
+  const pop = d.getElementById("cmdPal");
+  ok("clicking it opens the palette", !pop.hidden);
+  const upload = pop.querySelector('[data-pal="upload"]');
+  ok("which offers Upload", !!upload);
+  upload.click();
   /* THE LOCAL PICKER, not the host's dialog. This asserted `attachFiles`,
      which reaches `showOpenDialog` on the EXTENSION HOST - and in a WSL, dev
      container or SSH window that host is the remote machine, so the button
      labelled "Upload from your computer" browsed a disk the user was not
      sitting in front of.
 
-     The button opens a file input in the webview now, which runs in the
-     renderer and is therefore always on the user's own machine. So the
-     assertion inverts: pressing it must NOT ask the host, and there must be an
-     input for it to open. */
-  ok("clip does not ask the host to open its dialog",
+     Upload opens a file input in the webview now, which runs in the renderer
+     and is therefore always on the user's own machine. So the assertion
+     inverts: choosing it must NOT ask the host, and there must be an input
+     for it to open. */
+  ok("Upload does not ask the host to open its dialog",
     !sent.some(m => m.type === "attachFiles"), JSON.stringify(sent.map(m => m.type)));
   const local = d.getElementById("localPick");
   ok("and a local file input exists for it to open", !!local && local.type === "file");
@@ -591,27 +599,24 @@ const pasteTests = (async () => {
   const { w, d, sent, inbound } = boot();
   inbound(STATE());
 
-  const seg = d.getElementById("phaseSeg");
-  const btn = (p) => seg.querySelector('[data-phase="' + p + '"]');
-  ok("13 all three phases are offered", seg.querySelectorAll("[data-phase]").length === 3);
-  ok("13 Ask sits before Plan and Act",
-    [...seg.querySelectorAll("[data-phase]")].map((b) => b.getAttribute("data-phase")).join() ===
-      "ask,plan,act");
+  /* ONE WORD, NOT THREE SEGMENTS. The design states the phase in force and
+     nothing about the other two, so the row no longer "offers" all three - it
+     names one and cycles. What still has to hold: the phase is written, not
+     just coloured; clicking changes it and tells the host; and the cycle runs
+     least-destructive first, which is what the old left-to-right order said. */
+  const word = d.getElementById("phaseWord");
+  ok("13 the phase in force is named on the row", !!word);
+  ok("13 act starts lit", word.getAttribute("data-phase") === "act");
+  ok("13 and is written, not merely coloured",
+    word.textContent.trim().toLowerCase() === "act", word.textContent);
+  ok("13 with the full sentence in its accessible name",
+    /act/i.test(word.getAttribute("aria-label") || ""), word.getAttribute("aria-label"));
 
-  // The control announces which phase is live. data-on drives the styling and
-  // aria-checked drives the screen reader; both have to move together or the
-  // panel looks right and reads wrong.
-  ok("13 act starts lit", btn("act").getAttribute("data-on") === "1");
-  ok("13 and is announced as checked", btn("act").getAttribute("aria-checked") === "true");
-  ok("13 the group is a radiogroup", seg.getAttribute("role") === "radiogroup");
-
-  btn("ask").click();
-  ok("13 clicking Ask posts setPhase",
+  word.click();
+  ok("13 clicking cycles to Ask, the least destructive",
     sent.some((m) => m.type === "setPhase" && m.phase === "ask"));
-  ok("13 Ask lights up", btn("ask").getAttribute("data-on") === "1");
-  ok("13 and Act goes dark", btn("act").getAttribute("data-on") === "0");
-  ok("13 aria-checked follows", btn("ask").getAttribute("aria-checked") === "true" &&
-    btn("act").getAttribute("aria-checked") === "false");
+  ok("13 and the word follows", word.getAttribute("data-phase") === "ask");
+  ok("13 reading Ask", word.textContent.trim().toLowerCase() === "ask", word.textContent);
 
   // The rail replaced the read-only banner. It is painted from data-phase on
   // the session view, and unlike the banner it paints ALL THREE phases - Act
@@ -630,7 +635,9 @@ const pasteTests = (async () => {
     /^\u203A\u00A0Ask Genesis anything/.test(d.getElementById("draft").placeholder),
     d.getElementById("draft").placeholder);
 
-  btn("plan").click();
+  // Cycling on from Ask lands in Plan - the order is the point, so stepping
+  // through it is a truer test than jumping straight to a segment ever was.
+  word.click();
   ok("13 the rail follows into Plan", rail() === "plan");
   ok("13 and Plan's announcement is its own",
     /Plan phase/.test(said()) && /no edits applied/.test(said()), said());
@@ -638,7 +645,7 @@ const pasteTests = (async () => {
     /^\u203A\u00A0Describe what to plan/.test(d.getElementById("draft").placeholder),
     d.getElementById("draft").placeholder);
 
-  btn("act").click();
+  word.click();
   ok("13 and Act paints it too, where the banner showed nothing", rail() === "act");
   // Act withholds nothing, so it has no promise to make - but it must still
   // announce, or someone leaving a read-only phase is told nothing about the
@@ -652,7 +659,9 @@ const pasteTests = (async () => {
   // five branches first time round, so it appeared and vanished as the phase
   // changed. A prompt marker that is conditional is a rendering bug.
   for (const ph of ["ask", "plan", "act"]) {
-    btn(ph).click();
+    // Cycled to rather than picked: one word means the only way to a phase is
+    // through the ones before it, which is also how a user reaches them.
+    while (word.getAttribute("data-phase") !== ph) word.click();
     ok(`13 the ${ph} placeholder carries the prompt caret`,
       d.getElementById("draft").placeholder.startsWith("\u203A\u00A0"),
       d.getElementById("draft").placeholder);
@@ -662,7 +671,7 @@ const pasteTests = (async () => {
   // reach a third phase, which is the bug this replaced.
   const tab = () => d.getElementById("draft").dispatchEvent(
     new w.KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true }));
-  const lit = () => seg.querySelector('[data-on="1"]').getAttribute("data-phase");
+  const lit = () => word.getAttribute("data-phase");
   tab();
   ok("13 Shift+Tab from act reaches ask", lit() === "ask");
   tab();
@@ -696,12 +705,19 @@ const pasteTests = (async () => {
     result: "13 suites, 0 failed", isError: false } });
 
   ok("14 the dot marks success on landing", card.getAttribute("data-done") === "1");
-  const tags = [...card.querySelectorAll(".io-tag")].map((t) => t.textContent);
-  ok("14 the card labels its input and output", tags.join() === "IN,OUT", tags.join());
-  ok("14 IN carries the full command, not the truncated header",
-    /npm test -- --bail/.test(card.querySelector(".io-row .cmd-in").textContent));
-  ok("14 OUT carries the result",
-    /13 suites, 0 failed/.test(card.querySelectorAll(".io-row")[1].textContent));
+  /* The IN/OUT gutter tags are gone: a command and its output are one exchange
+     and now share one terminal surface, where a $ prompt marks the line that
+     was typed and the output is what sits beneath it. The questions are the
+     same ones the tags were asked - which half is which, and does each carry
+     what it should - so they are asked of the surface instead. */
+  const cmd = card.querySelector(".term-cmd-text");
+  const out = card.querySelector(".term-out");
+  ok("14 a $ prompt marks the command line",
+    (card.querySelector(".term-prompt") || {}).textContent === "$");
+  ok("14 the command line carries the full command, not the truncated header",
+    !!cmd && /npm test -- --bail/.test(cmd.textContent));
+  ok("14 and the output carries the result",
+    !!out && /13 suites, 0 failed/.test(out.textContent));
 }
 
 /* ── 15. a failed command still shows what was run ──────────────────── */
@@ -714,10 +730,13 @@ const pasteTests = (async () => {
   const card = d.querySelector("#log .tool");
   ok("15 the rail dot marks failure", card.getAttribute("data-error") === "1" &&
     card.getAttribute("data-done") === "0");
-  // "what did it actually run" is the first question on a failure, so IN must
-  // survive the error path - which is the branch that used to skip the
-  // argument preview entirely.
-  ok("15 IN survives the error path", !!card.querySelector(".cmd-in"));
+  // "what did it actually run" is the first question on a failure, so the
+  // command line must survive the error path - which is the branch that used
+  // to skip the argument preview entirely.
+  ok("15 the command survives the error path", !!card.querySelector(".term-cmd-text"));
+  // And the surface says it failed, which is what the rail and the tinted
+  // output are driven from.
+  ok("15 and the surface is marked failed", !!card.querySelector(".term.term-fail"));
   ok("15 and the card opens itself", card.getAttribute("data-open") === "1");
 }
 
@@ -726,7 +745,8 @@ const pasteTests = (async () => {
   // The replay path builds its cards by hand rather than going through
   // toolEnd, so every mark it has to settle is a chance for the two paths to
   // drift. The tool call carries `arguments` here and `args` on the live
-  // wire - reading the wrong one silently drops IN and nothing else breaks.
+  // wire - reading the wrong one silently drops the command line and nothing
+  // else breaks.
   const { d, inbound } = boot();
   inbound(STATE({ session: { id: "s9", title: "restored", messages: [
     { role: "user", content: "run the tests" },
@@ -739,10 +759,16 @@ const pasteTests = (async () => {
   ok("16 the restored card exists", !!card);
   ok("16 its rail dot is settled, not left running",
     card.getAttribute("data-done") === "1");
-  const tags = [...card.querySelectorAll(".io-tag")].map((t) => t.textContent);
-  ok("16 restored command cards keep IN/OUT", tags.join() === "IN,OUT", tags.join());
-  ok("16 IN reads the restored arguments",
-    /npm test -- --bail/.test(card.querySelector(".cmd-in").textContent));
+  // Restored cards get the same terminal surface the live path builds, which
+  // is the whole point of this section: one recipe, two callers.
+  const rcmd = card.querySelector(".term-cmd-text");
+  ok("16 restored command cards get the same terminal surface",
+    !!card.querySelector(".term") &&
+    (card.querySelector(".term-prompt") || {}).textContent === "$");
+  ok("16 the command line reads the restored arguments",
+    !!rcmd && /npm test -- --bail/.test(rcmd.textContent));
+  ok("16 and the output comes back with it",
+    /13 suites, 0 failed/.test((card.querySelector(".term-out") || {}).textContent || ""));
 }
 
 /* ══ §1 Activation & first paint ═══════════════════════════════════════ */
@@ -800,7 +826,9 @@ const pasteTests = (async () => {
   // carry lives on the model button. What has to keep working is that the
   // message carrying the usage still does not throw - a renderer reaching for
   // an element that is gone takes the whole panel with it.
-  ok("1.5 the endpoint is named on the model button", /gw/.test(d.getElementById("modelBtn").title));
+  ok("1.5 the endpoint is named on the model row",
+    /gw/.test(d.querySelector('#cmdPal [data-pal="model"]').title),
+    d.querySelector('#cmdPal [data-pal="model"]').title);
 }
 
 /* 1.5b — a usage report is accepted even though nothing renders it
@@ -904,10 +932,10 @@ function composer(over) {
   ok("2.2b send disabled with no workspace", c.d.getElementById("sendBtn").disabled === true);
   // The `@` button is gone - it typed one character the keyboard already
   // types, and as a sixth control it was what broke the composer onto two
-  // rows. The paperclip is the attach control now, and it is the one that has
+  // rows. The "+" is the attach control now, and it is the one that has
   // to be disabled when there is nowhere to attach to.
   ok("2.2b no @ button to disable", c.d.getElementById("atBtn") === null);
-  ok("2.2b attach disabled too", c.d.getElementById("clipBtn").disabled === true);
+  ok("2.2b attach disabled too", c.d.getElementById("attachBtn").disabled === true);
 }
 
 /* 2.3 — Enter sends, Shift+Enter does not */
@@ -1302,14 +1330,19 @@ function composer(over) {
     /24(\.\d)?k/.test(d.querySelector(".turn-foot .cost").textContent),
     d.querySelector(".turn-foot .cost") ? d.querySelector(".turn-foot .cost").textContent : "no footer");
 
-  // The endpoint pill went with the strip; its health did not.
-  ok("FT endpoint health sits on the model button", !!d.querySelector("#modelBtn #epDot"));
-  ok("FT and reads healthy by default",
-    d.getElementById("epDot").getAttribute("data-err") === "0");
+  /* The endpoint pill went with the strip and the model button went with the
+     redesign; the health survived both. It rides on the palette's Model row -
+     the one surface that still names the model - so that is where it is
+     asserted now. */
+  const epDot = () => d.querySelector('#cmdPal [data-pal="model"] .cp-dot');
+  ok("FT endpoint health sits on the model row", !!epDot());
+  ok("FT and reads healthy by default", epDot().getAttribute("data-err") === "0");
   inbound({ type: "tlsError", error: { profile: "gw", rung: "TLS handshake", message: "bad cert",
     endpoint: "https://x", proxied: false, fixKey: "k", fixValue: "v" } });
-  ok("FT a TLS failure turns it red", d.getElementById("epDot").getAttribute("data-err") === "1");
-  ok("FT and the button says so", /TLS error/.test(d.getElementById("modelBtn").title));
+  ok("FT a TLS failure turns it red", epDot().getAttribute("data-err") === "1");
+  ok("FT and the row says so",
+    /TLS error/.test(d.querySelector('#cmdPal [data-pal="model"]').title),
+    d.querySelector('#cmdPal [data-pal="model"]').title);
 }
 
 /* ══ The empty screen offers a way back ════════════════ */
@@ -1398,11 +1431,12 @@ const AGENTS = [
 {
   const { d, sent, inbound } = boot();
   inbound(STATE({ agents: AGENTS, activeAgent: "" }));
-  // The bar is gone; the composer's agent button is the one place that shows
-  // an agent, and with none set it is the bare glyph the other tools are.
+  // The bar is gone, and so is the standing button: an agent that is not set
+  // is a default, and the design keeps defaults off the control row. With none
+  // selected there is no plate at all, and the palette says "None".
   ok("AG nothing is named while no agent is selected",
-    d.getElementById("agentBtn").getAttribute("data-on") === "0" &&
-    d.getElementById("agentName").textContent === "");
+    !d.querySelector('.pick[data-pick="agent"]') &&
+    /None/.test(d.querySelector('#cmdPal [data-pal="agent"]').textContent));
 
   // Agents have a tab of their own now, after MCP. It was a collapsed section
   // inside Diagnostics, which is where a thing goes to be inspected rather than
@@ -1463,9 +1497,9 @@ const AGENTS = [
   const { d, sent, inbound } = boot();
   inbound(STATE({ agents: AGENTS, activeAgent: "" }));
   inbound({ type: "agentChanged", agent: { ...AGENTS[0], active: true } });
-  const agBtn = d.getElementById("agentBtn");
-  ok("AG selecting one lights the button", agBtn.getAttribute("data-on") === "1");
-  ok("AG which names it", /reader/.test(d.getElementById("agentName").textContent));
+  const agBtn = d.querySelector('.pick[data-pick="agent"]');
+  ok("AG selecting one puts a plate on the row", !!agBtn);
+  ok("AG which names it", /reader/.test(d.querySelector('#cmdPal [data-pal="agent"]').textContent));
   // The scope the bar used to print moved onto this button's tooltip when the
   // bar was removed - it is the only place left that says what the agent can
   // reach without opening the Agents tab.
@@ -1480,9 +1514,9 @@ const AGENTS = [
     sent.some((m) => m.type === "setAgent" && m.name === ""));
 
   inbound({ type: "agentChanged", agent: null });
-  ok("AG leaving returns it to the bare glyph",
-    d.getElementById("agentBtn").getAttribute("data-on") === "0" &&
-    d.getElementById("agentName").textContent === "");
+  ok("AG leaving takes the plate back off the row",
+    !d.querySelector('.pick[data-pick="agent"]') &&
+    /None/.test(d.querySelector('#cmdPal [data-pal="agent"]').textContent));
 }
 {
   // The composer's own picker.

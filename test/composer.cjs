@@ -74,28 +74,84 @@ function boot() {
   // settings. Pinned as the invariant rather than as the string, so renaming
   // either control can never quietly recreate the collision.
   {
-    const phases = [...b.d.querySelectorAll("#phaseSeg button")].map((x) =>
-      x.textContent.trim().toLowerCase());
+    // One word now, so the collision to guard against is with the phase the
+    // row is currently showing rather than with three printed labels.
+    const phases = [b.d.getElementById("phaseWord").textContent.trim().toLowerCase()];
     ok("and does not reuse a phase's name",
       !phases.includes(b.d.getElementById("permName").textContent.trim().toLowerCase()),
       `perm="${b.d.getElementById("permName").textContent}" phases=${phases.join(",")}`);
   }
-  ok("and the full sentence is still reachable",
-    /Manual - Always ask before making changes/.test(b.d.getElementById("permBtn").title),
-    b.d.getElementById("permBtn").title);
-  ok("it lives on the control row, not under the box",
-    !!b.d.querySelector(".toolbar #permBtn"));
-  ok("and carries it for styling", b.d.getElementById("permBtn").getAttribute("data-mode") === "ask");
+  /* The control row no longer carries a mode BUTTON. The mode is set from the
+     palette's Approvals row and, once away from its default, states itself as a
+     coloured glyph in the picked group - the design's rule that a control which
+     is ON never collapses, and one at its default never takes a plate. The row
+     still names the mode in the approvals word beside send. */
+  ok("the default mode takes no plate on the row",
+    !b.d.querySelector('.pick[data-pick="perm"]'));
+  ok("but the row still names it", /Manual/.test(b.d.getElementById("modeNote").textContent),
+    b.d.getElementById("modeNote").textContent);
+  ok("with the full sentence on the control",
+    /Manual - Always ask before making changes/.test(b.d.getElementById("modeNote").title),
+    b.d.getElementById("modeNote").title);
+  /* THE APPROVALS ROW IS GONE from the palette: the switch below it covers
+     the common case, and the plate on the control row is the door to all three
+     modes. So what has to hold is that the mode is still SETTABLE - the switch
+     exists - and that the sheet is still reachable once the mode is off its
+     default. */
+  ok("but the switch that sets it is there",
+    !!b.d.querySelector('#cmdPal [data-pal="autoEdit"]'));
+  ok("and the palette no longer carries a second door to it",
+    !b.d.querySelector('#cmdPal [data-pal="approvals"]'));
+
+  /* THE GLYPH BESIDE THE WORD IS THE MODE'S OWN, and this is pinned because it
+     has gone wrong twice. The mode button once drew a fixed shield whatever the
+     mode was; the word that replaced it shipped a fixed LIGHTNING BOLT - which
+     is full-auto's mark - sitting beside the label "Manual", so the safest mode
+     wore the loudest mode's glyph. Both times the cause was a glyph declared in
+     markup next to a label that changes. Read from PERMS, they cannot drift. */
+  for (const [mode, want] of [["ask", "i-shield"], ["edits-auto", "i-code"], ["full-auto", "i-bolt"]]) {
+    b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+      type: "configChanged",
+      config: { approvalMode: mode, activeProfile: "", caBundlePath: "", ui: {} },
+    } }));
+    const use = b.d.querySelector("#modeNote use");
+    ok(`${mode} draws ${want} beside its word`,
+      !!use && use.getAttribute("href") === "#" + want,
+      use && use.getAttribute("href"));
+    // And the plate in the tray reads from the same table, so the two surfaces
+    // that state the mode cannot disagree with each other either.
+    const plate = b.d.querySelector('.pick[data-pick="perm"] use');
+    if (mode !== "ask") {
+      ok(`  and the tray plate agrees for ${mode}`,
+        !!plate && plate.getAttribute("href") === "#" + want,
+        plate && plate.getAttribute("href"));
+    } else {
+      ok("  and the default takes no plate at all", !plate);
+    }
+  }
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "configChanged",
+    config: { approvalMode: "ask", activeProfile: "", caBundlePath: "", ui: {} },
+  } }));
   // The endpoint name was a label for a fact that only matters when it is
   // wrong, printed under every conversation. The footer strip it sat in is gone
   // entirely now: its health is a dot on the model button, which already names
   // that endpoint's model, and the name itself is in that button's tooltip.
   ok("the endpoint name is not printed", !b.d.getElementById("epName"));
-  ok("but is still carried for the tooltip", !!b.d.getElementById("modelBtn").title);
-  ok("and its health still has a dot of its own", !!b.d.getElementById("epDot"));
+  ok("but is still carried for the tooltip",
+    !!b.d.querySelector('#cmdPal [data-pal="model"]').title);
+  ok("and its health still has a dot of its own",
+    !!b.d.querySelector('#cmdPal [data-pal="model"] .cp-dot'));
   ok("the menu starts closed", b.d.getElementById("permPop").hidden);
 
-  ok("clicking opens it", b.click("#permBtn") && !b.d.getElementById("permPop").hidden);
+  /* Off the default, the plate appears and opens the sheet. That is the only
+     route to full-auto now, so it is worth pinning hard. */
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "configChanged",
+    config: { approvalMode: "edits-auto", activeProfile: "", caBundlePath: "", ui: {} },
+  } }));
+  ok("the plate opens the sheet",
+    b.click('.pick[data-pick="perm"]') && !b.d.getElementById("permPop").hidden);
   const rows = [...b.d.querySelectorAll("#permPop [data-perm]")].map((x) => x.getAttribute("data-perm"));
   ok("all three modes are offered", rows.join(",") === "ask,edits-auto,full-auto", rows.join(","));
   // Ordered by how much control they give up, so the list reads as a scale.
@@ -104,18 +160,22 @@ function boot() {
     [...b.d.querySelectorAll("#permPop .perm-row .m")].every((e) => e.textContent.trim().length > 10));
   // The sheet marks the mode in force with a filled radio rather than a tick,
   // because these are exclusive choices and a radio is what says so.
+  /* The sheet marks the mode IN FORCE, which is edits-auto here - the mode had
+     to be off its default for the plate that opens the sheet to exist at all. */
   ok("the current one is selected",
-    b.d.querySelector('#permPop [data-perm="ask"]').getAttribute("data-on") === "1");
+    b.d.querySelector('#permPop [data-perm="edits-auto"]').getAttribute("data-on") === "1");
   ok("and says so to assistive tech",
-    b.d.querySelector('#permPop [data-perm="ask"]').getAttribute("aria-checked") === "true");
+    b.d.querySelector('#permPop [data-perm="edits-auto"]').getAttribute("aria-checked") === "true");
   ok("and the others do not",
-    b.d.querySelector('#permPop [data-perm="full-auto"]').getAttribute("data-on") === "0");
+    b.d.querySelector('#permPop [data-perm="full-auto"]').getAttribute("data-on") === "0" &&
+    b.d.querySelector('#permPop [data-perm="ask"]').getAttribute("data-on") === "0");
   // Plan is a PHASE and already exists as the middle segment of the
   // ASK/PLAN/ACT control. Offering it here too would put one setting behind
   // two controls that can disagree.
   ok("plan is not offered as a mode",
     !b.d.querySelector('#permPop [data-perm="plan"]'));
-  ok("because it is already a phase", !!b.d.querySelector('#phaseSeg [data-phase="plan"]'));
+  ok("because it is already a phase",
+    /PHASE_CYCLE\s*=\s*\["ask",\s*"plan",\s*"act"\]/.test(SRC));
 
   /* EVERY MODE'S SENTENCE NAMES AN OUTCOME, NOT A MECHANISM.
      full-auto used to read "The agent handles permission decisions itself",
@@ -147,7 +207,7 @@ function boot() {
   {
     const c = boot();
     c.sync("full-auto");
-    c.click("#permBtn");
+    c.click('.pick[data-pick="perm"]');
     c.sent.length = 0;
     c.click('#permPop [data-perm="ask"]');
     const one = c.sent.filter((m) => m.type === "setConfig");
@@ -182,16 +242,18 @@ function boot() {
   ok("a change made elsewhere reaches the composer",
     b.d.getElementById("permName").textContent === "Auto",
     b.d.getElementById("permName").textContent);
-  ok("and the tooltip follows it",
-    /^Auto - /.test(b.d.getElementById("permBtn").title),
-    b.d.getElementById("permBtn").title);
+  ok("and the row's word follows it",
+    /^Auto - /.test(b.d.getElementById("modeNote").title),
+    b.d.getElementById("modeNote").title);
+  ok("and the glyph steps out onto the row",
+    !!b.d.querySelector('.pick[data-pick="perm"]'));
 
-  b.click("#permBtn");
+  b.click('.pick[data-pick="perm"]');
   b.d.body.dispatchEvent(new b.w.MouseEvent("click", { bubbles: true }));
   ok("clicking away closes it",
     b.d.getElementById("permPop").getAttribute("data-open") === null);
-  ok("and the button agrees immediately",
-    b.d.getElementById("permBtn").getAttribute("aria-expanded") === "false");
+  ok("and the sheet is on its way out",
+    b.d.getElementById("permPop").getAttribute("data-open") === null);
   // The exit finishing - `hidden` going back on once the transition has played
   // - is a TIMING fact, and jsdom runs no transitions and has no top-level
   // await to wait with. It is asserted for real against Chromium in the
@@ -241,19 +303,23 @@ function boot() {
   for (const mode of ["edits-auto", "full-auto"]) {
     const want = hue(mode);
     ok(`${mode} has a hue in the sheet`, !!want, String(want));
-    const rule = new RegExp('\\.perm-btn\\[data-mode="' + mode + '"\\]\\s*\\{([^}]*)\\}').exec(CSS);
-    ok(`${mode} is marked on the button too`, !!rule);
+    // The glyph carries the state now, grouped by how loud each mode is:
+    // accept-edits takes the agent hue, full-auto the alarm one.
+    const slot = mode === "full-auto" ? "error" : "agent";
+    const rule = new RegExp('\\.pick\\[data-hue="' + slot + '"\\]\\s*\\{([^}]*)\\}').exec(CSS);
+    ok(`${mode} is marked on the glyph too`, !!rule);
     if (rule && want) {
       ok(`${mode} uses the same hue as its sheet row`,
-        rule[1].includes(want), `button ${rule[1].match(/var\(--[a-z0-9-]+\)/)} vs sheet ${want}`);
+        rule[1].includes(want.replace(/\)$/, "")),
+        `glyph ${rule[1].match(/var\(--[a-z0-9-]+/)} vs sheet ${want}`);
     }
   }
   // The one that never asks is the alarm colour specifically, not merely a
   // colour: it has to read as a warning rather than as another category.
   ok("allow-all is marked in the alarm colour",
-    /\.perm-btn\[data-mode="full-auto"\][^}]*var\(--kx-error\)/.test(CSS));
+    /\.pick\[data-hue="error"\][^}]*var\(--kx-error/.test(CSS));
   ok("and the default is not coloured at all",
-    !/\.perm-btn\[data-mode="ask"\]\s*\{/.test(CSS));
+    !/\.pick\[data-hue="ask"\]\s*\{/.test(CSS));
 }
 
 /* ── the tip strip ──────────────────────────────────────────────────────── */
@@ -362,10 +428,12 @@ function boot() {
   const two = [{ group: "a", models: ["model-a"] }, { group: "z", models: ["model-z"] }];
 
   syncModels("", two);
-  ok("with nothing pinned the button says Auto",
-    /^Auto · /.test(b.d.getElementById("modelName").textContent),
-    b.d.getElementById("modelName").textContent);
-  b.click("#modelBtn");
+  /* The model button became a palette row, so the value it printed is the
+     row's value now. The Auto prefix is the assertion that matters: it says
+     the endpoint was chosen FOR you rather than pinned. */
+  const mval = () => b.d.querySelector('#cmdPal [data-pal="model"] .cp-val').textContent;
+  ok("with nothing pinned the row says Auto", /^Auto · /.test(mval()), mval());
+  b.click('#cmdPal [data-pal="model"]');
   const first = b.d.querySelector("#qp .qp-row");
   ok("Auto is offered first", /^Auto/.test(first.textContent.trim()), first.textContent.trim());
   // The listbox marks the selection with a lit dot rather than a tick. It is
@@ -383,20 +451,16 @@ function boot() {
     posted && posted.endpoint === "", JSON.stringify(posted));
 
   syncModels("a", two);
-  ok("a pinned profile drops the Auto prefix",
-    b.d.getElementById("modelName").textContent === "model-a",
-    b.d.getElementById("modelName").textContent);
+  ok("a pinned profile drops the Auto prefix", mval() === "model-a", mval());
 
   // One profile: "let it choose" and "choose that one" are the same
   // instruction, and offering both invites a question with no answer.
   syncModels("", [{ group: "a", models: ["model-a"] }]);
-  b.click("#modelBtn");
+  b.click('#cmdPal [data-pal="model"]');
   ok("Auto is not offered when there is only one endpoint",
     !/^Auto/.test((b.d.querySelector("#qp .qp-row") || {}).textContent || ""),
     (b.d.querySelector("#qp .qp-row") || {}).textContent);
-  ok("and the button shows the model plainly",
-    b.d.getElementById("modelName").textContent === "model-a",
-    b.d.getElementById("modelName").textContent);
+  ok("and the row shows the model plainly", mval() === "model-a", mval());
   b.dom.window.close();
 }
 
@@ -574,8 +638,16 @@ console.log("\n──── the send control ────");
   ok("and its corners stay corners",
     !!w && !!r && Number(r[1]) < Number(w[1]) / 2,
     w && r ? `radius ${r[1]} of width ${w[1]}` : "not found");
+  /* Armed, it is the one filled control in the row - and the fill is the
+     design's red, which in this palette is --kx-error. It is the design's
+     colour for the primary action, not a failure state. */
   ok("armed, it is the one filled control in the row",
-    /#sendBtn\[data-ready="1"\][^}]*background:\s*var\(--kx-action\)/.test(CSS));
+    /#sendBtn\[data-ready="1"\][^}]*background:\s*var\(--kx-error\)/.test(CSS));
+  /* And the glyph ON that fill is ink, not white: white on red-400 measures
+     3.15:1, which the contrast suite fails. The palette's own answer for a
+     filled accent is --kx-on-accent. */
+  ok("carrying ink rather than white, so it clears contrast",
+    /#sendBtn\[data-ready="1"\][^}]*color:\s*var\(--kx-on-accent\)/.test(CSS));
   // Stop is the same control admitting the turn is still running. Red there
   // would read as "something failed" at the moment nothing has.
   ok("stop goes quiet rather than red",
@@ -585,47 +657,45 @@ console.log("\n──── the send control ────");
     /prefers-reduced-motion[\s\S]*?#sendBtn:active\s*\{\s*transform:\s*none/.test(CSS));
 }
 
-/* ── the model control's shape ───────────────────────────────────────────
-   The same shape decision the send control gets, applied to the one control
-   that names the model. Pinned in CSS text for the same reason: jsdom applies
-   no stylesheet, so nothing else would notice it losing its plate. */
-console.log("\n──── the model control ────");
+/* ── the palette row's shape ─────────────────────────────────────────────
+   The model used to be a control on the row with a surface, a hairline and an
+   inner shadow - a FIELD among buttons. The design moves it into the palette,
+   where it is one row among rows, so that shape decision no longer has a
+   control to describe. What replaces it is the design's own row rule, pinned
+   in CSS text for the same reason the old one was: jsdom applies no
+   stylesheet, so nothing else would notice a row losing its shape. */
+console.log("\n──── the palette row ────");
 {
-  const model = CSS.match(/\n#modelBtn\s*\{[^}]*\}/);
-  ok("the model control has its own rule", !!model);
-  // A real surface and a hairline are what make it read as a control rather
-  // than as clickable prose.
-  ok("it wears a surface", !!model && /background:\s*var\(--kx-surface\b/.test(model[0]),
-    model ? model[0].replace(/\s+/g, " ") : "not found");
-  ok("and a hairline edge", !!model && /border:\s*1px solid var\(--kx-edge\)/.test(model[0]));
-  // A FIELD, not a raised plate: it is a picker showing a value, so it is sunk
-  // with an inner shadow rather than lifted like the icon buttons. That is the
-  // "kinda different but still part of the set" treatment.
-  ok("and reads as a recessed field, not a raised plate",
-    !!model && /box-shadow:\s*inset\b/.test(model[0]),
-    model ? model[0].replace(/\s+/g, " ") : "not found");
+  const model = CSS.match(/\n\.cp-row\s*\{[^}]*\}/);
+  ok("the palette row has its own rule", !!model);
+  /* The radii run as a SCALE - 10 on the palette, 8 on the composer, 6 on
+     rows, 4 on the small plates - so size and softness move together. What is
+     pinned is the relationship, not a literal: a row is softer than a plate
+     and sharper than the panel it sits in, and never a pill. */
+  const radius = (re) => { const m = CSS.match(re); return m ? Number(m[1]) : null; };
+  const rowR = radius(/\n\.cp-row\s*\{[^}]*border-radius:\s*(\d+)px/);
+  const panelR = radius(/\n\.cmd-pal\s*\{[^}]*border-radius:\s*(\d+)px/);
+  const plateR = radius(/\n\.pick\s*\{[^}]*border-radius:\s*(\d+)px/);
   ok("with softened corners, not a pill",
-    !!model && /border-radius:\s*(\d+)px/.test(model[0]) && !/border-radius:\s*50%/.test(model[0]),
-    model ? model[0].replace(/\s+/g, " ") : "not found");
-  // Same radius as the send control, so the two read as one family rather than
-  // two unrelated shapes.
-  const sendRadius = (CSS.match(/\n#sendBtn\s*\{[^}]*border-radius:\s*(\d+)px/) || [])[1];
-  const modelRadius = model && (model[0].match(/border-radius:\s*(\d+)px/) || [])[1];
-  ok("sharing the send control's corner radius",
-    !!sendRadius && sendRadius === modelRadius, `model ${modelRadius} vs send ${sendRadius}`);
-  // The radius must stay well under half the height or the square rounds into a
-  // pill by arithmetic - the same guard the send control carries.
-  const h = model && model[0].match(/height:\s*(\d+)px/);
-  const r = model && model[0].match(/border-radius:\s*(\d+)px/);
-  ok("and its corners stay corners",
-    !!h && !!r && Number(r[1]) < Number(h[1]) / 2,
-    h && r ? `radius ${r[1]} of height ${h[1]}` : "not found");
-  // Hover lifts the field rather than only the ink, so it answers a press.
-  ok("hover lifts the whole field",
-    /#modelBtn:hover:not\(:disabled\)[^}]*background:\s*var\(--kx-surface-2\)/.test(CSS));
-  // Open, the field flattens so it is not a sunk trigger fighting a raised list.
-  ok("and flattens while its list is open",
-    /#modelBtn\[aria-expanded="true"\][^}]*box-shadow:\s*none/.test(CSS));
+    !!rowR && !/\n\.cp-row\s*\{[^}]*border-radius:\s*50%/.test(CSS), String(rowR));
+  ok("softer than the small plates it shares the panel with",
+    !!plateR && rowR > plateR, `row ${rowR} vs plate ${plateR}`);
+  ok("and sharper than the panel that contains it",
+    !!panelR && rowR < panelR, `row ${rowR} vs panel ${panelR}`);
+  // Note 04: the highlighted or hovered row takes a SOLID fill and white text.
+  // A row that only changes its ink does not read as the row you are on.
+  ok("a hovered row takes a solid fill",
+    /\.cp-row:hover:not\(:disabled\)[^}]*background:\s*var\(--kx-surface-3\)/.test(CSS));
+  ok("and its text goes to full white with it",
+    /\.cp-row:hover:not\(:disabled\)[^}]*color:\s*var\(--kx-fg\)/.test(CSS));
+  // Note 05: a default ACTION row is accent-blue text on nothing.
+  ok("an action row is accent-blue on no fill",
+    /\.cp-row\.act\s*\{[^}]*color:\s*var\(--kx-link\)/.test(CSS));
+  // Note 06: only the switches stay pill-shaped, whatever the scale does.
+  ok("only the toggle stays a pill",
+    /\.cp-toggle\s*\{[^}]*border-radius:\s*(999px|9999px|50%)/.test(CSS));
+  ok("and reads as on in the action colour",
+    /\.cp-toggle\[data-on="1"\]\s*\{[^}]*background:\s*var\(--kx-action\)/.test(CSS));
 }
 
 
@@ -749,61 +819,57 @@ console.log("\n──── the model control ────");
   b.dom.window.close();
 }
 
-/* ── the agent button ───────────────────────────────────────────────────── */
+/* ── the agent, on the row and in the palette ───────────────────────────── */
 {
   /* THE PICKER EXISTED; THE DOOR DID NOT.
      The agent sheet has always been there and was reachable only by typing
      `/agent`, so choosing an agent meant knowing the command or leaving the
-     composer for the Agents tab. This is the control that opens it from where
-     you type, and the state it has to carry is WHOSE agent it is - the whole
-     reason the old workspace-wide agent went unnoticed is that nothing near
-     the composer said which chat it applied to. */
+     composer for the Agents tab. The door is the palette's Agent row now, and
+     the state it has to carry is WHOSE agent it is - the whole reason the old
+     workspace-wide agent went unnoticed is that nothing near the composer said
+     which chat it applied to.
+
+     The standing BUTTON is gone: an agent that is not set is a default, and the
+     design keeps defaults off the row. So there are two things to pin - the
+     door is always there, and the state takes a plate only once it is real. */
   const b = boot();
   b.sync("ask");
 
-  const btn = () => b.d.getElementById("agentBtn");
-  ok("the composer offers an agent button", !!b.d.querySelector(".toolbar #agentBtn"));
-  /* A DIRECT CHILD OF THE TOOLBAR, next to the actions rather than inside
-     them. `.tb-actions` is pinned to the phase segment's row at 280px so a
-     wrap cannot orphan send, and a fourth plate in that group took it over the
-     width - which put attach and send on a row of their own with the left half
-     of the composer empty. `render.cjs` catches exactly that, so this pins the
-     placement that keeps it caught. */
-  ok("it is a direct child of the toolbar", !!b.d.querySelector(".toolbar > #agentBtn"));
-  ok("and not inside the actions group", !b.d.querySelector(".tb-actions #agentBtn"));
-  ok("sitting immediately before them, so it still reads as one run",
-    (btn().nextElementSibling || {}).className === "tb-actions",
-    (btn().nextElementSibling || {}).className);
-  ok("it draws the sparkle", !!btn().querySelector('use[href="#i-spark"]'));
-  ok("which is defined", /id="i-spark"/.test(SRC));
+  const row = () => b.d.querySelector('#cmdPal [data-pal="agent"]');
+  const glyph = () => b.d.querySelector('.pick[data-pick="agent"]');
 
-  // Resting: no agent in this conversation.
-  ok("with no agent it rests", btn().getAttribute("data-on") === "0",
-    btn().getAttribute("data-on"));
-  ok("and says what it is for", /choose an agent/i.test(btn().title), btn().title);
-  ok("naming the scope, because that is what was invisible before",
-    /this chat/i.test(btn().title), btn().title);
-  ok("it has an accessible name of its own",
-    (btn().getAttribute("aria-label") || "").length > 8, btn().getAttribute("aria-label"));
+  ok("the palette offers a way in", !!row());
+  ok("which says there is no agent yet", /None/.test(row().textContent), row().textContent);
+  ok("and nothing takes a plate on the row", !glyph());
 
-  ok("the sheet starts closed", b.d.getElementById("qp").hidden);
-  ok("clicking opens it", b.click("#agentBtn") && !b.d.getElementById("qp").hidden);
+  ok("the picker starts closed", b.d.getElementById("qp").hidden);
+  ok("choosing Agent opens it",
+    b.click('#cmdPal [data-pal="agent"]') && !b.d.getElementById("qp").hidden);
 
-  // Armed: an agent is set for this conversation.
   b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
     type: "agentChanged",
     agent: { name: "reviewer", description: "Reads a diff.", tools: ["read_file"], mcp: [], file: "x.md" },
   } }));
-  ok("with one set it arms", btn().getAttribute("data-on") === "1",
-    btn().getAttribute("data-on"));
-  ok("and names it in the tooltip", /reviewer/.test(btn().title), btn().title);
-  ok("…and in the accessible name", /reviewer/.test(btn().getAttribute("aria-label") || ""),
-    btn().getAttribute("aria-label"));
+  ok("with one set it steps out onto the row", !!glyph());
+  ok("it draws the sparkle", !!glyph().querySelector('use[href="#i-spark"]'));
+  ok("which is defined", /id="i-spark"/.test(SRC));
+  ok("and names it in the tooltip", /reviewer/.test(glyph().title), glyph().title);
+  ok("…and in the accessible name", /reviewer/.test(glyph().getAttribute("aria-label") || ""),
+    glyph().getAttribute("aria-label"));
   ok("while still saying other chats are unaffected",
-    /other chats/i.test(btn().title), btn().title);
-  /* The armed state is a paint, so it has to exist in the stylesheet or the
-     attribute above is bookkeeping nobody can see. */
-  ok("the armed state is drawn", /\.agent-btn\[data-on="1"\]/.test(CSS));
+    /other chats/i.test(glyph().title), glyph().title);
+  ok("the palette agrees about which one", /reviewer/.test(row().textContent), row().textContent);
+  /* The plate is a paint, so its hue has to exist in the stylesheet or the
+     attribute above is bookkeeping nobody can see. Purple is the agent colour
+     everywhere else in the panel. */
+  ok("the armed state is drawn", /\.pick\[data-hue="agent"\]/.test(CSS));
+  ok("in the agent colour", /\.pick\[data-hue="agent"\][^}]*--kx-agent/.test(CSS));
+  /* Clicking the plate takes the agent back out - the design's "click a glyph
+     to take it back out". Without this the glyph is a readout, not a control. */
+  b.click('.pick[data-pick="agent"]');
+  ok("clicking the plate clears the agent",
+    b.sent.some((m) => m.type === "setAgent" && !m.name),
+    JSON.stringify(b.sent.filter((m) => m.type === "setAgent")));
   b.dom.window.close();
 }
 

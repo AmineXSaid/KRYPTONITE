@@ -48,21 +48,32 @@ const TOKENS = fs.readFileSync(path.join(ROOT, "media/webview/tokens.css"), "utf
     context: null, models: [], logs: [], session: { id: "s", title: "t", messages: [] },
   } });
   const send = (m) => w.dispatchEvent(new w.MessageEvent("message", { data: m }));
-  // Scoped to the segment: the session view carries a data-phase of its own -
-  // the one that paints the rail - and an unscoped query finds that instead.
-  const seg = (p) => d.querySelector(`#phaseSeg [data-phase="${p}"]`);
+  /* THE SEGMENT IS ONE WORD NOW. The design states the phase in force and says
+     nothing about the two that are not, so "all three are offered" is no longer
+     a question the row can answer - what it must still answer is which phase is
+     ON, in text rather than in colour alone, and that the rail agrees with it.
+     Scoped to the word: the session view carries a data-phase of its own - the
+     one that paints the rail - and an unscoped query finds that instead. */
+  const word = () => d.getElementById("phaseWord");
   const railPhase = () => d.getElementById("viewSession").getAttribute("data-phase");
-  const on = (p) => seg(p) && seg(p).getAttribute("data-on") === "1";
+  const on = (p) => word().getAttribute("data-phase") === p;
 
   send(state("act"));
-  ok("all three phases are offered",
-    !!seg("ask") && !!seg("plan") && !!seg("act"),
-    [seg("ask"), seg("plan"), seg("act")].map((x) => !!x).join(","));
-  ok("Ask reads as Ask", seg("ask").textContent.trim() === "Ask");
-  // Ask sits first: it is the least destructive of the three, and a control
-  // that runs harmless to harmful left-to-right is read correctly by default.
-  const order = [...d.querySelectorAll("#phaseSeg [data-phase]")].map((b) => b.getAttribute("data-phase"));
-  ok("ordered least destructive first", order.join(",") === "ask,plan,act", order.join(","));
+  ok("the phase in force is stated on the row", !!word());
+  ok("in words, not colour alone", word().textContent.trim().length >= 3,
+    word().textContent);
+  /* The cycle still runs least-destructive first, which is what the old
+     left-to-right order carried. Driven rather than read out of the source:
+     clicking the word is the gesture that replaced picking a segment, so the
+     order is asserted through the control a user actually operates. */
+  send(state("ask"));
+  const walked = [];
+  for (let i = 0; i < 3; i++) {
+    walked.push(word().getAttribute("data-phase"));
+    word().dispatchEvent(new w.MouseEvent("click", { bubbles: true }));
+  }
+  ok("and cycles least destructive first", walked.join(",") === "ask,plan,act", walked.join(","));
+  send(state("act"));
 
   ok("Act is selected", on("act") && !on("ask") && !on("plan"));
   // The banner that used to sit here showed NOTHING in Act. The rail that
@@ -73,15 +84,18 @@ const TOKENS = fs.readFileSync(path.join(ROOT, "media/webview/tokens.css"), "utf
   send(state("ask"));
   ok("Ask can be selected", on("ask") && !on("act"));
   ok("and the rail follows the phase", railPhase() === "ask", railPhase());
-  // The rail is a colour, so the WRITTEN answer has to come from the control:
-  // the lit segment is what a screen reader is told, and what a viewer who
-  // cannot separate the three hues reads instead.
-  ok("the segment is the written answer", seg("ask").getAttribute("aria-checked") === "true");
-  ok("and the others say they are not", seg("act").getAttribute("aria-checked") === "false");
+  /* The rail is a colour, so the WRITTEN answer has to come from the control.
+     With one word instead of three radios, the word IS the written answer, and
+     its accessible name carries the sentence the radiogroup used to speak. */
+  ok("the word is the written answer", word().textContent.trim().toLowerCase() === "ask",
+    word().textContent);
+  ok("and its accessible name says which phase, in full",
+    /ask/i.test(word().getAttribute("aria-label") || ""), word().getAttribute("aria-label"));
 
   send(state("plan"));
   ok("Plan still works", on("plan") && railPhase() === "plan");
-  ok("and Plan's segment is the checked one", seg("plan").getAttribute("aria-checked") === "true");
+  ok("and the word reads Plan", word().textContent.trim().toLowerCase() === "plan",
+    word().textContent);
 
   // What applyPhase announces in the banner's place carries BOTH halves: the
   // promise that nothing gets written, and the purpose the mode exists for.
@@ -96,21 +110,31 @@ const TOKENS = fs.readFileSync(path.join(ROOT, "media/webview/tokens.css"), "utf
 
 /* ── the colour ─────────────────────────────────────────────────────────── */
 {
-  // The segment FILLS with the phase hue and writes the label in ink, so each
-  // phase needs its own fill token. --kx-ask stays as the Ask hue used for
-  // TEXT (the banner), which is a lighter step of the same blue.
+  /* Each phase needs its own hue token, and the WORD is what wears it now: the
+     segment used to fill with the hue and write its label in ink, and the
+     design replaced it with one word painted in the phase's own colour.
+     --kx-ask stays as the Ask hue used for TEXT (the banner), which is a
+     lighter step of the same blue. */
   const hue = (t) => (TOKENS.match(new RegExp(t + ":\\s*(#[0-9a-f]{6})", "i")) || [])[1];
   for (const ph of ["ask", "plan", "act"]) {
     ok(`${ph} has its own fill token`, !!hue(`--kx-phase-${ph}`));
-    ok(`and the ${ph} segment uses it`,
-      new RegExp(`\\[data-phase="${ph}"\\]\\[data-on="1"\\]\\s*\\{[^}]*var\\(--kx-phase-${ph}\\)`).test(CSS));
+    // Act is the base state of `.phase-word`, so it is stated there rather
+    // than in an attribute rule of its own.
+    ok(`and the ${ph} word uses it`,
+      ph === "act"
+        ? /\.phase-word\s*\{[^}]*var\(--kx-phase-act\)/.test(CSS)
+        : new RegExp(`\\.phase-word\\[data-phase="${ph}"\\]\\s*\\{[^}]*var\\(--kx-(phase-${ph}|plan-fg)\\)`).test(CSS));
   }
   // Reusing another phase's hue would say the two modes are the same thing.
   const fills = ["ask", "plan", "act"].map((p) => hue(`--kx-phase-${p}`));
   ok("and the three fills are all different",
     new Set(fills).size === 3, fills.join(","));
-  ok("the label on a filled segment is ink, not another accent",
-    /\.seg button\[data-on="1"\]\s*\{[^}]*var\(--kx-on-accent\)/.test(CSS));
+  /* The filled segment is gone, so "ink on the fill" has moved to the one
+     control that is still filled in a phase-adjacent hue: send. The rule it
+     replaces said the same thing - a filled accent carries ink, never another
+     accent - and this is where that now has to hold. */
+  ok("the one filled control carries ink, not another accent",
+    /#sendBtn\[data-ready="1"\][^}]*var\(--kx-on-accent\)/.test(CSS));
   ok("Ask still has its own text token",
     /--kx-ask:\s*#[0-9a-f]{6}/i.test(TOKENS));
   // The rail takes the segment's own fills, so the stripe and the lit segment

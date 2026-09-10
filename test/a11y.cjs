@@ -145,18 +145,23 @@ function boot() {
 {
   const b = boot();
   b.sync();
-  const dot = b.d.getElementById("epDot");
-  ok("the health dot exists", !!dot);
+  /* The health came off the model button with the button: the model is a
+     palette row now, and the dot rides on that row. The questions are the same
+     two the button had to answer - the dot is NAMED rather than five pixels of
+     hue, and the name changes when the endpoint breaks. */
+  const dot = () => b.d.querySelector('#cmdPal [data-pal="model"] .cp-dot');
+  ok("the health dot exists", !!dot());
   ok("and is named, so it is not five pixels of hue alone",
-    !!dot && (dot.getAttribute("aria-label") || dot.getAttribute("title") || "").length > 2,
-    dot && dot.getAttribute("aria-label"));
+    !!dot() && (dot().getAttribute("aria-label") || "").length > 2,
+    dot() && dot().getAttribute("aria-label"));
 
-  const healthy = b.d.getElementById("modelBtn").getAttribute("aria-label") || "";
+  const healthy = dot().getAttribute("aria-label") || "";
   b.post({ type: "statusChanged", status: { state: "error", label: "502" } });
-  const broken = b.d.getElementById("modelBtn").getAttribute("aria-label") || "";
-  ok("the model button's own name carries the health", healthy !== broken,
+  const broken = dot().getAttribute("aria-label") || "";
+  ok("the health is carried in the name, not the colour", healthy !== broken,
     `${healthy} / ${broken}`);
   ok("and says which way", /fail|error|unreach|not/i.test(broken), broken);
+  ok("and the dot marks it for the eye too", dot().getAttribute("data-err") === "1");
   b.dom.window.close();
 }
 

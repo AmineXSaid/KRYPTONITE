@@ -476,15 +476,53 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
  * rail is a pseudo-element with no node and no aria precisely so assistive
  * tech is told this once, by the control, rather than twice. */
 #viewSession { position: relative; }
+/* A HAIRLINE THAT SEPARATES, AND AN ACCENT THAT FADES.
+ *
+ * This was a 3px bar of solid phase colour down the whole height of the view -
+ * a stripe of orange beside every conversation, which is a lot of saturated
+ * paint to spend on one fact. Two things replace it, and they do different
+ * jobs:
+ *
+ *   the separation  a 1px hairline in the neutral line colour, full height.
+ *                   That is what an edge is for, and it does not compete with
+ *                   the content beside it.
+ *   the phase       the same hue, but 2px and fading to nothing over the first
+ *                   ~150px. It is present where the eye enters the view and
+ *                   gone by the time you are reading.
+ *
+ * The phase is not carried by this alone any more, which is what makes the
+ * fade safe: the composer states it as a word (see `.phase-word`), and that
+ * sits below the transcript at every scroll position - which is the job the
+ * full-height rail was invented to do. */
+#viewSession { border-left: 1px solid var(--kx-hairline); }
 #viewSession::before {
-  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  content: ""; position: absolute; left: 0; top: 0; height: 150px; width: 2px;
   z-index: 4; pointer-events: none;
-  background: var(--kx-phase-act);
+  background: linear-gradient(180deg,
+    var(--kx-phase-act) 0,
+    color-mix(in srgb, var(--kx-phase-act) 30%, transparent) 48%,
+    transparent 100%);
   transition: background .18s ease;
 }
-#viewSession[data-phase="ask"]::before  { background: var(--kx-phase-ask); }
-#viewSession[data-phase="plan"]::before { background: var(--kx-phase-plan); }
-#viewSession[data-phase="act"]::before  { background: var(--kx-phase-act); }
+#viewSession[data-phase="ask"]::before {
+  background: linear-gradient(180deg, var(--kx-phase-ask) 0,
+    color-mix(in srgb, var(--kx-phase-ask) 30%, transparent) 48%, transparent 100%);
+}
+#viewSession[data-phase="plan"]::before {
+  background: linear-gradient(180deg, var(--kx-phase-plan) 0,
+    color-mix(in srgb, var(--kx-phase-plan) 30%, transparent) 48%, transparent 100%);
+}
+/* Act is stated too, rather than left to the base rule above: three phases and
+   two rules is how one of them ends up inheriting a colour nobody chose. */
+#viewSession[data-phase="act"]::before {
+  background: linear-gradient(180deg, var(--kx-phase-act) 0,
+    color-mix(in srgb, var(--kx-phase-act) 30%, transparent) 48%, transparent 100%);
+}
+/* Without color-mix the gradient still runs, just from the hue straight to
+   transparent - the fade is the point, not its midpoint. */
+@supports not (color: color-mix(in srgb, red 10%, transparent)) {
+  #viewSession::before { background: linear-gradient(180deg, var(--kx-phase-act) 0, transparent 100%); }
+}
 /* The hue swap is information, not decoration, so it still happens - what goes
    is the crossfade between the two colours. */
 @media (prefers-reduced-motion: reduce) {
@@ -2106,6 +2144,207 @@ ul.md-l li.md-task, ol.md-l li.md-task {
      transition, and why there is no matching exit. */
   animation: g-rise 130ms cubic-bezier(.16, 1, .3, 1) both;
 }
+
+/* ── the command palette ──────────────────────────────────────────────────
+   Two sections over one filter, sitting on the bar's top edge with an 8px
+   gap. Placed by placeCmdPal() for the same reason the attach menu is: the
+   wrapper it lives in is taller than the bar it belongs to. */
+/* 10px, not 4. The design's "4px on panels" was written for a small popup a
+   few rows tall; this is a 21-row surface most of the panel's height, and at
+   4px a box that size reads as a hard rectangle cut out of the panel rather
+   than as something floating over it. The radii now run as a scale - 10 on
+   this panel, 8 on the composer, 6 on rows, 4 on the small plates - so size
+   and softness move together instead of every surface sharing one corner. */
+.cmd-pal {
+  position: absolute; left: 12px; right: 12px; bottom: 100%; z-index: 55;
+  background: var(--kx-over);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--kx-line); border-radius: 10px;
+  box-shadow: 0 18px 44px var(--kx-shadow);
+  overflow: hidden;
+  animation: g-rise 140ms cubic-bezier(.16, 1, .3, 1) both;
+}
+/* Placeholder only, no icon: the design gives the filter the whole line, and a
+   magnifier in front of "Search for a command" says nothing the words do not. */
+.cp-filter { padding: 11px 14px 9px; border-bottom: 1px solid var(--kx-line); }
+.cp-filter input {
+  width: 100%; border: 0; background: none; outline: none; padding: 0;
+  font-family: var(--kx-ui); font-size: 13px; color: var(--kx-fg);
+}
+.cp-filter input::placeholder { color: var(--kx-fg-3); }
+/* Tall enough for both sections at once - the palette is a fixed eight rows,
+   not a list that grows, so it should not be a scroller at a normal panel
+   height. It still caps, because a short editor window is not a reason to push
+   the composer off the bottom of the panel. */
+.cp-body { max-height: min(58vh, 420px); overflow-y: auto; padding: 0 6px 8px;
+  display: flex; flex-direction: column; gap: 1px; }
+/* Muted, uppercase, and not a landing target - it names the half below it. */
+.cp-sec {
+  padding: 12px 4px 5px; font-family: var(--kx-mono);
+  font-size: 9px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
+  /* Dimmer than the rows it heads: it is a label, not a choice. */
+  color: var(--kx-fg-4);
+}
+.cp-sec + .cp-sec, .cp-body > .cp-sec:not(:first-child) { border-top: 1px solid var(--kx-line); }
+.cp-row {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 8px 9px; border-radius: 6px;
+  font-size: 13px; font-weight: 500; color: var(--kx-fg-2);
+  text-align: left;
+}
+/* The row's own health dot, for the Model row: the endpoint's state came off
+   the model button with the button, and this is where it landed. */
+.cp-dot { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--kx-accent); }
+.cp-dot[data-err="1"] { background: var(--kx-error); }
+.cp-row .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A SETTING READS DIFFERENTLY FROM AN ACTION. The rows that state a value or
+   carry a switch are nouns - what this conversation IS - so they take the
+   brighter ink and sit at normal weight. The action rows are verbs, and they
+   already have accent-blue to mark them; giving them the same bright ink as
+   the settings made the list one undifferentiated wall of text. */
+.cp-row.cp-sw .t, .cp-row:has(.cp-val) .t { color: var(--kx-fg); }
+/* ...but not when the row cannot act. The rule above targets `.t` directly, so
+   it outranks the `:disabled` colour set on the button - which put the two
+   UNWIRED switches back into full-strength ink, reading as available. Same
+   specificity, stated after, so unavailable wins where it should. */
+.cp-row:disabled .t { color: var(--kx-fg-4); }
+.cp-row svg { flex: none; }
+/* An action is accent-blue text on nothing, and takes a solid fill only when
+   it is the row under the pointer - which is the design's whole hover rule. */
+.cp-row.act { color: var(--kx-link); }
+.cp-row:hover:not(:disabled), .cp-row:focus-visible:not(:disabled) {
+  background: var(--kx-surface-3); color: var(--kx-fg); outline: none;
+}
+/* Not merely dimmer - a row that cannot act should not look like a row that
+   simply is not blue. It loses the accent entirely and its glyph fades with
+   it, so "unavailable" and "not an action" never read as the same thing. */
+.cp-row:disabled { color: var(--kx-fg-4); }
+.cp-row:disabled svg { opacity: .45; }
+.cp-row:disabled:hover { background: none; color: var(--kx-fg-4); cursor: default; }
+/* A row that cannot act still has to look like it was meant to be there, so it
+   dims rather than vanishing - and its title says what is missing. */
+.cp-row:disabled .cp-toggle { opacity: .5; }
+.cp-note, .cp-val {
+  margin-left: auto; flex: none; font-size: 12.5px; color: var(--kx-fg-3);
+}
+.cp-note { font-family: var(--kx-mono); font-size: 9.5px; font-weight: 500; }
+.cp-empty { padding: 10px 9px; font-size: 12px; color: var(--kx-fg-3); }
+/* ── the switch ───────────────────────────────────────────────────────────
+   The one pill in the composer: every other radius is part of the 10/8/6/4
+   scale, and a switch that is not fully round does not read as a switch.
+
+   THE OFF STATE IS THE ONE THAT HAS TO WORK. On is easy - it is filled and
+   bright and obviously on. Off was a dim knob on a near-black track, which is
+   two dark greys touching: it read as a control that had failed rather than
+   one that is simply not switched. So off gets a track a clear step ABOVE the
+   panel (a raised object, not a hole) and a knob at label brightness, and the
+   two are far enough apart to be read at a glance.
+
+   And OFF is not DISABLED. Those were the same picture - both dim - so a
+   switch nothing had wired looked exactly like a switch you had turned off.
+   Disabled now drops the whole control's opacity and takes its cursor, which
+   says "not yours to move" without changing what on and off look like.
+
+   What makes it feel like hardware: the track is a groove with an inset edge,
+   the knob carries a real shadow so it sits ON the track, and it travels on a
+   spring that overshoots very slightly - which is what says the thing was
+   thrown rather than faded.
+*/
+.cp-toggle {
+  margin-left: auto; flex: none;
+  width: 40px; height: 22px; border-radius: 999px;
+  background: var(--kx-surface-3);
+  box-shadow: inset 0 0 0 1px var(--kx-line-2), inset 0 1px 2px rgba(1, 4, 9, .45);
+  display: flex; align-items: center;
+  padding: 0 3px; box-sizing: border-box;
+  transition: background .2s ease, box-shadow .2s ease;
+}
+.cp-toggle .knob {
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--kx-fg-3);
+  box-shadow: 0 1px 3px rgba(1, 4, 9, .55);
+  transition: transform .24s cubic-bezier(.34, 1.4, .64, 1),
+              background .18s ease, box-shadow .18s ease;
+}
+.cp-toggle[data-on="1"] {
+  background: var(--kx-action);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--kx-action) 65%, #000),
+              inset 0 1px 2px rgba(1, 4, 9, .3);
+}
+.cp-toggle[data-on="1"] .knob {
+  transform: translateX(18px);
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(1, 4, 9, .5), 0 0 0 .5px rgba(1, 4, 9, .18);
+}
+/* Hover lifts the track a step, so the row answers the pointer before it is
+   pressed - the switch is the target, not the row it sits on. */
+.cp-sw:hover:not(:disabled) .cp-toggle { background: var(--kx-surface-4); }
+.cp-sw:hover:not(:disabled) .cp-toggle[data-on="1"] {
+  background: color-mix(in srgb, var(--kx-action) 88%, #fff);
+}
+/* Unwired, and saying so by going quiet as a whole rather than by muddying
+   the two states into each other. */
+.cp-sw:disabled .cp-toggle { opacity: .4; cursor: default; }
+/* The switch is the control, so the focus ring lands on IT, not on the row. */
+.cp-sw:focus-visible { outline: none; }
+.cp-sw:focus-visible .cp-toggle {
+  box-shadow: 0 0 0 2px var(--kx-bg), 0 0 0 4px var(--kx-info);
+}
+/* Motion off: it still moves - the position IS the state - it simply arrives. */
+@media (prefers-reduced-motion: reduce) {
+  .cp-toggle, .cp-toggle .knob { transition: none; }
+}
+
+/* ── the picked-feature glyphs ────────────────────────────────────────────
+   One plate holding the features that are ON, with the + as its last item.
+   The tray itself only shows when it is carrying something; with nothing
+   picked the + stands alone rather than in an empty box. */
+.picks {
+  display: flex; align-items: center; gap: 2px; flex: none;
+  padding: 2px; border-radius: 4px; background: var(--kx-surface);
+}
+/* WITH NOTHING PICKED THE TRAY HAS NO PLATE - a default takes no surface,
+   which is the rule the whole group is built on. But the + is the TRIGGER, not
+   a piece of state, and a trigger with no surface at all reads as a stray
+   glyph rather than a control. So the tray drops its plate and the + keeps a
+   quiet one of its own, until glyphs arrive and it joins their flat run. */
+.picks[data-empty="1"] { padding: 0; background: none; }
+.picks[data-empty="1"] .attach-btn {
+  background: var(--kx-surface-2); border-color: var(--kx-edge);
+}
+.picks[data-empty="1"] .attach-btn:hover:not(:disabled) {
+  background: var(--kx-surface-3); border-color: var(--kx-line-2);
+}
+.pick {
+  width: 22px; height: 22px; flex: none; display: grid; place-items: center;
+  border-radius: 3px; color: var(--kx-fg-2); background: var(--kx-surface-3);
+}
+/* The washes are the ones the buttons these replaced already used, not the
+   `-wash` tokens. `--kx-agent-wash` is 16% purple, and purple-400 on top of it
+   composites to 4.41:1 - under the 4.5:1 the contrast suite holds body text
+   to, which is what caught it. 12% keeps the plate readable as a tint and the
+   glyph above AA. */
+.pick[data-hue="agent"] {
+  background: color-mix(in srgb, var(--kx-agent) 12%, transparent); color: var(--kx-agent);
+}
+.pick[data-hue="error"] {
+  background: color-mix(in srgb, var(--kx-error) 14%, transparent); color: var(--kx-error);
+}
+@supports not (color: color-mix(in srgb, red 10%, transparent)) {
+  .pick[data-hue="agent"] { background: var(--kx-surface-3); }
+  .pick[data-hue="error"] { background: var(--kx-surface-3); }
+}
+.pick[data-hue="plain"] { background: var(--kx-surface-3); color: var(--kx-fg); }
+.pick:hover { background: var(--kx-surface-4); }
+/* Inside the tray the + drops to the glyphs' size, so the group reads as one
+   run of plates rather than a button with badges beside it. */
+.picks .tb-btn { width: 22px; height: 22px; border-radius: 3px; }
+/* The + is a member of the tray, so it takes the tray's plate rather than the
+   raised one .tb-btn gives the controls at the end of the row. */
+.picks .attach-btn { background: transparent; border-color: transparent; }
+.picks .attach-btn:hover:not(:disabled) { background: var(--kx-surface-3); border-color: transparent; }
+
 /* The `@` scope header. Sticky, because the list scrolls and the answer to
    "where is this looking" must not scroll away with it. */
 .qp-scope {
@@ -2235,7 +2474,11 @@ ul.md-l li.md-task, ol.md-l li.md-task {
      with no floor shows the panel straight through it, which is unreadable
      rather than merely wrong. */
   background-color: var(--kx-surface, #18171d);
-  border-radius: 4px; overflow: hidden;
+  /* The design's own box: 8px/9px padding, and a 9px gap between
+     the draft and the control row. The pills above keep their own edges, so
+     they are pulled back out to the box edge by their negative margins. */
+  border-radius: 8px; overflow: hidden;
+  display: flex; flex-direction: column; gap: 9px; padding: 8px 9px;
   /* --kx-edge, not the literal this used to carry: at .15 the composer's
      outline was 1.47:1 against the panel and the box you type into had no
      visible boundary at all. */
@@ -2314,9 +2557,33 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    indicator has to reach 3:1 (WCAG 1.4.11), so the BORDER goes solid blue -
    6.27:1 on the ground, 5.90:1 on the surface - and the wash stays as a soft
    halo around it, which is presence rather than affordance. */
+/* THE RING IS THE DESIGN'S RED, NOT THE PALETTE'S BLUE, and that is a
+   deliberate exception worth naming.
+ *
+ * tokens.css maps focus to blue ("information / links / read-only / focus"),
+ * and this rule followed it. The chatbox design overrides it: note 09 asks for
+ * a red/orange ring and a soft glow, and its literal value is #ec624c, which is
+ * this palette's own --kx-error. So the exception is scoped to THIS ONE
+ * SURFACE - the composer, the box the design is about - and nothing else in the
+ * panel changes what focus looks like.
+ *
+ * The mechanism the blue version was written for is kept exactly: a SOLID
+ * border carries the 3:1 that WCAG 1.4.11 wants (red-400 on the panel ground
+ * clears it comfortably), and the wash stays a halo, which is presence rather
+ * than affordance. What changed is the hue, not the affordance.
+ *
+ * The cost, stated: red means failure everywhere else here, so a focused
+ * composer now looks momentarily like a complaint. That is the design's call
+ * to make, and this comment is here so the next reader knows it was a call
+ * rather than a slip. */
 .composer:focus-within {
-  border-color: var(--kx-info);
-  box-shadow: 0 0 0 2px var(--kx-info-wash);
+  border-color: var(--kx-error);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--kx-error) 16%, transparent);
+}
+/* color-mix is recent; without it the halo is simply absent and the solid
+   border - which is the part that carries the contrast - still lands. */
+@supports not (color: color-mix(in srgb, red 10%, transparent)) {
+  .composer:focus-within { box-shadow: 0 0 0 3px var(--kx-error-wash); }
 }
 /* A running turn, marked where the user is already looking - but as a solid
    1px tint, not a moving gradient. Losing the rim would otherwise have left
@@ -2338,6 +2605,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 
 .sel-pill {
   display: flex; align-items: center; gap: 7px; padding: 7px 10px; font-size: 11.5px;
+  margin: -8px -9px 0;
   color: var(--kx-fg-2);
   border-bottom: 1px solid var(--kx-line);
 }
@@ -2346,6 +2614,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    and a readout that shouts competes with the message being written. */
 .ed-pill {
   display: flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 11px;
+  margin: -8px -9px 0;
   color: var(--kx-fg-3);
   border-bottom: 1px solid var(--kx-line);
 }
@@ -2378,14 +2647,25 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 #draft,
 .draft-mirror {
   font-family: var(--kx-ui); font-size: 13px; line-height: 1.5;
-  padding: 13px 14px 9px;
+  /* NO PADDING OF ITS OWN. This carried `13px 14px 9px` from when the composer
+     was a box with no inset and the textarea had to make its own. The composer
+     owns the padding now (8px 9px), so that 14px was ADDED to it: the
+     placeholder started 23px from the box edge while the + directly beneath it
+     started at 9px, and the two left edges of the same control disagreed by
+     14px. The 13/9 top and bottom were the other half of the same mistake -
+     22px of padding around a 20px line, which is most of the dead band under
+     the text. */
+  padding: 0;
   white-space: pre-wrap; overflow-wrap: break-word; word-break: normal;
   letter-spacing: normal;
 }
 
 #draft {
   display: block; width: 100%; background: transparent; border: none; outline: none; resize: none;
-  min-height: 36px; max-height: 120px; overflow: hidden;
+  /* One line, and no more. 36px was a line plus the padding that has gone;
+     the resting box is now the line itself, and the composer's own 8px does
+     the breathing. That is ~24px off the height of every idle composer. */
+  min-height: 20px; max-height: 120px; overflow: hidden;
   position: relative;
   /* The glyphs come from the mirror; the caret and the selection do not, so
      both are named explicitly rather than inherited from a transparent
@@ -2419,6 +2699,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 /* â”€â”€ attachment pills â”€â”€ */
 .att-strip {
   display: flex; flex-wrap: wrap; gap: 5px; padding: 6px 10px 2px;
+  margin: -8px -9px 0;
   border-bottom: 1px solid var(--kx-line);
 }
 .att-pill {
@@ -2435,42 +2716,94 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 .att-x:hover { color: var(--kx-error); background: var(--kx-hover); }
 
-.toolbar { display: flex; align-items: center; gap: 7px; padding: 0 9px 9px 11px; }
-.seg {
-  /* Equal columns, not flex. The three labels are 3, 4 and 3 characters, and
-     in a monospace that is a hard one-character difference no amount of
-     padding hides: the segments measured 34.5 / 42 / 35.5px, so the filled
-     one sat in a box a different size from its neighbours and the control
-     read as ragged. `grid-auto-columns: 1fr` in an auto-width container sizes
-     every track to the widest content, which is the segmented-control idiom
-     and needs no magic number to keep in step with the font size. */
-  display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
-  flex: none; border-radius: 4px; overflow: hidden;
-  border: 1px solid var(--kx-edge);
+/* THE CONTROL ROW, to the design's own metrics: one 8px-gapped line of
+   picked glyphs, phase, rule, context, approvals and send. The composer owns
+   the padding now (8px 9px, with a 9px gap above this row), so the row itself
+   carries none - that is what puts the glyph tray flush with the draft above
+   it the way the mockup draws it. */
+.toolbar { display: flex; align-items: center; gap: 8px; padding: 0; }
+/* ── the phase ────────────────────────────────────────────────────────────
+   One word in the mono face, in its own phase's hue - so it says which phase
+   in colour as well as in letters, and a reader who cannot separate the three
+   hues still has the word.
+
+   IT IS A CHIP, NOT LOOSE TEXT. As bare 9px type beside a plated + it read as
+   a stray label rather than the control it is: it cycles on click, and nothing
+   about it said so. It takes the same recipe as the glyph plates it sits
+   beside - 22px tall, 3px corners, the hue at a low wash behind it - so the
+   left of the row is one run of objects instead of a button, a word and a
+   gap. The hue does the work the plate would otherwise need a border for. */
+.phase-word {
+  flex: none; height: 22px; padding: 0 7px; border: 0; border-radius: 3px;
+  display: inline-flex; align-items: center;
+  font-family: var(--kx-mono); font-size: 9.5px; font-weight: 700;
+  letter-spacing: .12em; text-indent: .12em; text-transform: uppercase;
+  color: var(--kx-phase-act);
+  background: color-mix(in srgb, var(--kx-phase-act) 14%, transparent);
+  transition: background .14s ease, color .14s ease;
 }
-/* The mockup's segmented control, reproduced exactly.
- *
- * mono 9px / 700 / .12em / uppercase, 5px 7px padding, a border-left hairline
- * between segments and none before the first, and the ACTIVE segment filled
- * with its phase hue carrying ink text. An earlier pass here used coloured
- * text on a raised plate instead; that was a reasonable idea and it is not
- * what the design says, so it is gone.
- *
- * The three hues are the mockup's: Ask blue, Plan purple, Act orange. Ink on
- * each clears AA comfortably (5.25 / 4.94 / 7.03), so the fills are the
- * mockup's -400 values unaltered. */
-.seg button {
-  font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
-  letter-spacing: .12em; text-transform: uppercase; text-indent: .12em;
-  padding: 5px 7px; text-align: center; color: var(--kx-fg-3);
-  background: transparent;
+.phase-word[data-phase="ask"] {
+  color: var(--kx-phase-ask);
+  background: color-mix(in srgb, var(--kx-phase-ask) 14%, transparent);
 }
-.seg button + button { border-left: 1px solid var(--kx-line); }
-.seg button[data-on="1"] { color: var(--kx-on-accent); }
-.seg button[data-phase="ask"][data-on="1"]  { background: var(--kx-phase-ask); }
-.seg button[data-phase="plan"][data-on="1"] { background: var(--kx-phase-plan); }
-.seg button[data-phase="act"][data-on="1"]  { background: var(--kx-phase-act); }
-.seg button:hover:not([data-on="1"]) { background: var(--kx-hover); color: var(--kx-fg); }
+.phase-word[data-phase="plan"] {
+  color: var(--kx-plan-fg);
+  background: color-mix(in srgb, var(--kx-plan-fg) 14%, transparent);
+}
+/* Hover deepens the wash rather than underlining: this cycles through three
+   states, and an underline reads as a link to somewhere. */
+.phase-word:hover { background: color-mix(in srgb, var(--kx-phase-act) 26%, transparent); }
+.phase-word[data-phase="ask"]:hover  { background: color-mix(in srgb, var(--kx-phase-ask) 26%, transparent); }
+.phase-word[data-phase="plan"]:hover { background: color-mix(in srgb, var(--kx-plan-fg) 26%, transparent); }
+/* Without color-mix the chip is simply the coloured word it always was - the
+   hue is the information, the wash is the affordance. */
+@supports not (color: color-mix(in srgb, red 10%, transparent)) {
+  .phase-word { background: none; padding: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .phase-word { transition: none; } }
+/* The hairline between what the turn IS and what rides along with it. */
+.tb-rule { flex: none; width: 1px; height: 15px; background: var(--kx-line); }
+.ctx-note {
+  display: flex; align-items: center; gap: 6px; min-width: 0;
+  font-size: 12px; color: var(--kx-fg-3);
+}
+.ctx-note svg { flex: none; }
+/* Approvals, as its word. Neutral at the default and carrying the mode's own
+   hue once it stops asking - the same rule the glyph beside it follows. */
+/* `margin-left: auto` here, not on the group at the end, and the two cannot
+   both have it: an auto margin absorbs the free space BEFORE any flex-grow is
+   considered, so whichever comes first wins and the other gets nothing. The
+   design puts the gap in front of the approvals word, which leaves it sitting
+   against send rather than stranded mid-row. */
+.mode-note {
+  display: flex; align-items: center; gap: 5px; flex: none; margin-left: auto;
+  padding: 0; background: none; border: 0;
+  /* 11.5px, and QUIET at the default. This read at 12px in --kx-fg-3, which
+     put "Manual" - the mode that does the least and is on by default - at a
+     heavier visual weight than the phase word beside it, which is the more
+     consequential of the two. The row's own rule is that a default says as
+     little as possible; the mode only gets colour once it stops asking. */
+  font-size: 11.5px; color: var(--kx-fg-4);
+}
+.mode-note svg { flex: none; opacity: .85; }
+.mode-note[data-mode="edits-auto"] { color: var(--kx-agent); }
+.mode-note[data-mode="edits-auto"] svg { opacity: 1; }
+.mode-note[data-mode="full-auto"] { color: var(--kx-active); }
+.mode-note[data-mode="full-auto"] svg { opacity: 1; }
+.mode-note:hover { color: var(--kx-fg-2); }
+.mode-note[data-mode="edits-auto"]:hover,
+.mode-note[data-mode="full-auto"]:hover { color: var(--kx-fg); }
+/* Below this the row cannot hold a fifth word, so the label sheds and the
+   glyph carries the mode alone - the tooltip and the accessible name still
+   have it in full. This is the rule the old mode button carried, and the word
+   inherits it along with the job. */
+@media (max-width: 340px) {
+  .mode-note span { display: none; }
+}
+/* THE SEGMENTED CONTROL'S RULES ARE GONE WITH THE CONTROL.
+   The phase is one word now (see `.phase-word`), and `.seg` matched nothing -
+   dead selectors are exactly what let three other rules on this branch go on
+   describing markup that had already changed. */
 
 
 .hint { font-size: 10.5px; flex: none; color: var(--kx-fg-3); }
@@ -2541,6 +2874,24 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   .tb-btn { transition: none; }
   .tb-btn:active:not(:disabled) { transform: none; }
 }
+/* Open, it says so on its own surface - the same "coloured plate" treatment
+   `.perm-btn`'s non-default modes get below, not a new idea invented for this
+   one control. `--kx-active` rather than a link/info blue: this is not a
+   state of the conversation the way focus or a phase is, it is one control
+   admitting its own menu is up, which is the same fact the Plan segment's
+   fill already uses this hue for - "there is a choice waiting to be made". */
+/* `.tb-btn.attach-btn[…]`, and the :hover twin, because `.tb-btn:hover` scores
+   (0,3,0) and a plain `.attach-btn[aria-expanded]` scores (0,2,0) - so the
+   resting hover treatment beat the open state, and the pointer is ALWAYS on
+   this button at the moment it opens its own menu. The gold never appeared. */
+.tb-btn.attach-btn[aria-expanded="true"],
+.tb-btn.attach-btn[aria-expanded="true"]:hover {
+  color: var(--kx-active); border-color: color-mix(in srgb, var(--kx-active) 45%, transparent);
+  background: color-mix(in srgb, var(--kx-active) 16%, transparent);
+}
+@supports not (color: color-mix(in srgb, red 10%, transparent)) {
+  .tb-btn.attach-btn[aria-expanded="true"] { color: var(--kx-active); }
+}
 /* The send control is a rounded square, not a disc.
  *
  * A circle reads as a media button - the thing a consumer app puts under a
@@ -2551,7 +2902,11 @@ ul.md-l li.md-task, ol.md-l li.md-task {
  * row, which is what the primary action should be.
  */
 #sendBtn {
-  width: 30px; height: 30px; flex: none; border-radius: 4px;
+  /* 28px and 3px, and the fill is --kx-error: the design paints send in the
+     same red it puts on the focus ring, which in this palette is the error
+     token. Send is the loudest thing in the box and this is the design's
+     colour for it, not a failure state. */
+  width: 28px; height: 28px; flex: none; border-radius: 6px;
   display: grid; place-items: center;
   background: var(--kx-surface-2); color: var(--kx-fg-3);
   /* The same hairline the attach button has, so the two read as one pair of
@@ -2568,8 +2923,13 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 #sendBtn[data-ready="0"]:hover { background: var(--kx-surface-4); color: var(--kx-fg-2); }
 /* Armed: the only filled element in the composer, so the eye lands on it
    without anything else having to get louder. */
+/* INK ON THE FILL, not the mockup's white. White on red-400 measures 3.15:1,
+   which this repo's contrast suite fails at the 4.5:1 it holds foregrounds to -
+   and the palette already has an answer for a filled accent: --kx-on-accent,
+   the same ink the phase segment puts on its own fills. That lands at 5.44:1.
+   The fill is the design's colour exactly; only the glyph on top of it moved. */
 #sendBtn[data-ready="1"] {
-  background: var(--kx-action); border-color: var(--kx-action); color: var(--kx-on-action);
+  background: var(--kx-error); border-color: var(--kx-error); color: var(--kx-on-accent);
   box-shadow: 0 1px 3px var(--kx-shadow);
 }
 #sendBtn[data-ready="1"]:hover { box-shadow: 0 2px 6px var(--kx-shadow); }
@@ -3787,16 +4147,15 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .ag-live { text-indent: .05em; }
 
 /* ── Composer toolbar at panel widths (audit A1 / C12) ──
-   The panel is draggable down to ~280px, and at that width the phase
-   segment, model button, mode chip, @, attach and send do not fit on one
-   line. Unwrapped, send and attach left the panel entirely - the two
-   controls you cannot do without. Let the row wrap, and let the model
-   button be the thing that gives, since its label already ellipsises. */
-/* 5px, not 6. With the `@` button gone the row needs 330px of basis and a
-   380px panel offers 326 - four short. The gap is the cheapest four pixels in
-   the row and the only one nobody can see go. */
-.toolbar { flex-wrap: wrap; gap: 5px; }
-#modelBtn { min-width: 0; flex: 1 1 auto; }
+   The panel is draggable down to ~280px. This block was written when the row
+   held a phase SEGMENT, a model button, a mode chip, attach and send, which
+   did not fit - so the row was allowed to wrap and the gap was shaved to 5px
+   to buy four pixels of basis.
+   Two of those controls have since moved into the palette, and the row is far
+   narrower than the rule was tuned for: at 280px it now fits on one line (see
+   render.cjs 5v). So the shave is repaid - the gap goes back to the design's
+   8px - and the wrap stays only as the safety it always was. */
+.toolbar { flex-wrap: wrap; gap: 8px; }
 /* The actions stay together as a group and hug the right, so a wrap puts
    @ / attach / send on one line rather than orphaning send by itself.
    `.sp` takes the slack; `.tb-actions` is the group it pushes over. */
@@ -3805,7 +4164,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    second, zero-height row that still cost a row-gap. An auto margin does the
    same job and cannot wrap, so the spacer is out of the flow here. */
 .toolbar > .sp { display: none; }
-.tb-actions { display: flex; align-items: center; gap: 6px; flex: none; margin-left: auto; }
+.tb-actions { display: flex; align-items: center; gap: 6px; flex: none; }
 
 /* The model button may SHRINK so the toolbar can wrap at 280px, but it must
    not GROW: with `flex: 1 1 auto` it ballooned at 900px and stranded the mode
@@ -3915,11 +4274,11 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 /* Narrower still: the gaps and the panel's own gutters give way, in that
    order, because they are the pixels nobody can see go. */
 @media (max-width: 330px) {
-  .toolbar { gap: 4px; padding-left: 7px; padding-right: 7px; }
+  /* The gap gives before the gutters do. No padding here any more: the
+     composer owns its inset, and a padded toolbar inside a padded box was
+     what pushed the controls off the text's left edge. */
+  .toolbar { gap: 6px; }
   .composer-wrap { padding-left: 10px; padding-right: 10px; }
-  /* And the model button asks for less to start with. It grows into whatever
-     is left over anyway; the basis only decides whether the row wraps. */
-  #modelBtn { flex-basis: 48px; }
 }
 /* THE WRAP, WHEN IT FINALLY COMES, PUTS THE MODEL ON THE FIRST ROW.
 
