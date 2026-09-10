@@ -648,14 +648,22 @@ function boot() {
     // A title alone reads the same for a thread of one message and one of
     // forty. The design's row has no room for the count, so it is on the title.
     ok("how big it is is still reachable", /12 messages/.test(chips[0].title), chips[0].title);
-    /* Same sentence, said as a shell comment - it was the one line of prose on
-       a screen that is otherwise a transcript, and it read as marketing copy
-       that had wandered in. Case-insensitive, because a shell does not
-       capitalise and the assertion is about the invitation, not the casing. */
-    ok("the copy invites resuming",
-      /pick up where you left off/i.test(b.d.querySelector(".welcome").textContent));
-    ok("and says it in the shell's voice",
-      !!b.d.querySelector(".welcome .boot-cmt"));
+    /* THE SECTION IS THE INVITATION. This asserted a sentence - "pick up where
+       you left off, or start something new" - which sat directly above two
+       captions saying exactly that: `Recent` is the picking up and
+       `Start here` is the something new. A line of copy introducing two labels
+       that already say it is a line of copy to cut, so what is pinned now is
+       the thing that actually invites: a captioned Recent section with the
+       conversations in it. */
+    const caps = [...b.d.querySelectorAll(".welcome .w-label .t")]
+      .map((x) => x.textContent.trim().toLowerCase());
+    ok("the screen invites resuming", caps.indexOf("recent") >= 0, caps.join(","));
+    ok("and offers somewhere to start instead", caps.indexOf("start here") >= 0);
+    /* Each caption carries a rule out to the edge - which is what makes two of
+       them read as two SECTIONS rather than as two stray words on a black
+       field, the whole complaint about the version before this. */
+    ok("and each section is drawn as one, not left as a floating word",
+      b.d.querySelectorAll(".welcome .w-label .sp").length >= 2);
     ok("and the whole history is one click away", !!b.d.querySelector('.welcome [data-act="history"]'));
     b.sent.length = 0;
     b.click('.welcome [data-act="history"]');

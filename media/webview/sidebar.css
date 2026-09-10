@@ -727,28 +727,29 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   letter-spacing: .12em; text-transform: uppercase; color: var(--kx-fg-3);
 }
 .w-all:hover { color: var(--kx-fg); }
-/* ── RECENT, AS A LISTING ─────────────────────────────────────────────────
-   The rules between rows are gone. A three-item list does not need five
-   horizontal lines to be read as a list, and on a screen whose terminal draws
-   no rules at all they were the loudest thing under it. What separates the
-   rows now is the same thing that separates the report's: the rows themselves,
-   and the wash under the one you are pointing at. */
-.w-list { width: 100%; border-top: 0; }
+/* ── RECENT ───────────────────────────────────────────────────────────────
+   Filled rows, which is what the tiles' grid paid for. As bare text on black
+   these were three titles floating with nothing holding them; each sits on its
+   own surface now, so the list has edges without needing rules between them.
+
+   Still no borders: the surface IS the separation, and five hairlines under a
+   terminal that draws none was the loudest thing on the old screen. */
+.w-list { width: 100%; display: flex; flex-direction: column; gap: 4px; border-top: 0; }
 .w-row {
-  display: flex; align-items: center; gap: 9px;
-  width: 100%; padding: 5px 12px; margin-left: -12px; width: calc(100% + 24px);
-  text-align: left; border-bottom: 0;
+  display: flex; align-items: center; gap: 11px; width: 100%;
+  padding: 10px 11px; text-align: left;
+  background: var(--kx-surface); border: 0; border-radius: 6px;
   color: var(--kx-fg-3);
   transition: background .14s ease;
 }
-.w-row:hover { background: rgba(70, 146, 221, .25); }
+.w-row:hover { background: var(--kx-surface-2); }
 .w-row .t {
-  min-width: 0; flex: 1; font-size: 12px; line-height: 1.45; color: var(--kx-fg-2);
+  min-width: 0; flex: 1; font-size: 12.5px; line-height: 1.45; color: var(--kx-fg-2);
 }
 .w-row:hover .t { color: var(--kx-fg); }
-/* A square, in the report's punctuation colour - the same mark the boot lines
-   use for a bullet, at the same weight. */
-.w-dot { flex: none; width: 4px; height: 4px; border-radius: 1px; background: var(--kx-fg-5); }
+/* Round, and the panel's link blue: a conversation is a thing you go back to,
+   and blue is what this product paints "go here" in everywhere else. */
+.w-dot { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--kx-link); }
 @media (prefers-reduced-motion: reduce) { .w-row { transition: none; } }
 
 /* A Recent row and its bin. The bin is a sibling of the row, not a child:
@@ -760,8 +761,14 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
    at all times, which `:focus-visible` is what guarantees. The border-bottom
    moves from the row to the wrapper so the rule still spans the full width
    with the bin sitting on it. */
-.w-item { display: flex; align-items: stretch; width: 100%; position: relative; }
-.w-item .w-row { border-bottom: none; }
+.w-item {
+  display: flex; align-items: stretch; width: 100%; position: relative;
+  background: var(--kx-surface); border-radius: 6px; overflow: hidden;
+}
+/* The row paints the wrapper's surface, so the bin beside it sits on the same
+   plate rather than on a gap of black. */
+.w-item .w-row { background: none; border-bottom: none; border-radius: 0; }
+.w-item:hover { background: var(--kx-surface-2); }
 .w-del {
   flex: none; width: 26px; display: grid; place-items: center;
   color: var(--kx-fg-3); opacity: 0;
@@ -822,19 +829,34 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   /* State one: sat low and left, big, behind the terminal - the ground the
      boot screen is printed on. */
   width: clamp(300px, 96%, 680px);
-  left: -34%; bottom: -30%; top: auto; right: auto;
+  /* MEASURED, AND IT WAS WRONG. `bottom` is a percentage of the VIEW'S HEIGHT,
+     not of the mark - so a taller panel cropped it harder, and the visible
+     AREA came out at 23% on a 420px dock and 9% on a 280px one. A watermark
+     you can only read as a stray arc is not a watermark.
+
+     Margins are the fix rather than offsets: a percentage margin resolves
+     against the containing block's WIDTH on every side, top and bottom
+     included, so both axes finally share one basis and the same fraction of
+     the mark bleeds off each edge at any panel height. ~60% of it now shows. */
+  left: 0; bottom: 0; top: auto; right: auto;
+  margin-left: -22%; margin-bottom: -22%;
   /* Lower than it was on #181818, and it has to be: the same white at the same
      alpha is a far bigger step against pure black than against a grey, and at
      .085 the ring read as a stray shape in the empty half of the screen
      rather than as texture behind it. */
-  opacity: .055;
+  /* Lower than before, and it has to be: showing 60% of the mark instead of
+     23% puts six times as much ink on screen at the same alpha, and at .055 a
+     402px roundel stopped being texture and became an object sitting behind
+     the list. The rule is the ink, not the alpha. */
+  opacity: .034;
   color: var(--kx-fg-4);
   /* Everything that moves, moving together and on one curve. `left/bottom/top`
      are in the list because the mark travels corner to corner, not just
      scales - a shrink in place would read as the logo receding rather than as
      the screen handing over. */
   transition:
-    width .72s var(--kx-hand), left .72s var(--kx-hand), right .72s var(--kx-hand),
+    width .72s var(--kx-hand), margin .72s var(--kx-hand),
+    left .72s var(--kx-hand), right .72s var(--kx-hand),
     top .72s var(--kx-hand), bottom .72s var(--kx-hand),
     opacity .6s var(--kx-hand), transform .72s var(--kx-hand),
     color .6s var(--kx-hand);
@@ -846,8 +868,9 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
    competing with the conversation. Still bled off both edges it touches. */
 #viewSession[data-booted="1"] .void-mark {
   width: clamp(150px, 42%, 260px);
-  left: auto; right: -13%; top: -16%; bottom: auto;
-  opacity: .045;
+  left: auto; right: 0; top: 0; bottom: auto;
+  margin-left: 0; margin-right: -9%; margin-top: -9%; margin-bottom: 0;
+  opacity: .03;
   transform: rotate(-18deg);
 }
 /* A drag-resize must track the cursor, not lag an ease behind it - so the
@@ -1155,55 +1178,111 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 
 /* ── THE OPENERS ──────────────────────────────────────────────────────────
  *
- * These were three bordered, filled, rounded cards sitting under a terminal
- * whose every line is flush and unboxed - so the screen read as a beautiful
- * terminal with somebody else's UI parked beneath it.
+ * Two-up tiles. They were bordered cards once, then flat monospace rows, and
+ * the rows were worse: under a terminal that is itself a dense block of mono,
+ * three more lines of mono had nothing to distinguish them and the screen read
+ * as unfinished text on black.
  *
- * They are rows now, and deliberately the SAME ROW the boot report uses: a
- * fixed left column, the description to the right of it, hover painting the
- * terminal's own selection wash full-bleed. The command lands where a report
- * label lands, so the eye running down the screen never has to re-learn where
- * a line begins.
+ * So the register changes at the terminal's bottom edge. Sans for the
+ * description, a real surface, and a tinted icon plate - the tile is the thing
+ * that says "this is something you can DO", against a box above it that says
+ * "this is what happened".
  *
- * The command is what you are choosing, so it takes ansiBlue and the weight;
- * the description is the gloss, in body ink. */
-.boot-cards { display: flex; flex-direction: column; width: 100%; }
-.boot-card {
-  display: flex; align-items: baseline; gap: 8px; width: 100%;
-  padding: 5px 12px; margin-left: -12px; width: calc(100% + 24px);
-  text-align: left; border: 0; border-radius: 0; background: none;
-  transition: background .14s ease;
+ * The grid buys the vertical room that pays for Recent's filled rows below.
+ */
+.boot-cards {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px; width: 100%;
 }
+.boot-card {
+  display: flex; flex-direction: column; gap: 9px; width: 100%;
+  padding: 13px 12px; text-align: left;
+  background: var(--kx-surface);
+  border: 1px solid var(--kx-hairline); border-radius: 8px;
+  transition: background .14s ease, border-color .14s ease;
+}
+/* NO HOLE IN AN ODD ROW. Three tiles in two columns leaves the last one in a
+   half-empty row, which reads as a missing fourth. It spans instead - same
+   anatomy, wider - so the grid ends on a full edge. Written as a rule rather
+   than a count so a fourth opener would simply fill the row. */
+/* The two text lines, as one column - so the tile can turn on its side
+   without them turning with it. */
+.boot-card-txt { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+/* AND THE ODD ONE TURNS ON ITS SIDE. Spanning the row in the stacked layout
+   gave a full-width box 100px tall holding one line of text and a lot of
+   nothing. Laid out horizontally it is the same parts at a third of the
+   height, and the change of axis reads as deliberate rather than as a tile
+   that failed to find a partner. */
+.boot-card:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+  flex-direction: row; align-items: center; gap: 12px;
+  padding: 11px 12px;
+}
+.boot-card:last-child:nth-child(odd) .boot-card-ic { flex: none; }
+.boot-card:last-child:nth-child(odd) .boot-card-txt { flex: 1; }
+/* One line beside the plate when it fits, which for a single short
+   description it does - and two when it does not, because the wrapper is a
+   column either way. */
+.boot-card:last-child:nth-child(odd) .boot-card-txt {
+  flex-direction: row; align-items: baseline; gap: 12px;
+}
+.boot-card:last-child:nth-child(odd) .boot-card-cmd { flex: none; }
+.boot-card:last-child:nth-child(odd) .boot-card-desc { flex: 1; min-width: 0; }
+.boot-card-ic {
+  width: 28px; height: 28px; border-radius: 6px;
+  display: grid; place-items: center;
+  background: color-mix(in srgb, var(--h) 14%, transparent);
+  color: var(--h);
+}
+.boot-card-ic svg { display: block; }
 .boot-card-cmd {
-  /* The report's label column, to the pixel - see `.boot-what`. */
-  flex: none; width: 74px;
-  font-family: var(--kx-mono); font-size: 11.5px; font-weight: 700;
-  color: var(--kx-link);
+  font-family: var(--kx-mono); font-size: 11px; font-weight: 700;
+  letter-spacing: .02em; color: var(--h);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .boot-card-desc {
-  min-width: 0; font-size: 12px; line-height: 1.45; color: var(--kx-fg-2);
+  font-size: 12px; line-height: 1.35; color: var(--kx-fg-3);
+  text-wrap: pretty;
 }
-/* The selection wash, exactly as the prompt uses it - `--kx-link` at 25%, the
-   value palette.ts hands VS Code for `terminal.selectionBackground`. */
+/* One hue per tile, set once and read by the plate and the command. Read is
+   blue, change is amber, produce is purple - the same three-way split the
+   phase word uses, so it is a distinction the panel already teaches. */
+.boot-card[data-hue="link"] { --h: var(--kx-link); }
+.boot-card[data-hue="act"]  { --h: var(--kx-phase-act); }
+.boot-card[data-hue="plan"] { --h: var(--kx-phase-plan); }
 .boot-card:hover, .boot-card:focus-visible {
-  background: rgba(70, 146, 221, .25); outline: none;
+  background: var(--kx-surface-2);
+  border-color: color-mix(in srgb, var(--h) 40%, transparent);
+  outline: none;
 }
 .boot-card:hover .boot-card-desc, .boot-card:focus-visible .boot-card-desc {
-  color: var(--kx-fg);
+  color: var(--kx-fg-2);
 }
 @media (prefers-reduced-motion: reduce) { .boot-card { transition: none; } }
-/* Under ~340px a 74px command column and a description cannot share a line -
-   the same wall the report hit, and the same answer: the description wraps to
-   its own row under the command. */
+/* ── THE NARROW DOCK ──────────────────────────────────────────────────────
+   One column, because two tiles at 130px each would truncate every description
+   to a word and a half. But stacked tiles in one column are ~120px tall each
+   and three of them push Recent off the screen entirely - so at this width
+   EVERY tile takes the side-on layout the odd one already uses. Same parts, a
+   third of the height, and the plate gives the row a left edge to align on. */
 @media (max-width: 340px) {
-  .boot-card { flex-wrap: wrap; row-gap: 1px; padding-bottom: 7px; }
-  /* A SMALL indent, not the column's. The report's values line up under their
-     labels at 62px because they are short; a description is prose, and
-     indenting it to the command column throws away the width the wrap was for
-     - it wrapped to gain a line and then started it 82px in. 14px is enough to
-     say "this belongs to the line above" and costs nothing. */
-  .boot-card-desc { flex: 1 0 100%; box-sizing: border-box; padding-left: 14px; }
+  .boot-cards { grid-template-columns: minmax(0, 1fr); }
+  .boot-card {
+    flex-direction: row; align-items: center; gap: 12px; padding: 11px 12px;
+  }
+  .boot-card .boot-card-ic { flex: none; }
+  .boot-card .boot-card-txt { flex: 1; flex-direction: column; align-items: stretch; gap: 3px; }
+  .boot-card .boot-card-desc { flex: none; }
+  /* THE ODD TILE STOPS BEING ODD HERE. In one column every tile is already
+     side-on, so its command-beside-description layout is no longer the thing
+     that distinguishes it - it is just the one tile whose text reads
+     differently from the other two. Restated at the same specificity as the
+     rule above, because `:last-child:nth-child(odd)` outranks a bare
+     descendant selector wherever it is written. */
+  .boot-card:last-child:nth-child(odd) .boot-card-txt {
+    flex-direction: column; align-items: stretch; gap: 3px;
+  }
+  .boot-card:last-child:nth-child(odd) .boot-card-desc { flex: none; }
 }
 
 /* â”€â”€ the two voices â”€â”€
@@ -4885,19 +4964,24 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 .kx-tab[aria-selected="true"] { font-weight: 700; }
 
-/* Section labels read as a shell prompt's bracketed field. The brackets sit on
-   the TEXT rather than on the label, which is what lets the Recent row - a
-   word, a spacer and an `all` button - close its bracket after the word
-   instead of after the button. That was why only one of the two had them.
-
-   Lower-case, because the whole screen is a transcript and a shell does not
-   shout its section names. */
-.w-label .t::before { content: "["; color: var(--kx-fg-5); margin-right: 5px; }
-.w-label .t::after  { content: "]"; color: var(--kx-fg-5); margin-left: 5px; }
-.w-label { text-transform: none; letter-spacing: .1em; }
-.w-all { text-transform: none; letter-spacing: .1em; color: var(--kx-fg-4); }
-.w-all::before { content: "["; color: var(--kx-fg-5); margin-right: 4px; }
-.w-all::after  { content: "]"; color: var(--kx-fg-5); margin-left: 4px; }
+/* ── SECTION CAPTIONS ─────────────────────────────────────────────────────
+   A word and a rule running out to the edge. The bracketed `[ recent ]` form
+   they wore was the terminal's punctuation, and the terminal's punctuation now
+   stays inside the terminal - below it, a caption is a caption. The rule is
+   what makes two of them read as two sections rather than as two stray words
+   on a black field, which was the whole complaint. */
+.w-label {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  text-transform: uppercase; letter-spacing: .16em;
+  font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
+  color: var(--kx-fg-4); margin: 26px 0 12px;
+}
+.w-label .t { flex: none; }
+.w-label .sp { flex: 1; height: 1px; background: var(--kx-divider); }
+.w-all {
+  flex: none; font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--kx-fg-4);
+}
 .w-all:hover { color: var(--kx-link); }
 
 /* The dashed rules that used to sit here are gone with the borders they

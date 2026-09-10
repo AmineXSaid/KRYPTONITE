@@ -257,9 +257,13 @@ function _sbRun() {
    * point at what the user has open - this file, these changes, this selection -
    * so none of them can name code that does not exist here. */
   var STARTERS = [
-    { icon: "i-file", text: "Explain the file I have open", run: "/explain" },
-    { icon: "i-diff", text: "Review my uncommitted changes", run: "review" },
-    { icon: "i-book", text: "Write tests for the selected function", run: "/tests" }
+    /* The hue is the tile's, and it is the only thing that separates three
+       cards of identical shape at a glance. Read: understand blue, change
+       amber, produce purple - which is the same three-way split the phase
+       word uses, so it is a distinction the panel already teaches. */
+    { icon: "i-file", text: "Explain the file I have open", run: "/explain", hue: "link" },
+    { icon: "i-diff", text: "Review my uncommitted changes", run: "review", hue: "act" },
+    { icon: "i-book", text: "Write tests for the selected function", run: "/tests", hue: "plan" }
   ];
 
   var REVIEW_PROMPT =
@@ -2735,32 +2739,34 @@ function _sbRun() {
     // The design's "Pick up where you left off" copy earns its place only when
     // there is a thread to come back to; the Recent list below is what it
     // points at.
-    /* A COMMENT, in the shell's voice. This was the one line of prose on a
-       screen that is otherwise a transcript, set in the prose face, and it
-       read as marketing copy that had wandered in. Said as a comment it does
-       the same job - it heads the two lists below - in the voice everything
-       around it already speaks. */
-    if (recent.length) {
-      body += '<div class="boot-cmt"># pick up where you left off, or start something new</div>';
-    }
+    /* The greeting is gone with the terminal styling it wore. It said "pick up
+       where you left off, or start something new" above two sections captioned
+       exactly that - `recent` is the picking up and `start here` is the
+       something new - so it was a sentence introducing two labels that already
+       said it. The captions do the work. */
 
-    // Openers, as the design's cards: the command in the accent, the plain-language
-    // description under it. `data-starter` is unchanged, so the click handler that
-    // routes /explain, review and /tests still fires whatever the card looks like.
-    body += '<div class="w-label"><span class="t">start here</span></div>' +
+    body += '<div class="w-label"><span class="t">Start here</span><span class="sp"></span></div>' +
       '<div class="boot-cards">';
     for (var si = 0; si < STARTERS.length; si++) {
-      body += '<button class="boot-card" data-starter="' + esc(STARTERS[si].run) + '">' +
-        '<span class="boot-card-cmd">' + esc(STARTERS[si].run) + "</span>" +
-        '<span class="boot-card-desc">' + esc(STARTERS[si].text) + "</span>" +
-        "</button>";
+      var st0 = STARTERS[si];
+      body += '<button class="boot-card" data-hue="' + esc(st0.hue) + '" data-starter="' +
+        esc(st0.run) + '">' +
+        '<span class="boot-card-ic">' + icon(st0.icon, "ic-14") + "</span>" +
+        /* The two text lines are wrapped so the tile can turn on its side
+           without them turning with it: in the row layouts - the spanning
+           tile, and every tile at 280px - this wrapper is the second column
+           and keeps the command stacked over its description. */
+        '<span class="boot-card-txt">' +
+          '<span class="boot-card-cmd">' + esc(st0.run) + "</span>" +
+          '<span class="boot-card-desc">' + esc(st0.text) + "</span>" +
+        "</span></button>";
     }
     body += "</div>";
 
     if (recent.length) {
       body += '<div class="w-sec">' +
-        '<div class="w-label row"><span class="t">recent</span><span class="sp"></span>' +
-          '<button class="w-all" data-act="history">all</button></div>' +
+        '<div class="w-label row"><span class="t">Recent</span><span class="sp"></span>' +
+          '<button class="w-all" data-act="history">All</button></div>' +
         '<div class="w-list">';
       for (var rj = 0; rj < recent.length; rj++) {
         var r = recent[rj];
