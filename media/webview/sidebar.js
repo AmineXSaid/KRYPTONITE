@@ -2627,16 +2627,15 @@ function _sbRun() {
     var mode = (S.config && S.config.approvalMode) || "ask";
 
     /* ── THE CHROME ───────────────────────────────────────────────────────
-       A shell host string, not a document title. `genesis@workspace:~` is the
-       thing every terminal in the world puts here, and it does two jobs at
-       once: it says which machine you are on, and it says this box is a
-       terminal before a single line has printed. */
-    var host = "genesis@" + (S.workspace.name || "workspace");
+       A lit dot and a version, and nothing else. This carried
+       `genesis@workspace:~` - the shell host string - and it was the product's
+       name said a third time on one screen: the tab strip above says it, the
+       `$ genesis init` line below says it, and the report's own first row
+       names the workspace. A title bar repeating what the transcript already
+       states is chrome for its own sake. */
     var body = '<div class="boot-term">' +
       '<div class="boot-bar">' +
         '<span class="boot-led"></span>' +
-        '<span class="boot-host">' + esc(host) + "</span>" +
-        '<span class="boot-cwd">:~</span>' +
         (ver ? '<span class="boot-ver">v' + esc(ver) + "</span>" : "") +
       "</div>" +
       '<div class="boot-body">';
@@ -2712,12 +2711,23 @@ function _sbRun() {
     /* THE PROMPT IS THE DOOR, so it is a button rather than a decorated line.
        It was a blinking cursor that did nothing, on a screen whose entire job
        is to get you typing. Clicking it hands off to the composer. */
+    /* ── THE SECOND PROMPT ────────────────────────────────────────────────
+       The first `$` ran and produced everything above it. This one is empty
+       and waiting, which is the most literal statement a terminal can make of
+       "your turn" - and it is the door: clicking it hands off to the composer.
+       Same sigil, same column, so the two read as one session rather than as a
+       log with a control bolted underneath.
+
+       THE HINT IS HELD BACK UNTIL YOU ARE ON IT. A waiting prompt with a
+       blinking cursor already says "type here" to anyone who has used a
+       terminal; printing the instruction permanently talks over that. It
+       appears on hover and on keyboard focus, and the accessible name carries
+       it the whole time for anyone who gets neither. */
     body += '<button class="boot-go" data-act="handoff" style="--i:' + (li++) + '" ' +
       'aria-label="Start typing - opens the message box">' +
-      '<span class="boot-g">' + esc(host) + "</span>" +
-      '<span class="boot-caret">\u276F</span>' +
+      '<span class="boot-sh">$</span>' +
       '<span class="boot-cursor"></span>' +
-      '<span class="boot-go-hint">click to begin, or just start typing</span>' +
+      '<span class="boot-go-hint"># click to start</span>' +
       "</button>";
 
     body += "</div></div>";

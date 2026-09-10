@@ -960,13 +960,6 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   flex: none; width: 7px; height: 7px; border-radius: 50%;
   background: var(--kx-accent);
 }
-/* ansiBlue. The host string is the identity of the machine, and identity is
-   the primary hue in this system - not green, which has a job. */
-.boot-host {
-  color: var(--kx-link); font-weight: 700; min-width: 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.boot-cwd { flex: none; color: var(--kx-fg-4); }
 .boot-ver { margin-left: auto; flex: none; color: var(--kx-fg-5); }
 
 .boot-body {
@@ -1044,48 +1037,71 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 .welcome:not(.arriving) .boot-line,
 .welcome:not(.arriving) .boot-go { animation: none; }
 
-/* ── THE PROMPT IS THE DOOR ───────────────────────────────────────────────
+/* ── THE SECOND PROMPT ────────────────────────────────────────────────────
  *
- * It was a decorated line with a blinking cursor and no behaviour, on a screen
- * whose only job is to get you typing. It is a button now: the whole width,
- * with the hint beside the caret rather than under it. */
+ * The first `$` ran and produced the report; this one is empty and waiting,
+ * which is the most literal statement a terminal can make of "your turn". It
+ * is also the door - clicking it hands off to the composer - and it sits in
+ * the same column with the same sigil, so the two read as one session rather
+ * than as a log with a control bolted underneath.
+ *
+ * It wore a border, a radius and a surface fill before this, which made the
+ * one element on the screen that genuinely IS terminal output look like the
+ * one thing that is not. Everything above it is flush, unboxed text; so is
+ * this.
+ *
+ * Which leaves the question the box was answering: how do you know it can be
+ * clicked? The whole terminal can be (see the click route), so the answer is
+ * the one the medium already has - the SELECTION WASH. `palette.ts` gives VS
+ * Code `terminal.selectionBackground` as the focus blue at 25%, and hovering
+ * paints exactly that, full-bleed, the way dragging across a line of output
+ * would. It is the affordance the medium comes with. */
 .boot-go {
-  display: flex; align-items: center; gap: 7px; width: 100%;
-  margin-top: 10px; padding: 8px 9px;
-  border: 1px solid var(--kx-line); border-radius: 6px;
-  background: var(--kx-surface);
+  display: flex; align-items: center; gap: 7px;
+  margin-top: 12px;
+  /* Full-bleed to the terminal's edges, so the wash reads as a selected LINE
+     rather than as a highlighted control with 12px of dead ground either
+     side. The body's padding is given back as negative margin. */
+  padding: 4px 12px; margin-left: -12px; margin-right: -12px;
+  width: calc(100% + 24px);
+  border: 0; border-radius: 0; background: none;
   font-family: var(--kx-mono); font-size: 11.5px;
-  transition: border-color .18s ease, background .18s ease;
+  transition: background .14s ease;
 }
-.boot-go .boot-g {
-  color: var(--kx-link); font-weight: 700; min-width: 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-/* GREEN, AND IT MEANS SOMETHING. A prompt caret that reports the last exit
-   status is a real shell convention - green for zero - and the log directly
-   above it is that exit status, line by line. It is the only green in the
-   body, so it reads as the summary of the report rather than as decoration. */
-.boot-caret { flex: none; color: var(--kx-accent); font-weight: 700; }
-/* A block cursor, in the theme's primary. Solid, not glowing: the blink is
-   what says "waiting for you", and a halo only says "this is meant to look
-   like a film prop". */
+/* The cursor takes `--kx-accent` because that is what palette.ts hands VS Code
+   as `terminalCursor.foreground`, for the reason its comment gives: a cursor
+   is a "you are here", and this product paints that in the accent everywhere
+   else. It was blue here, which was the one slot this box got wrong. */
 .boot-cursor {
   flex: none; display: inline-block; width: 7px; height: 14px;
-  background: var(--kx-link);
+  background: var(--kx-accent);
   animation: boot-blink 1.1s step-end infinite;
 }
+/* A shell comment, in ansiBrightBlack - the slot a shell paints comments and
+   hints in, which is precisely what this is.
+
+   HELD BACK UNTIL YOU ARE ON IT. A waiting prompt with a blinking cursor
+   already says "type here" to anyone who has used a terminal, and printing the
+   instruction permanently talks over that. Hover and keyboard focus reveal it;
+   the button's accessible name carries it the whole time for anyone who gets
+   neither, so nothing depends on the pointer. */
 .boot-go-hint {
-  margin-left: auto; min-width: 0; flex-shrink: 1;
-  font-family: var(--kx-ui); font-size: 11px; color: var(--kx-fg-4);
+  min-width: 0; flex-shrink: 1;
+  color: var(--kx-fg-4);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  opacity: 0; transition: opacity .14s ease;
 }
-/* The whole terminal answers the pointer, because the whole terminal is
-   clickable - see the click route. Lighting only the button would promise a
-   smaller target than the one that actually works. Blue, matching the cursor
-   the click is about to put a caret next to. */
+/* Hovering ANYWHERE in the terminal lights the prompt and shows the hint,
+   because anywhere in the terminal is the target. */
 .welcome.boot .boot-term:hover .boot-go,
 .boot-go:hover, .boot-go:focus-visible {
-  border-color: var(--kx-link); background: var(--kx-info-wash); outline: none;
+  background: rgba(70, 146, 221, .25); outline: none;
+}
+.welcome.boot .boot-term:hover .boot-go-hint,
+.boot-go:hover .boot-go-hint,
+.boot-go:focus-visible .boot-go-hint { opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .boot-go, .boot-go-hint { transition: none; }
 }
 .welcome.boot .boot-term { cursor: text; }
 @keyframes boot-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }

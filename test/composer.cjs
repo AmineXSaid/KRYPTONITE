@@ -496,8 +496,13 @@ function boot() {
        it is. That used to be a wordmark above the log; it is the terminal's
        own title bar now, which says it once instead of twice and says it the
        way a terminal identifies itself. */
-    const bar = w.querySelector(".boot-bar");
-    ok("a first run still welcomes", !!bar && /genesis/i.test(bar.textContent));
+    /* It names the product in the COMMAND, which is where a terminal says it.
+       The title bar carried `genesis@workspace:~` and that was the third time
+       on one screen - the tab strip says it, this line says it, and the
+       report's first row names the workspace - so the bar is a lit dot and a
+       version now, and the transcript does the naming. */
+    ok("a first run still welcomes",
+      !!w.querySelector(".boot-line.echo") && /genesis init/.test(w.textContent));
 
     ok("and offers nothing to resume", w.querySelectorAll("[data-session]").length === 0);
     // The welcome is a boot sequence now: the copy that once introduced the tool
@@ -535,7 +540,6 @@ function boot() {
         ["ansiBlack  → the ground", ".boot-term", "--kx-bg-deep"],
         ["ansiGreen  → [ OK ]", '.boot-st[data-st="ok"]', "--kx-accent"],
         ["ansiYellow → [WARN]", '.boot-st[data-st="warn"]', "--kx-warn"],
-        ["ansiBlue   → the host", ".boot-host", "--kx-link"],
         ["ansiBlue   → the numbers", ".boot-meta .n", "--kx-link"],
         ["ansiMagenta→ the sigil", ".boot-sh", "--kx-agent"],
         ["ansiWhite  → the labels", ".boot-what", "--kx-fg-3"],
@@ -556,9 +560,58 @@ function boot() {
         !/\.boot-led\s*\{[^}]*box-shadow/.test(CSS));
       /* Green is a status, not a theme. If it starts painting the host or the
          command as well, it has stopped meaning "this succeeded". */
+      /* Green is a status, not a theme. If it starts painting the command or
+         the labels as well, it has stopped meaning "this succeeded". */
       ok("green means succeeded, and only that",
-        rule(".boot-host").indexOf("--kx-accent") < 0 &&
-        rule(".boot-cmd").indexOf("--kx-accent") < 0);
+        rule(".boot-cmd").indexOf("--kx-accent") < 0 &&
+        rule(".boot-what").indexOf("--kx-accent") < 0);
+      /* ── TWO PROMPTS, ONE SESSION ────────────────────────────────────
+         The first `$` ran and produced the report; the second is empty and
+         waiting, which is the most literal statement a terminal can make of
+         "your turn" - and it is the door. Same sigil, same column, so they
+         read as one session rather than as a log with a control bolted
+         underneath, which is what the bordered box it replaced looked like. */
+      ok("the door is a second prompt, not a button",
+        /border:\s*0/.test(rule(".boot-go")) &&
+        /border-radius:\s*0/.test(rule(".boot-go")) &&
+        /background:\s*none/.test(rule(".boot-go")) &&
+        /class="boot-sh"/.test(SRC.slice(SRC.indexOf("boot-go\" data-act"), SRC.indexOf("boot-go-hint"))));
+      /* The affordance the box was carrying, replaced by the one the medium
+         already has: the wash palette.ts hands VS Code as
+         `terminal.selectionBackground`, which is --kx-link at 25%. */
+      ok("and says it is clickable with the terminal's own selection wash",
+        /rgba\(70,\s*146,\s*221,\s*\.25\)/.test(CSS));
+      /* palette.ts gives `terminalCursor.foreground` the ACCENT, for the
+         reason its own comment states: a cursor is a "you are here". */
+      ok("the cursor takes the slot palette.ts gives it",
+        /background:\s*var\(--kx-accent\)/.test(rule(".boot-cursor")));
+      /* A waiting prompt with a blinking cursor already says "type here". The
+         instruction appears on hover and on focus; the accessible name carries
+         it the whole time, so nothing depends on the pointer. */
+      ok("the hint waits until you are on it, but the name never does",
+        /\.boot-go-hint\s*\{[^}]*opacity:\s*0/.test(CSS) &&
+        /aria-label="Start typing/.test(SRC));
+      /* ── THE PROMPT IS A PROMPT ──────────────────────────────────────
+         It wore a border, a radius and a surface fill, which made the one
+         element on the screen that genuinely IS terminal output look like the
+         one thing that is not - a UI control parked at the bottom of a log.
+         Everything above it is flush, unboxed text; so is this. */
+      ok("the prompt is a line of the log, not a button",
+        /border:\s*0/.test(rule(".boot-go")) &&
+        /border-radius:\s*0/.test(rule(".boot-go")) &&
+        /background:\s*none/.test(rule(".boot-go")));
+      /* Which leaves the affordance the box was carrying. The whole terminal
+         is clickable, so the answer is the one the medium already has: the
+         selection wash palette.ts hands VS Code as
+         `terminal.selectionBackground`, which is --kx-link at 25%. */
+      ok("and says it is clickable with the terminal's own selection wash",
+        /rgba\(70,\s*146,\s*221,\s*\.25\)/.test(CSS));
+      /* palette.ts gives `terminalCursor.foreground` the ACCENT, for the
+         reason its own comment states: a cursor is a "you are here", and this
+         product paints that in the accent everywhere else. This was the one
+         slot the box had wrong. */
+      ok("the cursor takes the slot palette.ts gives it",
+        /background:\s*var\(--kx-accent\)/.test(rule(".boot-cursor")));
     }
     ok("and does not yet invite a resume", !/Pick up where you left off/.test(w.textContent));
     // The invented examples are gone. Asserted on the markup rather than the
