@@ -2146,147 +2146,239 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 
 /* ── the command palette ──────────────────────────────────────────────────
-   Two sections over one filter, sitting on the bar's top edge with an 8px
-   gap. Placed by placeCmdPal() for the same reason the attach menu is: the
-   wrapper it lives in is taller than the bar it belongs to. */
-/* 10px, not 4. The design's "4px on panels" was written for a small popup a
-   few rows tall; this is a 21-row surface most of the panel's height, and at
-   4px a box that size reads as a hard rectangle cut out of the panel rather
-   than as something floating over it. The radii now run as a scale - 10 on
-   this panel, 8 on the composer, 6 on rows, 4 on the small plates - so size
-   and softness move together instead of every surface sharing one corner. */
+   Six groups over one search line, sitting on the composer's top edge with an
+   8px gap. Placed by placeCmdPal() for the same reason the attach menu is: the
+   wrapper it lives in is taller than the bar it belongs to.
+
+   ONE COLUMN, NOT TWO. The design draws this window twice - a narrow one and a
+   760px one that splits the list in half beside a detail rail - and the panel
+   this ships in is 280-900px wide. Two 12px-padded columns inside 280px are
+   two columns of truncation, so the list stays single and simply gets longer,
+   which is what the group headers and the ⇥ key are for.
+
+   Every colour below is a token, and every token here is the exact value the
+   design names: --kx-over is rgba(9,9,11,.97), --kx-line is .22, --kx-edge is
+   .38, --kx-divider is .10, --kx-surface-2 is .068. The design and the
+   stylesheet are not two sources of truth that happen to agree - the design's
+   palette IS this file's. */
 .cmd-pal {
   position: absolute; left: 12px; right: 12px; bottom: 100%; z-index: 55;
   background: var(--kx-over);
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
-  border: 1px solid var(--kx-line); border-radius: 10px;
-  box-shadow: 0 18px 44px var(--kx-shadow);
+  border: 1px solid var(--kx-line); border-radius: 6px;
+  box-shadow: 0 24px 60px var(--kx-shadow);
   overflow: hidden;
+  display: flex; flex-direction: column;
   animation: g-rise 140ms cubic-bezier(.16, 1, .3, 1) both;
 }
-/* Placeholder only, no icon: the design gives the filter the whole line, and a
-   magnifier in front of "Search for a command" says nothing the words do not. */
-.cp-filter { padding: 11px 14px 9px; border-bottom: 1px solid var(--kx-line); }
+/* ── the search line ──────────────────────────────────────────────────────
+   A PROMPT, NOT A FORM FIELD. It has no box, no fill and no magnifier: a mono
+   chevron in link blue, the words, and the size of what you are searching. The
+   chevron is the same one the composer wears, so the palette reads as that box
+   having opened upward rather than as a dialog from somewhere else. */
+.cp-filter {
+  flex: none; display: flex; align-items: center; gap: 9px;
+  height: 44px; padding: 0 14px;
+  border-bottom: 1px solid var(--kx-divider);
+}
+.cp-chev { flex: none; font-family: var(--kx-mono); font-size: 14px; color: var(--kx-link); }
 .cp-filter input {
-  width: 100%; border: 0; background: none; outline: none; padding: 0;
-  font-family: var(--kx-ui); font-size: 13px; color: var(--kx-fg);
+  flex: 1; min-width: 0; border: 0; background: none; outline: none; padding: 0;
+  font-family: var(--kx-ui); font-size: 13.5px; color: var(--kx-fg);
 }
-.cp-filter input::placeholder { color: var(--kx-fg-3); }
-/* Tall enough for both sections at once - the palette is a fixed eight rows,
-   not a list that grows, so it should not be a scroller at a normal panel
-   height. It still caps, because a short editor window is not a reason to push
-   the composer off the bottom of the panel. */
-.cp-body { max-height: min(58vh, 420px); overflow-y: auto; padding: 0 6px 8px;
-  display: flex; flex-direction: column; gap: 1px; }
-/* Muted, uppercase, and not a landing target - it names the half below it. */
-.cp-sec {
-  padding: 12px 4px 5px; font-family: var(--kx-mono);
-  font-size: 9px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
-  /* Dimmer than the rows it heads: it is a label, not a choice. */
-  color: var(--kx-fg-4);
+.cp-filter input::placeholder { color: var(--kx-fg-4); }
+/* Counted, not painted on - see renderCmdPal. It narrows as you type, which is
+   the only feedback the filter gives that a list this long is being cut down. */
+.cp-meta {
+  flex: none; font-family: var(--kx-mono); font-size: 8.5px;
+  letter-spacing: .1em; text-indent: .1em; color: var(--kx-fg-3);
+  white-space: nowrap;
 }
-.cp-sec + .cp-sec, .cp-body > .cp-sec:not(:first-child) { border-top: 1px solid var(--kx-line); }
+/* Below about 340px the sentence and the placeholder fight over one line, and
+   the placeholder loses mid-word. So the narrow panel gets 1A's answer to the
+   same problem: the words go and a boxed count stays, which is still the one
+   thing the header is for. */
+.cp-meta .mini { display: none; }
+@media (max-width: 340px) {
+  .cp-meta .full { display: none; }
+  .cp-meta .mini {
+    display: inline-block; color: var(--kx-fg-5);
+    border: 1px solid var(--kx-divider); border-radius: 3px; padding: 2px 4px 1px;
+  }
+}
+/* The list itself carries no padding: the rows are full-bleed so the selected
+   row's 2px inset marker can sit on the panel's own edge, and the 12px inset
+   lives on the row where the group headers can match it exactly. */
+.cp-body {
+  flex: 1 1 auto; min-height: 0;
+  /* 58vh is the real governor - the palette must never push the composer off
+     the bottom of the panel. The hard cap only stops it running away on a very
+     tall window; at 620px it shows twenty of the thirty rows, and the rest is
+     what TAB is for. */
+  max-height: min(58vh, 620px); overflow-y: auto;
+}
+/* ── a group header ───────────────────────────────────────────────────────
+   A 4px square in the group's hue, the name in that same hue, and a hairline
+   running out to the edge. The square is what makes six groups legible at a
+   glance without six different type treatments: the rule carries the eye
+   across, the dot carries the colour. Not a landing target - it names the rows
+   below it, it is not one of them. */
+.cp-grp {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 12px 5px;
+}
+/* The first group sits closer to the search line: there is a border above it
+   already, so the full 12px reads as a gap rather than as breathing room. */
+.cp-body > .cp-grp:first-child { padding-top: 9px; }
+.cp-gdot { flex: none; width: 4px; height: 4px; border-radius: 1px; background: currentColor; }
+.cp-gname {
+  font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
+  letter-spacing: .14em; text-indent: .14em; text-transform: uppercase;
+}
+.cp-grule { flex: 1; height: 1px; background: var(--kx-divider); }
+/* One table for all six accents, set on the header so the dot and the name
+   cannot drift apart - both read `currentColor`. */
+.cp-grp[data-hue="ask"]   { color: var(--kx-phase-ask); }
+.cp-grp[data-hue="ctx"]   { color: var(--kx-tab-mcp); }
+.cp-grp[data-hue="plan"]  { color: var(--kx-phase-plan); }
+.cp-grp[data-hue="link"]  { color: var(--kx-link); }
+.cp-grp[data-hue="act"]   { color: var(--kx-phase-act); }
+.cp-grp[data-hue="dim"]   { color: var(--kx-fg-4); }
+
+/* ── a row ────────────────────────────────────────────────────────────────
+   29px, and a fixed 14px glyph column so every label in the list starts on the
+   same x whatever is in front of it. No radius and no inset: the rows are a
+   list, not a stack of cards, and 28 rounded rectangles is 28 more edges than
+   this window needs. */
 .cp-row {
   display: flex; align-items: center; gap: 9px; width: 100%;
-  padding: 8px 9px; border-radius: 6px;
-  font-size: 13px; font-weight: 500; color: var(--kx-fg-2);
-  text-align: left;
+  height: 29px; padding: 0 12px;
+  border: 0; background: none; border-radius: 0;
+  text-align: left; color: inherit;
 }
-/* The row's own health dot, for the Model row: the endpoint's state came off
-   the model button with the button, and this is where it landed. */
-.cp-dot { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--kx-accent); }
+/* ── the mark column ──────────────────────────────────────────────────────
+   14px, centred, one of six hues - exactly the design's column. What fills it
+   is an SVG, a typed character or a status dot, and the cell is a centring
+   flex box so all three land on the same optical centre. See the note above
+   palRows for why this could not simply be type. */
+.cp-ic {
+  flex: none; width: 14px; height: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--kx-mono); font-size: 11px; line-height: 1;
+}
+.cp-ic svg { flex: none; color: currentColor; }
+/* The two rows whose mark IS a state - the model and the endpoint. A filled
+   circle in accent green or error red, which is the same dot the panel uses
+   everywhere else for "reachable" and "not". */
+.cp-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+/* Belt and braces: the hue is already error red via the cell, and this says it
+   again off the flag the accessible name is set from, so a state that reaches
+   the screen reader can never fail to reach the eye. */
 .cp-dot[data-err="1"] { background: var(--kx-error); }
-.cp-row .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* A SETTING READS DIFFERENTLY FROM AN ACTION. The rows that state a value or
-   carry a switch are nouns - what this conversation IS - so they take the
-   brighter ink and sit at normal weight. The action rows are verbs, and they
-   already have accent-blue to mark them; giving them the same bright ink as
-   the settings made the list one undifferentiated wall of text. */
-.cp-row.cp-sw .t, .cp-row:has(.cp-val) .t { color: var(--kx-fg); }
-/* ...but not when the row cannot act. The rule above targets `.t` directly, so
-   it outranks the `:disabled` colour set on the button - which put the two
-   UNWIRED switches back into full-strength ink, reading as available. Same
-   specificity, stated after, so unavailable wins where it should. */
+.cp-ic[data-hue="ask"]    { color: var(--kx-phase-ask); }
+.cp-ic[data-hue="ctx"]    { color: var(--kx-tab-mcp); }
+.cp-ic[data-hue="plan"]   { color: var(--kx-phase-plan); }
+.cp-ic[data-hue="agent"]  { color: var(--kx-agent); }
+.cp-ic[data-hue="link"]   { color: var(--kx-link); }
+.cp-ic[data-hue="act"]    { color: var(--kx-phase-act); }
+.cp-ic[data-hue="accent"] { color: var(--kx-accent); }
+.cp-ic[data-hue="error"]  { color: var(--kx-error); }
+.cp-ic[data-hue="dim"]    { color: var(--kx-fg-4); }
+.cp-row .t {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12.5px; font-weight: 400; color: var(--kx-fg-2);
+}
+/* ── the right-hand reading ───────────────────────────────────────────────
+   Exactly one of these per row, never two. A mono value (a model name, a
+   count), a boxed reason the row cannot fire, or a keybinding - and they
+   descend in brightness in that order, because a value is what the row IS, a
+   tag is why it cannot, and a shortcut is a thing you may already know. */
+.cp-val, .cp-tag, .cp-kbd { flex: none; font-family: var(--kx-mono); }
+.cp-val { font-size: 10.5px; color: var(--kx-fg-2); }
+.cp-kbd { font-size: 9.5px; color: var(--kx-fg-5); }
+.cp-tag {
+  font-size: 8.5px; letter-spacing: .1em; text-indent: .1em; color: var(--kx-fg-4);
+  border: 1px solid var(--kx-divider); border-radius: 3px; padding: 2px 4px 1px;
+}
+/* ── the selected row ─────────────────────────────────────────────────────
+   ONE HIGHLIGHT, SHARED BY THE POINTER AND THE ARROW KEYS. A hover fill under
+   the mouse plus a separate selected row under the keyboard is two answers to
+   "what does ENTER do", so mousemove moves this same selection (see the
+   listener) and only one row is ever lit.
+
+   The 2px inset bar is the half that survives a colour-blind reading: the fill
+   alone is a 6.8% wash, which is a difference you can miss at a glance on a
+   list this long. */
+.cp-row[data-sel="1"] {
+  background: var(--kx-surface-2);
+  box-shadow: inset 2px 0 0 var(--kx-link);
+}
+.cp-row[data-sel="1"] .t { color: var(--kx-fg); }
+.cp-row:focus-visible { outline: none; }
+/* ── a row that cannot fire ───────────────────────────────────────────────
+   Drawn in its designed place and dimmed, never hidden. A palette that removes
+   what it cannot do teaches you the feature does not exist; one that shows it
+   greyed with the reason on it teaches you what to go fix. The whole row fades
+   together - glyph, label and tag - so "unavailable" never reads as "this row
+   simply has no colour". */
+.cp-row:disabled { opacity: .6; cursor: default; }
 .cp-row:disabled .t { color: var(--kx-fg-4); }
-.cp-row svg { flex: none; }
-/* An action is accent-blue text on nothing, and takes a solid fill only when
-   it is the row under the pointer - which is the design's whole hover rule. */
-.cp-row.act { color: var(--kx-link); }
-.cp-row:hover:not(:disabled), .cp-row:focus-visible:not(:disabled) {
-  background: var(--kx-surface-3); color: var(--kx-fg); outline: none;
-}
-/* Not merely dimmer - a row that cannot act should not look like a row that
-   simply is not blue. It loses the accent entirely and its glyph fades with
-   it, so "unavailable" and "not an action" never read as the same thing. */
-.cp-row:disabled { color: var(--kx-fg-4); }
-.cp-row:disabled svg { opacity: .45; }
-.cp-row:disabled:hover { background: none; color: var(--kx-fg-4); cursor: default; }
-/* A row that cannot act still has to look like it was meant to be there, so it
-   dims rather than vanishing - and its title says what is missing. */
-.cp-row:disabled .cp-toggle { opacity: .5; }
-.cp-note, .cp-val {
-  margin-left: auto; flex: none; font-size: 12.5px; color: var(--kx-fg-3);
-}
-.cp-note { font-family: var(--kx-mono); font-size: 9.5px; font-weight: 500; }
-.cp-empty { padding: 10px 9px; font-size: 12px; color: var(--kx-fg-3); }
+.cp-row:disabled[data-sel="1"] { background: var(--kx-surface); box-shadow: none; }
+.cp-empty { padding: 14px 12px; font-size: 12px; color: var(--kx-fg-3); }
+
 /* ── the switch ───────────────────────────────────────────────────────────
-   The one pill in the composer: every other radius is part of the 10/8/6/4
-   scale, and a switch that is not fully round does not read as a switch.
+   A BREAKER, NOT A PILL, and the design is explicit about why: the state has
+   to be readable without colour. A pill says on/off with a knob position and a
+   fill, and both of those are gone in a monochrome screenshot or to a
+   red-green reader. This says it with the WORD - ON or OFF, in the track,
+   next to a knob that has thrown to the other end. Three signals, and any one
+   of them alone is enough.
 
-   THE OFF STATE IS THE ONE THAT HAS TO WORK. On is easy - it is filled and
-   bright and obviously on. Off was a dim knob on a near-black track, which is
-   two dark greys touching: it read as a control that had failed rather than
-   one that is simply not switched. So off gets a track a clear step ABOVE the
-   panel (a raised object, not a hole) and a knob at label brightness, and the
-   two are far enough apart to be read at a glance.
-
-   And OFF is not DISABLED. Those were the same picture - both dim - so a
-   switch nothing had wired looked exactly like a switch you had turned off.
-   Disabled now drops the whole control's opacity and takes its cursor, which
-   says "not yours to move" without changing what on and off look like.
-
-   What makes it feel like hardware: the track is a groove with an inset edge,
-   the knob carries a real shadow so it sits ON the track, and it travels on a
-   spring that overshoots very slightly - which is what says the thing was
-   thrown rather than faded.
-*/
+   Off is an empty frame with a grey block at the left; on is a filled orange
+   frame with the block at the right and the word in ink. The 4px radius is the
+   panel's smallest, so the switch reads as hardware set into the row rather
+   than as a lozenge floating on it. */
 .cp-toggle {
-  margin-left: auto; flex: none;
-  width: 40px; height: 22px; border-radius: 999px;
-  background: var(--kx-surface-3);
-  box-shadow: inset 0 0 0 1px var(--kx-line-2), inset 0 1px 2px rgba(1, 4, 9, .45);
-  display: flex; align-items: center;
-  padding: 0 3px; box-sizing: border-box;
-  transition: background .2s ease, box-shadow .2s ease;
+  flex: none; display: inline-flex; align-items: center;
+  width: 40px; height: 19px; box-sizing: border-box;
+  border: 1px solid var(--kx-edge); border-radius: 4px;
+  padding: 2px; background: transparent;
+  transition: background .18s ease, border-color .18s ease, box-shadow .18s ease;
 }
 .cp-toggle .knob {
-  width: 16px; height: 16px; border-radius: 50%;
-  background: var(--kx-fg-3);
-  box-shadow: 0 1px 3px rgba(1, 4, 9, .55);
-  transition: transform .24s cubic-bezier(.34, 1.4, .64, 1),
-              background .18s ease, box-shadow .18s ease;
+  flex: none; width: 13px; height: 13px; border-radius: 3px;
+  background: var(--kx-fg-4);
+  transition: background .18s ease;
 }
+.cp-toggle .lbl {
+  flex: 1; text-align: center;
+  font-family: var(--kx-mono); font-size: 8px; font-weight: 700;
+  letter-spacing: .06em; text-indent: .06em; color: var(--kx-fg-3);
+}
+/* The throw. Reversing the row is what moves the knob AND swaps which side the
+   word sits on in one declaration - the two halves trade places, which is
+   exactly what a breaker does. */
 .cp-toggle[data-on="1"] {
-  background: var(--kx-action);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--kx-action) 65%, #000),
-              inset 0 1px 2px rgba(1, 4, 9, .3);
+  flex-direction: row-reverse;
+  border-color: var(--kx-phase-act); background: var(--kx-phase-act);
+  /* A soft halo, so a thrown switch is findable when the list is long. */
+  box-shadow: 0 0 0 3px var(--kx-warn-wash);
 }
-.cp-toggle[data-on="1"] .knob {
-  transform: translateX(18px);
-  background: #fff;
-  box-shadow: 0 1px 3px rgba(1, 4, 9, .5), 0 0 0 .5px rgba(1, 4, 9, .18);
-}
-/* Hover lifts the track a step, so the row answers the pointer before it is
-   pressed - the switch is the target, not the row it sits on. */
-.cp-sw:hover:not(:disabled) .cp-toggle { background: var(--kx-surface-4); }
+.cp-toggle[data-on="1"] .knob { background: var(--kx-on-accent); }
+.cp-toggle[data-on="1"] .lbl { color: var(--kx-on-accent); }
+/* Hover answers on the SWITCH, because the switch is the target - the row it
+   sits in only carries it. */
+.cp-sw:hover:not(:disabled) .cp-toggle { border-color: var(--kx-fg-3); }
 .cp-sw:hover:not(:disabled) .cp-toggle[data-on="1"] {
-  background: color-mix(in srgb, var(--kx-action) 88%, #fff);
+  background: color-mix(in srgb, var(--kx-phase-act) 88%, #fff);
+  border-color: color-mix(in srgb, var(--kx-phase-act) 88%, #fff);
 }
-/* Unwired, and saying so by going quiet as a whole rather than by muddying
-   the two states into each other. */
-.cp-sw:disabled .cp-toggle { opacity: .4; cursor: default; }
-/* The switch is the control, so the focus ring lands on IT, not on the row. */
+/* OFF IS NOT DISABLED. Those were the same picture once - both dim - so a
+   switch nothing had wired looked exactly like one you had turned off. The row
+   above drops the whole control's opacity and takes its cursor, which says
+   "not yours to move" without touching what on and off look like. */
+.cp-sw:disabled .cp-toggle { cursor: default; }
 .cp-sw:focus-visible { outline: none; }
 .cp-sw:focus-visible .cp-toggle {
   box-shadow: 0 0 0 2px var(--kx-bg), 0 0 0 4px var(--kx-info);
@@ -2294,6 +2386,30 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 /* Motion off: it still moves - the position IS the state - it simply arrives. */
 @media (prefers-reduced-motion: reduce) {
   .cp-toggle, .cp-toggle .knob { transition: none; }
+}
+
+/* ── the keyboard contract ────────────────────────────────────────────────
+   Stated where the keyboard is, and every hint here is a key onPalKey actually
+   binds. A footer that promises ⇥ NEXT GROUP and does not move is worse than
+   no footer. ESC is the dimmest because it is the one you already know. */
+.cp-foot {
+  flex: none; display: flex; align-items: center; gap: 12px;
+  height: 30px; padding: 0 14px;
+  border-top: 1px solid var(--kx-divider);
+  background: var(--kx-surface);
+}
+.cp-foot span {
+  font-family: var(--kx-mono); font-size: 8.5px;
+  letter-spacing: .1em; text-indent: .1em; color: var(--kx-fg-4);
+  white-space: nowrap;
+}
+.cp-foot .sp { flex: 1; }
+.cp-foot .esc { color: var(--kx-fg-5); }
+/* Under about 320px the four hints and ESC stop fitting on one line, and a
+   wrapped keyboard legend is worse than a short one. The two that survive are
+   the two you cannot guess. */
+@media (max-width: 340px) {
+  .cp-foot span:nth-child(2), .cp-foot span:nth-child(4) { display: none; }
 }
 
 /* ── the picked-feature glyphs ────────────────────────────────────────────

@@ -658,46 +658,137 @@ console.log("\n──── the send control ────");
 }
 
 /* ── the palette row's shape ─────────────────────────────────────────────
-   The model used to be a control on the row with a surface, a hairline and an
-   inner shadow - a FIELD among buttons. The design moves it into the palette,
-   where it is one row among rows, so that shape decision no longer has a
-   control to describe. What replaces it is the design's own row rule, pinned
-   in CSS text for the same reason the old one was: jsdom applies no
-   stylesheet, so nothing else would notice a row losing its shape. */
-console.log("\n──── the palette row ────");
+   Section 1B of Genesis_Windows draws this window, and these are the numbers
+   it draws it with. Pinned in CSS TEXT because jsdom applies no stylesheet:
+   nothing else in the suite would notice a row losing its height, a switch
+   turning back into a pill, or the mark column drifting off 14px. */
+console.log("\n──── the 1B palette ────");
 {
-  const model = CSS.match(/\n\.cp-row\s*\{[^}]*\}/);
-  ok("the palette row has its own rule", !!model);
-  /* The radii run as a SCALE - 10 on the palette, 8 on the composer, 6 on
-     rows, 4 on the small plates - so size and softness move together. What is
-     pinned is the relationship, not a literal: a row is softer than a plate
-     and sharper than the panel it sits in, and never a pill. */
-  const radius = (re) => { const m = CSS.match(re); return m ? Number(m[1]) : null; };
-  const rowR = radius(/\n\.cp-row\s*\{[^}]*border-radius:\s*(\d+)px/);
-  const panelR = radius(/\n\.cmd-pal\s*\{[^}]*border-radius:\s*(\d+)px/);
-  const plateR = radius(/\n\.pick\s*\{[^}]*border-radius:\s*(\d+)px/);
-  ok("with softened corners, not a pill",
-    !!rowR && !/\n\.cp-row\s*\{[^}]*border-radius:\s*50%/.test(CSS), String(rowR));
-  ok("softer than the small plates it shares the panel with",
-    !!plateR && rowR > plateR, `row ${rowR} vs plate ${plateR}`);
-  ok("and sharper than the panel that contains it",
-    !!panelR && rowR < panelR, `row ${rowR} vs panel ${panelR}`);
-  // Note 04: the highlighted or hovered row takes a SOLID fill and white text.
-  // A row that only changes its ink does not read as the row you are on.
-  ok("a hovered row takes a solid fill",
-    /\.cp-row:hover:not\(:disabled\)[^}]*background:\s*var\(--kx-surface-3\)/.test(CSS));
-  ok("and its text goes to full white with it",
-    /\.cp-row:hover:not\(:disabled\)[^}]*color:\s*var\(--kx-fg\)/.test(CSS));
-  // Note 05: a default ACTION row is accent-blue text on nothing.
-  ok("an action row is accent-blue on no fill",
-    /\.cp-row\.act\s*\{[^}]*color:\s*var\(--kx-link\)/.test(CSS));
-  // Note 06: only the switches stay pill-shaped, whatever the scale does.
-  ok("only the toggle stays a pill",
-    /\.cp-toggle\s*\{[^}]*border-radius:\s*(999px|9999px|50%)/.test(CSS));
-  ok("and reads as on in the action colour",
-    /\.cp-toggle\[data-on="1"\]\s*\{[^}]*background:\s*var\(--kx-action\)/.test(CSS));
-}
+  const rule = (sel) => {
+    const m = CSS.match(new RegExp("\\n" + sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\{[^}]*\\}"));
+    return m ? m[0] : "";
+  };
+  const px = (sel, prop) => {
+    const m = rule(sel).match(new RegExp(prop + ":\\s*([\\d.]+)px"));
+    return m ? Number(m[1]) : null;
+  };
 
+  /* ── the window ── */
+  ok("the palette is the design's 6px panel, not a 10px one",
+    px(".cmd-pal", "border-radius") === 6, String(px(".cmd-pal", "border-radius")));
+  ok("on the design's own overlay ground",
+    /background:\s*var\(--kx-over\)/.test(rule(".cmd-pal")));
+  ok("and it stacks header, list and footer",
+    /flex-direction:\s*column/.test(rule(".cmd-pal")));
+
+  /* ── the three bands, at the heights 1B gives them ── */
+  ok("the search line is 44px", px(".cp-filter", "height") === 44, String(px(".cp-filter", "height")));
+  ok("the keyboard footer is 30px", px(".cp-foot", "height") === 30, String(px(".cp-foot", "height")));
+  ok("and the list is the only part that scrolls",
+    /overflow-y:\s*auto/.test(rule(".cp-body")) && /flex:\s*none/.test(rule(".cp-filter")) &&
+    /flex:\s*none/.test(rule(".cp-foot")));
+  // 58vh, so a long list can never push the composer off the bottom of a
+  // short panel - the palette is a thing over the bar, not a thing that
+  // replaces it.
+  ok("the list is capped against the viewport, not just a literal",
+    /max-height:\s*min\(58vh,/.test(rule(".cp-body")));
+
+  /* ── the row ── */
+  ok("a row is 29px", px(".cp-row", "height") === 29, String(px(".cp-row", "height")));
+  ok("inset 12px, matching the group header above it",
+    /padding:\s*0 12px/.test(rule(".cp-row")) && /padding:\s*12px 12px 5px/.test(rule(".cp-grp")));
+  /* A LIST, NOT A STACK OF CARDS. The old palette gave every row a 6px radius
+     because it was eight rows of chunky buttons; this is thirty rows, and
+     thirty rounded rectangles is thirty more edges than the window needs.
+     The design draws them full-bleed with no corner at all. */
+  ok("and carries no radius of its own",
+    /border-radius:\s*0/.test(rule(".cp-row")));
+
+  /* ── the mark column ── */
+  ok("the mark column is 14px, so every label starts on one x",
+    px(".cp-ic", "width") === 14, String(px(".cp-ic", "width")));
+  ok("and centres whatever fills it",
+    /align-items:\s*center/.test(rule(".cp-ic")) && /justify-content:\s*center/.test(rule(".cp-ic")));
+  /* THE COLUMN CANNOT BE TYPE. The bundled JetBrains Mono is subset and
+     carries almost none of the design's marks, so the rows that cannot be a
+     character are SVG from the panel's own set. If this ever regresses to
+     glyphs the marks become tofu on some machines and nothing else would
+     catch it - see the note above palRows. */
+  {
+    const rows = SRC.slice(SRC.indexOf("function palRows"), SRC.indexOf("function pickList"));
+    const glyphs = [...rows.matchAll(/glyph:\s*"([^"]*)"/g)].map((m) => m[1]);
+    const SAFE = ["↑", "@", "/", "+", ""];
+    ok("every literal mark is one the bundled mono actually has",
+      glyphs.length > 0 && glyphs.every((g) => SAFE.indexOf(g) >= 0), glyphs.join(" "));
+    ok("and the rest are the panel's own icons",
+      /icon:\s*"i-/.test(rows));
+    /* ⌃ ⌥ ⌘ are missing from the same font, so the shortcuts are spelled - and
+       spelled for the platform the panel is actually running on. Tested on the
+       emitted strings, not on the source text: the comments in palRows quote
+       the design's symbols, which is exactly what they are for. */
+    ok("the shortcuts are spelled, not drawn in symbols",
+      /mac \? "CMD OPT " : "CTRL ALT "/.test(rows));
+    ok("and every row's shortcut goes through that one speller",
+      [...rows.matchAll(/kbd:\s*("[^"]*"|kbd\([^)]*\))/g)]
+        .every((m) => m[1].startsWith("kbd(")));
+  }
+
+  /* ── one highlight ── */
+  /* A hover fill under the mouse PLUS a selected row under the arrow keys is
+     two answers to "what does ENTER do". The pointer moves the same selection
+     the keyboard does, so there is exactly one lit row and no `:hover` rule
+     on `.cp-row` at all. */
+  ok("the pointer moves the real selection rather than lighting a second row",
+    /cpBody"\)\.addEventListener\("mousemove"/.test(SRC) && !/\.cp-row:hover/.test(CSS));
+  ok("the selected row takes the design's 6.8% fill",
+    /background:\s*var\(--kx-surface-2\)/.test(rule('.cp-row[data-sel="1"]')));
+  // The fill alone is a difference you can miss on a list this long, and it is
+  // the only difference a colour-blind reading gets. The bar is the redundancy.
+  ok("and a 2px marker on its inside edge, so the fill is not the only signal",
+    /box-shadow:\s*inset 2px 0 0/.test(rule('.cp-row[data-sel="1"]')));
+
+  /* ── the switch ── */
+  /* "A breaker, not a pill. State is readable without colour." - 1C, and the
+     reason a pill fails that test is that its whole answer is a position and a
+     fill. This one says ON or OFF in words. */
+  const togR = px(".cp-toggle", "border-radius");
+  ok("the switch is a breaker, not a pill", togR === 4, String(togR));
+  ok("at 40 by 19", px(".cp-toggle", "width") === 40 && px(".cp-toggle", "height") === 19);
+  ok("with a square knob, not a round one",
+    px(".cp-toggle .knob", "border-radius") === 3 && px(".cp-toggle .knob", "width") === 13);
+  ok("and it states its position in words",
+    /r\.on \? "ON" : "OFF"/.test(SRC) && /\.cp-toggle \.lbl/.test(CSS));
+  ok("thrown, it takes the attention hue",
+    /background:\s*var\(--kx-phase-act\)/.test(rule('.cp-toggle[data-on="1"]')));
+  ok("and both halves trade places rather than the knob merely sliding",
+    /flex-direction:\s*row-reverse/.test(rule('.cp-toggle[data-on="1"]')));
+
+  /* ── the groups ── */
+  ok("all six groups are drawn", [...SRC.matchAll(/sec: "(\w+)"/g)]
+    .reduce((a, m) => (a.indexOf(m[1]) < 0 ? [...a, m[1]] : a), []).length === 6);
+  ok("each takes its hue from a token, never a literal hex",
+    /\.cp-grp\[data-hue="ask"\]\s*\{\s*color:\s*var\(--kx-phase-ask\)/.test(CSS) &&
+    !/\.cp-(grp|ic)\[data-hue[^}]*#[0-9a-f]{3,6}/i.test(CSS));
+  /* The design draws "42 OPTIONS · 6 GROUPS". A number painted on rather than
+     measured is the first thing to go stale, and this one has to narrow as the
+     filter bites - it is the only feedback the filter gives. */
+  ok("the header's count is measured off the rows it draws",
+    /\.full"\)\.textContent = rows\.length/.test(SRC) && /groups\.length/.test(SRC));
+  /* At 280px the sentence and the placeholder fight over one line and the
+     placeholder loses mid-word. 1A hit the same wall and answered it by
+     dropping the words for a boxed count; the narrow panel gets that. */
+  ok("and it collapses to 1A's boxed number before it can crowd the placeholder",
+    /\.cp-meta \.mini \{ display: none/.test(CSS) &&
+    /@media \(max-width: 340px\)[\s\S]{0,220}\.cp-meta \.full \{ display: none/.test(CSS));
+
+  /* ── a row that cannot fire ── */
+  ok("an unavailable row is dimmed in place, never removed",
+    /\.cp-row:disabled\s*\{[^}]*opacity/.test(CSS));
+  /* Five EDIT rows go dark for one reason. Five identical boxed reasons is the
+     loudest thing in the window, on the rows that should be quietest. */
+  ok("and a reason shared by a whole group is stated once, not on every row",
+    /lastTag/.test(SRC));
+}
 
 /* ── the mode sheet arrives, rather than appearing ──────────────────────── */
 {

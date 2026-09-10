@@ -623,6 +623,27 @@ export interface EditorCommandMsg {
 }
 export interface OpenSkillsFolderMsg { type: "openSkillsFolder" }
 /**
+ * Run one of the palette's command-backed rows.
+ *
+ * Every row in the command palette that is not a switch or a picker is one of
+ * the extension's own registered commands - the palette IS the contributed
+ * command list, drawn where you are typing rather than behind F1. So the rows
+ * run those commands instead of reimplementing them, and the host keeps one
+ * definition of what "Open browser" does.
+ *
+ * Mapped explicitly for the same reason `editorCommand` is: interpolating the
+ * name into `genesis.<name>` would let the webview invoke anything registered,
+ * and the palette needs exactly these.
+ */
+export interface PaletteCommandMsg {
+  type: "paletteCommand";
+  command:
+    | "selectEndpoint" | "newEndpoint" | "runDiagnostics"
+    | "selectAgent" | "newAgent"
+    | "openBrowser" | "watchAgentBrowser" | "focusSidebar"
+    | "restoreCheckpoint" | "exportAllChats" | "searchWeb";
+}
+/**
  * Open the project's issue tracker.
  *
  * Carries no URL on purpose. The host reads `bugs.url` out of the manifest,
@@ -691,6 +712,7 @@ export type InboundMessage =
   | SetAgentMsg | NewAgentMsg | OpenAgentMsg
   | RestoreCheckpointMsg | ExportBundleMsg | ExportChatMsg | OpenFileMsg | OpenSettingsMsg
   | OpenYamlMsg | OpenControlCenterMsg | EditorCommandMsg | OpenSkillsFolderMsg | OpenIssuesMsg
+  | PaletteCommandMsg
   | ListSessionsMsg | LoadSessionMsg | DeleteSessionMsg | ForgetAllowedCommandMsg
   | OpenDiffMsg | SearchFilesMsg
   | CheckEndpointMsg | McpReconnectMsg | McpReloadMsg | ClearChangesMsg

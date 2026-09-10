@@ -2956,6 +2956,29 @@ export class App {
         return;
       }
 
+      case "paletteCommand": {
+        // Same shape as `editorCommand` above, and for the same reason: an
+        // explicit table, never `"genesis." + msg.command`. The palette draws
+        // the contributed command list, so it runs those commands rather than
+        // carrying a second copy of what each one does.
+        const palette = {
+          selectEndpoint: "genesis.selectEndpoint",
+          newEndpoint: "genesis.newEndpoint",
+          runDiagnostics: "genesis.runDiagnostics",
+          selectAgent: "genesis.selectAgent",
+          newAgent: "genesis.newAgent",
+          openBrowser: "genesis.openBrowser",
+          watchAgentBrowser: "genesis.watchAgentBrowser",
+          focusSidebar: "genesis.focusSidebar",
+          restoreCheckpoint: "genesis.restoreCheckpoint",
+          exportAllChats: "genesis.exportAllChats",
+          searchWeb: "genesis.searchWeb",
+        } as const;
+        const cmd = palette[msg.command];
+        if (cmd) await vscode.commands.executeCommand(cmd);
+        return;
+      }
+
       case "openIssues": {
         /* The URL comes from the manifest, never from the message - see
            OpenIssuesMsg. `bugs.url` is the npm-standard field for exactly

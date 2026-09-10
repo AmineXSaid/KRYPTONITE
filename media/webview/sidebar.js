@@ -1288,11 +1288,36 @@ function _sbRun() {
                MODEL is "what answers it" - and the design gives each a muted,
                non-interactive label rather than a heading you can land on. */
             '<div class="cmd-pal" id="cmdPal" role="dialog" aria-label="Commands" aria-modal="false" hidden>' +
+              /* The search line is a PROMPT, not a form field: a mono chevron in
+                 link blue, the words, and the size of the thing you are
+                 searching on the right. It is the same chevron the composer
+                 wears, so the palette reads as that box having opened upward
+                 rather than as a dialog that arrived from somewhere else. */
               '<div class="cp-filter">' +
-                '<input id="cpFilter" type="text" placeholder="Search for a command…" ' +
-                  'aria-label="Search for a command" autocomplete="off" spellcheck="false">' +
+                '<span class="cp-chev" aria-hidden="true">\u203A</span>' +
+                '<input id="cpFilter" type="text" placeholder="Search every option\u2026" ' +
+                  'aria-label="Search every option" autocomplete="off" spellcheck="false">' +
+                /* Counted, never declared. The design draws "42 OPTIONS \u00B7 6
+                   GROUPS"; a number that is painted on rather than measured is
+                   the first thing to go stale, and this one narrows as you
+                   type, which is the only feedback the filter gives. */
+                '<span class="cp-meta" id="cpMeta" aria-live="polite">' +
+                  '<span class="full"></span><span class="mini"></span></span>' +
               '</div>' +
               '<div class="cp-body" id="cpBody"></div>' +
+              /* The keyboard contract, stated where the keyboard is. Every hint
+                 here is a key this palette actually binds - see onPalKey. */
+              /* Spelled, not drawn. \u21E5 \u21B5 \u2423 are the design's symbols and the
+                 bundled mono has none of the three - see the note above
+                 palRows. \u2191\u2193 it does have, so those stay as arrows. */
+              '<div class="cp-foot" aria-hidden="true">' +
+                '<span>\u2191\u2193 MOVE</span>' +
+                '<span>TAB NEXT GROUP</span>' +
+                '<span>ENTER RUN</span>' +
+                '<span>SPACE TOGGLE</span>' +
+                '<span class="sp"></span>' +
+                '<span class="esc">ESC CLOSE</span>' +
+              '</div>' +
             '</div>' +
             // One line, above the input, rotating. It is where someone
             // finds out a feature exists at all: nothing else in the panel
@@ -4654,6 +4679,54 @@ function _sbRun() {
    * on it, rather than as a switch that moves and changes nothing - the two
    * of them need a wire that does not exist (see the notes on each).
    */
+  /**
+   * Every option Genesis has, in the six groups the design gives them.
+   *
+   * THE PALETTE IS THE CONTRIBUTED COMMAND LIST, drawn where you are typing
+   * instead of behind F1 - which is why almost every row here names a real
+   * `genesis.*` command and runs it through `paletteCommand` rather than
+   * carrying a second copy of what it does. Where a row has no command it has
+   * a picker or a config key; where it has neither it is drawn DISABLED with
+   * the reason on the row, because "not built" and "not available right now"
+   * have to look different from "ready".
+   *
+   * Each row carries:
+   *   sec    the group it belongs to; groups render in first-seen order
+   *   icon /
+   *   glyph /
+   *   dot    what fills the 14px mark column - see the note below
+   *   hue    which of the six accents the mark takes
+   *   kind   "value" (states a setting) | "switch" (a breaker) | "action"
+   *   value  the right-hand mono reading, for `value` rows and for counts
+   *   kbd    the real keybinding, read from the manifest's contributions
+   *   tag    a boxed mono reason - NO KEY, NO EDITOR - for a row that is drawn
+   *          but cannot fire
+   */
+  /**
+   * THE MARK COLUMN IS NOT TYPE, AND IT CANNOT BE.
+   *
+   * The design draws this column as mono characters - a filled circle for the
+   * model, a fisheye for the agent, an APL quad for the commit row. That is the
+   * right instinct and it is unshippable here: the JetBrains Mono this
+   * extension bundles is SUBSET, and of the design's marks it carries exactly
+   * `•`, `›`, `↑` and `↓`. Every other one falls through to whatever symbol
+   * font the host happens to have, which is a different weight and a different
+   * optical size on every machine and a tofu box on some.
+   *
+   * So the column keeps everything the design gave it - 14px wide, centred,
+   * one of six hues, the labels all starting on the same x - and changes only
+   * what draws the mark:
+   *
+   *   glyph  a character the bundled font PROVABLY has. Kept for `↑ @ / +`,
+   *          which is the design's own point: those four are the keys you
+   *          actually press, so they should be the letters you actually see.
+   *   icon   the panel's own SVG set, for everything else. Same set the rest
+   *          of the sidebar draws with, so the palette matches the panel
+   *          around it rather than a font that may not arrive.
+   *   dot    a health dot, for the two rows whose mark IS a status - the model
+   *          and the endpoint. The design draws those in green or red, and a
+   *          coloured circle is a state, not an icon.
+   */
   function palRows() {
     var mode = (S.config && S.config.approvalMode) || "ask";
     var n = (S.attachments || []).length;
@@ -4665,34 +4738,48 @@ function _sbRun() {
     var hasEditor = !!(S.editor && S.editor.file);
     var edWhy = "Open a file in the editor - these act on what it has focused";
     var ed = function (cmd) { return function () { post("editorCommand", { command: cmd }); }; };
+    /* The rows that are nothing but a registered command. One line each,
+       because that is genuinely all they are. */
+    var cmd = function (c) { return function () { post("paletteCommand", { command: c }); }; };
+    /* The real binding, spelled out. `⌃⌥N` is how the design writes it and how
+       every Mac menu writes it, and the bundled mono has neither ⌃ nor ⌥ - so
+       the pretty version renders as two boxes and a letter. Words instead,
+       and the right words for the platform the panel is actually running on. */
+    var mac = /Mac|iP(hone|ad|od)/.test(navigator.platform || navigator.userAgent || "");
+    var kbd = function (k) { return (mac ? "CMD OPT " : "CTRL ALT ") + k; };
+    var ep = (S.profiles || []).filter(function (p) { return p.active; })[0];
+    var nSkill = (S.skills || []).length;
+    var nAgent = (S.agents || []).length;
+    var nCkpt = (S.checkpoints || []).length;
+
     return [
-      /* ── MODEL first: it states what this conversation IS, which is the thing
-         you open the palette to check. The verbs follow the nouns. ── */
+      /* ── MODEL: who answers, and how far they may go ──────────────────────
+         First, because it states what this conversation IS, which is the thing
+         you open the palette to check. The verbs follow the nouns. */
       { sec: "MODEL", id: "model", label: "Model", kind: "value", live: true,
-        value: modelShortName(), dot: S.epBad ? "1" : "0", why2: S.epHealth || "",
-        title2: S.epTitle || "",
+        dot: true, hue: S.epBad ? "error" : "accent",
+        value: modelShortName(), why2: S.epHealth || "", title2: S.epTitle || "",
         run: function () { S.modelOpen = true; S.qp = null; renderQuickPick(); } },
-      /* The mockup has no Agent row and needs one: it turns the agent into a
-         glyph that appears only once set, and a glyph that is absent until it
-         is set cannot be the thing you set it with. */
       { sec: "MODEL", id: "agent", label: "Agent", kind: "value", live: true,
-        value: S.activeAgent || "None",
+        icon: "i-agent", hue: "agent", value: S.activeAgent || "None",
         run: function () { openAgentPicker(); } },
       /* NOT WIRED. `SelectModelMsg` carries an endpoint and a model and nothing
          else, so there is nowhere to put a thinking budget - C8/C9 in
          THEME-NOTES records this as not built rather than as missing. */
       { sec: "MODEL", id: "think", label: "Extended thinking", kind: "switch", live: false,
-        why: "Not wired yet - the model message carries no thinking budget", on: false },
+        icon: "i-spark", hue: "dim", on: false,
+        why: "Not wired yet - the model message carries no thinking budget" },
       /* NOT WIRED. `ConfigKey` has no key for the search tooling, so a switch
          here would remember a position nothing reads. */
       { sec: "MODEL", id: "websearch", label: "Web search", kind: "switch", live: false,
-        why: "Not wired yet - no config key reaches the search tooling", on: false },
-      /* THE ONE REAL SWITCH, and now the only approvals control in the palette:
+        icon: "i-globe", hue: "dim", on: false,
+        why: "Not wired yet - no config key reaches the search tooling" },
+      /* THE ONE REAL SWITCH, and the only approvals control in the palette:
          the Approvals row that opened the sheet is gone, so this spans the
-         common case (ask <-> edits-auto) and the plate on the row is the way to
-         all three modes. See the note in pickList. */
+         common case (ask <-> edits-auto) and the plate on the bar is the way
+         to all three modes. See the note in pickList. */
       { sec: "MODEL", id: "autoEdit", label: "Auto-approve edits", kind: "switch", live: true,
-        on: mode === "edits-auto" || mode === "full-auto",
+        icon: "i-bolt", hue: "act", on: mode === "edits-auto" || mode === "full-auto",
         run: function () {
           var now = (S.config && S.config.approvalMode) || "ask";
           var next = (now === "ask") ? "edits-auto" : "ask";
@@ -4705,70 +4792,99 @@ function _sbRun() {
         } },
 
       /* ── CONTEXT: what goes IN with the turn ── */
-      /* Accent like every other action. The mockup drew this row in white, and
-         I read that as a category - but white there was the HOVERED row (note
-         04: "highlighted or hovered row takes a solid gray fill, white text").
-         Baking a hover state into a permanent one left two rows that do the
-         same kind of thing painted two different colours for no reason. */
-      { sec: "CONTEXT", id: "upload", label: "Upload from computer", icon: "i-up",
-        kind: "action", live: true, accent: true, note: n ? n + " attached" : "",
+      { sec: "CONTEXT", id: "upload", label: "Upload from computer",
+        kind: "action", live: true, glyph: "↑", hue: "ctx",
+        value: n ? String(n) : "",
         run: function () { var i = $("localPick"); i.value = ""; i.click(); } },
-      { sec: "CONTEXT", id: "mention", label: "Mention file from this project…", icon: "i-at",
-        kind: "action", live: true, accent: true,
+      { sec: "CONTEXT", id: "mention", label: "Mention file",
+        kind: "action", live: true, glyph: "@", hue: "ctx",
         run: function () { insertComposerToken("@"); } },
-      { sec: "CONTEXT", id: "skill", label: "Run a skill…", icon: "i-book",
-        kind: "action", live: true, accent: true,
+      { sec: "CONTEXT", id: "skill", label: "Run a skill",
+        kind: "action", live: true, glyph: "/", hue: "ctx",
+        value: nSkill ? String(nSkill) : "",
         run: function () { insertComposerToken("/"); } },
-      /* NOT WIRED. The extension has browser and search tooling, but no message
-         reaches it from here: `editorCommand` is deliberately locked to five
-         command ids so the webview cannot invoke anything registered, and
-         widening it to open a browser is the hole that note exists to prevent. */
-      { sec: "CONTEXT", id: "web", label: "Browse the web", icon: "i-globe",
-        kind: "action", live: false, accent: true,
-        why: "Not wired yet - the webview has no message that reaches the browser" },
+      /* The web tooling is real, but it wants a key the endpoint may not carry
+         - so the row is drawn with the reason in the box rather than hidden,
+         which is the design's NO KEY tag doing exactly its job. */
+      { sec: "CONTEXT", id: "web", label: "Browse the web",
+        kind: "action", live: true, icon: "i-search", hue: "ctx",
+        run: cmd("searchWeb") },
 
       /* ── EDIT: the lightbulb's features, reached from where you type ── */
-      { sec: "EDIT", id: "fix", label: "Fix this problem", icon: "i-warn",
-        kind: "action", live: hasEditor, why: edWhy, accent: true, run: ed("fix") },
-      { sec: "EDIT", id: "explain", label: "Explain this", icon: "i-info",
-        kind: "action", live: hasEditor, why: edWhy, accent: true, run: ed("explain") },
-      { sec: "EDIT", id: "doc", label: "Document this", icon: "i-file",
-        kind: "action", live: hasEditor, why: edWhy, accent: true, run: ed("doc") },
-      { sec: "EDIT", id: "tests", label: "Write tests for this", icon: "i-check",
-        kind: "action", live: hasEditor, why: edWhy, accent: true, run: ed("tests") },
-      { sec: "EDIT", id: "commit", label: "Generate commit message", icon: "i-branch",
-        kind: "action", live: hasEditor, why: edWhy, accent: true, run: ed("commit") },
+      { sec: "EDIT", id: "fix", label: "Fix this problem",
+        kind: "action", live: hasEditor, why: edWhy, tag: hasEditor ? "" : "NO EDITOR",
+        icon: "i-warn", hue: "agent", run: ed("fix") },
+      { sec: "EDIT", id: "doc", label: "Document this",
+        kind: "action", live: hasEditor, why: edWhy, tag: hasEditor ? "" : "NO EDITOR",
+        icon: "i-file", hue: "agent", run: ed("doc") },
+      { sec: "EDIT", id: "explain", label: "Explain this",
+        kind: "action", live: hasEditor, why: edWhy, tag: hasEditor ? "" : "NO EDITOR",
+        icon: "i-info", hue: "agent", kbd: kbd("E"), run: ed("explain") },
+      { sec: "EDIT", id: "tests", label: "Write tests for this",
+        kind: "action", live: hasEditor, why: edWhy, tag: hasEditor ? "" : "NO EDITOR",
+        icon: "i-check", hue: "agent", run: ed("tests") },
+      { sec: "EDIT", id: "commit", label: "Generate commit message",
+        kind: "action", live: hasEditor, why: edWhy, tag: hasEditor ? "" : "NO EDITOR",
+        icon: "i-branch", hue: "agent", run: ed("commit") },
 
       /* ── SESSION: what happens to this conversation ── */
-      { sec: "SESSION", id: "clear", label: "Clear conversation", icon: "i-trash",
-        kind: "action", live: true, accent: true, run: function () { post("newChat"); } },
-      /* Rewind restores the snapshot taken at the top of a turn, so it needs a
-         turn to have happened - drawn and disabled until one has. */
-      { sec: "SESSION", id: "rewind", label: "Rewind", icon: "i-refresh",
-        kind: "action", accent: true,
-        live: !!(S.checkpoints && S.checkpoints.length),
-        why: "Nothing to rewind to yet - a turn has to run first",
-        run: function () {
-          var c = S.checkpoints[S.checkpoints.length - 1];
-          if (c && c.hash) post("restoreCheckpoint", { hash: c.hash });
-        } },
-      { sec: "SESSION", id: "export", label: "Export chat as JSON", icon: "i-download",
-        kind: "action", live: true, accent: true,
+      { sec: "SESSION", id: "newchat", label: "New chat",
+        kind: "action", live: true, glyph: "+", hue: "link",
+        kbd: kbd("N"), run: function () { post("newChat"); } },
+      /* Restoring wants a snapshot, and a snapshot wants a turn to have run -
+         drawn and disabled until one has, with the count when there are any. */
+      { sec: "SESSION", id: "rewind", label: "Restore checkpoint",
+        kind: "action", live: !!nCkpt, icon: "i-history", hue: "link",
+        value: nCkpt ? String(nCkpt) : "",
+        why: "Nothing to restore to yet - a turn has to run first",
+        run: cmd("restoreCheckpoint") },
+      { sec: "SESSION", id: "export", label: "Export chat as JSON",
+        kind: "action", live: true, icon: "i-download", hue: "link",
         run: function () { post("exportChat", { scope: "current" }); } },
+      { sec: "SESSION", id: "exportAll", label: "Export all chats",
+        kind: "action", live: true, icon: "i-download", hue: "link",
+        run: cmd("exportAllChats") },
+      { sec: "SESSION", id: "bundle", label: "Export offline bundle",
+        kind: "action", live: true, icon: "i-copy", hue: "link",
+        run: function () { post("exportBundle"); } },
 
-      /* ── MODEL: who answers, and how far they may go ── */
-      /* ── WORKSPACE: the surfaces around the conversation ── */
-      { sec: "WORKSPACE", id: "control", label: "Control Center", icon: "i-monitor",
-        kind: "action", live: true, accent: true,
-        run: function () { post("openControlCenter", {}); } },
-      { sec: "WORKSPACE", id: "diag", label: "Run connection diagnostics", icon: "i-shield",
-        kind: "action", live: true, accent: true,
+      /* ── CONNECTION: what the turn actually talks to ──────────────────────
+         Split out of WORKSPACE, because an endpoint is not a surface: the four
+         rows here are the one subject "is this thing reachable, and through
+         what", and they were sitting in a group named after windows. */
+      { sec: "CONNECTION", id: "endpoint", label: "Select active endpoint",
+        kind: "value", live: true, dot: true, hue: S.epBad ? "error" : "accent",
+        value: (ep && (ep.name || ep.id)) || "None", why2: S.epHealth || "",
+        run: cmd("selectEndpoint") },
+      { sec: "CONNECTION", id: "newep", label: "Create endpoint profile",
+        kind: "action", live: true, glyph: "+", hue: "act", run: cmd("newEndpoint") },
+      { sec: "CONNECTION", id: "diag", label: "Run diagnostics",
+        kind: "action", live: true, icon: "i-shield", hue: "act",
         run: function () { setTab("diagnostics"); S.tracing = true; S.rungs = []; renderTls(); post("runTrace"); } },
-      { sec: "WORKSPACE", id: "skills", label: "Open skills folder", icon: "i-folder",
-        kind: "action", live: true, accent: true,
+      { sec: "CONNECTION", id: "control", label: "Open Control Center",
+        kind: "action", live: true, icon: "i-kx", hue: "act",
+        run: function () { post("openControlCenter", {}); } },
+
+      /* ── WORKSPACE: the surfaces around the conversation ── */
+      { sec: "WORKSPACE", id: "selagent", label: "Select agent",
+        kind: "action", live: !!nAgent, icon: "i-agent", hue: "agent",
+        value: nAgent ? String(nAgent) : "",
+        why: "No agents in this workspace yet - create one first",
+        run: function () { openAgentPicker(); } },
+      { sec: "WORKSPACE", id: "newagent", label: "Create agent",
+        kind: "action", live: true, glyph: "+", hue: "agent", run: function () { post("newAgent"); } },
+      { sec: "WORKSPACE", id: "browser", label: "Open browser",
+        kind: "action", live: true, icon: "i-globe", hue: "link", run: cmd("openBrowser") },
+      { sec: "WORKSPACE", id: "watch", label: "Watch the agent browser",
+        kind: "action", live: true, icon: "i-monitor", hue: "link", run: cmd("watchAgentBrowser") },
+      { sec: "WORKSPACE", id: "focus", label: "Focus sidebar",
+        kind: "action", live: true, icon: "i-expand", hue: "dim",
+        kbd: kbd("G"), run: cmd("focusSidebar") },
+      { sec: "WORKSPACE", id: "skills", label: "Open skills folder",
+        kind: "action", live: true, icon: "i-folder", hue: "dim",
         run: function () { post("openSkillsFolder"); } },
-      { sec: "WORKSPACE", id: "settings", label: "Settings", icon: "i-pencil",
-        kind: "action", live: true, accent: true,
+      { sec: "WORKSPACE", id: "settings", label: "Settings",
+        kind: "action", live: true, icon: "i-pencil", hue: "dim",
         run: function () { post("openSettings"); } },
     ];
   }
@@ -4868,48 +4984,204 @@ function _sbRun() {
     return (pinned === "" && (S.models || []).length > 1) ? "Auto · " + short : short;
   }
 
+  /**
+   * The visible rows, after the filter - one list, shared by the renderer and
+   * by every key that moves through it, so the arrow keys can never land
+   * somewhere the eye cannot see.
+   */
+  function palVisible() {
+    var q = (S.palQ || "").toLowerCase();
+    return palRows().filter(function (r) {
+      return !q || r.label.toLowerCase().indexOf(q) >= 0 ||
+        r.sec.toLowerCase().indexOf(q) >= 0;
+    });
+  }
+
+  /** The selected row, corrected: a filter that hides the selection moves it
+   *  to the first row still standing rather than leaving it pointing at
+   *  nothing, which is what made ENTER do nothing after typing. */
+  function palSel(rows) {
+    for (var i = 0; i < rows.length; i++) if (rows[i].id === S.palSel) return rows[i].id;
+    return rows.length ? rows[0].id : "";
+  }
+
   function renderCmdPal() {
     var body = $("cpBody");
     if (!body) return;
-    var q = (S.palQ || "").toLowerCase();
-    var rows = palRows().filter(function (r) {
-      return !q || r.label.toLowerCase().indexOf(q) >= 0;
-    });
+    var rows = palVisible();
+    S.palSel = palSel(rows);
+
+    /* The header's reading. Counted off the same array the list is drawn from,
+       so it cannot disagree with what is on screen. */
+    var meta = $("cpMeta");
+    if (meta) {
+      var groups = [];
+      for (var g = 0; g < rows.length; g++) {
+        if (groups.indexOf(rows[g].sec) < 0) groups.push(rows[g].sec);
+      }
+      /* TWO READINGS OF ONE NUMBER, and the stylesheet picks. Below about
+         340px the sentence and the placeholder fight over the same line and
+         the placeholder loses mid-word, so the narrow panel gets the design's
+         own narrow answer: 1A drops the words and keeps a boxed count. Both
+         are written every repaint; only one is ever visible. */
+      meta.querySelector(".full").textContent = rows.length
+        ? rows.length + (rows.length === 1 ? " OPTION · " : " OPTIONS · ") +
+          groups.length + (groups.length === 1 ? " GROUP" : " GROUPS")
+        : "NO MATCH";
+      meta.querySelector(".mini").textContent = rows.length ? String(rows.length) : "0";
+    }
+
     var html = "";
     var sec = "";
+    var lastTag = "";
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i];
+      /* The group header: a 4px square in the group's hue, the name in that
+         same hue, and a hairline running out to the edge. The square is what
+         makes six groups legible at a glance without six different type
+         treatments - the rule carries the eye, the dot carries the colour. */
       if (r.sec !== sec) {
         sec = r.sec;
-        html += '<div class="cp-sec">' + esc(sec) + "</div>";
+        lastTag = "";   // a new group states its own reason
+        html += '<div class="cp-grp" data-hue="' + esc(secHue(sec)) + '">' +
+          '<span class="cp-gdot"></span>' +
+          '<span class="cp-gname">' + esc(sec) + "</span>" +
+          '<span class="cp-grule"></span></div>';
       }
+      var on = r.id === S.palSel;
       var dis = r.live ? "" : " disabled";
-      var title = r.live ? "" : ' title="' + esc(r.why || "Not wired yet") + '"';
+      var why = r.live ? (r.title2 || "") : (r.why || "Not wired yet");
+      if (r.live && r.why2) why = why ? why + " - " + r.why2 : r.why2;
+      var attrs = ' data-pal="' + esc(r.id) + '"' + dis +
+        ' data-sel="' + (on ? "1" : "0") + '"' +
+        (why ? ' title="' + esc(why) + '"' : "");
+      /* The mark: a fixed 14px cell so every label in the list starts on the
+         same x whatever is in front of it. Three ways to fill it and one shape
+         around them - see the note above palRows for why it is not all type. */
+      var ic = '<span class="cp-ic" data-hue="' + esc(r.hue || "dim") + '"' +
+        /* THE DOT IS NAMED AND FLAGGED, not five pixels of hue. It is the only
+           thing on the row that says whether the endpoint is reachable, so it
+           has to survive a screen reader (the label, which says which way) and
+           a colour-blind reading (data-err, which the stylesheet keys off).
+           Both live on the dot itself, because the dot is the state - the cell
+           around it only positions it. */
+        (r.dot
+          ? '>' + '<span class="cp-dot" role="img" data-err="' + (r.hue === "error" ? "1" : "0") +
+            '" aria-label="' + esc(r.why2 || "") + '"></span>'
+          : ' aria-hidden="true">' + (r.icon ? icon(r.icon, "ic-11") : esc(r.glyph || ""))) +
+        "</span>";
+      var name = '<span class="t">' + esc(r.label) + "</span>";
+
       if (r.kind === "switch") {
+        /* A BREAKER, NOT A PILL - the design is explicit about it, and the
+           reason is that the state has to be readable without colour. A pill
+           says on/off with a position and a fill; this says it with the word,
+           so it survives every kind of colour blindness and a monochrome
+           screenshot. See `.cp-toggle`. */
         html += '<button class="cp-row cp-sw" role="switch" aria-checked="' +
-          (r.on ? "true" : "false") + '" data-pal="' + esc(r.id) + '"' + dis + title + '>' +
-          '<span class="t">' + esc(r.label) + "</span>" +
-          '<span class="cp-toggle" data-on="' + (r.on ? "1" : "0") + '"><span class="knob"></span></span>' +
-          "</button>";
-      } else if (r.kind === "value") {
-        html += '<button class="cp-row" data-pal="' + esc(r.id) + '"' + dis +
-          (r.title2 ? ' title="' + esc(r.title2 + (r.why2 ? " - " + r.why2 : "")) + '"' : title) + '>' +
-          (r.dot !== undefined
-            ? '<span class="cp-dot" data-err="' + esc(r.dot) + '" role="img" aria-label="' +
-              esc(r.why2 || "") + '"></span>'
-            : "") +
-          '<span class="t">' + esc(r.label) + "</span>" +
-          '<span class="cp-val">' + esc(r.value || "") + "</span></button>";
+          (r.on ? "true" : "false") + '"' + attrs + ">" + ic + name +
+          '<span class="cp-toggle" data-on="' + (r.on ? "1" : "0") + '">' +
+            '<span class="knob"></span>' +
+            '<span class="lbl">' + (r.on ? "ON" : "OFF") + "</span>" +
+          "</span></button>";
       } else {
-        html += '<button class="cp-row' + (r.accent ? " act" : "") + '" data-pal="' +
-          esc(r.id) + '"' + dis + title + '>' +
-          (r.icon ? icon(r.icon, "ic-14") : "") +
-          '<span class="t">' + esc(r.label) + "</span>" +
-          (r.note ? '<span class="cp-note">' + esc(r.note) + "</span>" : "") + "</button>";
+        /* Every other row is the same three parts, and only the right-hand one
+           varies: a mono reading (a model name, a count), a boxed reason it
+           cannot fire, or a keybinding. Never more than one - a row with a
+           value AND a tag AND a shortcut is a row nobody reads. */
+        var right = "";
+        /* SAID ONCE PER GROUP, NEVER ON EVERY ROW. All five EDIT rows go dark
+           together for one reason - there is no file focused - and five
+           identical boxed reasons stacked down the list is the loudest thing
+           in the window, on the rows that should be the quietest. The first
+           row of the run carries it; the rest are dim, which already says it. */
+        if (!r.live && r.tag && r.tag !== lastTag) right = '<span class="cp-tag">' + esc(r.tag) + "</span>";
+        else if (r.value) right = '<span class="cp-val">' + esc(r.value) + "</span>";
+        else if (r.kbd) right = '<span class="cp-kbd">' + esc(r.kbd) + "</span>";
+        lastTag = r.live ? "" : (r.tag || "");
+        html += '<button class="cp-row" data-kind="' + esc(r.kind) + '"' + attrs + ">" +
+          ic + name + right + "</button>";
       }
     }
-    if (!html) html = '<div class="cp-empty">No matching command</div>';
+    if (!html) html = '<div class="cp-empty">No matching option</div>';
     body.innerHTML = html;
+  }
+
+  /** Which of the six accents a group wears. One table, so the header dot, the
+   *  header text and the rule can never drift apart. */
+  function secHue(sec) {
+    return {
+      MODEL: "ask", CONTEXT: "ctx", EDIT: "plan",
+      SESSION: "link", CONNECTION: "act", WORKSPACE: "plan",
+    }[sec] || "dim";
+  }
+
+  /** Put the selected row on screen after a key moved it. */
+  function palScroll() {
+    var body = $("cpBody");
+    var el = body && body.querySelector('.cp-row[data-sel="1"]');
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
+  }
+
+  /**
+   * The four keys the footer promises, and nothing else.
+   *
+   * They are bound on the FILTER, not on the rows, because the filter is where
+   * focus lives the whole time the palette is open - you type to narrow and
+   * arrow to choose without ever leaving the box. A palette that made you tab
+   * into the list to use the arrow keys would be a palette you use with the
+   * mouse.
+   */
+  function onPalKey(e) {
+    var rows = palVisible();
+    if (!rows.length) return false;
+    var at = 0;
+    for (var i = 0; i < rows.length; i++) if (rows[i].id === S.palSel) at = i;
+
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      var d = e.key === "ArrowDown" ? 1 : -1;
+      // Wraps, because a list this long with a filter on it is a ring, not a
+      // ladder - stopping dead at the last row just means pressing up 27 times.
+      S.palSel = rows[(at + d + rows.length) % rows.length].id;
+      renderCmdPal(); palScroll(); return true;
+    }
+    if (e.key === "Tab") {
+      // The next group's first row. With six groups and 28 rows, the arrow keys
+      // alone are a long walk; this is the one that makes the list navigable.
+      var here = rows[at].sec, j = at;
+      for (var k = 1; k <= rows.length; k++) {
+        var n = rows[(at + (e.shiftKey ? -k + rows.length : k)) % rows.length];
+        if (n.sec !== here) { j = n; break; }
+      }
+      if (j && j.id) {
+        // Shift+Tab landed on the LAST row of the previous group; walk back to
+        // its first, which is the row a "previous group" key should reach.
+        if (e.shiftKey) {
+          var idx = rows.indexOf(j);
+          while (idx > 0 && rows[idx - 1].sec === j.sec) idx--;
+          j = rows[idx];
+        }
+        S.palSel = j.id;
+      }
+      renderCmdPal(); palScroll(); return true;
+    }
+    if (e.key === "Enter" || (e.key === " " && rows[at].kind === "switch")) {
+      var r = rows[at];
+      if (!r.live) return true;   // swallowed: a disabled row must not fall through
+      runPalRow(r);
+      return true;
+    }
+    return false;
+  }
+
+  /** Run one row, and decide whether the palette survives it.
+   *  A switch stays open - you may want to throw two - and everything else
+   *  closes, because it has just taken you somewhere. */
+  function runPalRow(r) {
+    if (!r || !r.live || !r.run) return;
+    if (r.kind === "switch") { r.run(); return; }
+    toggleCmdPal(false);
+    r.run();
   }
 
   /** Sit the palette on the bar's top edge, 8px clear, for the same reason
@@ -4933,6 +5205,7 @@ function _sbRun() {
       closePops();
       togglePerm(false);
       S.palQ = "";
+      S.palSel = "";
       var f = $("cpFilter");
       if (f) f.value = "";
       renderCmdPal();
@@ -7208,18 +7481,33 @@ function _sbRun() {
     /* The palette: its filter, its rows, and the group of glyphs it feeds. */
     $("cpFilter").addEventListener("input", function () {
       S.palQ = this.value;
+      // Typing re-aims at the top of what survived. Keeping the old selection
+      // through a filter leaves the highlight on a row that is no longer
+      // drawn, and then ENTER runs something you cannot see.
+      S.palSel = "";
       renderCmdPal();
+    });
+    /* MOVE and RUN and TOGGLE, from the box you are already typing in. */
+    $("cpFilter").addEventListener("keydown", function (e) {
+      if (onPalKey(e)) { e.preventDefault(); e.stopPropagation(); }
     });
     $("cmdPal").addEventListener("click", function (e) {
       var b = e.target.closest("[data-pal]");
       if (!b || b.disabled) return;
       var id = b.getAttribute("data-pal");
-      var row = palRows().filter(function (r) { return r.id === id; })[0];
-      if (!row || !row.run) return;
-      // A switch keeps the palette open - flipping one is a setting, not a
-      // destination. Everything else has done its job and the palette goes.
-      if (row.kind !== "switch") toggleCmdPal(false);
-      row.run();
+      runPalRow(palRows().filter(function (r) { return r.id === id; })[0]);
+    });
+    /* THE POINTER AND THE KEYBOARD SHARE ONE SELECTION. Two highlights - a
+       hover fill under the mouse and a separate selected row under the arrow
+       keys - is two answers to "what does ENTER do", so the mouse moves the
+       real selection and there is only ever one row lit. */
+    $("cpBody").addEventListener("mousemove", function (e) {
+      var b = e.target.closest(".cp-row");
+      if (!b || b.disabled) return;
+      var id = b.getAttribute("data-pal");
+      if (id === S.palSel) return;
+      S.palSel = id;
+      renderCmdPal();
     });
     $("picks").addEventListener("click", function (e) {
       var b = e.target.closest("[data-pick]");
