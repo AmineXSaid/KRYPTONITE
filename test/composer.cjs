@@ -504,8 +504,21 @@ function boot() {
     // in a sentence is the boot log reporting the workspace came up. "Pick up
     // where you left off" is withheld until there is a thread to resume (see the
     // recent-sessions case below), so a first run shows the log and the openers.
-    ok("saying so in the copy", /initializing workspace/.test(w.textContent),
-      w.textContent.slice(0, 90));
+    /* It says so as a TRANSCRIPT, not as a sentence: a command that ran, then
+       a bracketed status line per thing that came up. `initializing workspace`
+       was the prose version of the same claim - this asserts the shape the
+       terminal actually has, which is the part that must not regress. */
+    ok("saying so as a command that ran",
+      !!w.querySelector(".boot-line.echo") && /genesis init/.test(w.textContent));
+    ok("and a status line per thing that came up",
+      w.querySelectorAll(".boot-line.rep .boot-st").length >= 3 &&
+      /workspace/.test(w.textContent),
+      String(w.querySelectorAll(".boot-line.rep").length) + " report lines");
+    /* Nothing in the column is timed. A boot log's `+12ms` is the strongest
+       tell that you are looking at one, and the panel measures none of these -
+       a number here would be decoration wearing the costume of a fact. */
+    ok("and never invents a latency it did not measure",
+      !/\+?\d+\s?ms/.test(w.textContent), w.textContent.slice(0, 60));
     ok("and does not yet invite a resume", !/Pick up where you left off/.test(w.textContent));
     // The invented examples are gone. Asserted on the markup rather than the
     // words, because the comment recording why they went still names them.

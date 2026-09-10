@@ -2626,50 +2626,82 @@ function _sbRun() {
     var mcpUp = servers.filter(function (x) { return x.state === "ready"; }).length;
     var mode = (S.config && S.config.approvalMode) || "ask";
 
-    /* The chrome. A label and a version, on a bar above the log - which is
-       what turns a bordered box into a terminal window. */
+    /* ── THE CHROME ───────────────────────────────────────────────────────
+       A shell host string, not a document title. `genesis@workspace:~` is the
+       thing every terminal in the world puts here, and it does two jobs at
+       once: it says which machine you are on, and it says this box is a
+       terminal before a single line has printed. */
+    var host = "genesis@" + (S.workspace.name || "workspace");
     var body = '<div class="boot-term">' +
       '<div class="boot-bar">' +
         '<span class="boot-led"></span>' +
-        '<span class="boot-name">genesis</span>' +
-        '<span class="boot-path">' + esc(S.workspace.name || "workspace") + "</span>" +
+        '<span class="boot-host">' + esc(host) + "</span>" +
+        '<span class="boot-cwd">:~</span>' +
         (ver ? '<span class="boot-ver">v' + esc(ver) + "</span>" : "") +
       "</div>" +
       '<div class="boot-body">';
 
-    body += '<div class="boot-line cmd"><span class="boot-g">genesis</span>' +
-      '<span class="boot-arrow">\u25B8</span>initializing workspace</div>';
+    /* The command that produced everything below it. A boot log with no
+       command at the top is a list; with one it is a transcript of something
+       that ran, which is the whole difference. */
+    var li = 0;
+    body += '<div class="boot-line echo" style="--i:' + (li++) + '">' +
+      '<span class="boot-sh">$</span>' +
+      '<span class="boot-cmd">genesis init</span></div>';
 
-    /* A tick, a label on a fixed column, and the value. The label column is
-       what makes eight lines scannable instead of eight sentences. */
-    function tick(label, meta, cls) {
-      return '<div class="boot-line ' + (cls || "ok") + '">' +
-        '<span class="boot-tick">' + (cls === "pending" ? "\u203A" : "\u2713") + "</span>" +
+    /* ── THE REPORT ───────────────────────────────────────────────────────
+       A bracketed status column, a label, a dotted leader, a value. The
+       leader is what a boot log has instead of a table: it carries the eye
+       across the gap without drawing a grid, and it is the reason eight lines
+       of wildly different lengths still line up.
+
+       NOTHING HERE IS TIMED, and that is deliberate. A real boot log prints
+       `+12ms` beside each line and it is the single strongest tell that you
+       are looking at one - but the panel does not measure any of these, so a
+       number here would be decoration wearing the costume of a fact. The
+       terminal reads as a terminal because of its shape, not because it is
+       lying about latency. */
+    function line(st, label, meta) {
+      return '<div class="boot-line rep" style="--i:' + (li++) + '">' +
+        '<span class="boot-st" data-st="' + st + '">' +
+          (st === "warn" ? "WARN" : "OK") + "</span>" +
         '<span class="boot-what">' + esc(label) + "</span>" +
+        '<span class="boot-lead"></span>' +
         '<span class="boot-meta">' + esc(meta) + "</span></div>";
     }
-    body += tick("workspace", S.workspace.name || "workspace");
+    body += line("ok", "workspace", S.workspace.name || "workspace");
     if (model) {
-      body += tick("endpoint", model + (ctxWin ? "  \u00B7  " + fmtK(ctxWin) + " ctx" : ""));
+      /* `fmtK` gives "200.0k", and the ".0" is two characters of nothing on the
+         longest value in the report - it was the difference between the line
+         fitting and losing "ctx" off the end. Whole thousands print whole. */
+      var ctxTxt = ctxWin >= 1000 && ctxWin % 1000 === 0
+        ? (ctxWin / 1000) + "k" : fmtK(ctxWin);
+      body += line("ok", "endpoint", model + (ctxWin ? " \u00B7 " + ctxTxt + " ctx" : ""));
     }
-    body += tick("skills", skillN + (skillN === 1 ? " loaded" : " loaded"));
-    if (agentN) body += tick("agents", agentN + (agentN === 1 ? " defined" : " defined"));
+    /* Skills is the one line that can legitimately report nothing, and a green
+       OK against zero reads as a success where nothing happened. */
+    body += line(skillN ? "ok" : "warn", "skills", skillN ? skillN + " loaded" : "none found");
+    if (agentN) body += line("ok", "agents", agentN + " defined");
     if (servers.length) {
-      body += tick("mcp", mcpUp + "/" + servers.length + " connected",
-        mcpUp === servers.length ? "ok" : "pending");
+      body += line(mcpUp === servers.length ? "ok" : "warn", "mcp",
+        mcpUp + "/" + servers.length + " connected");
     }
-    body += tick("approvals", permLabel(mode));
+    body += line("ok", "approvals", permLabel(mode));
+    /* The fact, and only the fact. This used to end "- ask me to review them",
+       which is an instruction the `review` card three inches below already
+       gives in full - and it was the one value long enough to truncate, so the
+       redundant half was also the half breaking the line. */
     if (changeN) {
-      body += tick(changeN === 1 ? "1 change" : changeN + " changes",
-        "uncommitted \u2014 ask me to review", "pending");
+      body += line("warn", "changes", changeN + " uncommitted");
     }
 
     /* THE PROMPT IS THE DOOR, so it is a button rather than a decorated line.
        It was a blinking cursor that did nothing, on a screen whose entire job
        is to get you typing. Clicking it hands off to the composer. */
-    body += '<button class="boot-go" data-act="handoff" ' +
+    body += '<button class="boot-go" data-act="handoff" style="--i:' + (li++) + '" ' +
       'aria-label="Start typing - opens the message box">' +
-      '<span class="boot-g">genesis</span><span class="boot-caret">\u276F</span>' +
+      '<span class="boot-g">' + esc(host) + "</span>" +
+      '<span class="boot-caret">\u276F</span>' +
       '<span class="boot-cursor"></span>' +
       '<span class="boot-go-hint">click to begin, or just start typing</span>' +
       "</button>";
@@ -2730,7 +2762,11 @@ function _sbRun() {
       }
       body += "</div></div>";
     }
-    logEl.appendChild(div("welcome boot", body));
+    /* `arriving` gates the print animation for exactly the reason it gates the
+       mark's spin: this function runs on every data refresh as well as on a
+       real arrival, and a session list landing under the panel would otherwise
+       replay the whole boot sequence while the user is reading it. */
+    logEl.appendChild(div("welcome boot" + (arriving !== false ? " arriving" : ""), body));
     // The Recent rows below still reveal a long title by scrolling it rather
     // than cutting it with an ellipsis, so measure them now they are in the
     // document. The boot cards wrap instead, so they carry no `.mq`.
