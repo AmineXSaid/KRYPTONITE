@@ -32,6 +32,7 @@ const code = [
   grab("  function icon(id, cls) {"),
   grab("  function highlight(code, lang) {"),
   grab("  function mermaidFigure(code) {"),
+  grab("  function fenceSegments(t) {"),
   grab("  function md(t) {"),
   // The grammars are object literals, so grab()'s "stop at `  }`" rule cannot
   // lift them. Sliced whole instead, which also means a new language family
@@ -77,8 +78,55 @@ ck(/<hr class="md-hr">/.test(md("___")), "thematic break, underscores");
 ck(/<blockquote class="md-q">note<\/blockquote>/.test(md("> note")), "blockquote");
 ck(/<ul class="md-l"><li>a<\/li><li>b<\/li><\/ul>/.test(md("- a\n- b")), "unordered list");
 ck(/<ol class="md-l"><li>one<\/li>/.test(md("1. one\n2. two")), "ordered list");
-ck(/<ul class="md-l"><li>a<\/li><ul class="md-l"><li>nested<\/li>/.test(md("- a\n  - nested")), "one level of nesting");
+/* The sublist sits INSIDE the item that introduced it. It used to be emitted
+   as a sibling of the `<li>` - `<ul><li>a</li><ul>…</ul></ul>` - which is
+   invalid: `ul` may contain `li`, `script` and `template`, nothing else.
+   Browsers render it anyway, which is how it survived, but the list is then
+   structurally flat to assistive tech and to the browser's own list rules. */
+ck(/<ul class="md-l"><li>a<ul class="md-l"><li>nested<\/li><\/ul><\/li><\/ul>/.test(md("- a\n  - nested")),
+  "one level of nesting, inside its parent item");
 ck(/<p>plain<\/p>/.test(md("plain")), "paragraph");
+
+/* ── nesting is a DEPTH, not a boolean ─────────────────────────────────────
+   `d = m2[1].length >= 2 ? 1 : 0` meant two, four, six and eight spaces all
+   said "level one", so every outline came out two ranks deep however deep it
+   was written. These pin the real depth, and the tag each rank carries. */
+{
+  const three = md("- a\n  - b\n    - c");
+  ck((three.match(/<ul class="md-l">/g) || []).length === 3,
+    "a three-level outline opens three lists",
+    String((three.match(/<ul class="md-l">/g) || []).length));
+  ck(/<li>c<\/li><\/ul><\/li><\/ul><\/li><\/ul>/.test(three),
+    "and closes all three, each inside its own item");
+  // Valid all the way down: no list is ever a direct child of another list.
+  ck(!/<(ul|ol) class="md-l"><(ul|ol)/.test(three) && !/<\/li><(ul|ol) class="md-l"/.test(three),
+    "with no list left as a direct child of a list");
+
+  // The old code reused the OUTER list's tag for every nested one, so an
+  // ordered sub-list inside a bullet list rendered as <ul> and lost its numbers.
+  ck(/<ul class="md-l"><li>a<ol class="md-l"><li>one<\/li>/.test(md("- a\n  1. one")),
+    "an ordered sub-list inside a bullet list is an ol");
+  ck(/<ol class="md-l"><li>one<ul class="md-l"><li>a<\/li>/.test(md("1. one\n  - a")),
+    "and a bullet sub-list inside an ordered one is a ul");
+
+  // A marker that changes kind at the same rank is a new list, not a list
+  // lying about what it is.
+  ck(/<\/ul><ol class="md-l"><li>one<\/li>/.test(md("- a\n1. one")),
+    "changing marker at the same rank starts a new list");
+
+  // A stray deep indent must not manufacture empty lists with nothing in them.
+  const jump = md("- a\n        - deep");
+  ck((jump.match(/<ul class="md-l">/g) || []).length === 2,
+    "an item indented straight to level four still opens only one more list",
+    String((jump.match(/<ul class="md-l">/g) || []).length));
+  ck(!/<ul class="md-l"><ul/.test(jump), "so no list is left empty");
+
+  // Bounded, so pathological input cannot open a list per space.
+  const deep = md("- a\n" + " ".repeat(40) + "- far");
+  ck((deep.match(/<ul class="md-l">/g) || []).length <= 5,
+    "and depth is capped rather than unbounded",
+    String((deep.match(/<ul class="md-l">/g) || []).length));
+}
 
 console.log("\n──── syntax highlighting ────");
 {
@@ -252,6 +300,41 @@ ck(/<div class="cb">[\s\S]*<pre>unterminated/.test(md("```\nunterminated")), "an
 ck(/<code>x<\/code>/.test(md("`x`")), "inline code");
 ck(/<code>a_b_c<\/code>/.test(md("`a_b_c`")), "underscores inside inline code survive");
 ck(/<code>\*\*bold\*\*<\/code>/.test(md("`**bold**`")), "asterisks inside inline code survive");
+
+/* ── A FENCE IS A LINE, NOT A SUBSTRING ────────────────────────────────────
+   This was `split("```")` with odd chunks treated as code, and the parity was
+   the bug: one unmatched ``` anywhere - a model TALKING ABOUT a fence, which
+   in this product is constant - flipped every following block into code.
+   Measured on a fixture holding one such sentence, the table, the callout, the
+   task list and the rule after it all rendered as zero.
+
+   These are the regression: prose that mentions a fence must leave everything
+   after it alone. */
+{
+  const talking = md(
+    "Open one with ``` at the start of a line.\n\n" +
+    "| a | b |\n| --- | --- |\n| 1 | 2 |\n\n" +
+    "- [ ] still a task\n\n---\n\n> [!NOTE]\n> still a callout");
+  ck(!/<div class="cb">/.test(talking), "a ``` inside a sentence opens no code block");
+  ck(/<table class="md-t">/.test(talking), "and the table after it still renders");
+  ck(/md-task/.test(talking), "and the task list");
+  ck(/<hr class="md-hr">/.test(talking), "and the rule");
+  ck(/md-call/.test(talking), "and the callout");
+
+  // The closing run must be at least as long as the opening one, so a
+  // three-backtick line inside a four-backtick fence stays code. `split()`
+  // could not express a four-backtick fence at all.
+  const four = md("````\nhas ``` inside\n````");
+  ck(/<pre>has ``` inside<\/pre>/.test(four) || /<pre>has ```/.test(four),
+    "a four-backtick fence holds a three-backtick line");
+  ck((four.match(/<div class="cb">/g) || []).length === 1, "as exactly one block");
+
+  // An indented fence is still a fence; a fence with an info string carrying a
+  // backtick is not one.
+  ck(/<div class="cb">/.test(md("  ```js\nx\n  ```")), "a fence indented up to three spaces still opens");
+  ck(/<p>a `` ` `` b<\/p>/.test(md("a `` ` `` b")) || !/<div class="cb">/.test(md("a `` ` `` b")),
+    "backticks inside a sentence never open a block");
+}
 
 console.log("\n──── tables ────");
 {

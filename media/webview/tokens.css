@@ -100,6 +100,36 @@
      quickly and arrives slowly, which is how a thing that was thrown settles
      rather than a thing that was faded. */
   --kx-hand: cubic-bezier(.22, .8, .28, 1);
+
+  /* ── THE TRANSCRIPT'S VERTICAL RHYTHM ─────────────────────────────────────
+   *
+   * The first space tokens in this file, and deliberately only three. The
+   * markdown blocks had grown SEVEN different gaps - 3, 6, 7, 8, 9, 12 and 14
+   * - with no shared unit between them, so the distance between a paragraph
+   * and a list was not the same as between a list and a quote, and nothing
+   * said which was right. Seven values is not a rhythm, it is seven decisions
+   * taken separately.
+   *
+   * Three is enough because a transcript block is only ever one of three
+   * things: something inside another thing, a run of prose, or a framed object.
+   *
+   * These are NOT a general spacing scale for the panel. The chrome around the
+   * transcript was tuned against its own constraints and is left alone; the
+   * names say `md` because that is exactly how far they reach. */
+   * The values are the SMALL end of what the seven were, not their average.
+   * A first pass took the middle - 4/7/11 - and normalised the rhythm without
+   * saving a pixel: it lowered the paragraph gap and the rule, and raised every
+   * framed block from 8 to 11 and every list item from 3 to 4, which cancelled
+   * to 0.1px across the whole answer. Consistency was the easy half; the ask
+   * was density, and density means picking the bottom of the range and then
+   * checking it still reads. */
+  --kx-md-tight: 3px;   /* between list items - inside one block            */
+  --kx-md-gap:   6px;   /* between paragraphs - the default block gap       */
+  --kx-md-block: 8px;   /* around a framed block: code, table, quote, call  */
+  /* One indent for every rank of a list. 16, not the 18 it was: the sublist
+     now nests inside its parent item rather than beside it, so the ranks
+     compound properly and each one can afford to be smaller. */
+  --kx-md-indent: 16px;
   /* THE SURFACES ARE STEPS OFF THE GROUND, NOT COLOURS OF THEIR OWN.
    *
    * These were fixed greys balanced against #181818, and once the panel

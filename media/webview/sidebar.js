@@ -917,19 +917,64 @@ function _sbRun() {
     if (back && document.contains(back)) back.focus();
   }
 
+  /**
+   * Cut the source into prose and fenced-code segments.
+   *
+   * THIS USED TO BE `split("```")`, WITH ODD CHUNKS TREATED AS CODE, and the
+   * parity was the bug: one unmatched ``` anywhere - a model *talking about* a
+   * fence, which in this product is constant - flipped every following block
+   * into code. Measured on a fixture holding one such sentence, the table, the
+   * callout, the task list and the rule after it all rendered as zero: they had
+   * been swallowed into two spurious code blocks. An answer that so much as
+   * mentions a fence lost the rest of its formatting.
+   *
+   * A fence is a LINE, not a substring, which is what CommonMark says and what
+   * makes an inline ``` in prose harmless. Opening runs of four or more
+   * backticks now work too - `split` could not express them at all - and the
+   * closing run must be at least as long as the one that opened it, so a
+   * three-backtick line inside a four-backtick fence stays code.
+   *
+   * An unterminated fence still yields code, which is the mid-stream case: a
+   * block being typed out should look like the block it is becoming, not like
+   * its source dumped into prose.
+   */
+  function fenceSegments(t) {
+    var src = String(t).split("\n");
+    var segs = [];
+    var prose = [];
+    var i = 0;
+    function flush() {
+      if (prose.length) { segs.push({ code: false, text: prose.join("\n") }); prose = []; }
+    }
+    while (i < src.length) {
+      // The info string may not contain a backtick - that is what stops a line
+      // like "use ``` to open a fence" from being read as one.
+      var open = src[i].match(/^ {0,3}(`{3,})[ \t]*([^`]*)$/);
+      if (!open) { prose.push(src[i]); i++; continue; }
+      flush();
+      var close = new RegExp("^ {0,3}`{" + open[1].length + ",}[ \\t]*$");
+      var body = [];
+      i++;
+      while (i < src.length && !close.test(src[i])) { body.push(src[i]); i++; }
+      if (i < src.length) i++;   // consume the closing line
+      segs.push({ code: true, lang: open[2].trim(), body: body.join("\n") });
+    }
+    flush();
+    return segs;
+  }
+
   function md(t) {
     var out = "";
-    var chunks = String(t).split("```");
+    var chunks = fenceSegments(t);
 
     for (var c = 0; c < chunks.length; c++) {
-      /* Odd chunks are fenced code. An unterminated fence - common mid-stream -
-         still renders as code rather than dumping the source as prose. */
-      if (c % 2) {
-        var body = chunks[c];
-        var nl = body.indexOf("\n");
-        var lang = nl === -1 ? body.trim() : body.slice(0, nl).trim();
-        var code = nl === -1 ? "" : body.slice(nl + 1);
-        if (/[^\w.+#-]/.test(lang)) { code = body; lang = ""; }
+      if (chunks[c].code) {
+        var lang = chunks[c].lang;
+        var code = chunks[c].body;
+        // An info string carrying anything but a language id is not a language.
+        // The body is still the body - it is delimited by its fence lines now,
+        // not by a parity count, so a strange label cannot swallow the text.
+        if (/[^\w.+#-]/.test(lang)) lang = "";
         // A mermaid block is a picture the model could only describe in text,
         // so the transcript draws it: the source becomes an SVG in place. The
         // header still carries Copy, and it copies the SOURCE, since that is
@@ -953,7 +998,7 @@ function _sbRun() {
         continue;
       }
 
-      var lines = chunks[c].split("\n");
+      var lines = chunks[c].text.split("\n");
       var i = 0;
       while (i < lines.length) {
         var line = lines[i];
@@ -1015,32 +1060,90 @@ function _sbRun() {
           continue;
         }
 
-        /* Lists. Nesting is by leading whitespace, two levels deep - beyond
-           that a sidebar has no horizontal room to show the difference. */
-        var li = line.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
+        /* ── Lists ─────────────────────────────────────────────────────────
+           Nesting is by leading whitespace, and it used to be a BOOLEAN:
+           `d = m2[1].length >= 2 ? 1 : 0`, so two, four, six and eight spaces
+           all meant "level one" and every outline the model wrote came out
+           two ranks deep however deep it actually was.
+
+           It is a real depth now, and the open lists are a STACK rather than a
+           counter - which is what fixes the second half of the same bug: the
+           old code reused the OUTER list's tag for every nested one, so an
+           ordered sub-list inside a bullet list rendered as <ul> and lost its
+           numbers. Each level now remembers what it is. */
+        var li = line.match(/^([ \t]*)([-*+]|\d+[.)])\s+(.*)$/);
         if (li) {
-          var ordered = /\d/.test(li[2]);
-          var tag = ordered ? "ol" : "ul";
-          // An ordered list that starts at 3 must show 3. A model numbering the
-          // steps of a plan across paragraphs restarted at 1 in every fragment.
-          var startAt = ordered ? parseInt(li[2], 10) : 1;
-          var open = "<" + tag + ' class="md-l"' +
-            (ordered && startAt > 1 ? ' start="' + startAt + '"' : "") + ">";
-          out += open;
-          var depth = 0;
+          /* A tab is one level; two spaces are one level. Capped at four,
+             because a sidebar has no horizontal room for a fifth rank and
+             pathological input should not be able to open sixty lists. */
+          var levelOf = function (ws) {
+            var n = 0;
+            for (var k = 0; k < ws.length; k++) n += ws.charAt(k) === "\t" ? 2 : 1;
+            return Math.min(4, n >> 1);
+          };
+          /* Each entry is `{tag, inLi}`. `inLi` records whether this list was
+             tucked back INSIDE the item above it, so the closer knows whether
+             it owes a `</li>` as well.
+
+             A NESTED LIST BELONGS TO ITS PARENT ITEM. This emitted the sublist
+             as a SIBLING of the `<li>` - `<ul><li>a</li><ul>...</ul></ul>` -
+             which is invalid: `ul` may contain `li`, `script` and `template`,
+             and nothing else. Browsers render it anyway, which is why it
+             survived, but the list is then structurally flat: assistive tech
+             announces the ranks wrong and the browser's own list semantics do
+             not apply. The item is reopened instead, by taking back the
+             `</li>` just written - the same surgery the continuation-line
+             branch above already does. */
+          var stack = [];
+          var closeTop = function () {
+            var top = stack.pop();
+            out += "</" + top.tag + ">" + (top.inLi ? "</li>" : "");
+          };
           while (i < lines.length) {
-            var m2 = lines[i].match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
+            var m2 = lines[i].match(/^([ \t]*)([-*+]|\d+[.)])\s+(.*)$/);
             if (!m2) {
               /* A wrapped continuation line belongs to the open item. */
-              if (lines[i].trim() && /^\s{2,}/.test(lines[i]) && out.slice(-5) === "</li>") {
+              if (lines[i].trim() && /^(\s{2,}|\t)/.test(lines[i]) && out.slice(-5) === "</li>") {
                 out = out.slice(0, -5) + " " + inline(lines[i].trim()) + "</li>";
                 i++; continue;
               }
               break;
             }
-            var d = m2[1].length >= 2 ? 1 : 0;
-            if (d > depth) { out += "<" + tag + ' class="md-l">'; depth = d; }
-            else if (d < depth) { out += "</" + tag + ">"; depth = d; }
+            /* NEVER SKIP A RANK. An item indented straight to level three opens
+               ONE list, not three - a stray indent must not manufacture empty
+               nested lists with nothing in them. */
+            var d = Math.min(levelOf(m2[1]), stack.length);
+            var ordered = /\d/.test(m2[2]);
+            var tag = ordered ? "ol" : "ul";
+            while (stack.length - 1 > d) closeTop();
+            /* A marker that changes type at the same rank starts a new list,
+               which is what makes `- a` followed by `1. b` two lists rather
+               than one list that lies about its own kind. It is a SIBLING of
+               the list it replaces, not a child of its last item - which is why
+               the open below is told not to absorb. */
+            var sibling = false;
+            if (stack.length - 1 === d && stack[stack.length - 1].tag !== tag) {
+              closeTop();
+              sibling = true;
+            }
+            if (stack.length - 1 < d) {
+              /* Going deeper: the sublist belongs to the item that introduced
+                 it, so take the `</li>` back and let this list close it.
+
+                 `stack.length` guards it. Only a list opening INSIDE another
+                 one may absorb - the outermost list must never reach back past
+                 its own start and adopt an `</li>` that some earlier block
+                 happened to leave at the end of `out`. */
+              var inLi = !sibling && stack.length > 0 && out.slice(-5) === "</li>";
+              if (inLi) out = out.slice(0, -5);
+              // An ordered list that starts at 3 must show 3. A model numbering
+              // the steps of a plan across paragraphs restarted at 1 in every
+              // fragment.
+              var startAt = ordered ? parseInt(m2[2], 10) : 1;
+              out += "<" + tag + ' class="md-l"' +
+                (ordered && startAt > 1 ? ' start="' + startAt + '"' : "") + ">";
+              stack.push({ tag: tag, inLi: inLi });
+            }
             // A checklist is not a bullet list. `- [x] ship it` was rendering as
             // a bullet with literal square brackets, which is the shape models
             // use for plans and progress - the exact case worth seeing at a
@@ -1056,8 +1159,7 @@ function _sbRun() {
             }
             i++;
           }
-          while (depth-- > 0) out += "</" + tag + ">";
-          out += "</" + tag + ">";
+          while (stack.length) closeTop();
           continue;
         }
 
@@ -1252,8 +1354,16 @@ function _sbRun() {
                with no signal it had, and the only route down was scrolling by
                hand. Shown only when it is true, so it costs no chrome the rest
                of the time. */
-            '<button class="to-latest" id="toLatest" hidden>' +
-              icon("i-caret", "ic-11") + "<span>Jump to latest</span></button>" +
+            /* THE MARK ALONE, AND A NAME THAT IS NOT DRAWN. A caret pointing
+               down at the foot of a scroller is one of the few icons that
+               needs no gloss - the words were doing nothing the arrow was not
+               already saying, and they made a floating chip four times wider
+               than it had to be. The name moves to `aria-label`, which is not
+               optional: an icon-only control without one is a button a screen
+               reader announces as nothing at all. */
+            '<button class="to-latest" id="toLatest" hidden ' +
+              'aria-label="Jump to latest" title="Jump to latest">' +
+              icon("i-caret", "ic-13") + "</button>" +
           "</div>" +
           /* THE TRANSCRIPT IS NOT A LIVE REGION, AND USED TO BE ONE.
            *
@@ -3087,9 +3197,21 @@ function _sbRun() {
    * because ordinary prose is the common case, not because it is clever.
    */
   function tailIsPlain(text, from) {
-    // An odd number of fences anywhere means one is open right now.
-    var fences = text.split("```").length - 1;
-    if (fences % 2) return false;
+    /* ONE DEFINITION OF "INSIDE A FENCE", shared with the parser.
+     *
+     * This counted ``` occurrences and called an odd total an open fence,
+     * which was the same parity trick `md()` used and is wrong for the same
+     * reason: a ``` mentioned mid-sentence is not a fence. Once md() stopped
+     * counting, the two disagreed - and they disagreed in the UNSAFE
+     * direction. One inline mention plus one real opening fence is two, an
+     * even number, so this would call the tail plain and take the cheap path
+     * while genuinely inside a code block. It needs a fence body containing a
+     * blank line to bite, which is rare and would have been baffling.
+     *
+     * Asking the parser instead means the two can never drift again: if the
+     * last segment it cuts is code, a fence is open. */
+    var segs = fenceSegments(text);
+    if (segs.length && segs[segs.length - 1].code) return false;
     var tail = text.slice(from);
     return !/[`*_~\[\]<>|#>-]/.test(tail) && tail.indexOf("\n") === -1;
   }
@@ -5398,6 +5520,15 @@ function _sbRun() {
     if (!pal) return;
     var want = open === undefined ? pal.hidden : open;
     if (want) {
+      /* OPENING THE PALETTE IS A WAY IN TOO.
+       *
+       * The palette lives inside the composer wrapper, and the welcome screen
+       * holds that wrapper translated away and `visibility: hidden` until you
+       * hand off - so on a fresh conversation Ctrl+K opened a panel nobody
+       * could see, and the shortcut simply did nothing. Reaching for the
+       * command list is as clear a statement of "I am starting" as typing is,
+       * so it hands off first and then opens. */
+      handOff();
       closePops();
       togglePerm(false);
       S.palQ = "";

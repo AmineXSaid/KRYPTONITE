@@ -152,6 +152,13 @@ const FILES = [
     await page.evaluate((s) => { window.__lastState = s; window.dispatchEvent(
       new MessageEvent("message", { data: { type: "stateSync", state: s } })); }, { ...BASE, ...state });
     await page.waitForTimeout(250);
+    /* HAND OFF, THE WAY A USER DOES. Every case in this file types into
+       `#draft`, and an empty conversation opens on the welcome terminal with
+       the composer deliberately not there yet - translated away, hidden, and
+       out of the tab order until you commit to typing. Reaching past that
+       screen would be testing a state no user is ever in. */
+    const term = page.locator(".welcome .boot-go");
+    if (await term.count()) { await term.click(); await page.waitForTimeout(320); }
     // Stand in for the host's file search: reply to every searchFiles with a
     // filtered list, the way src/core/app.ts does.
     await page.exposeFunction("__answer", () => {});

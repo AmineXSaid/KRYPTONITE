@@ -313,7 +313,15 @@ function boot() {
   const btn = b.d.getElementById("toLatest");
   ok("there is one", !!btn);
   ok("hidden while the log is already at the bottom", btn.hidden);
-  ok("and it says where it goes", /latest/i.test(btn.textContent), btn.textContent);
+  /* IT SAYS WHERE IT GOES WITHOUT DRAWING IT. The words came off the control -
+     a caret at the foot of a scroller needs no caption, and the label made the
+     chip four times wider than the mark. So the name is `aria-label` now, and
+     this asserts the accessible name rather than the visible text: an
+     icon-only button without one is announced as nothing at all, which is the
+     exact regression this line exists to catch. */
+  ok("and it says where it goes",
+    /latest/i.test(btn.getAttribute("aria-label") || ""), btn.getAttribute("aria-label"));
+  ok("without spending a caption on it", !btn.textContent.trim());
   ok("it is positioned against the transcript, not the panel",
     /#viewSession\s*\{[^}]*position:\s*relative/.test(CSS));
   b.dom.window.close();

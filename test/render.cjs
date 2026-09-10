@@ -244,21 +244,41 @@ function contrast(a, b) {
       { ...BASE, ...state }
     );
     await page.waitForTimeout(400);
+    /* ── HAND OFF, THE WAY A USER DOES ─────────────────────────────────────
+     * An empty conversation opens on the welcome terminal, and the composer is
+     * deliberately not there yet: translated away, `visibility: hidden` and out
+     * of the tab order until you commit to typing. That is the feature, so a
+     * test that wants to drive the composer has to get there the way a person
+     * does rather than by reaching past the screen in front of it.
+     *
+     * Every caller that touches `#draft`, the palette or the send button gets
+     * the hand-off; the handful that are ABOUT the welcome pass
+     * `welcome: true` and are left on it. */
+    if (!opts.welcome) {
+      const term = page.locator(".welcome .boot-go");
+      if (await term.count()) {
+        await term.click();
+        await page.waitForTimeout(320);   // the rise, plus the focus that follows it
+      }
+    }
     return { ctx, page, errors };
   }
 
   /* ── 1. the panel renders at all ───────────────────────────────────── */
   {
-    const { ctx, page, errors } = await open(400, {});
+    const { ctx, page, errors } = await open(400, {}, { welcome: true });
     ok("the shipped panel boots with no script error", errors.length === 0, errors.slice(0, 2).join(" | "));
 
     const header = page.locator(".kx-header");
     ok("the header renders", (await header.count()) === 1);
-    // The header carries no wordmark and no brand mark now - it opens straight
-    // on the tabs - so the wordmark is read from the welcome screen (.w-mark),
-    // which is where it lives and which the boot state shows.
-    const wordmark = await page.locator(".welcome .w-mark").first().textContent();
-    ok("the wordmark reads GENESIS", /genesis/i.test(wordmark || ""), wordmark);
+    /* The header carries no wordmark and no brand mark - it opens straight on
+       the tabs - and the WELCOME no longer carries one either: it is a terminal
+       now, and it opens `$ genesis init`. Between the tab strip, that command
+       and the report's own `workspace` row, a wordmark was the product's name
+       said a fourth time on one screen. The claim is unchanged - the panel says
+       which assistant this is - so it is read where it is now said. */
+    const wordmark = await page.locator(".welcome .boot-line.echo").first().textContent();
+    ok("the welcome names the product", /genesis/i.test(wordmark || ""), wordmark);
 
     // The brand face fails SILENTLY: a missing woff2 falls back to a platform
     // face and the header still reads "GENESIS", just in the wrong typeface.
@@ -272,9 +292,11 @@ function contrast(a, b) {
       return m ? m[1] : "";
     })();
     ok("tokens.css names a brand face", brandFam.length > 0, brandFam);
-    const fam = await page.locator(".welcome .w-mark").first()
+    // The command line is the mono surface the welcome now leads with, so it is
+    // what proves the brand face reaches the screen.
+    const fam = await page.locator(".welcome .boot-line.echo").first()
       .evaluate((el) => getComputedStyle(el).fontFamily);
-    ok("and the wordmark is set in it", fam.includes(brandFam), fam);
+    ok("and the welcome's mono is set in it", fam.includes(brandFam), fam);
 
     // getComputedStyle reports the DECLARED stack whether or not the file
     // loaded, so the check above cannot see a dropped woff2 - the failure its
@@ -324,10 +346,10 @@ function contrast(a, b) {
       painted ? `luminance ${lum(painted).toFixed(3)}` : "none");
 
     // Then the thing a user would actually report: can you read it.
-    // `.w-mark`, not `.kx-wordmark`: the header and the tab strip were merged
-    // into one bar and the header's wordmark went with the row it cost. The
-    // name is set on the welcome screen now, which is where this reads it.
-    for (const [label, sel] of [["the wordmark", ".welcome .w-mark"], ["a tab", ".kx-tab"]]) {
+    // The welcome's command line, not a wordmark: the header and tab strip were
+    // merged into one bar and the header's wordmark went with the row it cost,
+    // and the welcome became a terminal that names the product in what it ran.
+    for (const [label, sel] of [["the welcome's command", ".welcome .boot-line.echo"], ["a tab", ".kx-tab"]]) {
       const el = page.locator(sel).first();
       if (!(await el.count())) { ok(`${label} renders in light`, false); continue; }
       const fg = rgb(await el.evaluate((e) => getComputedStyle(e).color));
@@ -419,9 +441,11 @@ function contrast(a, b) {
      The masthead turning crystal and the header bar mark were both removed:
      the only logo on the welcome is the background watermark (section 5t). */
   {
-    const { ctx, page } = await open(400, {});
-    ok("the welcome wordmark renders",
-      (await page.locator(".welcome .w-mark").count()) === 1);
+    const { ctx, page } = await open(400, {}, { welcome: true });
+    // The terminal is what the welcome renders now; the wordmark it used to
+    // carry was the product's name said a fourth time on one screen.
+    ok("the welcome terminal renders",
+      (await page.locator(".welcome .boot-term").count()) === 1);
     ok("and there is no foreground mark beside it",
       (await page.locator(".welcome .crystal").count()) === 0);
     ok("and the header bar carries no mark either",
@@ -748,15 +772,15 @@ function contrast(a, b) {
   /* ── 5f. a data refresh still redraws the welcome ─────────────
      The turning masthead mark is gone, so there is no entrance to replay; what
      still matters is that a session list landing under the panel redraws the
-     welcome rather than blanking it. Keyed on the wordmark now, not the mark. */
+     welcome rather than blanking it. Keyed on the terminal now, not the wordmark. */
   {
-    const { ctx, page } = await open(400, {});
-    ok("the welcome renders", (await page.locator(".welcome .w-mark").count()) === 1);
+    const { ctx, page } = await open(400, {}, { welcome: true });
+    ok("the welcome renders", (await page.locator(".welcome .boot-term").count()) === 1);
     const refreshed = await page.evaluate(() => {
       window.dispatchEvent(new MessageEvent("message", {
         data: { type: "sessionsListed", sessions: [] },
       }));
-      return !!document.querySelector(".welcome .w-mark");
+      return !!document.querySelector(".welcome .boot-term");
     });
     ok("a session list arriving still redraws the welcome", refreshed);
     await ctx.close();
@@ -1556,7 +1580,8 @@ function contrast(a, b) {
     // It renders as the boot screen at every dock width, reports what mounted,
     // offers three cards, and never scrolls the panel sideways.
     for (const width of [300, 360, 420, 520, 900]) {
-      const { ctx, page } = await open(width, { sessions, session: { id: "s1", title: "", messages: [] } });
+      const { ctx, page } = await open(width, { sessions, session: { id: "s1", title: "", messages: [] } },
+        { welcome: true });
       await page.setViewportSize({ width, height: 900 });
       await page.waitForTimeout(200);
       const m = await page.evaluate(() => {
@@ -1564,44 +1589,65 @@ function contrast(a, b) {
         if (!wel) return { missing: true };
         return {
           text: wel.textContent,
-          panel: !!document.querySelector(".boot-panel"),
+          panel: !!document.querySelector(".boot-term"),
           cards: document.querySelectorAll(".boot-card[data-starter]").length,
           hScroll: document.documentElement.scrollWidth >
                    document.documentElement.clientWidth + 1,
         };
       });
       ok(`the boot welcome renders at ${width}px`, !m.missing && m.panel, JSON.stringify(m));
+      /* The log is a boot REPORT now, not four prose sentences: a command that
+         ran, then one bracketed status line per thing that came up. The claim
+         is the same - it says what actually mounted, read from state rather
+         than written into the screen - so it is checked against the labels the
+         report prints. */
       ok(`its log reports what mounted at ${width}px`,
-        /initializing workspace/.test(m.text || "") && /workspace mounted/.test(m.text || "") &&
-        /endpoint ready/.test(m.text || "") && /skills loaded/.test(m.text || ""),
-        (m.text || "").slice(0, 80));
+        /genesis init/.test(m.text || "") && /workspace/.test(m.text || "") &&
+        /endpoint/.test(m.text || "") && /skills/.test(m.text || "") &&
+        /approvals/.test(m.text || ""),
+        (m.text || "").slice(0, 90));
       ok(`the openers are three cards at ${width}px`, m.cards === 3, JSON.stringify(m));
       ok(`and it never scrolls the panel sideways at ${width}px`, !m.hScroll, JSON.stringify(m));
       await ctx.close();
     }
 
-    /* THE BACKGROUND LOGO OF THE SPLIT-SCREEN DIRECTION, brought onto the boot
-     * screen. It is one oversized mark bled off the corner at a whisper of
-     * opacity - texture, not a control - so it is aria-hidden, click-through,
-     * behind the content, and NOT the `.crystal`: that class names the single
-     * turning roundel in the masthead, which the animation suite counts. */
+    /* THE BACKGROUND LOGO, AND IT IS NO LONGER THE WELCOME'S.
+     *
+     * It was `.boot-bg`, a child of the boot screen, and it died with it. The
+     * hand-off is the reason it moved: the welcome clears, the composer rises,
+     * and the mark is the one thing on screen in BOTH states, so the eye has
+     * something to follow across the cut. A watermark that dies with the screen
+     * it decorates cannot do that job, so it lives on `#viewSession` now as
+     * `.void-mark`.
+     *
+     * Everything else the old assertions claimed still has to hold: texture,
+     * not a control - aria-hidden, click-through, behind the content, and NOT
+     * the `.crystal` that names the single turning roundel the animation suite
+     * counts. And a MEDIUM portion of it must show: the offsets were once
+     * percentages of the VIEW'S height rather than the mark's, so a taller
+     * panel cropped it harder and only 23% of its area was visible at 420px. */
     {
-      const { ctx, page } = await open(420, { session: { id: "s1", title: "", messages: [] } });
+      const { ctx, page } = await open(420, { session: { id: "s1", title: "", messages: [] } },
+        { welcome: true });
       const wm = await page.evaluate(() => {
-        const bg = document.querySelector(".boot-bg");
-        const mark = document.querySelector(".boot-bg-mark");
+        const bg = document.querySelector(".void-mark");
+        const mark = document.querySelector(".void-mark-svg");
         if (!bg || !mark) return { missing: true };
-        const cs = getComputedStyle(mark);
         const bgcs = getComputedStyle(bg);
+        const view = document.getElementById("viewSession").getBoundingClientRect();
+        const r = bg.getBoundingClientRect();
+        const ix = Math.max(0, Math.min(view.right, r.right) - Math.max(view.left, r.left));
+        const iy = Math.max(0, Math.min(view.bottom, r.bottom) - Math.max(view.top, r.top));
         return {
           crystals: document.querySelectorAll(".welcome .crystal").length,
-          opacity: parseFloat(cs.opacity),
+          opacity: parseFloat(bgcs.opacity),
           hidden: bg.getAttribute("aria-hidden") === "true",
           behind: (parseInt(bgcs.zIndex || "0", 10) || 0) <= 0,
           pe: bgcs.pointerEvents,
+          visible: Math.round((100 * ix * iy) / (r.width * r.height)),
         };
       });
-      ok("the split-screen watermark is on the boot screen", !wm.missing, JSON.stringify(wm));
+      ok("the watermark is on the view, so it outlives the welcome", !wm.missing, JSON.stringify(wm));
       ok("and it is the only logo: no foreground .crystal on the welcome",
         wm.crystals === 0, JSON.stringify(wm));
       ok("the watermark is a whisper, not a foreground",
@@ -1609,6 +1655,10 @@ function contrast(a, b) {
       ok("it sits behind the content", wm.behind, JSON.stringify(wm));
       ok("it is texture: aria-hidden and click-through",
         wm.hidden && wm.pe === "none", JSON.stringify(wm));
+      // A medium portion, not a stray arc. Both axes share one basis now, so
+      // this holds at any panel height rather than only at the one measured.
+      ok("and a medium portion of it is actually visible",
+        wm.visible >= 40 && wm.visible <= 80, JSON.stringify(wm));
       await ctx.close();
     }
 
@@ -1618,7 +1668,8 @@ function contrast(a, b) {
      * who asked for no motion, because a blink is exactly what that setting is
      * asking not to see. */
     {
-      const { ctx, page } = await open(420, { session: { id: "s1", title: "", messages: [] } });
+      const { ctx, page } = await open(420, { session: { id: "s1", title: "", messages: [] } },
+        { welcome: true });
       const cur = page.locator(".boot-cursor").first();
       ok("the boot prompt has a cursor", (await cur.count()) === 1);
       const anim = await cur.evaluate((el) => getComputedStyle(el).animationName);
@@ -2175,7 +2226,7 @@ function contrast(a, b) {
         { id: "a", title: "why Master is sending 0x3E", when: "7m ago", count: 14 },
         { id: "b", title: "create an svg image editor", when: "4m ago", count: 4, running: true },
       ],
-    });
+    }, { welcome: true });
     const text = (await page.locator("body").textContent()) || "";
     ok("a stored conversation is listed by title", text.includes("why Master is sending 0x3E"));
     ok("with how long ago it was touched", /7m ago/.test(text));
@@ -2194,9 +2245,14 @@ function contrast(a, b) {
     ok("a conversation working in the background is marked", (await live.count()) === 1);
     ok("and the idle one is not", (await page.locator('.w-item[data-run="0"]').count()) === 1);
 
-    // The welcome copy switches once there is something to come back to.
+    /* THE SECTION IS THE INVITATION NOW.
+       This asserted a sentence - "pick up where you left off, or start
+       something new" - which sat directly above two captions saying exactly
+       that: `Recent` is the picking up and `Start here` is the something new.
+       A line of copy introducing two labels that already say it is a line to
+       cut, so what is pinned is the thing that actually invites. */
     ok("the welcome copy invites you back rather than introducing itself",
-      /Pick up where you left off/.test(text), text.slice(0, 60));
+      /recent/i.test(text) && /start here/i.test(text), text.slice(0, 80));
     await ctx.close();
   }
 

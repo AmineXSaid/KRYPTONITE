@@ -102,17 +102,38 @@ function fontFaces(extensionUri: vscode.Uri, webview: vscode.Webview): string {
   ];
 
   const rules: string[] = [];
+  const preloads: string[] = [];
   for (const f of wanted) {
     if (!names.includes(f.file)) continue;
     const uri = webview.asWebviewUri(
       vscode.Uri.joinPath(extensionUri, "media", "fonts", f.file)
     );
+    /* PRELOAD, so the face starts loading with the document rather than after
+       the stylesheet has been parsed and something has asked for it. Both files
+       are always needed - there is no surface in this panel that uses neither -
+       so there is nothing speculative about fetching them first. */
+    preloads.push(
+      `<link rel="preload" as="font" type="font/woff2" href="${uri}" crossorigin>`
+    );
+    /* `block`, NOT `swap`.
+     *
+     * `swap` paints a fallback immediately and exchanges it when the real face
+     * arrives, which is the right default for a webfont coming over a network
+     * you do not control. These come off local disk: 40-45KB each, same origin,
+     * already on the machine. The swap is therefore never buying time - it is
+     * only guaranteeing one frame of the wrong typeface every time the panel
+     * opens, and permanently the wrong typeface if the file ever fails.
+     *
+     * `block` holds the text invisible for up to three seconds and then paints
+     * the real face. Against a local file that window is imperceptible, and it
+     * is the difference between "the design usually renders" and "the design
+     * renders". */
     rules.push(
       `@font-face{font-family:'${f.family}';font-style:${f.italic ? "italic" : "normal"};` +
-        `font-weight:${f.weight};font-display:swap;src:url('${uri}') format('woff2')}`
+        `font-weight:${f.weight};font-display:block;src:url('${uri}') format('woff2')}`
     );
   }
-  return rules.length ? `<style>${rules.join("")}</style>` : "";
+  return rules.length ? preloads.join("") + `<style>${rules.join("")}</style>` : "";
 }
 
 function assetUri(

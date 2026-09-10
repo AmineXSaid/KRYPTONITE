@@ -154,5 +154,46 @@ console.log("\n──── the wordmark keeps its own token ────");
   }
 }
 
+/* ── THE FACES MUST ACTUALLY WIN ───────────────────────────────────────────
+ *
+ * Everything above proves the families ship and are named. These prove the two
+ * things that decide whether a reader ever SEES them.
+ */
+console.log("\n──── forced, not merely offered ────");
+{
+  const SHELL = fs.readFileSync(path.join(ROOT, "src/ui/shell.ts"), "utf8");
+
+  /* `swap` paints a fallback first and exchanges it later - correct for a face
+     coming over a network you do not control, wrong for a 45KB file already on
+     the disk. Against a local file the swap never buys time; it only guarantees
+     one frame of the wrong typeface every time the panel opens, and permanently
+     the wrong typeface if the file ever fails to load. */
+  ok("the bundled faces block rather than swap",
+    /font-display:block/.test(SHELL) && !/font-display:swap/.test(SHELL));
+
+  /* Preloaded, so the fetch starts with the document instead of after the
+     stylesheet has been parsed and something has asked for the face. */
+  ok("and are preloaded, so the fetch starts with the document",
+    /rel="preload" as="font" type="font\/woff2"/.test(SHELL));
+
+  /* `hyphens: auto` is inert without a language to hyphenate by, and the
+     transcript now asks for it. */
+  ok("the document declares a language, so hyphenation has a dictionary",
+    /<html lang="/.test(SHELL));
+
+  /* NO SURFACE MAY DRIFT OFF THE TOKENS. A rule that names a family directly -
+     or falls back to a bare `sans-serif` - is a surface that stops tracking the
+     design the moment a token moves, and it is invisible until someone
+     screenshots it. The token definitions in tokens.css are the only place a
+     literal family name belongs. */
+  const CSS = fs.readFileSync(path.join(ROOT, "media/webview/sidebar.css"), "utf8");
+  const stray = [...CSS.matchAll(/font-family:\s*([^;}]+)/g)]
+    .map((m) => m[1].trim())
+    .filter((v) => !/^var\(--kx-(ui|mono|prose|display|brand)\)$/.test(v))
+    .filter((v) => !/^inherit$/.test(v));
+  ok("every surface takes its family from a token",
+    stray.length === 0, stray.join(" | "));
+}
+
 console.log(`\n──── ${pass} passed, ${failures.length} failed ────`);
 if (failures.length) { for (const f of failures) console.log("  FAIL " + f); process.exit(1); }

@@ -270,6 +270,19 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   from { opacity: 0; transform: translateY(-6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+/* OPACITY ONLY, for anything whose `transform` is doing layout work.
+ *
+ * The two above end on `transform: translateY(0)`, and with `both` fill that
+ * value PERSISTS after the animation - animations outrank normal declarations
+ * in the cascade, so they silently replace whatever transform the element's own
+ * rule set. On `.to-latest`, whose transform is a `translateX(-50%)` doing the
+ * horizontal centring, that meant the disc was never centred and its hover lift
+ * never painted. Anything centred, rotated or scaled by its own rule wants this
+ * one instead. */
+@keyframes g-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
 #historyPop { width: 262px; max-height: 300px; overflow-y: auto; }
 #morePop { width: 200px; }
 .pop-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 9px; border-radius: 4px; }
@@ -1288,13 +1301,25 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 /* â”€â”€ the two voices â”€â”€
  *
  * A transcript is a conversation between two parties and it has to read that
- * way at a glance, without labels. Four things separate them at once, so the
+ * way at a glance, without labels. Three things separate them at once, so the
  * distinction survives even in a dense scroll:
  *
- *   the question   a mint rail, 12.5px, medium weight, muted warm grey, tight
- *                  leading â€” it is a quotation of something you already know
- *   the answer     no rail, 13px, regular weight, full-strength warm white,
- *                  1.6 leading â€” the thing you are actually reading
+ *   the question   a BLUE rail, 12.5px, medium weight, muted warm grey - it
+ *                  is a quotation of something you already know
+ *   the answer     no rail, 13px, regular weight, full-strength warm white -
+ *                  the thing you are actually reading
+ *
+ * TWO OF THOSE CLAIMS WERE STALE, and this file's own rule is that a stated
+ * number must match the rule it describes - see the note on `.msg-ai`, which
+ * makes exactly that argument about its own leading.
+ *
+ * It said the answer had "1.6 leading". The answer is 1.5, and has been since
+ * the reduction documented on `.msg-ai` itself - so LEADING NO LONGER
+ * SEPARATES THE TWO VOICES. Both are 1.5, and the list above is three
+ * separators, not four: size, weight and colour, plus the rail's presence.
+ *
+ * And it called the rail "mint". The rail takes `--kx-link`, which is blue,
+ * and has never been green in this stylesheet.
  *
  * The rail takes the accent rather than a neutral line: it is the only mark in
  * the transcript that says "you", and a grey hairline said nothing.
@@ -1375,20 +1400,45 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   font-family: var(--kx-prose); font-size: 13px; line-height: 1.5;
   color: var(--kx-fg);
   text-wrap: pretty;
+  /* Pairs with `overflow-wrap: anywhere` above, and only bites where it is
+     needed: at a 280px dock a long identifier in running prose leaves a ragged
+     right edge with a hole in the middle of the line, and at a wide dock there
+     is room and this does nothing. Needs `lang` on the root to know which
+     dictionary to hyphenate by - see shell.ts. */
+  hyphens: auto;
 }
-.msg-ai p { margin: 0 0 7px; }
-.msg-ai p:last-child { margin-bottom: 0; }
+.msg-ai p { margin: 0 0 var(--kx-md-gap); }
+/* THE FIRST AND LAST BLOCK OWE NOTHING. Only headings had this, so an answer
+   that opened with a list or a callout carried its full top margin against
+   `#log`'s own 14px of padding, and every answer paid a bottom margin into the
+   gap `.msg-ai` was already providing. */
+.msg-ai > :first-child { margin-top: 0; }
+.msg-ai > :last-child { margin-bottom: 0; }
 /* Inline code gets a chip so identifiers pop out of prose instead of
-   blending into it. */
+   blending into it.
+
+   THE CHIP DOES NOT AND DID NOT STRETCH THE LINE, and it is worth writing that
+   down because it looks as though it might. Padding on an INLINE box does not
+   enter the line-box calculation at all - only `line-height` does - so a
+   paragraph carrying a chip has exactly the leading of one that does not.
+   Measured, because the opposite was assumed once and acted on: the chip is
+   16px against a 19.5px line, three and a half pixels INSIDE it.
+
+   `line-height: 1` is kept anyway, and only for that reason: it pins the
+   chip's own painted height to its font size, so if the transcript's leading
+   is ever retuned the chip does not silently grow with it. The padding stays
+   at 1px - a pass that raised it to 1.5 was correcting a problem that did not
+   exist and cost a pixel to do it. */
 .msg-ai code {
-  font-family: var(--kx-mono); font-size: 12px;
+  font-family: var(--kx-mono); font-size: 12px; line-height: 1;
   color: var(--kx-fg); background: var(--kx-surface-2);
   padding: 1px 5px; border-radius: 4px;
+  vertical-align: baseline;
 }
 .msg-ai pre, .code-block {
   background: var(--kx-surface-2); border-radius: 4px;
-  padding: 8px 10px; margin: 7px 0;
-  font-family: var(--kx-mono); font-size: 11px; line-height: 1.65;
+  padding: 7px 9px; margin: var(--kx-md-gap) 0;
+  font-family: var(--kx-mono); font-size: 11px; line-height: 1.6;
   white-space: pre; overflow-x: auto;
 }
 /* A chip inside a code block would be noise â€” the whole block is already code. */
@@ -1403,11 +1453,13 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 /* Fenced code, with the language as a tab above it. The wrapper owns the
    border so the header and body cannot drift apart on horizontal scroll. */
 .cb {
-  margin: 8px 0; border: 1px solid var(--kx-line); border-radius: 4px;
+  margin: var(--kx-md-block) 0; border: 1px solid var(--kx-line); border-radius: 4px;
   overflow: hidden; background: var(--kx-surface-2);
 }
+/* The header stays - it is what carries Copy, and the note below explains why
+   that cannot float over the code - but it was 26px tall for a 9px label. */
 .cb-h {
-  display: flex; align-items: center; gap: 6px; padding: 4px 9px;
+  display: flex; align-items: center; gap: 6px; padding: 3px 8px;
   border-bottom: 1px solid var(--kx-line);
   background: color-mix(in srgb, var(--kx-line) 22%, transparent);
 }
@@ -1537,7 +1589,18 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 .mm-zoom-body > svg { flex: none; display: block; margin: auto; }
 @media (prefers-reduced-motion: reduce) { .mm-zoom { backdrop-filter: none; } }
 
-.md-h { font-family: var(--kx-ui); line-height: 1.3; margin: 14px 0 6px; }
+/* `balance` rather than the `pretty` the body inherits: pretty only tidies a
+   block's LAST lines, which is the right optimisation for a paragraph and the
+   wrong one for a heading, where every line is nearly the last. */
+/* MORE ABOVE THAN BELOW, and that is the whole of a heading's spacing: the gap
+   above separates it from the section that ended, the gap below binds it to the
+   one it opens. It was 14/6; at 8/3 the ratio is the same and the pair costs
+   nine pixels less every time a model writes a heading, which is often. */
+.md-h {
+  font-family: var(--kx-ui); line-height: 1.3;
+  margin: var(--kx-md-block) 0 var(--kx-md-tight);
+  text-wrap: balance;
+}
 .md-h:first-child { margin-top: 0; }
 .md-h1 { font-family: var(--kx-display); font-size: 16px; font-weight: 700; letter-spacing: -.01em; }
 /* The Display cut's Semibold, which is drawn for exactly this size band and was
@@ -1550,18 +1613,25 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   color: var(--kx-fg-2);
 }
 
-.md-l { margin: 6px 0 9px; padding-left: 18px; }
-.md-l li { margin: 3px 0; }
-.md-l .md-l { margin: 3px 0 0; }
+.md-l { margin: var(--kx-md-gap) 0; padding-left: var(--kx-md-indent); }
+.md-l li { margin: var(--kx-md-tight) 0; }
+/* A sublist is INSIDE its item now, not beside it, so it needs no bottom gap
+   of its own - the parent item's own margin already closes the rank. */
+.md-l .md-l { margin: var(--kx-md-tight) 0 0; }
 ul.md-l { list-style: disc; }
 ul.md-l ul.md-l { list-style: circle; }
+ul.md-l ul.md-l ul.md-l { list-style: square; }
 ol.md-l { list-style: decimal; }
+ol.md-l ol.md-l { list-style: lower-alpha; }
+ol.md-l ol.md-l ol.md-l { list-style: lower-roman; }
 .md-l li::marker { color: var(--kx-fg-2); }
 
-/* A checklist reads as boxes, not bullets: no marker, a box in its place. */
+/* A checklist reads as boxes, not bullets: no marker, a box in its place.
+   The pull-back is the indent token, so a checklist nested inside a list still
+   lines up with the items around it rather than with the panel's edge. */
 ul.md-l li.md-task, ol.md-l li.md-task {
   display: flex; align-items: flex-start; gap: 7px;
-  list-style: none; margin-left: -18px;
+  list-style: none; margin-left: calc(-1 * var(--kx-md-indent));
 }
 .md-task .md-box {
   flex: none; width: 13px; height: 13px; margin-top: 2px;
@@ -1572,12 +1642,14 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .md-task[data-done="1"] .md-box { background: var(--kx-accent); border-color: var(--kx-accent); }
 .md-task[data-done="1"] > span:last-child { color: var(--kx-fg-3); text-decoration: line-through; }
 
-.md-hr { border: none; height: 1px; background: var(--kx-line); margin: 14px 0; }
+/* It was 14px each side - the biggest gap in the set, spent on the block with
+   the least in it. A rule already separates by BEING a rule. */
+.md-hr { border: none; height: 1px; background: var(--kx-line); margin: var(--kx-md-block) 0; }
 
 /* Callouts. A tinted rail plus a small kind label â€” enough to be spotted while
    scanning, not so much that three in a row shout over the prose. */
 .md-call {
-  margin: 9px 0; padding: 7px 10px 8px;
+  margin: var(--kx-md-block) 0; padding: 7px 10px 8px;
   border-left: 2px solid var(--kx-line-2);
   background: var(--kx-surface); border-radius: 0 4px 4px 0;
 }
@@ -1603,14 +1675,14 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .msg-ai strong, .md-q strong { font-weight: 700; }
 
 .md-q {
-  margin: 8px 0; padding: 2px 0 2px 10px;
+  margin: var(--kx-md-block) 0; padding: 2px 0 2px 10px;
   border-left: 2px solid var(--kx-line-2);
   color: var(--kx-fg-2);
 }
 
 /* Tables scroll inside their own box â€” a wide one must never make the whole
    panel scroll sideways. */
-.md-tw { margin: 8px 0; overflow-x: auto; border-radius: 4px; border: 1px solid var(--kx-line); }
+.md-tw { margin: var(--kx-md-block) 0; overflow-x: auto; border-radius: 4px; border: 1px solid var(--kx-line); }
 .md-t { border-collapse: collapse; width: 100%; font-size: 12px; }
 .md-t th, .md-t td {
   padding: 5px 9px; text-align: left; vertical-align: top;
@@ -2253,18 +2325,44 @@ ul.md-l li.md-task, ol.md-l li.md-task {
  * given a row of its own, because it is only true some of the time and a
  * permanent strip to say "you are at the bottom" is chrome for a non-event. */
 .to-latest {
-  position: absolute; left: 50%; transform: translateX(-50%);
-  bottom: 8px; z-index: 4;
-  display: flex; align-items: center; gap: 5px;
-  padding: 4px 10px; border-radius: 999px;
-  background: var(--kx-over); backdrop-filter: blur(6px);
+  position: absolute; left: 50%; bottom: 10px; z-index: 4;
+  /* A DISC, NOT A LOZENGE. It was a pill carrying "Jump to latest", which is a
+     caption for an arrow that already points where it goes - and it made the
+     chip four times wider than the mark inside it, floating over the very
+     content it was there to help you get back to. 30px is the panel's small
+     round control, the same target the composer's send button uses. */
+  width: 30px; height: 30px; padding: 0;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: var(--kx-over);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
   border: 1px solid var(--kx-edge);
-  font-size: 11px; color: var(--kx-fg-2);
-  box-shadow: 0 2px 10px var(--kx-shadow);
+  color: var(--kx-fg-2);
+  /* Two shadows: a tight one that seats the disc on the transcript, and a wide
+     soft one that separates it from whatever text is passing underneath. A
+     single shadow can do one or the other, not both. */
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 6px 18px var(--kx-shadow);
+  transform: translate(-50%, 0);
+  transition: transform .16s var(--kx-hand), border-color .16s ease,
+              color .16s ease, box-shadow .16s var(--kx-hand);
 }
-.to-latest:hover { color: var(--kx-fg); border-color: var(--kx-raised); }
+/* It rises to meet the pointer - a floating control that answers by lifting
+   reads as a thing sitting ON the transcript rather than printed into it. */
+.to-latest:hover {
+  color: var(--kx-fg); border-color: var(--kx-raised);
+  transform: translate(-50%, -2px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, .5), 0 10px 24px var(--kx-shadow);
+}
+.to-latest:active { transform: translate(-50%, 0); }
 .to-latest:focus-visible { outline: 1px solid var(--kx-link); outline-offset: 2px; }
 .to-latest .ic { transform: rotate(0deg); }
+/* It appears because you scrolled away, so it should arrive rather than blink
+   into being - the same rise the palette and the composer use. */
+.to-latest:not([hidden]) { animation: g-fade 160ms var(--kx-hand) both; }
+@media (prefers-reduced-motion: reduce) {
+  .to-latest { transition: none; }
+  .to-latest:not([hidden]) { animation: none; }
+}
 /* The transcript and the pill, and nothing else.
    
    This wrapper is what the pill is positioned against. It used to be
