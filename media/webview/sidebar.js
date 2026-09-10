@@ -2751,11 +2751,17 @@ function _sbRun() {
    * it is the only thing on screen in BOTH states, so the eye has something to
    * follow across the cut.
    */
+  /** The flag and the attribute, together - they are one fact and were drifting
+   *  apart while two call sites each set only the half they remembered. */
+  function setBooted(on) {
+    S.booted = !!on;
+    var view = $("viewSession");
+    if (view) view.setAttribute("data-booted", S.booted ? "1" : "0");
+  }
+
   function handOff(seed) {
     if (S.booted) return;
-    S.booted = true;
-    var view = $("viewSession");
-    if (view) view.setAttribute("data-booted", "1");
+    setBooted(true);
     /* The welcome is left in the document while it plays out and removed
        after, rather than yanked on the first frame - a node that disappears
        instantly has nothing to animate and the whole screen just blinks. */
@@ -6716,6 +6722,19 @@ function _sbRun() {
 
   function renderSession(messages) {
     clearTranscript();
+    /* THE ONE PLACE THE BOOT FLAG IS DECIDED.
+     *
+     * Every route that puts a conversation on screen comes through here - the
+     * first stateSync, a session switch, a restore - so the question "is the
+     * welcome up, or is this a conversation" has exactly one answer and it is
+     * computed from the only thing that settles it: whether there are turns.
+     *
+     * It was set in the message handlers instead, which missed the route that
+     * matters most: a panel reloading into an existing conversation runs
+     * stateSync, not sessionSwitched, so `data-booted` stayed at its markup
+     * default and the composer was left hidden under a full transcript.
+     */
+    setBooted(!!(messages && messages.length));
     if (!messages || !messages.length) { renderWelcome(); return; }
 
     /* Tool results are consumed by the assistant call that produced them, so a
@@ -8422,16 +8441,9 @@ function _sbRun() {
         S.sessionId = m.id;
         S.title = m.title || "";
         S.running = false;
-        /* A DIFFERENT CONVERSATION IS A DIFFERENT SCREEN. "Gone forever" is a
-           promise about this conversation - it must not come back under
-           someone who has started typing - not about the panel for the rest of
-           its life. A new chat with the welcome suppressed is a blank black
-           rectangle, which is the worst empty state in the product. One that
-           already has turns in it re-arms nothing, because renderSession draws
-           the turns and never reaches the welcome. */
-        S.booted = !!(m.messages && m.messages.length);
-        var vs = $("viewSession");
-        if (vs) vs.setAttribute("data-booted", S.booted ? "1" : "0");
+        /* A DIFFERENT CONVERSATION IS A DIFFERENT SCREEN: "gone forever" is a
+           promise about this conversation, not about the panel for the rest of
+           its life. renderSession below re-decides it from the turns. */
         endStream();
         detachAi();
         todoEl = null;
