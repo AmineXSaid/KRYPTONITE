@@ -2388,6 +2388,21 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   .cp-toggle, .cp-toggle .knob { transition: none; }
 }
 
+/* ── the bottom edge of the list ──────────────────────────────────────────
+   A row cut in half by the footer reads as a rendering fault. This is the
+   list saying "there is more", and it is a gradient rather than a mask for the
+   same reason the tab strip's is being rewritten: `mask-image` on a scroller
+   takes the scrollbar with it. Sits above the 30px footer, ignores the
+   pointer, and is present only while there is actually something below. */
+.cp-edge {
+  position: absolute; left: 0; right: 0; bottom: 30px; height: 26px;
+  pointer-events: none; opacity: 0;
+  background: linear-gradient(to bottom, transparent, var(--kx-over));
+  transition: opacity .15s ease;
+}
+.cmd-pal[data-more="1"] .cp-edge { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .cp-edge { transition: none; } }
+
 /* ── the keyboard contract ────────────────────────────────────────────────
    Stated where the keyboard is, and every hint here is a key onPalKey actually
    binds. A footer that promises ⇥ NEXT GROUP and does not move is worse than

@@ -1305,6 +1305,11 @@ function _sbRun() {
                   '<span class="full"></span><span class="mini"></span></span>' +
               '</div>' +
               '<div class="cp-body" id="cpBody"></div>' +
+              /* A half-drawn row at the bottom edge reads as a rendering fault,
+                 not as "there is more". 1B never had to answer this - two
+                 columns hold every row at once - but one column always
+                 overflows, so the list says so. */
+              '<div class="cp-edge" aria-hidden="true"></div>' +
               /* The keyboard contract, stated where the keyboard is. Every hint
                  here is a key this palette actually binds - see onPalKey. */
               /* Spelled, not drawn. \u21E5 \u21B5 \u2423 are the design's symbols and the
@@ -5105,6 +5110,7 @@ function _sbRun() {
     }
     if (!html) html = '<div class="cp-empty">No matching option</div>';
     body.innerHTML = html;
+    palEdge();
   }
 
   /** Which of the six accents a group wears. One table, so the header dot, the
@@ -5114,6 +5120,21 @@ function _sbRun() {
       MODEL: "ask", CONTEXT: "ctx", EDIT: "plan",
       SESSION: "link", CONNECTION: "act", WORKSPACE: "plan",
     }[sec] || "dim";
+  }
+
+  /**
+   * Say whether the list continues past the bottom edge.
+   *
+   * Measured rather than declared, and re-measured on scroll: whether there is
+   * more depends on the panel's height and on what the filter left standing,
+   * and neither is known here. Off by a pixel deliberately - a list scrolled to
+   * within 1px of the end has nothing left to promise.
+   */
+  function palEdge() {
+    var pal = $("cmdPal"), body = $("cpBody");
+    if (!pal || !body) return;
+    var more = body.scrollHeight - body.clientHeight - body.scrollTop > 1;
+    pal.setAttribute("data-more", more ? "1" : "0");
   }
 
   /** Put the selected row on screen after a key moved it. */
@@ -5211,6 +5232,8 @@ function _sbRun() {
       renderCmdPal();
       pal.hidden = false;
       placeCmdPal();
+      // Now that it has a height, the list knows whether it overflows.
+      palEdge();
       // The + is the trigger, so it wears the open state - that is what the
       // gold ring keys off.
       $("attachBtn").setAttribute("aria-expanded", "true");
@@ -7501,6 +7524,7 @@ function _sbRun() {
        hover fill under the mouse and a separate selected row under the arrow
        keys - is two answers to "what does ENTER do", so the mouse moves the
        real selection and there is only ever one row lit. */
+    $("cpBody").addEventListener("scroll", palEdge);
     $("cpBody").addEventListener("mousemove", function (e) {
       var b = e.target.closest(".cp-row");
       if (!b || b.disabled) return;

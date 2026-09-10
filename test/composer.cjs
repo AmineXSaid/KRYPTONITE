@@ -781,6 +781,21 @@ console.log("\n──── the 1B palette ────");
     /\.cp-meta \.mini \{ display: none/.test(CSS) &&
     /@media \(max-width: 340px\)[\s\S]{0,220}\.cp-meta \.full \{ display: none/.test(CSS));
 
+  /* ── the bottom edge ── */
+  /* 1B never had to answer this: two columns hold all 42 rows at once. One
+     column always overflows, and a row cut in half by the footer reads as a
+     rendering fault rather than as "there is more". */
+  ok("the list says when it continues past the footer",
+    /\.cmd-pal\[data-more="1"\] \.cp-edge/.test(CSS) && /class="cp-edge"/.test(SRC));
+  ok("and that is measured on every repaint and every scroll, not declared",
+    /scrollHeight - body\.clientHeight - body\.scrollTop/.test(SRC) &&
+    /addEventListener\("scroll", palEdge\)/.test(SRC));
+  /* `mask-image` on a scroller takes the scrollbar with it - which is the bug
+     the Control Center strip is still carrying. A gradient overlay does not. */
+  ok("drawn as an overlay rather than a mask over the scroller",
+    /\.cp-edge\s*\{[^}]*linear-gradient/.test(CSS) &&
+    !/\.cp-(edge|body)\s*\{[^}]*mask-image/.test(CSS));
+
   /* ── a row that cannot fire ── */
   ok("an unavailable row is dimmed in place, never removed",
     /\.cp-row:disabled\s*\{[^}]*opacity/.test(CSS));
