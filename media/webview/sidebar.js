@@ -1203,7 +1203,26 @@ function _sbRun() {
          *
          * The rail also fixes something the banner never could: it is visible at
          * every scroll position, where the banner only sat at the top. */
-        '<section class="view" id="viewSession" role="tabpanel" aria-labelledby="tabSession" data-phase="act">' +
+        '<section class="view" id="viewSession" role="tabpanel" aria-labelledby="tabSession" data-phase="act" data-booted="0">' +
+          /* THE MARK LIVES ON THE VIEW, NOT ON THE WELCOME.
+           *
+           * It used to be a child of the boot screen, which meant it died with
+           * it - and the whole point of the hand-off is that the mark is the
+           * one thing that DOES survive: the welcome clears, the composer
+           * rises, and the logo travels from behind the terminal up into the
+           * corner, so the two screens are one continuous place rather than a
+           * cut between two. Nothing else on screen is in both states.
+           *
+           * Texture, never a control: aria-hidden, pointer-events none, and
+           * not the `.crystal` the render suite counts and spins. */
+          '<div class="void-mark" id="voidMark" aria-hidden="true">' +
+            /* The `dim` variant, not the full mark: the roundel's notches are
+               oxide red and hard-coded, so they do not fade with the rest -
+               at watermark opacity on black they came through as a dark red
+               block sitting on its own. `dim` puts slate in that slot, which
+               is what a watermark wants. */
+            crystal(520, "void-mark-svg", "dim") +
+          "</div>" +
           // The conversation's name. Placeholder until the model has been asked
           // for a real one, so the strip never appears and disappears.
           '<div class="convo-title" id="convoTitle" hidden></div>' +
@@ -2524,6 +2543,15 @@ function _sbRun() {
    * The flag decides one class. See `.welcome .crystal.spin-in`.
    */
   function renderWelcome(arriving) {
+    /* HANDED OFF MEANS GONE, and gone for the life of this conversation.
+     *
+     * This function is called on every data refresh as well as on arrival -
+     * a session list landing, a skill reloading, the endpoint reporting in.
+     * Without this guard the boot screen would come BACK under someone who
+     * had already started typing, which is the one thing the hand-off
+     * promises will not happen. A genuinely new conversation clears the flag
+     * (see newChat), because a new chat with no welcome is a blank panel. */
+    if (S.booted) { clearTranscript(); return; }
     var spin = arriving !== false ? " spin-in" : "";
     clearTranscript();
     if (!S.workspace.open) {
@@ -2572,62 +2600,81 @@ function _sbRun() {
       recent.push(sess);
     }
 
-    // THE WORKSPACE BOOT SEQUENCE.
+    /* No background mark is built here any more - it lives on the view (see
+       `.void-mark`), because it has to outlive this screen. */
+
+    // ── the terminal ──────────────────────────────────────────────────────
+    // A REAL TERMINAL, WITH A REAL REPORT. The old boot log printed four
+    // lines; on a black ground a four-line card is a small grey box in a lot
+    // of nothing. It now prints everything the panel already holds - the
+    // folder, the model and its context window, the skills, the agents, the
+    // MCP servers, the approval mode, the uncommitted work - because that is
+    // the answer to "what am I about to be talking to", and it is the one
+    // moment the user is actually reading rather than working.
     //
-    // The welcome is a terminal coming up: a masthead, a boot log that reports
-    // what actually mounted, a live prompt, and the openers as cards. It reads
-    // the same facts the panel already holds - the folder, the active model,
-    // the skill count, the count of uncommitted changes - so no line of it is
-    // a mockup's placeholder. A fact the panel does not have (a git branch, a
-    // file count) is simply not printed rather than invented.
-    //
-    // Behind all of it, one oversized mark bleeds off the bottom-left corner:
-    // the split-screen watermark, at a whisper of opacity. It is NOT the
-    // `.crystal` - that class, and the single animated mark it names, stays in
-    // the masthead where it turns once on arrival.
-    var ver = (S.config && S.config.extensionVersion) || "";
+    // Every line is READ, never invented. A fact the panel does not have is
+    // not printed - see the `mcp` and `changes` lines, which are absent rather
+    // than zeroed when there is nothing to say.
     var ap = activeProfile();
     var model = ap && ap.model ? ap.model : "";
+    var ctxWin = ap && ap.capabilities && ap.capabilities.contextWindow;
+    var ver = (S.config && S.config.extensionVersion) || "";
     var skillN = S.skills.length;
+    var agentN = (S.agents || []).length;
     var changeN = (S.changes || []).length;
+    var servers = (S.mcp && S.mcp.servers) || [];
+    var mcpUp = servers.filter(function (x) { return x.state === "ready"; }).length;
+    var mode = (S.config && S.config.approvalMode) || "ask";
 
-    // The background logo: the full mark, huge and dim, anchored off the
-    // corner. aria-hidden - it is texture, and the masthead mark is the one
-    // that names the product to a screen reader.
-    var body = '<div class="boot-bg" aria-hidden="true">' + crystal(340, "boot-bg-mark") + "</div>";
+    /* The chrome. A label and a version, on a bar above the log - which is
+       what turns a bordered box into a terminal window. */
+    var body = '<div class="boot-term">' +
+      '<div class="boot-bar">' +
+        '<span class="boot-led"></span>' +
+        '<span class="boot-name">genesis</span>' +
+        '<span class="boot-path">' + esc(S.workspace.name || "workspace") + "</span>" +
+        (ver ? '<span class="boot-ver">v' + esc(ver) + "</span>" : "") +
+      "</div>" +
+      '<div class="boot-body">';
 
-    // The masthead: the wordmark and the version line. No mark here - the only
-    // logo on this screen is the background watermark bleeding off the corner
-    // behind the boot log. The turning mark that used to sit beside the wordmark
-    // was a second copy of it and has been removed.
-    body += '<div class="boot-head">' +
-      '<span class="w-mark">Genesis</span>' +
-      '<span class="boot-ver">' + (ver ? "v" + esc(ver) + " · " : "") +
-        "workspace boot</span></div>";
+    body += '<div class="boot-line cmd"><span class="boot-g">genesis</span>' +
+      '<span class="boot-arrow">\u25B8</span>initializing workspace</div>';
 
-    // The boot log. A green tick for what came up, an amber marker for the one
-    // thing waiting on the user. `boot-meta` is the dim tail after the em dash.
-    function tick(label, meta) {
-      return '<div class="boot-line ok"><span class="boot-tick">✓</span>' +
+    /* A tick, a label on a fixed column, and the value. The label column is
+       what makes eight lines scannable instead of eight sentences. */
+    function tick(label, meta, cls) {
+      return '<div class="boot-line ' + (cls || "ok") + '">' +
+        '<span class="boot-tick">' + (cls === "pending" ? "\u203A" : "\u2713") + "</span>" +
         '<span class="boot-what">' + esc(label) + "</span>" +
-        (meta ? '<span class="boot-meta">— ' + esc(meta) + "</span>" : "") +
-        "</div>";
+        '<span class="boot-meta">' + esc(meta) + "</span></div>";
     }
-    body += '<div class="boot-panel">' +
-      '<div class="boot-line cmd"><span class="boot-g">genesis</span>' +
-        '<span class="boot-arrow">▸</span>initializing workspace</div>' +
-      tick("workspace mounted", S.workspace.name || "workspace") +
-      (model ? tick("endpoint ready", model) : "") +
-      tick("skills loaded", skillN + " available");
+    body += tick("workspace", S.workspace.name || "workspace");
+    if (model) {
+      body += tick("endpoint", model + (ctxWin ? "  \u00B7  " + fmtK(ctxWin) + " ctx" : ""));
+    }
+    body += tick("skills", skillN + (skillN === 1 ? " loaded" : " loaded"));
+    if (agentN) body += tick("agents", agentN + (agentN === 1 ? " defined" : " defined"));
+    if (servers.length) {
+      body += tick("mcp", mcpUp + "/" + servers.length + " connected",
+        mcpUp === servers.length ? "ok" : "pending");
+    }
+    body += tick("approvals", permLabel(mode));
     if (changeN) {
-      body += '<div class="boot-line pending"><span class="boot-tick">›</span>' +
-        '<span class="boot-meta">' + changeN +
-        (changeN === 1 ? " uncommitted change" : " uncommitted changes") +
-        " — ask me to review them</span></div>";
+      body += tick(changeN === 1 ? "1 change" : changeN + " changes",
+        "uncommitted \u2014 ask me to review", "pending");
     }
-    body += '<div class="boot-line prompt"><span class="boot-g">genesis</span>' +
-      '<span class="boot-caret">❯</span><span class="boot-cursor"></span></div>' +
-      "</div>";
+
+    /* THE PROMPT IS THE DOOR, so it is a button rather than a decorated line.
+       It was a blinking cursor that did nothing, on a screen whose entire job
+       is to get you typing. Clicking it hands off to the composer. */
+    body += '<button class="boot-go" data-act="handoff" ' +
+      'aria-label="Start typing - opens the message box">' +
+      '<span class="boot-g">genesis</span><span class="boot-caret">\u276F</span>' +
+      '<span class="boot-cursor"></span>' +
+      '<span class="boot-go-hint">click to begin, or just start typing</span>' +
+      "</button>";
+
+    body += "</div></div>";
 
     // The design's "Pick up where you left off" copy earns its place only when
     // there is a thread to come back to; the Recent list below is what it
@@ -2688,6 +2735,54 @@ function _sbRun() {
     // than cutting it with an ellipsis, so measure them now they are in the
     // document. The boot cards wrap instead, so they carry no `.mq`.
     mqAll();
+  }
+
+  /**
+   * The hand-off: the welcome clears, the mark travels, the composer rises.
+   *
+   * ONE ATTRIBUTE DRIVES ALL OF IT. `data-booted` on the view is the only
+   * thing this function sets, and the stylesheet does the rest - the welcome
+   * lifts and fades, the watermark moves from behind the terminal up into the
+   * corner and shrinks, the composer comes up from below. Doing it in CSS off
+   * a single flag is what keeps the three in step; three separate JS
+   * animations would drift apart the moment one of them was interrupted.
+   *
+   * The mark is the reason this reads as one place rather than two screens:
+   * it is the only thing on screen in BOTH states, so the eye has something to
+   * follow across the cut.
+   */
+  function handOff(seed) {
+    if (S.booted) return;
+    S.booted = true;
+    var view = $("viewSession");
+    if (view) view.setAttribute("data-booted", "1");
+    /* The welcome is left in the document while it plays out and removed
+       after, rather than yanked on the first frame - a node that disappears
+       instantly has nothing to animate and the whole screen just blinks. */
+    var w = logEl && logEl.querySelector(".welcome");
+    if (w) {
+      w.setAttribute("data-going", "1");
+      var drop = function () { if (w.parentNode) w.parentNode.removeChild(w); };
+      if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) drop();
+      else setTimeout(drop, 620);
+    }
+    /* Focus lands after the rise has started, so the caret arrives in a box
+       that is already on its way rather than in one still off screen. */
+    setTimeout(function () {
+      var d = $("draft");
+      if (!d) return;
+      /* A character typed on the welcome screen is not thrown away - it is
+         the first character of the message, so it goes into the box and is
+         announced as if it had been typed there. Synthetic `input` for the
+         same reason insertComposerToken uses one: the autosize, the quick
+         pick and the send button all hang off that event. */
+      if (seed) {
+        d.value = seed;
+        d.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      d.focus();
+      if (seed) { try { d.setSelectionRange(d.value.length, d.value.length); } catch (e) {} }
+    }, 240);
   }
 
   /* The rail is a ::before on .msg-user, so everything else has to sit in a
@@ -7144,6 +7239,26 @@ function _sbRun() {
   /* ───────────────────────── wiring ───────────────────────── */
 
   function wire() {
+    /* TYPE ANYWHERE TO BEGIN.
+     *
+     * The welcome's whole job is to get you into the composer, and asking the
+     * user to first aim at a target before they may type is a step that exists
+     * for the panel's benefit rather than theirs. Any printable key hands off
+     * and carries that first character into the box.
+     *
+     * Bound on the window and heavily guarded: it must never eat a keystroke
+     * meant for something else, so it stands down for modifiers (a shortcut),
+     * for any real field (the filter, the draft, a search box), and the moment
+     * the hand-off has happened. */
+    window.addEventListener("keydown", function (e) {
+      if (S.booted || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key.length !== 1) return;
+      var t = e.target;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (!logEl || !logEl.querySelector(".boot-term")) return;
+      e.preventDefault();
+      handOff(e.key);
+    });
     $("newBtn").addEventListener("click", function () {
       closePops();
       post("newChat");
@@ -7415,14 +7530,24 @@ function _sbRun() {
       var st = e.target.closest("[data-starter]");
       if (st) {
         var run = st.getAttribute("data-starter");
+        // An opener is a way in too - it puts text in the composer, so the
+        // composer has to be there to put it in.
+        handOff();
         var box = $("draft");
         if (run === "review") sendText(REVIEW_PROMPT);
         else { runSlash(run.slice(1), box); syncComposer(); box.focus(); }
         return;
       }
+      /* The whole terminal is the door, not only the prompt button inside it:
+         a screen that says "click to begin" and then ignores a click two
+         pixels above the word is a screen that feels broken. The cards and the
+         Recent rows are handled above and have already returned, so anything
+         still reaching here inside the terminal is dead space. */
+      if (e.target.closest(".boot-term")) { handOff(); return; }
       var act = e.target.closest("[data-act]");
       if (!act) return;
       var a = act.getAttribute("data-act");
+      if (a === "handoff") { handOff(); return; }
       if (a === "doctor") { setTab("diagnostics"); openSection("secTls"); post("runTrace"); }
       else if (a === "openFolder") post("openFolder");
       else if (a === "newEndpoint") post("newEndpoint");
@@ -8297,6 +8422,16 @@ function _sbRun() {
         S.sessionId = m.id;
         S.title = m.title || "";
         S.running = false;
+        /* A DIFFERENT CONVERSATION IS A DIFFERENT SCREEN. "Gone forever" is a
+           promise about this conversation - it must not come back under
+           someone who has started typing - not about the panel for the rest of
+           its life. A new chat with the welcome suppressed is a blank black
+           rectangle, which is the worst empty state in the product. One that
+           already has turns in it re-arms nothing, because renderSession draws
+           the turns and never reaches the welcome. */
+        S.booted = !!(m.messages && m.messages.length);
+        var vs = $("viewSession");
+        if (vs) vs.setAttribute("data-booted", S.booted ? "1" : "0");
         endStream();
         detachAi();
         todoEl = null;

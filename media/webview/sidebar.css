@@ -49,6 +49,11 @@ body {
   overflow: hidden;
 }
 body.vscode-light, body.vscode-high-contrast-light { background: var(--kx-bg); }
+/* ...and on a dark theme it paints BLACK, which is the one deliberate break
+   from the rule above. Inheriting the container was the right default while
+   the panel had no ground of its own to want; it has one now. The surfaces are
+   translucent steps, so they follow it down without a single other change. */
+body:not(.vscode-light):not(.vscode-high-contrast-light) { background: var(--kx-void); }
 
 button, input, select, textarea { font: inherit; color: inherit; }
 button { background: none; border: none; cursor: pointer; text-align: left; }
@@ -783,69 +788,207 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 /* Everything real sits above the watermark. */
 .welcome.boot > *:not(.boot-bg) { position: relative; z-index: 1; }
 
-/* THE SPLIT-SCREEN BACKGROUND LOGO.
+/* ── THE MARK THAT TRAVELS ────────────────────────────────────────────────
  *
- * One oversized mark, bled off the bottom-left corner at a whisper of opacity -
- * the watermark from the split-screen direction, brought onto the boot screen.
- * It is texture, not a control: aria-hidden, pointer-events none, and NOT the
- * `.crystal` the render test counts and animates. It does not turn; a watermark
- * that spun would pull the eye off the log that is the actual content. */
-.boot-bg {
+ * One oversized roundel behind the whole session view, and the only thing on
+ * screen in BOTH states - which is the entire reason the hand-off reads as one
+ * place opening up rather than as a cut between two screens. The welcome
+ * clears, the composer rises, and the eye has this to follow across.
+ *
+ * It lives on the view rather than on the welcome because the welcome is
+ * removed; a watermark that dies with the screen it decorates cannot be the
+ * thing that carries you off it.
+ *
+ * FLUSH TO THE EDGES, WITH NO GAP ANYWHERE. The offsets are negative
+ * percentages of the view, not pixels, so the mark bleeds off two edges at
+ * every dock width instead of pulling away from the corner on a wide panel and
+ * swamping a narrow one. `#viewSession` clips it.
+ */
+#viewSession { overflow: hidden; }
+.void-mark {
   position: absolute; z-index: 0;
   pointer-events: none; line-height: 0;
-  /* CUT, AND IN PROPORTION. Sized and offset as a fraction of the panel, not in
-     fixed pixels, so the same slice of the mark bleeds off the corner whether the
-     dock is 300px or 900px wide - it grows and shrinks with the window instead of
-     the old fixed 340px that swamped a narrow panel and shrank to nothing on a
-     wide one. `overflow:hidden` on `.welcome.boot` makes the crop. */
-  width: clamp(240px, 74%, 560px);
-  /* Anchored INTO the bottom-left corner and bled off both the left and bottom
-     edges, so the mark sits flush against the phase rail with no dark wedge
-     between the two. The panel's `overflow:hidden` crops the off-edge part. */
-  left: -26%; bottom: -22%;
-  /* No transition on size/position: these track the window, and a live drag-
-     resize should follow the cursor instantly rather than lag behind an ease. */
+  /* State one: sat low and left, big, behind the terminal - the ground the
+     boot screen is printed on. */
+  width: clamp(300px, 96%, 680px);
+  left: -34%; bottom: -30%; top: auto; right: auto;
+  /* Lower than it was on #181818, and it has to be: the same white at the same
+     alpha is a far bigger step against pure black than against a grey, and at
+     .085 the ring read as a stray shape in the empty half of the screen
+     rather than as texture behind it. */
+  opacity: .055;
+  color: var(--kx-fg-4);
+  /* Everything that moves, moving together and on one curve. `left/bottom/top`
+     are in the list because the mark travels corner to corner, not just
+     scales - a shrink in place would read as the logo receding rather than as
+     the screen handing over. */
+  transition:
+    width .72s var(--kx-hand), left .72s var(--kx-hand), right .72s var(--kx-hand),
+    top .72s var(--kx-hand), bottom .72s var(--kx-hand),
+    opacity .6s var(--kx-hand), transform .72s var(--kx-hand),
+    color .6s var(--kx-hand);
+  transform: rotate(0deg);
 }
-.boot-bg-mark {
-  width: 100%; height: auto; display: block;
-  color: var(--kx-fg-3); opacity: .09;
+.void-mark-svg { width: 100%; height: auto; display: block; }
+/* State two: up into the top-right corner, smaller, turned, and cooled to the
+   phase blue - so the corner reads as chrome rather than as a second logo
+   competing with the conversation. Still bled off both edges it touches. */
+#viewSession[data-booted="1"] .void-mark {
+  width: clamp(150px, 42%, 260px);
+  left: auto; right: -13%; top: -16%; bottom: auto;
+  opacity: .045;
+  transform: rotate(-18deg);
+}
+/* A drag-resize must track the cursor, not lag an ease behind it - so the
+   size/position transition is only ever on for the hand-off itself. The class
+   is added for the duration of the move and taken off after. */
+@media (prefers-reduced-motion: reduce) {
+  .void-mark { transition: none; }
 }
 
-/* The masthead: the one turning mark, the wordmark, the version line. */
-.boot-head { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
-.boot-head .crystal { margin: 0; flex: none; }
-.boot-head .w-mark { margin: 0; }
-.boot-ver {
-  font-family: var(--kx-mono); font-size: 10px; letter-spacing: .04em;
-  color: var(--kx-fg-3); margin-left: auto; text-align: right;
+/* ── THE COMPOSER IS NOT THERE YET ────────────────────────────────────────
+ *
+ * "The chatbox must not be visible while the terminal is up" - and not
+ * visible has to mean not reachable, so this is not opacity alone. It is
+ * translated fully below its own box, made inert, and taken out of the tab
+ * order, which is the difference between a hidden control and a control that
+ * a Tab press can still land on and type into.
+ *
+ * It keeps its space in the layout rather than being display:none, so the
+ * transcript above it does not resize on hand-off - the composer rises INTO a
+ * gap that was always there. */
+/* The change strip and the queue belong to the composer, not to the welcome:
+   they are what THIS conversation has done and what it is about to send, and
+   on a screen where nothing has been said yet they are a bar of chrome
+   floating over an empty panel. They leave with the box they belong to. */
+#viewSession[data-booted="0"] .chg,
+#viewSession[data-booted="0"] .queue { display: none !important; }
+#viewSession[data-booted="0"] .composer-wrap {
+  transform: translateY(115%);
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
 }
+.composer-wrap {
+  transform: translateY(0); opacity: 1; visibility: visible;
+  transition: transform .55s var(--kx-hand), opacity .45s var(--kx-hand),
+              visibility 0s;
+}
+@media (prefers-reduced-motion: reduce) { .composer-wrap { transition: none; } }
 
-/* The boot log, framed as one recessed card the way the design draws it. */
-.boot-panel {
+/* The welcome, on its way out: it lifts and fades while the mark travels and
+   the composer rises, so the three read as one movement. Removed from the
+   document once it has played - see handOff. */
+.welcome[data-going="1"] {
+  transform: translateY(-18px) scale(.985);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform .55s var(--kx-hand), opacity .45s var(--kx-hand);
+}
+@media (prefers-reduced-motion: reduce) { .welcome[data-going="1"] { transition: none; } }
+
+/* ── THE TERMINAL ─────────────────────────────────────────────────────────
+ *
+ * On a black ground the old bordered box read as a small grey rectangle in a
+ * lot of nothing, so this is a window rather than a card: a title bar naming
+ * the workspace, a body of report lines, and a prompt that is the way in.
+ *
+ * It is the brightest thing on the screen on purpose. Black gives it somewhere
+ * to sit, and the whole screen exists to point at one target. */
+.boot-term {
   width: 100%; box-sizing: border-box;
-  background: var(--kx-surface); border: 1px solid var(--kx-line);
-  border-radius: 6px; padding: 14px 14px 12px;
-  font-family: var(--kx-mono); font-size: 11.5px; margin-bottom: 22px;
+  background: var(--kx-bg-deep);
+  border: 1px solid var(--kx-line);
+  border-radius: 8px;
+  margin-bottom: 22px;
+  overflow: hidden;
+  /* Lifted off the black, which a flat border cannot do on its own. */
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .55);
 }
-.boot-line { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; }
-.boot-line.cmd { color: var(--kx-fg-3); margin-bottom: 4px; gap: 6px; }
+/* The chrome. What turns a bordered box into a window - and it earns its
+   height by naming the workspace, which is the fact the screen is about. */
+.boot-bar {
+  display: flex; align-items: center; gap: 8px;
+  height: 30px; padding: 0 11px;
+  border-bottom: 1px solid var(--kx-divider);
+  background: var(--kx-surface);
+  font-family: var(--kx-mono); font-size: 10px; letter-spacing: .04em;
+}
+/* Green because the boot succeeded - the same dot the endpoint wears
+   everywhere else, saying the same thing. */
+.boot-led {
+  flex: none; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--kx-accent);
+}
+.boot-name { color: var(--kx-fg-2); font-weight: 700; }
+.boot-path {
+  color: var(--kx-fg-4); min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.boot-path::before { content: "— "; }
+.boot-ver { margin-left: auto; flex: none; color: var(--kx-fg-5); }
+
+.boot-body { padding: 12px 12px 10px; font-family: var(--kx-mono); font-size: 11.5px; }
+.boot-line { display: flex; align-items: baseline; gap: 8px; padding: 2.5px 0; }
+.boot-line.cmd { color: var(--kx-fg-4); margin-bottom: 6px; gap: 6px; }
 .boot-g { color: var(--kx-fg-2); }
-.boot-arrow { color: var(--kx-fg-3); }
-.boot-tick { flex: none; width: 12px; color: var(--kx-accent); font-weight: 700; }
-.boot-what { color: var(--kx-fg); font-weight: 700; }
-.boot-meta { color: var(--kx-fg-3); min-width: 0; }
-/* The one line waiting on the user: an amber marker rather than a green tick. */
+.boot-arrow { color: var(--kx-fg-4); }
+.boot-tick { flex: none; width: 10px; color: var(--kx-accent); font-weight: 700; }
+/* A FIXED LABEL COLUMN. Eight report lines only scan as a report if the values
+   line up; ragged labels make it eight sentences that happen to be stacked. */
+.boot-what {
+  flex: none; width: 74px;
+  color: var(--kx-fg-3); font-weight: 400;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.boot-meta {
+  min-width: 0; color: var(--kx-fg);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* The lines waiting on the user - unconnected servers, uncommitted work. Amber
+   rather than green, and the value keeps full brightness because it is the
+   part being asked about. */
 .boot-line.pending .boot-tick { color: var(--kx-active); }
-/* The live prompt, and its blinking block cursor. */
-.boot-line.prompt { margin-top: 8px; gap: 6px; align-items: center; }
-.boot-line.prompt .boot-g { color: var(--kx-fg); font-weight: 700; }
-.boot-caret { color: var(--kx-fg); font-weight: 700; }
+.boot-line.pending .boot-meta { color: var(--kx-fg-2); }
+
+/* ── THE PROMPT IS THE DOOR ───────────────────────────────────────────────
+ *
+ * It was a decorated line with a blinking cursor and no behaviour, on a screen
+ * whose only job is to get you typing. It is a button now: the whole width,
+ * with the hint sitting beside the caret rather than under it. */
+.boot-go {
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  margin-top: 10px; padding: 8px 9px;
+  border: 1px solid var(--kx-line); border-radius: 6px;
+  background: var(--kx-surface);
+  font-family: var(--kx-mono); font-size: 11.5px;
+  transition: border-color .18s ease, background .18s ease;
+}
+.boot-go .boot-g { color: var(--kx-fg); font-weight: 700; }
+.boot-caret { color: var(--kx-link); font-weight: 700; }
 .boot-cursor {
-  display: inline-block; width: 7px; height: 14px; background: var(--kx-accent);
+  flex: none; display: inline-block; width: 7px; height: 14px;
+  background: var(--kx-accent);
   animation: boot-blink 1.1s step-end infinite;
 }
+.boot-go-hint {
+  margin-left: auto; min-width: 0;
+  font-family: var(--kx-ui); font-size: 11px; color: var(--kx-fg-4);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* The whole terminal answers the pointer, because the whole terminal is
+   clickable - see the click route. Lighting only the button would promise a
+   smaller target than the one that actually works. */
+.welcome.boot .boot-term:hover .boot-go,
+.boot-go:hover, .boot-go:focus-visible {
+  border-color: var(--kx-link); background: var(--kx-info-wash); outline: none;
+}
+.welcome.boot .boot-term { cursor: text; }
 @keyframes boot-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .boot-cursor { animation: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .boot-cursor { animation: none; }
+  .boot-go { transition: none; }
+}
 
 .boot-note {
   font-family: var(--kx-prose); font-size: 11.5px; line-height: 1.6;

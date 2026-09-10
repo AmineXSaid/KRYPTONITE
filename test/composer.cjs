@@ -491,9 +491,14 @@ function boot() {
   {
     const b = bootWith([sess("cur", "Untitled", 0, "now", true)]);
     const w = b.d.querySelector(".welcome");
-    // The wordmark, not a sentence: "How can I help?" is what every assistant
-    // says, and the mark says which one this is.
-    ok("a first run still welcomes", !!w.querySelector(".w-mark"));
+    /* The screen NAMES THE PRODUCT rather than opening with a sentence - "How
+       can I help?" is what every assistant says, and this has to say which one
+       it is. That used to be a wordmark above the log; it is the terminal's
+       own title bar now, which says it once instead of twice and says it the
+       way a terminal identifies itself. */
+    const bar = w.querySelector(".boot-bar");
+    ok("a first run still welcomes", !!bar && /genesis/i.test(bar.textContent));
+
     ok("and offers nothing to resume", w.querySelectorAll("[data-session]").length === 0);
     // The welcome is a boot sequence now: the copy that once introduced the tool
     // in a sentence is the boot log reporting the workspace came up. "Pick up

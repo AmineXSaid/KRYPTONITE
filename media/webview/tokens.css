@@ -86,6 +86,20 @@
    * panel, and the ground the browser panel - which lives in an editor tab and
    * genuinely does paint its own - still uses. */
   --kx-bg:        #181818;  /* the assumed ground; see the note above        */
+  /* THE PANEL'S OWN GROUND, and the one place the "do not paint" rule above is
+     deliberately broken. Genesis is asked to be black, not to be whatever the
+     container is - so the panel paints this and the surfaces do the rest.
+     Nothing else has to move: every surface here is already a translucent step
+     off the ground rather than a fixed grey, which is exactly the case the
+     note above describes as "only the background is black, the elements are
+     the same original". Text gains contrast against it; nothing loses any. */
+  --kx-void:      #000000;
+  /* The hand-off curve. One easing for the whole transition - the mark, the
+     composer and the departing welcome all ride it, which is what makes three
+     separate animations read as one movement. Decelerating hard: it leaves
+     quickly and arrives slowly, which is how a thing that was thrown settles
+     rather than a thing that was faded. */
+  --kx-hand: cubic-bezier(.22, .8, .28, 1);
   /* THE SURFACES ARE STEPS OFF THE GROUND, NOT COLOURS OF THEIR OWN.
    *
    * These were fixed greys balanced against #181818, and once the panel
