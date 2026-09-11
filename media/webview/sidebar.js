@@ -5828,6 +5828,33 @@ function _sbRun() {
     renderQuickPick();
   }
 
+  /* KEEP THE LIST INSIDE THE PANEL, NOT JUST INSIDE ITS OWN max-height.
+   *
+   * `.qp` is anchored `bottom: 100%` above the composer and capped at 232px in
+   * CSS. That cap is the RIGHT height in a tall panel and a lie in a short one:
+   * a sidebar only a few hundred pixels high has less than 232px above the
+   * composer, so the list rises off the top edge and is clipped by the panel's
+   * own `overflow: hidden` - "the window appears not fully". The height the list
+   * may take is not a constant; it is whatever room sits above the composer, so
+   * it is measured, the same way placeCmdPal() places the command palette
+   * against the composer rather than trusting a constant.
+   *
+   * Measured, not guessed: the list scrolls internally (`overflow-y: auto`), so
+   * a short panel loses nothing - it just scrolls more. Clipping loses rows with
+   * no way to reach them, which is the bug. Recomputed on every render, so it
+   * tracks the panel as the composer grows and the list stays whole. */
+  function clampQuickPick() {
+    var qp = $("qp");
+    if (!qp || qp.hidden) return;
+    var wrap = qp.offsetParent; // the positioned ancestor the list hangs off
+    if (!wrap) return;
+    var GUTTER = 8; // breathing room the list keeps from the panel's top edge
+    // The list's bottom edge sits 6px (its margin) above the composer wrap; the
+    // room above that edge, less the gutter, is all the height it may take.
+    var room = Math.round(wrap.getBoundingClientRect().top - 6 - GUTTER);
+    qp.style.maxHeight = Math.min(232, Math.max(0, room)) + "px";
+  }
+
   function renderQuickPick() {
     var qp = $("qp");
     var items = qpItems();
@@ -5838,6 +5865,7 @@ function _sbRun() {
           ? '<div class="qp-empty" data-busy="1">Searching the workspace…</div>'
           : '<div class="qp-empty">No matching files</div>');
         qp.hidden = false;
+        clampQuickPick();
       } else {
         qp.hidden = true;
       }
@@ -5934,6 +5962,7 @@ function _sbRun() {
     // rather than guessing from the rows it happens to contain.
     qp.setAttribute("data-mode", S.modelOpen ? "model" : S.agentOpen ? "agent" : "find");
     qp.hidden = false;
+    clampQuickPick();
     var active = qp.querySelector('[data-active="1"]');
     if (active && active.scrollIntoView) active.scrollIntoView({ block: "nearest" });
   }
