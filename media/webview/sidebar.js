@@ -5093,13 +5093,11 @@ function _sbRun() {
         kind: "action", live: true, glyph: "↑", hue: "ctx",
         value: n ? String(n) : "",
         run: function () { var i = $("localPick"); i.value = ""; i.click(); } },
-      { sec: "CONTEXT", id: "mention", label: "Mention file",
-        kind: "action", live: true, glyph: "@", hue: "ctx",
-        run: function () { insertComposerToken("@"); } },
-      { sec: "CONTEXT", id: "skill", label: "Run a skill",
-        kind: "action", live: true, glyph: "/", hue: "ctx",
-        value: nSkill ? String(nSkill) : "",
-        run: function () { insertComposerToken("/"); } },
+      /* "Mention file" (@) and "Run a skill" (/) used to sit here. They did
+         nothing but type a `@` or a `/` into the composer, which the composer
+         already answers with its own picker the moment you type the character -
+         so they were a menu row for a keystroke. Dropped; the picker they open
+         is unchanged and is the real way in. */
       /* The web tooling is real, but it wants a key the endpoint may not carry
          - so the row is drawn with the reason in the box rather than hidden,
          which is the design's NO KEY tag doing exactly its job. */
@@ -5135,15 +5133,15 @@ function _sbRun() {
         value: nCkpt ? String(nCkpt) : "",
         why: "Nothing to restore to yet - a turn has to run first",
         run: cmd("restoreCheckpoint") },
+      /* One export in the menu, not three. "Export all chats" and "Export
+         offline bundle" were separate rows for cases most sessions never hit;
+         the everyday "this conversation as JSON" stays here, and neither of the
+         others is lost - the offline bundle lives in the Control Center's Logs
+         & export section, and "export all" stays a registered command reachable
+         from VS Code's own palette. */
       { sec: "SESSION", id: "export", label: "Export chat as JSON",
         kind: "action", live: true, icon: "i-download", hue: "link",
         run: function () { post("exportChat", { scope: "current" }); } },
-      { sec: "SESSION", id: "exportAll", label: "Export all chats",
-        kind: "action", live: true, icon: "i-download", hue: "link",
-        run: cmd("exportAllChats") },
-      { sec: "SESSION", id: "bundle", label: "Export offline bundle",
-        kind: "action", live: true, icon: "i-copy", hue: "link",
-        run: function () { post("exportBundle"); } },
 
       /* ── CONNECTION: what the turn actually talks to ──────────────────────
          Split out of WORKSPACE, because an endpoint is not a surface: the four
@@ -5172,11 +5170,10 @@ function _sbRun() {
         kind: "action", live: true, glyph: "+", hue: "agent", run: function () { post("newAgent"); } },
       { sec: "WORKSPACE", id: "browser", label: "Open browser",
         kind: "action", live: true, icon: "i-globe", hue: "link", run: cmd("openBrowser") },
-      { sec: "WORKSPACE", id: "watch", label: "Watch the agent browser",
-        kind: "action", live: true, icon: "i-monitor", hue: "link", run: cmd("watchAgentBrowser") },
-      { sec: "WORKSPACE", id: "focus", label: "Focus sidebar",
-        kind: "action", live: true, icon: "i-expand", hue: "dim",
-        kbd: kbd("G"), run: cmd("focusSidebar") },
+      /* "Watch the agent browser" and "Focus sidebar" were two more rows for
+         things done rarely and, when they are done, done from a keybinding or
+         VS Code's own palette - both stay registered commands, they just no
+         longer pad this menu. */
       { sec: "WORKSPACE", id: "skills", label: "Open skills folder",
         kind: "action", live: true, icon: "i-folder", hue: "dim",
         run: function () { post("openSkillsFolder"); } },
