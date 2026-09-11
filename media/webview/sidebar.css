@@ -2986,7 +2986,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .pick:hover { background: var(--kx-surface-4); }
 /* Inside the tray the + drops to the glyphs' size, so the group reads as one
    run of plates rather than a button with badges beside it. */
-.picks .tb-btn { width: 22px; height: 22px; border-radius: var(--kx-r); }
+.picks .tb-btn { width: 24px; height: 24px; border-radius: var(--kx-r); }
 /* The + is a member of the tray, so it takes the tray's plate rather than the
    raised one .tb-btn gives the controls at the end of the row. */
 .picks .attach-btn { background: transparent; border-color: transparent; }
@@ -3381,7 +3381,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    left of the row is one run of objects instead of a button, a word and a
    gap. The hue does the work the plate would otherwise need a border for. */
 .phase-word {
-  flex: none; height: 22px; padding: 0 7px; border: 0; border-radius: var(--kx-r);
+  flex: none; height: 24px; padding: 0 7px; border: 0; border-radius: var(--kx-r);
   display: inline-flex; align-items: center;
   font-family: var(--kx-mono); font-size: 9.5px; font-weight: 700;
   letter-spacing: .12em; text-indent: .12em; text-transform: uppercase;
@@ -3424,6 +3424,11 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    against send rather than stranded mid-row. */
 .mode-note {
   display: flex; align-items: center; gap: 5px; flex: none; margin-left: auto;
+  /* No plate and no padding - the mode stays quiet at its default - but the
+     click target is grown to the 24px the rest of the row now meets. The text
+     centres in that height, so the look is unchanged and only the hit area
+     grows; it stays inside the send button's row height, so nothing reflows. */
+  min-height: 24px;
   padding: 0; background: none; border: 0;
   /* 11.5px, and QUIET at the default. This read at 12px in --kx-fg-3, which
      put "Manual" - the mode that does the least and is on by default - at a
