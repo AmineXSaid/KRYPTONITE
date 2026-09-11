@@ -27,6 +27,24 @@ const ROOT = path.join(__dirname, "..");
 const CSS = fs.readFileSync(path.join(ROOT, "media/webview/sidebar.css"), "utf8");
 const SRC = fs.readFileSync(path.join(ROOT, "media/webview/sidebar.js"), "utf8");
 const CRYSTAL = fs.readFileSync(path.join(ROOT, "media/webview/crystal.js"), "utf8");
+const TOKENS = fs.readFileSync(path.join(ROOT, "media/webview/tokens.css"), "utf8");
+
+// The panel's corner radius is one token now (--kx-r in tokens.css), so a shape
+// reads `border-radius: var(--kx-r)` rather than a literal px. These shape
+// guards care about the RESOLVED number - is it a corner, not a pill, and does
+// it stay under half the box - so they resolve the token the way the browser
+// does. A literal px still resolves, so a shape that opts out is still measured.
+const RADIUS_TOKEN = Number((TOKENS.match(/--kx-r:\s*(\d+)px/) || [])[1]);
+// A border-radius value from a CSS block resolved to a number: a literal `Npx`,
+// or the shared radius token.
+function radiusPx(block) {
+  const m = block && block.match(/border-radius:\s*([^;\n}]+)/);
+  if (!m) return null;
+  const v = m[1].trim();
+  if (/^var\(--kx-r\)$/.test(v)) return Number.isFinite(RADIUS_TOKEN) ? RADIUS_TOKEN : null;
+  const px = v.match(/^([\d.]+)px$/);
+  return px ? Number(px[1]) : null;
+}
 
 function boot() {
   const dom = new JSDOM(`<!doctype html><html><body><div id="root"></div></body></html>`, {
@@ -754,16 +772,16 @@ console.log("\n──── the send control ────");
   ok("the send control has its own rule", !!send);
   // A rounded square, not a circle. 50% would be a media button, which is the
   // one shape in this composer that belongs to a different product.
+  const sendR = radiusPx(send && send[0]);
   ok("it is a rounded square, not a disc",
-    !!send && /border-radius:\s*(\d+)px/.test(send[0]) && !/border-radius:\s*50%/.test(send[0]),
+    sendR != null && !/border-radius:\s*50%/.test(send[0]),
     send ? send[0].replace(/\s+/g, " ") : "not found");
   // Radius has to stay well under half the width or it becomes a disc by
   // arithmetic rather than by declaration.
   const w = send && send[0].match(/width:\s*(\d+)px/);
-  const r = send && send[0].match(/border-radius:\s*(\d+)px/);
   ok("and its corners stay corners",
-    !!w && !!r && Number(r[1]) < Number(w[1]) / 2,
-    w && r ? `radius ${r[1]} of width ${w[1]}` : "not found");
+    !!w && sendR != null && sendR < Number(w[1]) / 2,
+    w && sendR != null ? `radius ${sendR} of width ${w[1]}` : "not found");
   /* Armed, it is the one filled control in the row - and the fill is the
      design's red, which in this palette is --kx-error. It is the design's
      colour for the primary action, not a failure state. */
@@ -795,13 +813,21 @@ console.log("\n──── the 1B palette ────");
     return m ? m[0] : "";
   };
   const px = (sel, prop) => {
-    const m = rule(sel).match(new RegExp(prop + ":\\s*([\\d.]+)px"));
-    return m ? Number(m[1]) : null;
+    const block = rule(sel);
+    const m = block.match(new RegExp(prop + ":\\s*([\\d.]+)px"));
+    if (m) return Number(m[1]);
+    // border-radius is the one property that reads the shared --kx-r token now;
+    // resolve it so a corner set from the token still measures as a number.
+    if (prop === "border-radius" && /border-radius:\s*var\(--kx-r\)/.test(block)) return RADIUS_TOKEN;
+    return null;
   };
 
   /* ── the window ── */
-  ok("the palette is the design's 6px panel, not a 10px one",
-    px(".cmd-pal", "border-radius") === 6, String(px(".cmd-pal", "border-radius")));
+  // The palette takes the panel's one corner radius, not a chunky round of its
+  // own - the whole point of the original "6px, not 10px" note, now that the
+  // sharp token is what every surface reads.
+  ok("the palette carries the panel's sharp corner, not a chunky round",
+    px(".cmd-pal", "border-radius") === RADIUS_TOKEN, String(px(".cmd-pal", "border-radius")));
   ok("on the design's own overlay ground",
     /background:\s*var\(--kx-over\)/.test(rule(".cmd-pal")));
   ok("and it stacks header, list and footer",
@@ -878,10 +904,13 @@ console.log("\n──── the 1B palette ────");
      reason a pill fails that test is that its whole answer is a position and a
      fill. This one says ON or OFF in words. */
   const togR = px(".cp-toggle", "border-radius");
-  ok("the switch is a breaker, not a pill", togR === 4, String(togR));
+  // A breaker, not a pill: the radius is the panel's sharp token and stays far
+  // under half the 19px height, which is what keeps it from reading as a pill.
+  ok("the switch is a breaker, not a pill",
+    togR === RADIUS_TOKEN && togR < 19 / 2, String(togR));
   ok("at 40 by 19", px(".cp-toggle", "width") === 40 && px(".cp-toggle", "height") === 19);
   ok("with a square knob, not a round one",
-    px(".cp-toggle .knob", "border-radius") === 3 && px(".cp-toggle .knob", "width") === 13);
+    px(".cp-toggle .knob", "border-radius") === RADIUS_TOKEN && px(".cp-toggle .knob", "width") === 13);
   ok("and it states its position in words",
     /r\.on \? "ON" : "OFF"/.test(SRC) && /\.cp-toggle \.lbl/.test(CSS));
   ok("thrown, it takes the attention hue",

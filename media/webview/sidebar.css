@@ -68,7 +68,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb {
   background: var(--kx-scroll);
-  border: 2px solid transparent; background-clip: content-box; border-radius: 4px;
+  border: 2px solid transparent; background-clip: content-box; border-radius: var(--kx-r);
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--kx-scroll-hover);
@@ -189,7 +189,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   letter-spacing: .2em; text-transform: uppercase; color: var(--kx-fg);
 }
 .icon-btn {
-  width: 24px; height: 24px; display: grid; place-items: center; border-radius: 4px;
+  width: 24px; height: 24px; display: grid; place-items: center; border-radius: var(--kx-r);
   color: var(--kx-fg-2);
 }
 .icon-btn:hover { background: var(--kx-hover); color: var(--kx-fg); }
@@ -200,7 +200,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   background: var(--kx-over);
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
-  border: 1px solid var(--kx-line); border-radius: 4px;
+  border: 1px solid var(--kx-line); border-radius: var(--kx-r);
   box-shadow: 0 8px 24px var(--kx-shadow);
   /* Drops out of the button it hangs from, where `.qp` rises out of the
      composer. Opposite directions, one idea: a menu comes FROM its trigger. */
@@ -225,7 +225,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   background: var(--kx-over);
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
-  border: 1px solid var(--kx-line); border-radius: 4px;
+  border: 1px solid var(--kx-line); border-radius: var(--kx-r);
   box-shadow: 0 8px 24px var(--kx-shadow);
   animation: g-drop 130ms cubic-bezier(.16, 1, .3, 1) both;
 }
@@ -285,7 +285,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 }
 #historyPop { width: 262px; max-height: 300px; overflow-y: auto; }
 #morePop { width: 200px; }
-.pop-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 9px; border-radius: 4px; }
+.pop-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 9px; border-radius: var(--kx-r); }
 .pop-row:hover { background: var(--kx-hover); }
 .pop-row .t { font-size: 12px; display: block; }
 .pop-row .m { font-size: 10.5px; color: var(--kx-fg-2); display: block; }
@@ -352,7 +352,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 }
 .hist-del {
   position: absolute; right: 6px; top: 50%; margin-top: -11px;
-  width: 22px; height: 22px; display: grid; place-items: center; border-radius: 4px;
+  width: 22px; height: 22px; display: grid; place-items: center; border-radius: var(--kx-r);
   color: var(--kx-fg-2); opacity: 0;
 }
 .hist-row:hover .hist-del, .hist-del:focus-visible { opacity: 1; }
@@ -364,7 +364,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
    stopping runaway work that you have to go looking for is not a control. */
 .hist-stop {
   position: absolute; right: 30px; top: 50%; margin-top: -11px;
-  width: 22px; height: 22px; display: grid; place-items: center; border-radius: 4px;
+  width: 22px; height: 22px; display: grid; place-items: center; border-radius: var(--kx-r);
   color: var(--kx-fg-2);
 }
 .hist-stop:hover, .hist-stop:focus-visible { color: var(--kx-error); background: var(--kx-hover); }
@@ -751,7 +751,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 .w-row {
   display: flex; align-items: center; gap: 11px; width: 100%;
   padding: 10px 11px; text-align: left;
-  background: var(--kx-surface); border: 0; border-radius: 6px;
+  background: var(--kx-surface); border: 0; border-radius: var(--kx-r);
   color: var(--kx-fg-3);
   transition: background .14s ease;
 }
@@ -776,7 +776,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
    with the bin sitting on it. */
 .w-item {
   display: flex; align-items: stretch; width: 100%; position: relative;
-  background: var(--kx-surface); border-radius: 6px; overflow: hidden;
+  background: var(--kx-surface); border-radius: var(--kx-r); overflow: hidden;
 }
 /* The row paints the wrapper's surface, so the bin beside it sits on the same
    plate rather than on a gap of black. */
@@ -796,7 +796,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 }
 .chips { display: flex; flex-direction: column; gap: 6px; width: 100%; max-width: 300px; }
 .chip-btn {
-  font-size: 12.5px; padding: 8px 12px; border-radius: 4px;
+  font-size: 12.5px; padding: 8px 12px; border-radius: var(--kx-r);
   border: 1px solid var(--kx-line);
 }
 .chip-btn:hover { background: var(--kx-hover); }
@@ -976,7 +976,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
      translucent step, because a terminal has a ground of its own. */
   background: var(--kx-bg-deep);
   border: 1px solid var(--kx-line);
-  border-radius: 8px;
+  border-radius: var(--kx-r);
   margin-bottom: 22px;
   overflow: hidden;
   position: relative;
@@ -989,7 +989,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   content: ""; position: absolute; inset: 0; z-index: 2;
   pointer-events: none; border-radius: inherit;
   border-top: 1px solid rgba(255, 255, 255, .055);
-  border-radius: 8px 8px 0 0;
+  border-radius: var(--kx-r) var(--kx-r) 0 0;
   height: 1px;
 }
 /* The chrome. A step above the ground, the way a title bar always is. */
@@ -1211,7 +1211,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   display: flex; flex-direction: column; gap: 9px; width: 100%;
   padding: 13px 12px; text-align: left;
   background: var(--kx-surface);
-  border: 1px solid var(--kx-hairline); border-radius: 8px;
+  border: 1px solid var(--kx-hairline); border-radius: var(--kx-r);
   transition: background .14s ease, border-color .14s ease;
 }
 /* NO HOLE IN AN ODD ROW. Three tiles in two columns leaves the last one in a
@@ -1242,30 +1242,33 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 .boot-card:last-child:nth-child(odd) .boot-card-cmd { flex: none; }
 .boot-card:last-child:nth-child(odd) .boot-card-desc { flex: 1; min-width: 0; }
 .boot-card-ic {
-  width: 28px; height: 28px; border-radius: 6px;
+  width: 28px; height: 28px; border-radius: var(--kx-r);
   display: grid; place-items: center;
-  background: color-mix(in srgb, var(--h) 14%, transparent);
-  color: var(--h);
+  background: var(--kx-surface-3);
+  color: var(--kx-fg-2);
 }
 .boot-card-ic svg { display: block; }
 .boot-card-cmd {
   font-family: var(--kx-mono); font-size: 11px; font-weight: 700;
-  letter-spacing: .02em; color: var(--h);
+  letter-spacing: .02em; color: var(--kx-fg);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .boot-card-desc {
   font-size: 12px; line-height: 1.35; color: var(--kx-fg-3);
   text-wrap: pretty;
 }
-/* One hue per tile, set once and read by the plate and the command. Read is
-   blue, change is amber, produce is purple - the same three-way split the
-   phase word uses, so it is a distinction the panel already teaches. */
-.boot-card[data-hue="link"] { --h: var(--kx-link); }
-.boot-card[data-hue="act"]  { --h: var(--kx-phase-act); }
-.boot-card[data-hue="plan"] { --h: var(--kx-phase-plan); }
+/* NO HUE PER TILE. Three cards of identical shape used to be told apart by
+   three saturated hues - blue/amber/purple on the plate and the command - and
+   three decorative colours at equal weight is exactly what reads as a toy. The
+   cards are chrome, not state, so they carry no colour: the command name in
+   cream mono is the emphasis, the plate a neutral step, and the icon and label
+   already tell one tile from another. Colour is kept for what it means -
+   OK/WARN in the boot log, the phase, a diff, syntax - not for decoration.
+   `--h` stays defined as one neutral so the hover edge is a quiet lift. */
+.boot-card { --h: var(--kx-fg-3); }
 .boot-card:hover, .boot-card:focus-visible {
   background: var(--kx-surface-2);
-  border-color: color-mix(in srgb, var(--h) 40%, transparent);
+  border-color: var(--kx-edge);
   outline: none;
 }
 .boot-card:hover .boot-card-desc, .boot-card:focus-visible .boot-card-desc {
@@ -1356,7 +1359,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 .u-more {
   display: inline-flex; align-items: center; gap: 5px;
   margin-top: 5px; padding: 2px 7px 2px 5px;
-  background: none; border: 1px solid var(--kx-line); border-radius: 4px;
+  background: none; border: 1px solid var(--kx-line); border-radius: var(--kx-r);
   color: var(--kx-fg-3); cursor: pointer;
   font-family: var(--kx-ui); font-size: 11px; font-weight: 500;
 }
@@ -1369,13 +1372,13 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 .u-att { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
 .u-att-chip {
   display: inline-flex; align-items: center; gap: 5px;
-  padding: 3px 8px; border-radius: 4px;
+  padding: 3px 8px; border-radius: var(--kx-r);
   background: var(--kx-surface-2); color: var(--kx-fg-2);
   font-family: var(--kx-ui); font-size: 11px; font-weight: 400;
   white-space: nowrap;
 }
 .u-att-chip .sz { font-family: var(--kx-mono); font-size: 10.5px; color: var(--kx-fg-4); }
-.msg-img { max-width: 100%; max-height: 200px; border-radius: 4px; margin-bottom: 6px; display: block; }
+.msg-img { max-width: 100%; max-height: 200px; border-radius: var(--kx-r); margin-bottom: 6px; display: block; }
 
 /* -- the answer: prose, with room to breathe --
  *
@@ -1432,11 +1435,11 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 .msg-ai code {
   font-family: var(--kx-mono); font-size: 12px; line-height: 1;
   color: var(--kx-fg); background: var(--kx-surface-2);
-  padding: 1px 5px; border-radius: 4px;
+  padding: 1px 5px; border-radius: var(--kx-r);
   vertical-align: baseline;
 }
 .msg-ai pre, .code-block {
-  background: var(--kx-surface-2); border-radius: 4px;
+  background: var(--kx-surface-2); border-radius: var(--kx-r);
   padding: 7px 9px; margin: var(--kx-md-gap) 0;
   font-family: var(--kx-mono); font-size: 11px; line-height: 1.6;
   white-space: pre; overflow-x: auto;
@@ -1453,7 +1456,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 /* Fenced code, with the language as a tab above it. The wrapper owns the
    border so the header and body cannot drift apart on horizontal scroll. */
 .cb {
-  margin: var(--kx-md-block) 0; border: 1px solid var(--kx-line); border-radius: 4px;
+  margin: var(--kx-md-block) 0; border: 1px solid var(--kx-line); border-radius: var(--kx-r);
   overflow: hidden; background: var(--kx-surface-2);
 }
 /* The header stays - it is what carries Copy, and the note below explains why
@@ -1473,7 +1476,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 .cb-copy {
   display: flex; align-items: center; justify-content: center;
   width: 20px; height: 18px; padding: 0; flex: none;
-  background: none; border: none; border-radius: 3px;
+  background: none; border: none; border-radius: var(--kx-r);
   color: var(--kx-fg-3); cursor: pointer;
 }
 .cb-copy:hover { background: var(--kx-line); color: var(--kx-fg); }
@@ -1555,7 +1558,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
      the same treatment the Agents tab's sticky header uses for the same reason:
      the content behind it has to stop. */
   background: rgba(9, 9, 11, .97);
-  border: 1px solid var(--kx-line); border-radius: 6px;
+  border: 1px solid var(--kx-line); border-radius: var(--kx-r);
   box-shadow: 0 8px 28px var(--kx-shadow);
   overflow: hidden;
 }
@@ -1636,7 +1639,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .md-task .md-box {
   flex: none; width: 13px; height: 13px; margin-top: 2px;
   display: flex; align-items: center; justify-content: center;
-  border: 1px solid var(--kx-line-2); border-radius: 3px;
+  border: 1px solid var(--kx-line-2); border-radius: var(--kx-r);
   color: var(--kx-bg-deep);
 }
 .md-task[data-done="1"] .md-box { background: var(--kx-accent); border-color: var(--kx-accent); }
@@ -1651,7 +1654,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .md-call {
   margin: var(--kx-md-block) 0; padding: 7px 10px 8px;
   border-left: 2px solid var(--kx-line-2);
-  background: var(--kx-surface); border-radius: 0 4px 4px 0;
+  background: var(--kx-surface); border-radius: 0 var(--kx-r) var(--kx-r) 0;
 }
 .md-call-h {
   display: flex; align-items: center; gap: 5px; margin-bottom: 3px;
@@ -1682,7 +1685,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 
 /* Tables scroll inside their own box â€” a wide one must never make the whole
    panel scroll sideways. */
-.md-tw { margin: var(--kx-md-block) 0; overflow-x: auto; border-radius: 4px; border: 1px solid var(--kx-line); }
+.md-tw { margin: var(--kx-md-block) 0; overflow-x: auto; border-radius: var(--kx-r); border: 1px solid var(--kx-line); }
 .md-t { border-collapse: collapse; width: 100%; font-size: 12px; }
 .md-t th, .md-t td {
   padding: 5px 9px; text-align: left; vertical-align: top;
@@ -1709,7 +1712,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   background: var(--kx-bg-deep);
   border: 1px solid var(--kx-line);
   border-left: 2px solid var(--kx-fg-2);
-  border-radius: 4px; padding: 7px 10px; margin: 6px 0;
+  border-radius: var(--kx-r); padding: 7px 10px; margin: 6px 0;
   font-family: var(--kx-mono); font-size: 11px; line-height: 1.6;
   color: var(--kx-fg-2);
   white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: auto;
@@ -1729,7 +1732,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    carries a failure, so a red edge no longer sits on the line that never
    failed. */
 .term {
-  margin: 6px 0; border-radius: 5px; overflow: hidden;
+  margin: 6px 0; border-radius: var(--kx-r); overflow: hidden;
   border: 1px solid var(--kx-line); border-left: 2px solid var(--kx-fg-2);
   background: var(--kx-bg-deep);
   font-family: var(--kx-mono); font-size: 11px; line-height: 1.6;
@@ -1799,7 +1802,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    is the AAA/mobile guideline and does not apply to a desktop panel, but 22px
    was under the floor that does. The glyph stays 13px; the target grew. */
 .turn-foot button {
-  height: 24px; width: 24px; padding: 0; border-radius: 4px;
+  height: 24px; width: 24px; padding: 0; border-radius: var(--kx-r);
   display: grid; place-items: center;
   color: var(--kx-fg-3);
 }
@@ -1839,7 +1842,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    of a scrolling wall. The group is a plain wrapper: each .tool inside keeps
    its own expander and its own body. */
 .tool-group {
-  border: 1px solid var(--kx-line); border-radius: 4px;
+  border: 1px solid var(--kx-line); border-radius: var(--kx-r);
   margin-bottom: 12px; overflow: hidden;
 }
 .tool-group-head {
@@ -1869,7 +1872,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .think { margin-bottom: 12px; }
 .think-head {
   display: flex; align-items: center; gap: 8px; width: 100%;
-  padding: 4px 2px; border-radius: 4px;
+  padding: 4px 2px; border-radius: var(--kx-r);
   color: var(--kx-fg-4);
 }
 .think-head:hover { color: var(--kx-fg-2); background: var(--kx-hover); }
@@ -1994,7 +1997,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 
 /* â”€â”€ unified diff â”€â”€ */
 .diff-card {
-  border: 1px solid var(--kx-line); border-radius: 4px;
+  border: 1px solid var(--kx-line); border-radius: var(--kx-r);
   background: var(--kx-bg-deep); overflow: hidden; margin: 6px 0 14px;
 }
 .diff-head {
@@ -2033,7 +2036,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    it appears. No gutters here: there are no line numbers to show. */
 .edit-preview {
   font-family: var(--kx-mono); font-size: 11px; line-height: 1.7;
-  border: 1px solid var(--kx-line); border-radius: 4px;
+  border: 1px solid var(--kx-line); border-radius: var(--kx-r);
   background: var(--kx-bg-deep); overflow-x: auto; max-height: 320px; overflow-y: auto;
 }
 .edit-preview .dl { min-width: max-content; }
@@ -2055,7 +2058,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .btn {
   font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
   letter-spacing: .12em; text-transform: uppercase;
-  padding: 5px 11px; border-radius: 4px; text-align: center;
+  padding: 5px 11px; border-radius: var(--kx-r); text-align: center;
   background: transparent; border: 1px solid var(--kx-edge);
   color: var(--kx-fg-2);
 }
@@ -2128,7 +2131,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    checklist of boxes, so the box lives here for skills and the todo list
    overrides it below. Deleting it takes the skills checkbox with it. */
 .cbx {
-  width: 14px; height: 14px; flex: none; margin-top: 2px; border-radius: 3px;
+  width: 14px; height: 14px; flex: none; margin-top: 2px; border-radius: var(--kx-r);
   display: grid; place-items: center; background: transparent;
   border: 1px solid var(--kx-line);
 }
@@ -2144,7 +2147,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 /* â”€â”€ permission card â”€â”€ */
 .perm {
   background: var(--kx-surface);
-  border: 1px solid var(--kx-line); border-radius: 4px;
+  border: 1px solid var(--kx-line); border-radius: var(--kx-r);
   padding: 11px 12px; margin-bottom: 14px;
 }
 /* A command that can discard work the user cannot get back.
@@ -2159,7 +2162,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .perm-danger .perm-t, .perm-danger .perm-t .ic { color: var(--kx-error-2); }
 .perm-b { font-size: 12.5px; color: var(--kx-fg-2); margin: 6px 0 8px; }
 .perm-cmd {
-  background: var(--kx-surface-2); border-radius: 4px; padding: 7px 9px;
+  background: var(--kx-surface-2); border-radius: var(--kx-r); padding: 7px 9px;
   font-family: var(--kx-mono); font-size: 11.5px; white-space: pre-wrap; overflow-x: auto;
   max-height: 160px; overflow-y: auto;
 }
@@ -2168,7 +2171,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    need scrolling past to reach its own buttons. */
 .perm-diff {
   margin-top: 8px; max-height: 220px; overflow: auto;
-  background: var(--kx-bg-deep); border-radius: 4px; padding: 4px 0;
+  background: var(--kx-bg-deep); border-radius: var(--kx-r); padding: 4px 0;
 }
 .perm-actions { display: flex; gap: 7px; margin-top: 10px; flex-wrap: wrap; }
 /* Armed, not yet chosen: full-auto asks to be pressed twice. The row already
@@ -2186,7 +2189,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 /* â”€â”€ plan card â”€â”€ */
 .plan-card {
   background: var(--kx-surface);
-  border: 1px solid var(--kx-line); border-radius: 4px;
+  border: 1px solid var(--kx-line); border-radius: var(--kx-r);
   padding: 11px 12px; margin-bottom: 14px;
 }
 .plan-h { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
@@ -2196,7 +2199,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .plan-steps { list-style: none; display: flex; flex-direction: column; gap: 8px; margin-bottom: 11px; }
 .plan-steps li { display: flex; gap: 8px; font-size: 12.5px; }
 .plan-steps .n {
-  width: 16px; height: 16px; flex: none; border-radius: 4px; display: grid; place-items: center;
+  width: 16px; height: 16px; flex: none; border-radius: var(--kx-r); display: grid; place-items: center;
   background: var(--kx-surface-2); font-family: var(--kx-mono); font-size: 10.5px;
 }
 .plan-foot { display: flex; gap: 7px; }
@@ -2215,7 +2218,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .plan-why {
   flex: 1 1 auto; min-width: 0;
   background: var(--kx-surface-2);
-  border: 1px solid var(--kx-line); border-radius: 4px;
+  border: 1px solid var(--kx-line); border-radius: var(--kx-r);
   padding: 5px 8px; font-size: 12px;
 }
 .plan-why::placeholder { color: var(--kx-fg-3); }
@@ -2310,7 +2313,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   display: flex; gap: 9px; align-items: flex-start;
   margin-bottom: 14px; padding: 9px 11px;
   border-left: 2px solid var(--kx-error);
-  background: var(--kx-surface); border-radius: 0 4px 4px 0;
+  background: var(--kx-surface); border-radius: 0 var(--kx-r) var(--kx-r) 0;
   font-family: var(--kx-ui); font-size: 12.5px; line-height: 1.55;
   color: var(--kx-fg-2); white-space: pre-wrap; overflow-wrap: anywhere;
   text-wrap: pretty;
@@ -2402,7 +2405,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    sentence rather than under it. */
 .err-raw {
   max-height: 180px; overflow: auto;
-  background: var(--kx-bg-deep); border-radius: 4px; padding: 7px 9px;
+  background: var(--kx-bg-deep); border-radius: var(--kx-r); padding: 7px 9px;
   font-family: var(--kx-mono); font-size: 10.5px; line-height: 1.5;
   /* --kx-fg-3, not the --kx-fg-4 a code pane uses. This is EVIDENCE somebody
      opened deliberately in order to read it - a status line, a stack, the one
@@ -2422,7 +2425,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   display: flex; gap: 9px; align-items: center;
   margin-bottom: 14px; padding: 9px 11px;
   border-left: 2px solid var(--kx-link);
-  background: var(--kx-surface); border-radius: 0 4px 4px 0;
+  background: var(--kx-surface); border-radius: 0 var(--kx-r) var(--kx-r) 0;
   font-family: var(--kx-ui); font-size: 12px; line-height: 1.5;
   color: var(--kx-fg-2); overflow-wrap: anywhere;
 }
@@ -2477,7 +2480,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .ag-head .ic { flex: none; color: var(--kx-fg-3); }
 .ag-head .n { min-width: 0; font-family: var(--kx-ui); font-size: 12px; font-weight: 600; }
 .ag-live {
-  flex: none; padding: 1px 6px; border-radius: 3px;
+  flex: none; padding: 1px 6px; border-radius: var(--kx-r);
   background: var(--kx-agent); color: var(--kx-on-accent);
   font-family: var(--kx-ui); font-size: 9px; font-weight: 700;
   letter-spacing: .05em; text-transform: uppercase;
@@ -2496,7 +2499,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 .recent-row {
   display: flex; align-items: center; gap: 8px; width: 100%;
-  padding: 6px 8px; border-radius: 4px;
+  padding: 6px 8px; border-radius: var(--kx-r);
   background: none; border: none; cursor: pointer;
   color: var(--kx-fg-2); font-family: var(--kx-ui); font-size: 12px;
   text-align: left;
@@ -2533,7 +2536,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .chg-clear {
   flex: none; width: 26px; height: 26px; margin-right: 8px;
   display: flex; align-items: center; justify-content: center;
-  background: none; border: none; border-radius: 4px;
+  background: none; border: none; border-radius: var(--kx-r);
   color: var(--kx-fg-4); cursor: pointer;
 }
 .chg-clear:hover { color: var(--kx-fg); background: var(--kx-hover); }
@@ -2570,7 +2573,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .queue-clear {
   flex: none; width: 22px; height: 22px;
   display: grid; place-items: center;
-  background: none; border: none; border-radius: 4px;
+  background: none; border: none; border-radius: var(--kx-r);
   color: var(--kx-fg-4); cursor: pointer;
 }
 .queue-clear:hover { color: var(--kx-fg); background: var(--kx-hover); }
@@ -2580,7 +2583,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   display: flex; align-items: center; gap: 7px;
   min-width: 0; padding: 4px 0 4px 8px;
   border-left: 2px solid var(--kx-active);
-  border-radius: 0 3px 3px 0;
+  border-radius: 0 var(--kx-r) var(--kx-r) 0;
 }
 .queue-row + .queue-row { margin-top: 3px; }
 .queue-row:hover { background: var(--kx-hover); }
@@ -2595,7 +2598,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .queue-now, .queue-x {
   flex: none; width: 22px; height: 22px;
   display: grid; place-items: center;
-  background: none; border: none; border-radius: 4px;
+  background: none; border: none; border-radius: var(--kx-r);
   color: var(--kx-fg-4); cursor: pointer;
   /* Revealed on hover or focus, so a queue of five is five messages rather
      than ten buttons. They stay in the layout - appearing on hover would move
@@ -2650,7 +2653,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   background: var(--kx-over);
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
-  border: 1px solid var(--kx-line); border-radius: 4px;
+  border: 1px solid var(--kx-line); border-radius: var(--kx-r);
   box-shadow: 0 8px 24px var(--kx-shadow);
   /* It rises out of the composer rather than appearing on top of it.
      See the note on `g-rise` above for why this is an animation and not a
@@ -2679,7 +2682,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   background: var(--kx-over);
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
-  border: 1px solid var(--kx-line); border-radius: 6px;
+  border: 1px solid var(--kx-line); border-radius: var(--kx-r);
   box-shadow: 0 24px 60px var(--kx-shadow);
   overflow: hidden;
   display: flex; flex-direction: column;
@@ -2717,7 +2720,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   .cp-meta .full { display: none; }
   .cp-meta .mini {
     display: inline-block; color: var(--kx-fg-5);
-    border: 1px solid var(--kx-divider); border-radius: 3px; padding: 2px 4px 1px;
+    border: 1px solid var(--kx-divider); border-radius: var(--kx-r); padding: 2px 4px 1px;
   }
 }
 /* The list itself carries no padding: the rows are full-bleed so the selected
@@ -2812,7 +2815,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .cp-kbd { font-size: 9.5px; color: var(--kx-fg-5); }
 .cp-tag {
   font-size: 8.5px; letter-spacing: .1em; text-indent: .1em; color: var(--kx-fg-4);
-  border: 1px solid var(--kx-divider); border-radius: 3px; padding: 2px 4px 1px;
+  border: 1px solid var(--kx-divider); border-radius: var(--kx-r); padding: 2px 4px 1px;
 }
 /* ── the selected row ─────────────────────────────────────────────────────
    ONE HIGHLIGHT, SHARED BY THE POINTER AND THE ARROW KEYS. A hover fill under
@@ -2855,12 +2858,12 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .cp-toggle {
   flex: none; display: inline-flex; align-items: center;
   width: 40px; height: 19px; box-sizing: border-box;
-  border: 1px solid var(--kx-edge); border-radius: 4px;
+  border: 1px solid var(--kx-edge); border-radius: var(--kx-r);
   padding: 2px; background: transparent;
   transition: background .18s ease, border-color .18s ease, box-shadow .18s ease;
 }
 .cp-toggle .knob {
-  flex: none; width: 13px; height: 13px; border-radius: 3px;
+  flex: none; width: 13px; height: 13px; border-radius: var(--kx-r);
   background: var(--kx-fg-4);
   transition: background .18s ease;
 }
@@ -2946,7 +2949,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    picked the + stands alone rather than in an empty box. */
 .picks {
   display: flex; align-items: center; gap: 2px; flex: none;
-  padding: 2px; border-radius: 4px; background: var(--kx-surface);
+  padding: 2px; border-radius: var(--kx-r); background: var(--kx-surface);
 }
 /* WITH NOTHING PICKED THE TRAY HAS NO PLATE - a default takes no surface,
    which is the rule the whole group is built on. But the + is the TRIGGER, not
@@ -2962,7 +2965,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 .pick {
   width: 22px; height: 22px; flex: none; display: grid; place-items: center;
-  border-radius: 3px; color: var(--kx-fg-2); background: var(--kx-surface-3);
+  border-radius: var(--kx-r); color: var(--kx-fg-2); background: var(--kx-surface-3);
 }
 /* The washes are the ones the buttons these replaced already used, not the
    `-wash` tokens. `--kx-agent-wash` is 16% purple, and purple-400 on top of it
@@ -2983,7 +2986,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .pick:hover { background: var(--kx-surface-4); }
 /* Inside the tray the + drops to the glyphs' size, so the group reads as one
    run of plates rather than a button with badges beside it. */
-.picks .tb-btn { width: 22px; height: 22px; border-radius: 3px; }
+.picks .tb-btn { width: 22px; height: 22px; border-radius: var(--kx-r); }
 /* The + is a member of the tray, so it takes the tray's plate rather than the
    raised one .tb-btn gives the controls at the end of the row. */
 .picks .attach-btn { background: transparent; border-color: transparent; }
@@ -3004,7 +3007,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .qp-scope-n { flex: none; color: var(--kx-fg-4); }
 .qp-scope[data-none="1"] { color: var(--kx-warn); }
 
-.qp-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 9px; border-radius: 4px; }
+.qp-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 9px; border-radius: var(--kx-r); }
 .qp-row[data-active="1"] { background: var(--kx-hover); }
 .qp-row .n { font-family: var(--kx-ui); font-size: 12px; font-weight: 600; flex: none; }
 .qp-row .d {
@@ -3121,7 +3124,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   /* The design's own box: 8px/9px padding, and a 9px gap between
      the draft and the control row. The pills above keep their own edges, so
      they are pulled back out to the box edge by their negative margins. */
-  border-radius: 8px; overflow: hidden;
+  border-radius: var(--kx-r); overflow: hidden;
   display: flex; flex-direction: column; gap: 9px; padding: 8px 9px;
   /* --kx-edge, not the literal this used to carry: at .15 the composer's
      outline was 1.47:1 against the panel and the box you type into had no
@@ -3163,7 +3166,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
   letter-spacing: .14em; text-transform: uppercase; text-indent: .14em;
   color: var(--kx-fg);
-  border-radius: 4px;
+  border-radius: var(--kx-r);
 }
 
 /* Two background layers rather than a pseudo-element: the surface is painted
@@ -3265,7 +3268,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .ed-pill .nm { min-width: 0; }
 .ed-pill .prob {
   flex: none; font-family: var(--kx-ui); font-size: 10.5px; padding: 0 5px;
-  border-radius: 3px; background: var(--kx-surface-3); color: var(--kx-fg-2);
+  border-radius: var(--kx-r); background: var(--kx-surface-3); color: var(--kx-fg-2);
 }
 .ed-pill .prob[data-err="1"] { color: var(--kx-error); }
 /* The textarea must never show a scrollbar when empty. `rows=1` plus a fixed
@@ -3348,15 +3351,15 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 .att-pill {
   display: inline-flex; align-items: center; gap: 5px; max-width: 200px;
-  padding: 3px 4px 3px 6px; border-radius: 4px; font-size: 11px;
+  padding: 3px 4px 3px 6px; border-radius: var(--kx-r); font-size: 11px;
   background: var(--kx-surface-3); color: var(--kx-fg);
 }
-.att-thumb { width: 18px; height: 18px; object-fit: cover; border-radius: 3px; flex: none; }
+.att-thumb { width: 18px; height: 18px; object-fit: cover; border-radius: var(--kx-r); flex: none; }
 .att-name { max-width: 110px; }
 .att-size { color: var(--kx-fg-2); font-size: 10.5px; flex: none; }
 .att-x {
   width: 16px; height: 16px; flex: none; display: grid; place-items: center;
-  border-radius: 3px; color: var(--kx-fg-2);
+  border-radius: var(--kx-r); color: var(--kx-fg-2);
 }
 .att-x:hover { color: var(--kx-error); background: var(--kx-hover); }
 
@@ -3378,7 +3381,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    left of the row is one run of objects instead of a button, a word and a
    gap. The hue does the work the plate would otherwise need a border for. */
 .phase-word {
-  flex: none; height: 22px; padding: 0 7px; border: 0; border-radius: 3px;
+  flex: none; height: 22px; padding: 0 7px; border: 0; border-radius: var(--kx-r);
   display: inline-flex; align-items: center;
   font-family: var(--kx-mono); font-size: 9.5px; font-weight: 700;
   letter-spacing: .12em; text-indent: .12em; text-transform: uppercase;
@@ -3467,7 +3470,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
  * height, so it is a squircle by arithmetic and can never round into a pill. */
 #modelBtn {
   display: flex; align-items: center; gap: 5px; min-width: 0; height: 28px; padding: 0 8px;
-  border-radius: 4px; font-size: 12px; color: var(--kx-fg-2); white-space: nowrap;
+  border-radius: var(--kx-r); font-size: 12px; color: var(--kx-fg-2); white-space: nowrap;
   background: var(--kx-surface); border: 1px solid var(--kx-edge);
   box-shadow: inset 0 1px 2px var(--kx-shadow);
   transition: background .14s ease, color .14s ease, border-color .14s ease, box-shadow .14s ease;
@@ -3498,7 +3501,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
  * without attach having to be hidden to let it. */
 .tb-btn {
   width: 30px; height: 30px; flex: none; display: grid; place-items: center;
-  border-radius: 4px;
+  border-radius: var(--kx-r);
   background: var(--kx-surface-2);
   border: 1px solid var(--kx-edge);
   color: var(--kx-fg-2);
@@ -3550,7 +3553,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
      same red it puts on the focus ring, which in this palette is the error
      token. Send is the loudest thing in the box and this is the design's
      colour for it, not a failure state. */
-  width: 28px; height: 28px; flex: none; border-radius: 6px;
+  width: 28px; height: 28px; flex: none; border-radius: var(--kx-r);
   display: grid; place-items: center;
   background: var(--kx-surface-2); color: var(--kx-fg-3);
   /* The same hairline the attach button has, so the two read as one pair of
@@ -3631,7 +3634,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   margin-bottom: 6px; padding: 3px 10px;
   font-size: 11.5px; line-height: 1.4; color: var(--kx-fg-3);
   background: var(--kx-hover);
-  border: 1px solid var(--kx-hairline); border-radius: 4px;
+  border: 1px solid var(--kx-hairline); border-radius: var(--kx-r);
 }
 /* The keycap-ish label. Amber, matching Ask: both mean "information, not
    action", and a third accent for one word would be a third thing to learn. */
@@ -3648,7 +3651,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .tipbar .tip-t b { font-weight: 600; color: var(--kx-fg-2); }
 .tipbar .tip-x {
   flex: none; width: 20px; height: 20px; display: grid; place-items: center;
-  border-radius: 4px; color: var(--kx-fg-4);
+  border-radius: var(--kx-r); color: var(--kx-fg-4);
 }
 .tipbar .tip-x:hover { background: var(--kx-hover); color: var(--kx-fg-2); }
 
@@ -3929,7 +3932,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
   border-top: 1px solid var(--kx-line);
-  border-radius: 4px 4px 0 0;
+  border-radius: var(--kx-r) var(--kx-r) 0 0;
   box-shadow: 0 -14px 34px var(--kx-shadow);
   padding-bottom: 8px;
   transform: translateY(100%);
@@ -3976,7 +3979,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .perm-x {
   position: absolute; left: 8px; top: 2px;
   width: 26px; height: 26px; display: grid; place-items: center;
-  border-radius: 4px; color: var(--kx-fg);
+  border-radius: var(--kx-r); color: var(--kx-fg);
 }
 .perm-x:hover { background: var(--kx-surface-3); }
 
@@ -4077,7 +4080,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    provenance. Bounded in height so a tall image cannot push the rest of the
    turn off screen. */
 .gen-img {
-  margin: 8px 0; border: 1px solid var(--kx-line); border-radius: 4px;
+  margin: 8px 0; border: 1px solid var(--kx-line); border-radius: var(--kx-r);
   overflow: hidden; background: var(--kx-surface-2);
 }
 .gi-frame {
@@ -4118,7 +4121,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   margin: 4px 0 10px; padding: 6px 10px;
   border-left: 2px solid var(--kx-info);
   background: var(--kx-info-wash);
-  border-radius: 0 4px 4px 0;
+  border-radius: 0 var(--kx-r) var(--kx-r) 0;
   font-size: 11.5px; color: var(--kx-fg-2);
 }
 .prov-note svg { flex: none; color: var(--kx-info); }
@@ -4128,7 +4131,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   margin: 4px 0 10px; padding: 6px 10px;
   border-left: 2px solid var(--kx-info);
   background: var(--kx-info-wash);
-  border-radius: 0 4px 4px 0;
+  border-radius: 0 var(--kx-r) var(--kx-r) 0;
   font-size: 11.5px; color: var(--kx-fg-2);
 }
 .queued-note svg { flex: none; color: var(--kx-info); }
@@ -4174,7 +4177,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .mdl-picks {
   min-width: 0; margin-top: 5px;
   max-height: 168px; overflow-y: auto;
-  border: 1px solid var(--kx-line); border-radius: 4px;
+  border: 1px solid var(--kx-line); border-radius: var(--kx-r);
   background: var(--kx-surface-2);
 }
 .mdl-pick {
@@ -4322,7 +4325,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 
 .mcp-pill {
   display: inline-flex; align-items: center; gap: 5px; flex: none;
-  padding: 3px 9px; border-radius: 4px;
+  padding: 3px 9px; border-radius: var(--kx-r);
   font-size: 10.5px; font-weight: 600; letter-spacing: .02em;
   background: var(--kx-surface-3); color: var(--kx-fg-2);
 }
@@ -4340,7 +4343,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    twice on one row. */
 .mcp-ro {
   display: inline-flex; align-items: center; flex: none;
-  padding: 2px 7px; border-radius: 4px;
+  padding: 2px 7px; border-radius: var(--kx-r);
   font-family: var(--kx-mono); font-size: 9px;
   letter-spacing: .1em; text-transform: uppercase;
   /* --kx-ask rather than --kx-info: same blue family, one step lighter, and
@@ -4359,7 +4362,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    The classification is a heuristic over the tool's name (see mcpToolWrites
    in sidebar.js); every chip states it in its title. */
 .mcp-chip {
-  display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 4px;
+  display: inline-flex; align-items: center; padding: 3px 8px; border-radius: var(--kx-r);
   background: var(--kx-info-wash);
   /* A hairline of the same hue: the wash alone bleeds into the panel at this
      size, and a stack of chips reads as one block rather than several tools. */
@@ -4397,7 +4400,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .mcp-err {
   margin: 0 14px 12px; padding: 10px 12px;
   border-left: 2px solid var(--kx-error);
-  background: var(--kx-surface); border-radius: 0 4px 4px 0;
+  background: var(--kx-surface); border-radius: 0 var(--kx-r) var(--kx-r) 0;
 }
 .mcp-err .t { font-size: 12px; line-height: 1.55; color: var(--kx-fg-2); text-wrap: pretty; }
 .mcp-err .acts { display: flex; gap: 8px; margin-top: 10px; }
@@ -4405,7 +4408,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    and show nothing; this is the thing it was always meant to open. */
 .mcp-log {
   margin: 10px 0 0; padding: 9px 10px; max-height: 220px; overflow: auto;
-  border-radius: 4px; background: var(--kx-bg-deep);
+  border-radius: var(--kx-r); background: var(--kx-bg-deep);
   border: 1px solid var(--kx-line);
   font-family: var(--kx-mono); font-size: 10.5px; line-height: 1.65;
   color: var(--kx-fg-2); white-space: pre-wrap; overflow-wrap: anywhere;
@@ -4470,7 +4473,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 .te-s code {
   font-family: var(--kx-mono); font-size: 10.5px; color: var(--kx-fg-2);
-  background: var(--kx-surface-2); padding: 1px 5px; border-radius: 4px;
+  background: var(--kx-surface-2); padding: 1px 5px; border-radius: var(--kx-r);
   overflow-wrap: anywhere;
 }
 .tab-empty .btn { margin-top: 7px; height: 27px; padding: 0 15px; }
@@ -4494,7 +4497,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .sec-head .lbl { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
 .sec[data-open="1"] .sec-head .chev { transform: rotate(90deg); }
 .badge {
-  font-family: var(--kx-mono); font-size: 9px; padding: 1px 6px; border-radius: 4px;
+  font-family: var(--kx-mono); font-size: 9px; padding: 1px 6px; border-radius: var(--kx-r);
   background: var(--kx-surface-3); color: var(--kx-fg);
 }
 .badge.alert { background: var(--kx-error); color: var(--kx-on-accent); }
@@ -4508,7 +4511,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 
 .errc {
   background: var(--kx-surface);
-  border: 1px solid var(--kx-line); border-radius: 4px;
+  border: 1px solid var(--kx-line); border-radius: var(--kx-r);
   padding: 11px 12px; margin-bottom: 10px;
 }
 .errc-h { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; }
@@ -4532,7 +4535,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .fixk { margin-bottom: 10px; }
 .fixk .l { font-size: 11.5px; color: var(--kx-fg-2); margin-bottom: 5px; }
 .fixk .row {
-  display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 4px;
+  display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: var(--kx-r);
   background: var(--kx-surface-2);
 }
 .fixk .row code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font-size: 11px; }
@@ -4549,9 +4552,9 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   font-family: var(--kx-ui); font-size: 12px;
   background: var(--kx-surface-2); color: var(--kx-fg);
   border: 1px solid var(--kx-line);
-  border-right: none; border-radius: 4px 0 0 4px;
+  border-right: none; border-radius: var(--kx-r) 0 0 var(--kx-r);
 }
-.split .btn { border-radius: 0 4px 4px 0; }
+.split .btn { border-radius: 0 var(--kx-r) var(--kx-r) 0; }
 .upload .hint2 { font-size: 11px; color: var(--kx-fg-2); }
 .upload .row { display: flex; gap: 7px; justify-content: flex-end; }
 
@@ -4617,7 +4620,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   color: var(--kx-fg-2);
 }
 
-.tbl { border: 1px solid var(--kx-line); border-radius: 4px; overflow: hidden; }
+.tbl { border: 1px solid var(--kx-line); border-radius: var(--kx-r); overflow: hidden; }
 /* Four columns now: the wire glyph, the id over its URL, the model kind, and
    the two row actions. The kind column is `auto` rather than fixed so a narrow
    panel spends its width on the URL - the one field here that is long and
@@ -4645,7 +4648,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    columns rather than leaving a gap where the tag would be. */
 .trow[data-status="error"] { grid-template-columns: 26px minmax(0, 1fr) 54px; }
 .mini {
-  width: 22px; height: 22px; display: grid; place-items: center; border-radius: 4px;
+  width: 22px; height: 22px; display: grid; place-items: center; border-radius: var(--kx-r);
   color: var(--kx-fg-2);
 }
 .mini:hover { background: var(--kx-hover); color: var(--kx-fg); }
@@ -4653,7 +4656,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 
 .form {
   display: flex; flex-direction: column; gap: 8px; padding: 11px 12px; margin-top: 8px;
-  border: 1px solid var(--kx-line); border-radius: 4px;
+  border: 1px solid var(--kx-line); border-radius: var(--kx-r);
   background: var(--kx-surface);
 }
 .form .t { font-size: 12px; font-weight: 600; }
@@ -4670,7 +4673,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   align-self: center;
 }
 .fgrid input, .fgrid select {
-  height: 28px; min-width: 0; padding: 0 9px; outline: none; border-radius: 4px;
+  height: 28px; min-width: 0; padding: 0 9px; outline: none; border-radius: var(--kx-r);
   font-family: var(--kx-ui); font-size: 12px;
   background: var(--kx-surface-2); color: var(--kx-fg);
   border: 1px solid var(--kx-line);
@@ -4713,7 +4716,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .form .hint2 { font-size: 11px; line-height: 1.5; color: var(--kx-fg-2); }
 .form .hint2 code {
   font-family: var(--kx-mono); font-size: 10.5px;
-  background: var(--kx-surface-2); padding: 1px 4px; border-radius: 3px;
+  background: var(--kx-surface-2); padding: 1px 4px; border-radius: var(--kx-r);
 }
 
 /* â”€â”€ connection check, inside the endpoint form â”€â”€ */
@@ -4723,7 +4726,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 }
 .ep-check-banner {
   display: flex; align-items: flex-start; gap: 7px; margin-bottom: 8px;
-  padding: 7px 9px; border-radius: 4px; font-size: 11.5px; line-height: 1.5;
+  padding: 7px 9px; border-radius: var(--kx-r); font-size: 11.5px; line-height: 1.5;
   overflow-wrap: anywhere;
 }
 .ep-check-banner .ic { flex: none; margin-top: 2px; }

@@ -115,7 +115,8 @@
    *
    * These are NOT a general spacing scale for the panel. The chrome around the
    * transcript was tuned against its own constraints and is left alone; the
-   * names say `md` because that is exactly how far they reach. */
+   * names say `md` because that is exactly how far they reach.
+   *
    * The values are the SMALL end of what the seven were, not their average.
    * A first pass took the middle - 4/7/11 - and normalised the rhythm without
    * saving a pixel: it lowered the paragraph gap and the rule, and raised every
@@ -305,6 +306,19 @@
   --kx-scroll:       #4c4b51;
   --kx-scroll-hover: #6e6d73;
   --kx-shadow:       rgba(7, 10, 15, .7);   /* the mockup's dialog shadow    */
+
+  /* ── corner radius ──
+   * ONE knob for how sharp the panel's corners are. It reads as the whole
+   * difference between "a tool" and "a toy": a 4px round on a 30px control is
+   * the soft, bubbly corner that makes chrome look consumer and cheap, and it
+   * was the panel's default nearly everywhere - buttons, cards, popovers, code
+   * blocks, the boot terminal, the starter tiles. 2px is a corner you can see
+   * is a corner and cannot mistake for a pill: crisp, deliberate, the register
+   * a developer tool sits in. Circles (`50%`) and true pills (`999px`) are
+   * shapes rather than softening and keep their own values; the terminal's
+   * inner rows stay a literal `0`. Everything that was a plain round now reads
+   * this, so the sharpness is set in one place, not negotiated in sixty. */
+  --kx-r:   2px;   /* the standard control / card / popover corner */
 
   /* ── type ──
    * TWO families, split by role, and both ship; see src/ui/shell.ts and
