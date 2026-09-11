@@ -29,19 +29,27 @@ const SRC = fs.readFileSync(path.join(ROOT, "media/webview/sidebar.js"), "utf8")
 const CRYSTAL = fs.readFileSync(path.join(ROOT, "media/webview/crystal.js"), "utf8");
 const TOKENS = fs.readFileSync(path.join(ROOT, "media/webview/tokens.css"), "utf8");
 
-// The panel's corner radius is one token now (--kx-r in tokens.css), so a shape
-// reads `border-radius: var(--kx-r)` rather than a literal px. These shape
+// The panel's corner radius is a SCALE now (tokens.css): --kx-r-xs for the
+// tiniest controls, --kx-r for the default control, --kx-r-lg for surfaces. A
+// shape reads `border-radius: var(--kx-r*)` rather than a literal px. These
 // guards care about the RESOLVED number - is it a corner, not a pill, and does
-// it stay under half the box - so they resolve the token the way the browser
-// does. A literal px still resolves, so a shape that opts out is still measured.
-const RADIUS_TOKEN = Number((TOKENS.match(/--kx-r:\s*(\d+)px/) || [])[1]);
+// it stay under half the box - so they resolve whichever token is named the way
+// the browser does. A literal px still resolves, so a shape that opts out is
+// still measured.
+const RADIUS = {
+  "--kx-r-xs": Number((TOKENS.match(/--kx-r-xs:\s*(\d+)px/) || [])[1]),
+  "--kx-r":    Number((TOKENS.match(/--kx-r:\s*(\d+)px/) || [])[1]),
+  "--kx-r-lg": Number((TOKENS.match(/--kx-r-lg:\s*(\d+)px/) || [])[1]),
+};
+const RADIUS_TOKEN = RADIUS["--kx-r"]; // the default control radius
 // A border-radius value from a CSS block resolved to a number: a literal `Npx`,
-// or the shared radius token.
+// or any of the scale's tokens.
 function radiusPx(block) {
   const m = block && block.match(/border-radius:\s*([^;\n}]+)/);
   if (!m) return null;
   const v = m[1].trim();
-  if (/^var\(--kx-r\)$/.test(v)) return Number.isFinite(RADIUS_TOKEN) ? RADIUS_TOKEN : null;
+  const tok = v.match(/^var\((--kx-r(?:-xs|-lg)?)\)$/);
+  if (tok) { const n = RADIUS[tok[1]]; return Number.isFinite(n) ? n : null; }
   const px = v.match(/^([\d.]+)px$/);
   return px ? Number(px[1]) : null;
 }
@@ -816,18 +824,18 @@ console.log("\n──── the 1B palette ────");
     const block = rule(sel);
     const m = block.match(new RegExp(prop + ":\\s*([\\d.]+)px"));
     if (m) return Number(m[1]);
-    // border-radius is the one property that reads the shared --kx-r token now;
-    // resolve it so a corner set from the token still measures as a number.
-    if (prop === "border-radius" && /border-radius:\s*var\(--kx-r\)/.test(block)) return RADIUS_TOKEN;
+    // border-radius reads a token from the radius scale now; resolve whichever
+    // one is named so a corner set from a token still measures as a number.
+    if (prop === "border-radius") return radiusPx(block);
     return null;
   };
 
   /* ── the window ── */
-  // The palette takes the panel's one corner radius, not a chunky round of its
-  // own - the whole point of the original "6px, not 10px" note, now that the
-  // sharp token is what every surface reads.
-  ok("the palette carries the panel's sharp corner, not a chunky round",
-    px(".cmd-pal", "border-radius") === RADIUS_TOKEN, String(px(".cmd-pal", "border-radius")));
+  // A floating surface, so it takes the SURFACE radius (the large end of the
+  // scale), not a control radius - which is what keeps it reading as a panel
+  // over the composer rather than a big button.
+  ok("the palette carries the surface radius, not a control's",
+    px(".cmd-pal", "border-radius") === RADIUS["--kx-r-lg"], String(px(".cmd-pal", "border-radius")));
   ok("on the design's own overlay ground",
     /background:\s*var\(--kx-over\)/.test(rule(".cmd-pal")));
   ok("and it stacks header, list and footer",
@@ -904,13 +912,16 @@ console.log("\n──── the 1B palette ────");
      reason a pill fails that test is that its whole answer is a position and a
      fill. This one says ON or OFF in words. */
   const togR = px(".cp-toggle", "border-radius");
-  // A breaker, not a pill: the radius is the panel's sharp token and stays far
-  // under half the 19px height, which is what keeps it from reading as a pill.
+  // A breaker, not a pill: the radius is the control token and stays under half
+  // the 19px height, which is what keeps it from reading as a pill.
   ok("the switch is a breaker, not a pill",
     togR === RADIUS_TOKEN && togR < 19 / 2, String(togR));
   ok("at 40 by 19", px(".cp-toggle", "width") === 40 && px(".cp-toggle", "height") === 19);
+  // The 13px knob takes the SMALLEST radius on purpose - the control radius
+  // would be over half its width and disc it - and still reads as a square.
+  const knobR = px(".cp-toggle .knob", "border-radius");
   ok("with a square knob, not a round one",
-    px(".cp-toggle .knob", "border-radius") === RADIUS_TOKEN && px(".cp-toggle .knob", "width") === 13);
+    knobR === RADIUS["--kx-r-xs"] && knobR < 13 / 2 && px(".cp-toggle .knob", "width") === 13, String(knobR));
   ok("and it states its position in words",
     /r\.on \? "ON" : "OFF"/.test(SRC) && /\.cp-toggle \.lbl/.test(CSS));
   ok("thrown, it takes the attention hue",

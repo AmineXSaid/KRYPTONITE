@@ -200,7 +200,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   background: var(--kx-over);
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
-  border: 1px solid var(--kx-line); border-radius: var(--kx-r);
+  border: 1px solid var(--kx-line); border-radius: var(--kx-r-lg);
   box-shadow: 0 8px 24px var(--kx-shadow);
   /* Drops out of the button it hangs from, where `.qp` rises out of the
      composer. Opposite directions, one idea: a menu comes FROM its trigger. */
@@ -225,7 +225,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   background: var(--kx-over);
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
-  border: 1px solid var(--kx-line); border-radius: var(--kx-r);
+  border: 1px solid var(--kx-line); border-radius: var(--kx-r-lg);
   box-shadow: 0 8px 24px var(--kx-shadow);
   animation: g-drop 130ms cubic-bezier(.16, 1, .3, 1) both;
 }
@@ -976,7 +976,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
      translucent step, because a terminal has a ground of its own. */
   background: var(--kx-bg-deep);
   border: 1px solid var(--kx-line);
-  border-radius: var(--kx-r);
+  border-radius: var(--kx-r-lg);
   margin-bottom: 22px;
   overflow: hidden;
   position: relative;
@@ -1211,7 +1211,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   display: flex; flex-direction: column; gap: 9px; width: 100%;
   padding: 13px 12px; text-align: left;
   background: var(--kx-surface);
-  border: 1px solid var(--kx-hairline); border-radius: var(--kx-r);
+  border: 1px solid var(--kx-hairline); border-radius: var(--kx-r-lg);
   transition: background .14s ease, border-color .14s ease;
 }
 /* NO HOLE IN AN ODD ROW. Three tiles in two columns leaves the last one in a
@@ -1456,7 +1456,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 /* Fenced code, with the language as a tab above it. The wrapper owns the
    border so the header and body cannot drift apart on horizontal scroll. */
 .cb {
-  margin: var(--kx-md-block) 0; border: 1px solid var(--kx-line); border-radius: var(--kx-r);
+  margin: var(--kx-md-block) 0; border: 1px solid var(--kx-line); border-radius: var(--kx-r-lg);
   overflow: hidden; background: var(--kx-surface-2);
 }
 /* The header stays - it is what carries Copy, and the note below explains why
@@ -1558,7 +1558,7 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
      the same treatment the Agents tab's sticky header uses for the same reason:
      the content behind it has to stop. */
   background: rgba(9, 9, 11, .97);
-  border: 1px solid var(--kx-line); border-radius: var(--kx-r);
+  border: 1px solid var(--kx-line); border-radius: var(--kx-r-lg);
   box-shadow: 0 8px 28px var(--kx-shadow);
   overflow: hidden;
 }
@@ -1842,7 +1842,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    of a scrolling wall. The group is a plain wrapper: each .tool inside keeps
    its own expander and its own body. */
 .tool-group {
-  border: 1px solid var(--kx-line); border-radius: var(--kx-r);
+  border: 1px solid var(--kx-line); border-radius: var(--kx-r-lg);
   margin-bottom: 12px; overflow: hidden;
 }
 .tool-group-head {
@@ -1872,7 +1872,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .think { margin-bottom: 12px; }
 .think-head {
   display: flex; align-items: center; gap: 8px; width: 100%;
-  padding: 4px 2px; border-radius: var(--kx-r);
+  padding: 4px 2px; border-radius: var(--kx-r-lg);
   color: var(--kx-fg-4);
 }
 .think-head:hover { color: var(--kx-fg-2); background: var(--kx-hover); }
@@ -2147,7 +2147,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 /* â”€â”€ permission card â”€â”€ */
 .perm {
   background: var(--kx-surface);
-  border: 1px solid var(--kx-line); border-radius: var(--kx-r);
+  border: 1px solid var(--kx-line); border-radius: var(--kx-r-lg);
   padding: 11px 12px; margin-bottom: 14px;
 }
 /* A command that can discard work the user cannot get back.
@@ -2189,7 +2189,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 /* â”€â”€ plan card â”€â”€ */
 .plan-card {
   background: var(--kx-surface);
-  border: 1px solid var(--kx-line); border-radius: var(--kx-r);
+  border: 1px solid var(--kx-line); border-radius: var(--kx-r-lg);
   padding: 11px 12px; margin-bottom: 14px;
 }
 .plan-h { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
@@ -2653,7 +2653,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   background: var(--kx-over);
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
-  border: 1px solid var(--kx-line); border-radius: var(--kx-r);
+  border: 1px solid var(--kx-line); border-radius: var(--kx-r-lg);
   box-shadow: 0 8px 24px var(--kx-shadow);
   /* It rises out of the composer rather than appearing on top of it.
      See the note on `g-rise` above for why this is an animation and not a
@@ -2682,7 +2682,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   background: var(--kx-over);
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
-  border: 1px solid var(--kx-line); border-radius: var(--kx-r);
+  border: 1px solid var(--kx-line); border-radius: var(--kx-r-lg);
   box-shadow: 0 24px 60px var(--kx-shadow);
   overflow: hidden;
   display: flex; flex-direction: column;
@@ -2863,7 +2863,9 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   transition: background .18s ease, border-color .18s ease, box-shadow .18s ease;
 }
 .cp-toggle .knob {
-  flex: none; width: 13px; height: 13px; border-radius: var(--kx-r);
+  /* 13px wide, so it takes the smallest corner - the 8px control radius would
+     be more than half its width and round it into a disc. */
+  flex: none; width: 13px; height: 13px; border-radius: var(--kx-r-xs);
   background: var(--kx-fg-4);
   transition: background .18s ease;
 }
@@ -3124,7 +3126,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   /* The design's own box: 8px/9px padding, and a 9px gap between
      the draft and the control row. The pills above keep their own edges, so
      they are pulled back out to the box edge by their negative margins. */
-  border-radius: var(--kx-r); overflow: hidden;
+  border-radius: var(--kx-r-lg); overflow: hidden;
   display: flex; flex-direction: column; gap: 9px; padding: 8px 9px;
   /* --kx-edge, not the literal this used to carry: at .15 the composer's
      outline was 1.47:1 against the panel and the box you type into had no
@@ -3166,7 +3168,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
   letter-spacing: .14em; text-transform: uppercase; text-indent: .14em;
   color: var(--kx-fg);
-  border-radius: var(--kx-r);
+  border-radius: var(--kx-r-lg);
 }
 
 /* Two background layers rather than a pseudo-element: the surface is painted
@@ -3639,7 +3641,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   margin-bottom: 6px; padding: 3px 10px;
   font-size: 11.5px; line-height: 1.4; color: var(--kx-fg-3);
   background: var(--kx-hover);
-  border: 1px solid var(--kx-hairline); border-radius: var(--kx-r);
+  border: 1px solid var(--kx-hairline); border-radius: var(--kx-r-lg);
 }
 /* The keycap-ish label. Amber, matching Ask: both mean "information, not
    action", and a third accent for one word would be a third thing to learn. */
@@ -3937,7 +3939,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
   border-top: 1px solid var(--kx-line);
-  border-radius: var(--kx-r) var(--kx-r) 0 0;
+  border-radius: var(--kx-r-lg) var(--kx-r-lg) 0 0;
   box-shadow: 0 -14px 34px var(--kx-shadow);
   padding-bottom: 8px;
   transform: translateY(100%);
