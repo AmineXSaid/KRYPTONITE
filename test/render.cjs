@@ -1158,16 +1158,23 @@ function contrast(a, b) {
     ok("and the defs were actually found", defined.size > 15, String(defined.size));
   }
 
-  /* ── 5k. the section strip never hides the tab you are on ──────────── */
+  /* ── 5k. every section stays reachable at every width ─────────────── */
   {
-    // The strip scrolls - ten sections have never fitted - and a fade at its
-    // right edge says "there is more this way". That mask must not sit on top
-    // of the LAST tab once you have scrolled to the end, because then the
-    // thing it hides is the tab you just selected. The More menu navigates
-    // straight to About, which is last, so this is the ordinary path.
+    // Ten sections have never fitted on one line. The strip used to answer
+    // that by SCROLLING sideways with the scrollbar hidden and a fade at the
+    // right edge as the only hint, and the tabs past the fold - Skills,
+    // Checkpoints, Logs, Documentation, About - simply sat off-screen at every
+    // realistic panel width. Dragging the panel narrower did not reflow them;
+    // it hid them. So the strip WRAPS now, and this is the guard on that: a
+    // section you cannot see is a section you cannot open.
     //
-    // jsdom cannot see it: there is no layout and no mask. Only a real engine
-    // can say where the tab ends up.
+    // The three assertions that used to live here measured the retired design
+    // - they read the fade width out of the stylesheet and expected the strip
+    // to overflow - and were never updated when it changed.
+    //
+    // test/control-center.cjs proves the ten tabs EXIST; jsdom has no layout,
+    // so it cannot say whether they land on screen. Only a real engine can,
+    // which is why this claim has to be made here or nowhere.
     const ctx = await browser.newContext({
       viewport: { width: 820, height: 700 }, deviceScaleFactor: 2, colorScheme: "dark",
     });
@@ -1191,27 +1198,53 @@ function contrast(a, b) {
     await page.waitForTimeout(300);
     ok("the control center boots with no script error", errors.length === 0, errors.slice(0, 2).join(" | "));
 
-    // The fade width is read from the stylesheet, not retyped: the padding that
-    // clears it and the mask that needs clearing must stay the same number.
-    const css = fs.readFileSync(path.join(MEDIA, "webview/controlCenter.css"), "utf8");
-    const fade = Number((/mask-image: linear-gradient\(90deg, #000 calc\(100% - (\d+)px\)/.exec(css) || [])[1]);
-    ok("the strip's fade width is declared in css", Number.isFinite(fade), String(fade));
+    // How many tabs there should be, counted from the source the way
+    // test/control-center.cjs:39 counts them. A hardcoded ten would keep
+    // passing after an eleventh section was added and left off the strip,
+    // which is the failure this whole block exists to catch.
+    const sections = (() => {
+      const src = fs.readFileSync(path.join(MEDIA, "webview/controlCenter.js"), "utf8");
+      const m = src.match(/var SECTIONS = \[[\s\S]*?\];/);
+      if (!m) throw new Error("SECTIONS not found in controlCenter.js");
+      return [...m[0].matchAll(/\["([a-z]+)",\s*"/g)].map((x) => x[1]);
+    })();
+    ok("the section list is readable from the shipped source", sections.length >= 10, String(sections.length));
 
-    const m = await page.evaluate(() => {
-      const s = document.getElementById("strip");
-      s.scrollLeft = s.scrollWidth; // all the way to the end of the list
-      const tabs = [...s.querySelectorAll("button")];
-      const last = tabs[tabs.length - 1];
-      return { overflow: s.scrollWidth - s.clientWidth,
-               gap: Math.round(s.getBoundingClientRect().right - last.getBoundingClientRect().right),
-               label: last.textContent.trim() };
-    });
-    // The premise: at this width the strip really does scroll. Without it the
-    // assertion below would pass for the boring reason.
-    ok("the strip overflows at 820px, so the end of it is reachable",
-      m.overflow > 0, String(m.overflow));
-    ok("and the last tab clears the fade when scrolled to the end",
-      m.gap >= fade, `"${m.label}" ends ${m.gap}px from the edge, fade is ${fade}px`);
+    // 820px was the only width the old block ran at, and it is the one that
+    // proves the least: the claim is that narrowing REFLOWS rather than hides,
+    // so measure one row, two rows and three.
+    for (const width of [520, 820, 1200]) {
+      await page.setViewportSize({ width, height: 700 });
+      await page.waitForTimeout(80);
+      const m = await page.evaluate(() => {
+        const s = document.getElementById("strip");
+        const box = s.getBoundingClientRect();
+        const tabs = [...s.querySelectorAll("button")];
+        const within = (a, b) => a <= b + 1; // a pixel of slack for subpixel layout
+        const outside = (r) => !(within(box.left, r.left) && within(r.right, box.right) &&
+                                 within(box.top, r.top) && within(r.bottom, box.bottom));
+        return {
+          count: tabs.length,
+          wrap: getComputedStyle(s).flexWrap,
+          overflow: s.scrollWidth - s.clientWidth,
+          rows: new Set(tabs.map((t) => Math.round(t.getBoundingClientRect().top))).size,
+          clipped: tabs.filter((t) => outside(t.getBoundingClientRect())).map((t) => t.textContent.trim()),
+          // Visible but covered is the failure a rect check alone misses.
+          covered: tabs.filter((t) => {
+            const r = t.getBoundingClientRect();
+            const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+            return !(hit && (hit === t || t.contains(hit)));
+          }).map((t) => t.textContent.trim()),
+        };
+      });
+      ok(`the strip wraps rather than scrolls at ${width}px`,
+        m.wrap === "wrap" && m.overflow <= 1, `${m.wrap}, ${m.overflow}px of overflow, ${m.rows} row(s)`);
+      ok(`  and every section is drawn inside it`,
+        m.count === sections.length && m.clipped.length === 0,
+        `${m.count}/${sections.length} tabs, clipped: ${m.clipped.join(", ") || "none"}`);
+      ok(`  and every tab answers a click where it is drawn`,
+        m.covered.length === 0, `covered: ${m.covered.join(", ") || "none"}`);
+    }
     await ctx.close();
   }
 
