@@ -2151,11 +2151,15 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   padding: 11px 12px; margin-bottom: 14px;
 }
 /* A command that can discard work the user cannot get back.
-   The card carries the alarm hue rather than the warn hue the ordinary
-   permission card wears, because these two questions should not look alike:
-   one is "may I", the other is "this is not undoable". */
+   The alarm is spent as an EDGE, not a wash: a full red panel is louder than
+   the question needs and reads as "too much colour". A 3px red left border and
+   the red title carry "this is not undoable" while the card keeps the ordinary
+   surface - colour as signal, not fill. These two questions still do not look
+   alike: "may I" wears no edge, this one does. */
 .perm.perm-danger {
-  border-color: var(--kx-error); background: var(--kx-error-wash);
+  border-color: var(--kx-line);
+  border-left: 3px solid var(--kx-error);
+  background: var(--kx-surface);
 }
 .perm-t { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; }
 .perm-t .ic { color: var(--kx-warn); }

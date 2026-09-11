@@ -1259,14 +1259,26 @@ console.log("\n──── the 1B palette ────");
   ok("and the diff is bounded so the buttons stay reachable",
     /\.perm-diff\s*\{[^}]*max-height/.test(CSS));
 
-  // A request with no patch - a shell command, a fetch - still shows its
-  // payload the old way, because there is no diff to make of it.
+  // A COMMAND is shown once. The summary already IS the command ("Run: <line>"),
+  // so repeating it as a second payload block below was the same line twice -
+  // the redundancy the card dropped. The command stays, once, in the summary.
   b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
     type: "permissionRequest", id: "p4", summary: "Run: npm test", detail: "npm test",
   } }));
   const cmd = [...b.d.querySelectorAll(".perm")].pop();
-  ok("a command falls back to its payload", !!cmd.querySelector(".perm-cmd[style]"));
+  ok("a command is shown once, not repeated as a payload block",
+    !cmd.querySelector(".perm-cmd[style]"));
+  ok("and the command is still there, in the summary", /Run: npm test/.test(cmd.textContent));
   ok("and draws no empty diff", !cmd.querySelector(".perm-diff"));
+
+  // A NON-command payload - a fetch, a write - carries something the summary
+  // does not, and has no diff to make of it, so it still shows its detail block.
+  b.w.dispatchEvent(new b.w.MessageEvent("message", { data: {
+    type: "permissionRequest", id: "p5", summary: "Fetch a URL",
+    detail: "https://api.example.com/v1/data",
+  } }));
+  const fetchCard = [...b.d.querySelectorAll(".perm")].pop();
+  ok("a non-command payload still shows its detail", !!fetchCard.querySelector(".perm-cmd[style]"));
   b.dom.window.close();
 }
 

@@ -4546,9 +4546,13 @@ function _sbRun() {
        *
        * `detail` remains the fallback: a shell command and a fetch have a
        * payload worth reading and no patch to make of it. */
+      /* For a command the summary already IS the command ("Run: <line>"), so
+         the detail is the same line a second time - shown once. The block stays
+         for the cases where detail carries something the summary does not: a
+         fetch URL, a write payload. */
       (m.patch
         ? '<div class="perm-diff diff-body">' + diffRows(m.patch) + "</div>"
-        : m.detail ? '<div class="perm-cmd" style="margin-top:6px">' + esc(String(m.detail).slice(0, 4000)) + "</div>" : "") +
+        : (m.detail && !isCmd) ? '<div class="perm-cmd" style="margin-top:6px">' + esc(String(m.detail).slice(0, 4000)) + "</div>" : "") +
       '<div class="perm-actions">' +
         '<button class="btn go" data-perm="allow">Allow once</button>' +
         (canAlways
