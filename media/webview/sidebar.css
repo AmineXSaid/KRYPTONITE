@@ -2103,29 +2103,33 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    .cbx is shared with the skills list, so every rule here is scoped under
    .todo-list; unscoped, the 9px glyph column would eat the skills checkbox. */
 .card { margin-bottom: 16px; }
-.todo-head { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; }
+.todo-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
 .todo-head .t {
   font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
   letter-spacing: .14em; text-transform: uppercase; color: var(--kx-fg-3);
 }
-.todo-head .n {
-  font-family: var(--kx-mono); font-size: 9px; letter-spacing: .14em;
-  color: var(--kx-fg);
+.todo-head .todo-ln { flex: 1; height: 1px; background: var(--kx-line); }
+/* THE COUNTER IS A RING, not a track. A 2px bar washed out in a moving panel;
+   a filled arc reads the fraction done at a glance, with the count in its
+   centre. `--p` is the percent, set by renderTodos; the hole is the panel's
+   own ground so the ring reads as an arc, not a disc. */
+.todo-ring {
+  flex: none; width: 30px; height: 30px; border-radius: 50%; position: relative;
+  display: grid; place-items: center;
+  background: conic-gradient(var(--kx-accent) calc(var(--p, 0) * 1%), var(--kx-surface-3) 0);
 }
-/* 2px, not the mockup's 1px.
-   The design draws this as a hairline, and at 1px against --kx-line it is
-   legible in a static comp and effectively invisible in a moving panel - the
-   ratio it encodes has to be read off the counter instead, which makes the
-   track decoration. 2px keeps the shape and restores the reason for it. */
-.todo-bar { flex: 1; height: 2px; background: var(--kx-line); overflow: hidden; }
-.todo-bar i { display: block; height: 2px; background: var(--kx-action); }
+.todo-ring::before {
+  content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--kx-void);
+}
+.todo-ring span {
+  position: relative; font-family: var(--kx-mono); font-size: 9px; color: var(--kx-fg-2);
+}
 .todo-list { list-style: none; display: flex; flex-direction: column; }
 .todo-list li {
-  display: flex; align-items: center; gap: 11px; min-height: 28px;
-  padding: 4px 0 4px 11px; font-size: 13px;
-  border-left: 1px solid var(--kx-line);
+  display: flex; align-items: center; gap: 10px; min-height: 30px;
+  padding: 6px 0; font-size: 13px;
 }
-.todo-list li.doing { border-left-color: var(--kx-action); }
+.todo-list li + li { border-top: 1px solid var(--kx-line); }
 /* The base checkbox, which the SKILLS list still uses. main declared this
    once and the todo list borrowed it; the todo list has since stopped being a
    checklist of boxes, so the box lives here for skills and the todo list
@@ -2135,14 +2139,29 @@ ul.md-l li.md-task, ol.md-l li.md-task {
   display: grid; place-items: center; background: transparent;
   border: 1px solid var(--kx-line);
 }
+/* A real box again, at the smallest radius: empty and outlined while pending,
+   filled green with a check when done, replaced by a spinner while running. */
 .todo-list .cbx {
-  width: 9px; height: auto; flex: none; margin: 0; display: block;
-  border: none; border-radius: 0; background: none;
-  font-family: var(--kx-mono); font-size: 10.5px; color: var(--kx-accent);
+  width: 15px; height: 15px; flex: none; margin: 0; border-radius: var(--kx-r-xs);
+  border: 1.5px solid var(--kx-edge); background: none;
+  display: grid; place-items: center;
+  font-family: var(--kx-mono); font-size: 10px; color: var(--kx-fg-3);
 }
+.todo-list li.done .cbx {
+  background: var(--kx-accent); border-color: var(--kx-accent); color: var(--kx-on-accent);
+}
+.todo-list li.doing .cbx { border: none; }
+.todo-spin {
+  width: 12px; height: 12px; border-radius: 50%;
+  border: 2px solid var(--kx-active); border-top-color: transparent;
+  animation: g-sweep .8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { .todo-spin { animation: none; } }
 .todo-list .tx { color: var(--kx-fg-3); }
 .todo-list li.doing .tx { color: var(--kx-fg); font-weight: 500; }
-.todo-list li.done .tx { color: var(--kx-fg-2); font-weight: 400; }
+.todo-list li.done .tx {
+  color: var(--kx-fg-3); text-decoration: line-through; text-decoration-color: var(--kx-fg-4);
+}
 
 /* â”€â”€ permission card â”€â”€ */
 .perm {

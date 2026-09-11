@@ -4465,14 +4465,15 @@ function _sbRun() {
         (t.status === "in_progress" || !anyInProgress);
       if (isActive) activeMarked = true;
       items += '<li class="' + (isDone ? "done" : isActive ? "doing" : "") + '">' +
-        '<span class="cbx">' + (isDone ? icon("i-check", "ic-9") : "") + "</span>" +
+        '<span class="cbx">' +
+          (isDone ? icon("i-check", "ic-9") : isActive ? '<span class="todo-spin"></span>' : "") +
+        "</span>" +
         '<span class="tx">' + esc(t.content) + "</span></li>";
     }
     var pct = Math.round((done / S.todos.length) * 100);
     var html =
-      '<div class="todo-head"><span class="t">Todos</span>' +
-      '<span class="n">' + done + "/" + S.todos.length + "</span>" +
-      '<span class="todo-bar"><i style="width:' + pct + '%"></i></span></div>' +
+      '<div class="todo-head"><span class="t">Todos</span><span class="todo-ln"></span>' +
+      '<span class="todo-ring" style="--p:' + pct + '"><span>' + done + "/" + S.todos.length + "</span></span></div>" +
       '<ul class="todo-list">' + items + "</ul>";
 
     if (todoEl) { todoEl.innerHTML = html; return; }
