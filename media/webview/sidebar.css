@@ -3650,7 +3650,7 @@ ul.md-l li.md-task, ol.md-l li.md-task {
    are constants in sidebar.js and carry their own emphasis. */
 .tipbar .tip-t b { font-weight: 600; color: var(--kx-fg-2); }
 .tipbar .tip-x {
-  flex: none; width: 20px; height: 20px; display: grid; place-items: center;
+  flex: none; width: 24px; height: 24px; display: grid; place-items: center;
   border-radius: var(--kx-r); color: var(--kx-fg-4);
 }
 .tipbar .tip-x:hover { background: var(--kx-hover); color: var(--kx-fg-2); }

@@ -5065,17 +5065,12 @@ function _sbRun() {
       { sec: "MODEL", id: "agent", label: "Agent", kind: "value", live: true,
         icon: "i-agent", hue: "agent", value: S.activeAgent || "None",
         run: function () { openAgentPicker(); } },
-      /* NOT WIRED. `SelectModelMsg` carries an endpoint and a model and nothing
-         else, so there is nowhere to put a thinking budget - C8/C9 in
-         THEME-NOTES records this as not built rather than as missing. */
-      { sec: "MODEL", id: "think", label: "Extended thinking", kind: "switch", live: false,
-        icon: "i-spark", hue: "dim", on: false,
-        why: "Not wired yet - the model message carries no thinking budget" },
-      /* NOT WIRED. `ConfigKey` has no key for the search tooling, so a switch
-         here would remember a position nothing reads. */
-      { sec: "MODEL", id: "websearch", label: "Web search", kind: "switch", live: false,
-        icon: "i-globe", hue: "dim", on: false,
-        why: "Not wired yet - no config key reaches the search tooling" },
+      /* The two rows that used to sit here - Extended thinking and Web search -
+         were drawn `live: false` with a "Not wired yet" reason: switches that
+         could not be thrown because nothing behind them reads a value. A menu
+         that lists what it cannot do is not minimal, it is misleading, so they
+         are gone rather than disabled. When either is wired, it comes back as a
+         row that works. */
       /* THE ONE REAL SWITCH, and the only approvals control in the palette:
          the Approvals row that opened the sheet is gone, so this spans the
          common case (ask <-> edits-auto) and the plate on the bar is the way
