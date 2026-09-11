@@ -41,7 +41,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb {
   background: var(--kx-scroll);
-  border: 2px solid transparent; background-clip: content-box; border-radius: 4px;
+  border: 2px solid transparent; background-clip: content-box; border-radius: var(--kx-r);
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--kx-scroll-hover);
@@ -75,10 +75,10 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
      full id still on the title tooltip. */
   flex: 0 1 auto; min-width: 3ch; max-width: 22ch;
   font-family: var(--kx-mono); font-size: 10.5px; padding: 2px 8px;
-  border: 1px solid var(--kx-line); color: var(--kx-fg-2); border-radius: 4px;
+  border: 1px solid var(--kx-line); color: var(--kx-fg-2); border-radius: var(--kx-r);
 }
 .hdr-btn {
-  width: 28px; height: 26px; flex: none; display: grid; place-items: center; border-radius: 4px;
+  width: 28px; height: 26px; flex: none; display: grid; place-items: center; border-radius: var(--kx-r);
   color: var(--kx-fg-2);
 }
 .hdr-btn:hover { background: var(--kx-hover); color: var(--kx-fg); }
@@ -111,7 +111,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
   box-shadow: inset 0 -2px 0 var(--kx-under);
 }
 .nav-badge {
-  font-family: var(--kx-mono); font-size: 10px; padding: 0 5px; border-radius: 4px;
+  font-family: var(--kx-mono); font-size: 10px; padding: 0 5px; border-radius: var(--kx-r);
   background: var(--kx-surface-3); color: var(--kx-fg);
 }
 .nav-badge.alert { background: var(--kx-error); color: var(--kx-on-accent); }
@@ -136,7 +136,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 .grid-cards.tight { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 
 .card {
-  border: 1px solid var(--kx-line); border-radius: 4px;
+  border: 1px solid var(--kx-line); border-radius: var(--kx-r);
   padding: 11px 12px; min-width: 0;
 }
 .card .t { font-size: 12px; font-weight: 600; margin-bottom: 7px; }
@@ -150,7 +150,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {
-  font-family: var(--kx-mono); font-size: 10.5px; padding: 2px 8px; border-radius: 4px;
+  font-family: var(--kx-mono); font-size: 10.5px; padding: 2px 8px; border-radius: var(--kx-r);
   border: 1px solid var(--kx-line); color: var(--kx-fg-2);
 }
 .chip.on { border-color: var(--kx-link); color: var(--kx-link); }
@@ -158,7 +158,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 
 .opt-group { display: flex; flex-wrap: wrap; gap: 6px; }
 .opt {
-  font-size: 11.5px; padding: 3px 10px; border-radius: 4px; text-align: center;
+  font-size: 11.5px; padding: 3px 10px; border-radius: var(--kx-r); text-align: center;
   border: 1px solid var(--kx-line); color: var(--kx-fg-2);
 }
 .opt[aria-pressed="true"] { border-color: var(--kx-link); color: var(--kx-link); font-weight: 600; }
@@ -173,7 +173,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 .toggle-row .hint.warn { color: var(--kx-warn); }
 .switch {
   position: relative; width: 28px; height: 16px; flex: none; margin-top: 2px;
-  border-radius: 4px; background: var(--kx-line);
+  border-radius: var(--kx-r); background: var(--kx-line);
   border: 1px solid var(--kx-line);
 }
 .switch::after {
@@ -186,7 +186,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 .switch:disabled { opacity: .6; cursor: default; }
 
 /* ── tables ── */
-.tbl { border: 1px solid var(--kx-line); border-radius: 4px; overflow: hidden; }
+.tbl { border: 1px solid var(--kx-line); border-radius: var(--kx-r); overflow: hidden; }
 /* Five columns, not six: the status dot used to occupy a column of its own on
    the left, repeating what the Status column already said. */
 .tr {
@@ -217,7 +217,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
    Four former tabs as four blocks. Only the head is a control; the bodies are
    the same read-only reports they always were. */
 .acc-wrap { display: flex; flex-direction: column; gap: 8px; }
-.acc { border: 1px solid var(--kx-line); border-radius: 4px; overflow: hidden; }
+.acc { border: 1px solid var(--kx-line); border-radius: var(--kx-r); overflow: hidden; }
 .acc-head {
   display: flex; align-items: center; gap: 9px; width: 100%;
   min-height: 38px; padding: 0 12px;
@@ -230,7 +230,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 .acc[data-open="1"] .acc-chev { transform: rotate(90deg); }
 .acc-b {
   font-family: var(--kx-mono); font-size: 10px; letter-spacing: .04em;
-  padding: 2px 7px; border-radius: 4px;
+  padding: 2px 7px; border-radius: var(--kx-r);
   background: var(--kx-surface-4); color: var(--kx-fg-2);
 }
 .acc-body { padding: 12px; border-top: 1px solid var(--kx-line); }
@@ -276,7 +276,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
    people who already know. Same sentences as the header tooltips. */
 .btn.help { display: inline-flex; align-items: center; gap: 6px; }
 .legend {
-  border: 1px solid var(--kx-line); border-radius: 4px;
+  border: 1px solid var(--kx-line); border-radius: var(--kx-r);
   background: var(--kx-surface-2);
   padding: 4px 12px; margin-bottom: 8px;
 }
@@ -371,7 +371,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
    changing it meant finding a setting. Here it is one glance and one click. */
 .seg {
   display: inline-flex; align-items: center; gap: 1px;
-  padding: 2px; border-radius: 4px;
+  padding: 2px; border-radius: var(--kx-r);
   background: var(--kx-surface-2);
   border: 1px solid var(--kx-line);
 }
@@ -381,7 +381,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 }
 .seg-b {
   min-width: 32px; min-height: 24px; padding: 0 8px;
-  border: 0; border-radius: 4px; background: none; cursor: pointer;
+  border: 0; border-radius: var(--kx-r); background: none; cursor: pointer;
   font: inherit; font-size: 11px; font-variant-numeric: tabular-nums;
   color: var(--kx-fg-2);
 }
@@ -400,7 +400,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 /* ── about ── */
 .about-card {
   display: flex; align-items: center; gap: 16px;
-  border: 1px solid var(--kx-line); border-radius: 6px; padding: 16px 18px;
+  border: 1px solid var(--kx-line); border-radius: var(--kx-r); padding: 16px 18px;
 }
 .about-mark { flex: none; display: flex; }
 .about-id { min-width: 0; }
@@ -441,7 +441,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 .tr4 + .tr4 { border-top: 1px solid var(--kx-line); }
 
 .mini {
-  width: 22px; height: 22px; display: grid; place-items: center; border-radius: 4px;
+  width: 22px; height: 22px; display: grid; place-items: center; border-radius: var(--kx-r);
   color: var(--kx-fg-2);
 }
 .mini:hover { background: var(--kx-hover); color: var(--kx-fg); }
@@ -451,7 +451,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 .btn {
   font-family: var(--kx-mono); font-size: 9.5px; font-weight: 700;
   letter-spacing: .12em; text-transform: uppercase;
-  padding: 5px 11px; border-radius: 4px; text-align: center;
+  padding: 5px 11px; border-radius: var(--kx-r); text-align: center;
   background: transparent; border: 1px solid var(--kx-line);
   color: var(--kx-fg-2);
 }
@@ -484,7 +484,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 /* ── forms ── */
 .form {
   display: flex; flex-direction: column; gap: 8px; padding: 11px 12px; margin-top: 10px;
-  border: 1px solid var(--kx-line); border-radius: 4px;
+  border: 1px solid var(--kx-line); border-radius: var(--kx-r);
   background: var(--kx-surface);
 }
 .form .t { font-size: 12px; font-weight: 600; }
@@ -494,7 +494,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 }
 .fgrid label { font-size: 11.5px; color: var(--kx-fg-2); }
 .fgrid input, .fgrid select {
-  height: 26px; min-width: 0; padding: 0 8px; outline: none; border-radius: 4px;
+  height: 26px; min-width: 0; padding: 0 8px; outline: none; border-radius: var(--kx-r);
   font-size: 12px;
   background: var(--kx-surface-2); color: var(--kx-fg);
   border: 1px solid var(--kx-line);
@@ -520,7 +520,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 /* ── connection check, inside the endpoint form ── */
 .ep-check { margin-top: 2px; padding-top: 8px; border-top: 1px solid var(--kx-line); }
 .ep-check-banner {
-  margin-bottom: 8px; padding: 7px 9px; border-radius: 4px;
+  margin-bottom: 8px; padding: 7px 9px; border-radius: var(--kx-r);
   font-size: 11.5px; line-height: 1.5; overflow-wrap: anywhere;
 }
 .ep-check-banner[data-ok="1"] {
@@ -573,7 +573,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 
 /* ── logs ── */
 .logview {
-  border: 1px solid var(--kx-line); border-radius: 4px;
+  border: 1px solid var(--kx-line); border-radius: var(--kx-r);
   max-height: 420px; overflow-y: auto;
   background: var(--kx-surface-2);
 }
@@ -590,7 +590,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 .watch-mark { display: flex; align-items: center; gap: 6px; font-size: 11px; margin-bottom: 7px; color: var(--kx-accent); }
 
 .pre {
-  background: var(--kx-surface-2); border-radius: 4px; padding: 8px 10px;
+  background: var(--kx-surface-2); border-radius: var(--kx-r); padding: 8px 10px;
   font-family: var(--kx-mono); font-size: 11px; line-height: 1.65;
   white-space: pre-wrap; overflow-x: auto; max-height: 240px; overflow-y: auto;
 }
@@ -603,7 +603,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
    blocks already use (`.cb` / `.cb-h` in sidebar.css), so copy works the same
    way on both surfaces. */
 .pre-wrap {
-  margin: 0; border: 1px solid var(--kx-line); border-radius: 4px;
+  margin: 0; border: 1px solid var(--kx-line); border-radius: var(--kx-r);
   overflow: hidden; background: var(--kx-surface-2);
 }
 .pre-h {
@@ -624,7 +624,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 .pre-wrap .pre { border-radius: 0; background: none; }
 .pre-copy {
   margin-left: auto; flex: none;
-  padding: 3px 8px; border-radius: 4px;
+  padding: 3px 8px; border-radius: var(--kx-r);
   background: var(--kx-surface-4); border: 1px solid var(--kx-line);
   color: var(--kx-fg-2);
   font-family: var(--kx-mono); font-size: 9px; letter-spacing: .1em;
@@ -665,7 +665,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 0 0 3px; }
 .req { color: var(--kx-error); font-weight: 700; }
 .seg-row { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .seg-b {
-  padding: 3px 8px; border-radius: 4px; border: 1px solid var(--kx-line);
+  padding: 3px 8px; border-radius: var(--kx-r); border: 1px solid var(--kx-line);
   background: transparent; color: var(--kx-fg-3);
   font-family: var(--kx-mono); font-size: 9px; font-weight: 700;
   letter-spacing: .1em; text-transform: uppercase; text-indent: .1em;
