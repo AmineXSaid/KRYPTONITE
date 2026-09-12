@@ -1273,7 +1273,10 @@ function _sbRun() {
           '<button class="icon-btn" id="moreBtn" title="More" aria-label="More actions" aria-haspopup="menu" aria-expanded="false">' + icon("i-kebab") + '</button>' +
           '<div class="popover" id="historyPop" role="menu" hidden></div>' +
           '<div class="popover" id="morePop" role="menu" hidden>' +
-            '<button class="pop-row" role="menuitem" data-more="control">' + crystal(15) + '<span class="t">Control Center</span></button>' +
+            // Settings is the config home now - it opens the in-sidebar sheet
+            // that replaced the Control Center window, so it wears the mark the
+            // Control Center row used to.
+            '<button class="pop-row" role="menuitem" data-more="settings">' + crystal(15) + '<span class="t">Settings</span></button>' +
             '<div class="pop-div"></div>' +
             '<button class="pop-row" role="menuitem" data-more="agents">' + icon("i-agent", "ic-13") +
               '<span class="t">Agents…</span></button>' +
@@ -1283,12 +1286,7 @@ function _sbRun() {
             '<button class="pop-row" role="menuitem" data-more="exportAll">' + icon("i-download", "ic-13") +
               '<span class="t">Export all chats as JSON…</span></button>' +
             '<div class="pop-div"></div>' +
-            '<button class="pop-row" role="menuitem" data-more="settings"><span class="t">Settings…</span></button>' +
             '<button class="pop-row" role="menuitem" data-more="docs"><span class="t">Documentation</span></button>' +
-            // "Report Issue" landed on Logs & export, which is where the evidence
-            // lives but says nothing about what to do with it. It goes to About
-            // now, which names the author, states the version a report needs, and
-            // has the tracker and the bundle a click away.
             '<button class="pop-row" role="menuitem" data-more="issue">' +
               '<span class="t">Author &amp; report an issue</span></button>' +
           '</div>' +
@@ -1582,6 +1580,28 @@ function _sbRun() {
               '</div>' +
             '</div>' +
           '</div>' +
+          /* THE SETTINGS SHEET - what the Control Center window used to hold,
+             folded into the sidebar. The daily tabs (MCP, Agents, Diagnostics)
+             stay as tabs; the rarely-touched configuration lives here, one
+             reach from the chat behind the header menu, so there is no second
+             window to find and learn.
+             A DIRECT CHILD OF THE VIEW, not the composer wrapper the mode sheet
+             sits in: the wrapper is translated off-screen while the welcome is
+             up, and a transformed ancestor captures a `position: fixed` child
+             and drops it out of view. The header can open this sheet with the
+             welcome still up, so it must hang off the untransformed view, where
+             `inset: 0` means the viewport. */
+          '<div class="perm-sheet" id="settingsPop" hidden>' +
+            '<div class="perm-card" role="dialog" aria-modal="true" aria-label="Settings">' +
+              '<div class="perm-grip"><span></span></div>' +
+              '<div class="perm-head">' +
+                '<button class="perm-x" data-set-close="1" aria-label="Close">' + icon("i-x", "ic-13") + '</button>' +
+                '<div class="t">Settings</div>' +
+                '<div class="s">Endpoint, approvals and export - all in one place</div>' +
+              '</div>' +
+              '<div class="set-list" id="settingsList"></div>' +
+            '</div>' +
+          '</div>' +
         '</section>' +
         '<section class="view" id="viewMcp" role="tabpanel" aria-labelledby="tabMcp" hidden>' +
           '<div class="mcp-wrap" id="mcpBody"></div>' +
@@ -1610,8 +1630,8 @@ function _sbRun() {
         '<div class="ctx-menu" id="msgMenu" role="menu" hidden></div>' +
         '<section class="view" id="viewDiag" role="tabpanel" aria-labelledby="tabDiag" hidden>' +
           '<button class="cc-card" id="ccBtn">' + crystal(19) +
-            '<span class="col"><span class="t">Control Center</span>' +
-            '<span class="s ell">Profiles, wire formats, auth, mTLS, proxy, agent loop, checkpoints</span></span>' +
+            '<span class="col"><span class="t">Settings</span>' +
+            '<span class="s ell">Endpoint &amp; wire, approvals, export - opens the settings sheet</span></span>' +
             icon("i-chev", "ic-9") + '</button>' +
           sectionShell("secTls", "TLS diagnostics", "tlsBadge", "tlsBody", true) +
           sectionShell("secEp", "Endpoints", "epBadge", "epBody", false) +
@@ -2418,6 +2438,10 @@ function _sbRun() {
   /* The document-level key handler while the sheet is open, held so it can be
      taken off again. See `permKeydown`. */
   var permKeys = null;
+  /* The settings sheet's own exit timer and return focus - same story as the
+     mode sheet's above, kept separate so the two sheets never fight. */
+  var setExit = null;
+  var setReturn = null;
 
   /**
    * Everything inside the card that a Tab can reach, in order.
@@ -2568,6 +2592,80 @@ function _sbRun() {
     }
   }
 
+  /* THE SETTINGS SHEET - the Control Center's essentials, in the sidebar.
+     Rows are wired to messages the host already handles, so this is a new door
+     onto existing behaviour, not new behaviour. */
+  function renderSettings() {
+    var list = $("settingsList");
+    if (!list) return;
+    var ep = (S.profiles || []).filter(function (p) { return p.active; })[0];
+    var epName = ep ? (ep.model || ep.id) : "not set";
+    var epWire = ep && ep.wire ? " · " + ep.wire : "";
+    var mode = (S.config && S.config.approvalMode) || "ask";
+    var ver = (S.config && S.config.extensionVersion) || "";
+    function row(act, ic, title, sub, right) {
+      return '<button class="set-row" data-set="' + act + '" type="button">' +
+        '<span class="set-ic">' + icon(ic, "ic-13") + "</span>" +
+        '<span class="set-lbl"><span class="k">' + esc(title) + "</span>" +
+          (sub ? '<span class="sub">' + esc(sub) + "</span>" : "") + "</span>" +
+        '<span class="set-right">' + (right || "") + "</span></button>";
+    }
+    var chev = '<span class="set-chev">›</span>';
+    var down = '<span class="set-chev">↓</span>';
+    list.innerHTML =
+      row("endpoint", "i-globe", "Endpoint", epName + epWire, chev) +
+      row("approvals", "i-shield", "Approvals", "What runs without asking",
+        '<span class="set-v">' + esc(permLabel(mode)) + "</span>") +
+      '<div class="set-div"></div>' +
+      row("exportChat", "i-download", "Export this chat", "", down) +
+      row("exportAll", "i-download", "Export all chats", "", down) +
+      row("bundle", "i-copy", "Offline bundle", "", down) +
+      '<div class="set-div"></div>' +
+      row("docs", "i-book", "Documentation", ver ? "Genesis v" + ver : "",
+        '<span class="set-chev">↗</span>');
+  }
+
+  function settingsAction(a) {
+    toggleSettings(false);
+    var ep = (S.profiles || []).filter(function (p) { return p.active; })[0];
+    if (a === "endpoint") post("openYaml", { profile: ep ? ep.id : "" });
+    else if (a === "approvals") togglePerm(true);
+    else if (a === "exportChat") post("exportChat", { scope: "current" });
+    else if (a === "exportAll") post("exportChat", { scope: "all" });
+    else if (a === "bundle") post("exportBundle");
+    else if (a === "docs") post("openIssues");
+  }
+
+  /* Open/close on the mode sheet's mechanics - the two-frame reveal, the timed
+     hide, the return of focus - kept separate so the sheets never collide. */
+  function toggleSettings(open) {
+    var pop = $("settingsPop");
+    if (!pop) return;
+    var want = open === undefined ? pop.hidden : open;
+    if (setExit) { clearTimeout(setExit); setExit = null; }
+    if (want) {
+      togglePerm(false);          // never two sheets at once
+      closePops();
+      setReturn = document.activeElement;
+      pop.inert = false;
+      pop.hidden = false;
+      renderSettings();
+      var close = pop.querySelector("[data-set-close]");
+      if (close && close.focus) close.focus();
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () { pop.setAttribute("data-open", "1"); });
+      });
+    } else {
+      pop.removeAttribute("data-open");
+      var held = pop.contains(document.activeElement);
+      pop.inert = true;
+      var back = (setReturn && setReturn.isConnected) ? setReturn : $("draft");
+      if (held && back && back.focus) back.focus();
+      setReturn = null;
+      setExit = setTimeout(function () { pop.hidden = true; setExit = null; }, 380);
+    }
+  }
+
 
   /* ─────────────────────── transcript primitives ─────────────────────── */
 
@@ -2690,7 +2788,7 @@ function _sbRun() {
         "<p>Genesis works against endpoint profiles defined in .agent/endpoints/. Create one to get started.</p>" +
         '<div class="chips">' +
           '<button class="btn primary" data-act="newEndpoint">Create endpoint profile</button>' +
-          '<button class="btn" data-act="ccEndpoints">Open Control Center</button>' +
+          '<button class="btn" data-act="ccEndpoints">Open settings</button>' +
         '</div>'));
       return;
     }
@@ -5161,9 +5259,9 @@ function _sbRun() {
       { sec: "CONNECTION", id: "diag", label: "Run diagnostics",
         kind: "action", live: true, icon: "i-shield", hue: "act",
         run: function () { setTab("diagnostics"); S.tracing = true; S.rungs = []; renderTls(); post("runTrace"); } },
-      { sec: "CONNECTION", id: "control", label: "Open Control Center",
+      { sec: "CONNECTION", id: "control", label: "Settings",
         kind: "action", live: true, icon: "i-kx", hue: "act",
-        run: function () { post("openControlCenter", {}); } },
+        run: function () { toggleSettings(true); } },
 
       /* ── WORKSPACE: the surfaces around the conversation ── */
       { sec: "WORKSPACE", id: "selagent", label: "Select agent",
@@ -6030,7 +6128,7 @@ function _sbRun() {
       case "/model":
         draft.value = ""; S.modelOpen = true; S.qpIndex = 0; renderQuickPick(); return;
       case "/checkpoint":
-        draft.value = ""; post("openControlCenter", { section: "checkpoints" }); break;
+        draft.value = ""; post("paletteCommand", { command: "restoreCheckpoint" }); break;
       case "/export":
         draft.value = ""; post("exportChat", { scope: "current" }); break;
       case "/agent":
@@ -6154,7 +6252,7 @@ function _sbRun() {
     if (e.action) {
       html += '<span class="err-acts">' +
         (e.action === "endpoints"
-          ? '<button class="btn sm" data-act="ccEndpoints">Open Control Center</button>' +
+          ? '<button class="btn sm" data-act="ccEndpoints">Open settings</button>' +
             '<button class="btn sm go" data-act="newEndpoint">Create endpoint profile</button>'
           : '<button class="btn sm go" data-act="doctor">Run diagnostics</button>') +
         "</span>";
@@ -7544,13 +7642,12 @@ function _sbRun() {
       if (!b) return;
       closePops();
       var a = b.getAttribute("data-more");
-      if (a === "control") post("openControlCenter", {});
+      if (a === "settings") toggleSettings(true);
       else if (a === "agents") setTab("agents");
       else if (a === "exportChat") post("exportChat", { scope: "current" });
       else if (a === "exportAll") post("exportChat", { scope: "all" });
-      else if (a === "settings") post("openSettings");
-      else if (a === "docs") post("openControlCenter", { section: "docs" });
-      else if (a === "issue") post("openControlCenter", { section: "about" });
+      else if (a === "docs") post("openIssues");
+      else if (a === "issue") post("openIssues");
     });
     $("historyPop").addEventListener("click", function (e) {
       var stop = e.target.closest("[data-stop]");
@@ -7605,7 +7702,7 @@ function _sbRun() {
     // off S.tab, not off the element the key landed on, so it behaves the same
     // whichever tab has focus.
     document.querySelector(".kx-tabs").addEventListener("keydown", onTabKey);
-    $("ccBtn").addEventListener("click", function () { post("openControlCenter", {}); });
+    $("ccBtn").addEventListener("click", function () { toggleSettings(true); });
 
     document.addEventListener("click", function (e) {
       var head = e.target.closest(".sec-head");
@@ -7801,7 +7898,7 @@ function _sbRun() {
       if (a === "doctor") { setTab("diagnostics"); openSection("secTls"); post("runTrace"); }
       else if (a === "openFolder") post("openFolder");
       else if (a === "newEndpoint") post("newEndpoint");
-      else if (a === "ccEndpoints") post("openControlCenter", { section: "endpoints" });
+      else if (a === "ccEndpoints") toggleSettings(true);
       else if (a === "history") {
         // Same sequence the header's history button uses: ask the host to
         // refresh the list, render, then show. Skipping listSessions would
@@ -7995,6 +8092,23 @@ function _sbRun() {
       mqResizeT = setTimeout(mqAll, 150);
     });
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(mqAll);
+
+    // The settings sheet: the X and the backdrop close it, a row acts. Escape
+    // is handled by the same document-level closer the other sheets use.
+    $("settingsPop").addEventListener("click", function (e) {
+      if (e.target.closest("[data-set-close]") || !e.target.closest(".perm-card")) {
+        toggleSettings(false);
+        return;
+      }
+      var s = e.target.closest("[data-set]");
+      if (s) settingsAction(s.getAttribute("data-set"));
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && $("settingsPop") && !$("settingsPop").hidden) {
+        e.preventDefault();
+        toggleSettings(false);
+      }
+    }, true);
 
     $("permPop").addEventListener("click", function (e) {
       // The X, and the dimmed backdrop itself. A modal sheet that can only be
