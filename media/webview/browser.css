@@ -6,6 +6,15 @@ body {
   margin: 0; padding: 0;
   font-family: var(--kx-ui); font-size: 12px;
   color: var(--kx-fg); background: var(--kx-bg);
+  /* One rendering on every platform - see the long note in sidebar.css. The
+     bundled faces fix the letterforms; these fix how they are painted, so
+     macOS grayscale-smooths light-on-dark text the way Windows and Linux
+     already do. No-op off macOS. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-optical-sizing: auto;
+  font-synthesis: weight style;
 }
 /* Form controls do not inherit a font. Without this every button and input in
    this panel fell back to the platform default - measured as Arial - while

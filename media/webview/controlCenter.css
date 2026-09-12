@@ -26,6 +26,12 @@ body {
   color: var(--kx-fg);
   background: var(--kx-bg-deep);
   overflow: hidden;
+  /* One rendering on every platform - see the long note in sidebar.css. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-optical-sizing: auto;
+  font-synthesis: weight style;
 }
 
 button, input, select { font: inherit; color: inherit; }

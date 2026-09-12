@@ -199,5 +199,146 @@ console.log("\n──── forced, not merely offered ────");
     stray.length === 0, stray.join(" | "));
 }
 
+/* ── ONE RENDERING ON EVERY PLATFORM ───────────────────────────────────────
+ *
+ * Bundling the faces fixes the letterforms; it does not fix how the OS paints
+ * them. macOS sub-pixel antialiasing gives light-on-dark text extra weight and
+ * colour fringes, so the same panel is heavier on a Mac than on Windows or
+ * Linux (which grayscale-smooth in Chromium already). The body of every webview
+ * surface forces the grayscale path, turns on kerning, and refuses faux-bold -
+ * so "looks the same wherever it is installed" holds for the painting too, not
+ * only the shapes. This is invisible in a screenshot diff taken on one OS,
+ * which is exactly why it needs a test. */
+console.log("\n──── one rendering on every platform ────");
+{
+  const SURFACES = ["sidebar.css", "browser.css", "controlCenter.css"];
+  for (const f of SURFACES) {
+    const css = fs.readFileSync(path.join(ROOT, "media/webview", f), "utf8");
+    const body = (css.match(/\nbody\s*\{[^}]*\}/) || [""])[0];
+    ok(`${f}: macOS is forced onto the grayscale path`,
+      /-webkit-font-smoothing:\s*antialiased/.test(body) &&
+      /-moz-osx-font-smoothing:\s*grayscale/.test(body));
+    ok(`${f}: kerning and the sans's own ligatures are on`,
+      /text-rendering:\s*optimizeLegibility/.test(body));
+    ok(`${f}: bold comes from the real weight axis, never faked`,
+      /font-synthesis:\s*weight style/.test(body));
+  }
+}
+
+/* ── NO GLYPH FALLS TO A SYSTEM FONT ────────────────────────────────────────
+ *
+ * The one way a system typeface can still appear once the faces are forced: a
+ * character the bundled woff2 does not carry. Both files are the LATIN SUBSET,
+ * so a `→`, a `≥`, a `✓` or any CJK in an interface STRING renders in whatever
+ * the OS substitutes - the precise thing the design is trying not to do, and
+ * again invisible until someone on another OS looks.
+ *
+ * So every non-ASCII character an interface string can put on screen must be
+ * one this project has CONFIRMED is in both faces (via a Chromium canvas
+ * coverage probe - see the scratchpad `glyphs` checks). The allowlist is that
+ * confirmed set; anything new fails here until it has been verified and added,
+ * or swapped for a glyph that is covered. Comments are not checked - they never
+ * render - so the scan reads string literals only. */
+console.log("\n──── no glyph falls to a system font ────");
+{
+  // Codepoint → the character, each CONFIRMED present in both bundled faces.
+  const COVERED = new Set([
+    0x00b7, // ·  middle dot (separator)
+    0x00d7, // ×  multiplication sign
+    0x2013, // –  en dash
+    0x2014, // —  em dash
+    0x2019, // ’  right single quote / apostrophe
+    0x201c, // “  left double quote
+    0x201d, // ”  right double quote
+    0x2022, // •  bullet
+    0x2026, // …  horizontal ellipsis
+    0x2039, // ‹  single left guillemet
+    0x203a, // ›  single right guillemet (chevron)
+    0x2191, // ↑  up arrow (send)
+    0x2193, // ↓  down arrow (download / scroll)
+    0x2212, // −  minus sign
+  ]);
+  const NAME = (cp) => "U+" + cp.toString(16).toUpperCase().padStart(4, "0");
+  /* Collect non-ASCII codepoints that live INSIDE string literals, ignoring
+     comments. A regex cannot do this: an apostrophe or a backtick in a comment
+     ("don't", "`x`") opens a phantom string that swallows the box-drawing in the
+     next comment banner. So this is a real little scanner - code / line-comment /
+     block-comment / "…" / '…' / `…` - that only harvests characters while it is
+     inside a quote. Regex-literal bodies are left in code state and not
+     harvested, which is fine: this project writes non-ASCII in regexes as \\uXXXX
+     escapes, never as literal glyphs. */
+  const RE_CTX = /[([{,;:=!&|?+\-*%~^<>]/;                       // a `/` after one of these starts a regex
+  const RE_KW = new Set(["return", "typeof", "instanceof", "in", "of", "new",
+    "delete", "void", "do", "else", "yield", "await", "case"]);   // ...or after one of these words
+  function stringGlyphs(src) {
+    const found = new Map();
+    let i = 0, mode = "code", lastSig = "", word = "";
+    const n = src.length;
+    while (i < n) {
+      const c = src[i], c2 = src[i + 1];
+      if (mode === "code") {
+        if (c === "/" && c2 === "/") { mode = "line"; i += 2; continue; }
+        if (c === "/" && c2 === "*") { mode = "block"; i += 2; continue; }
+        if (c === "/" && (lastSig === "" || RE_CTX.test(lastSig) || RE_KW.has(word))) {
+          // A regex literal - skip its whole body so a quote inside it (e.g.
+          // /['"]/) is never mistaken for the start of a string.
+          i++;
+          let inClass = false;
+          while (i < n) {
+            const r = src[i];
+            if (r === "\\") { i += 2; continue; }
+            if (r === "[") inClass = true;
+            else if (r === "]") inClass = false;
+            else if (r === "/" && !inClass) { i++; break; }
+            else if (r === "\n") break;
+            i++;
+          }
+          lastSig = "/"; word = "";
+          continue;
+        }
+        if (c === '"') { mode = "dq"; i++; continue; }
+        if (c === "'") { mode = "sq"; i++; continue; }
+        if (c === "`") { mode = "tpl"; i++; continue; }
+        if (/\s/.test(c)) { i++; continue; }               // whitespace keeps lastSig/word
+        if (/[\w$]/.test(c)) { word += c; } else { word = ""; }
+        lastSig = c;
+        i++; continue;
+      }
+      if (mode === "line") { if (c === "\n") mode = "code"; i++; continue; }
+      if (mode === "block") { if (c === "*" && c2 === "/") { mode = "code"; i += 2; } else i++; continue; }
+      // inside a string literal
+      if (c === "\\") { i += 2; continue; }               // skip the escaped char
+      if ((mode === "dq" && c === '"') || (mode === "sq" && c === "'") || (mode === "tpl" && c === "`")) {
+        mode = "code"; lastSig = c; word = ""; i++; continue;
+      }
+      const cp = src.codePointAt(i);
+      if (cp > 0x7e && cp !== 0xfeff && !COVERED.has(cp)) found.set(cp, (found.get(cp) || 0) + 1);
+      i += cp > 0xffff ? 2 : 1;
+    }
+    return found;
+  }
+  for (const f of ["sidebar.js", "browser.js", "controlCenter.js"]) {
+    const src = fs.readFileSync(path.join(ROOT, "media/webview", f), "utf8");
+    const bad = stringGlyphs(src);
+    const list = [...bad.entries()].map(([cp, n]) => `${String.fromCodePoint(cp)} ${NAME(cp)}×${n}`);
+    ok(`${f}: every glyph in an interface string is one the bundled faces carry`,
+      bad.size === 0, list.join("  "));
+  }
+  // CSS content: values render too (e.g. a prompt caret prefix), so scan those.
+  for (const f of ["sidebar.css", "browser.css", "controlCenter.css"]) {
+    const css = fs.readFileSync(path.join(ROOT, "media/webview", f), "utf8");
+    const bad = new Map();
+    for (const m of css.match(/content:\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g) || []) {
+      for (const ch of m) {
+        const cp = ch.codePointAt(0);
+        if (cp > 0x7e && cp !== 0xfeff && !COVERED.has(cp)) bad.set(cp, (bad.get(cp) || 0) + 1);
+      }
+    }
+    const list = [...bad.entries()].map(([cp, n]) => `${String.fromCodePoint(cp)} ${NAME(cp)}×${n}`);
+    ok(`${f}: every rendered content glyph is one the bundled faces carry`,
+      bad.size === 0, list.join("  "));
+  }
+}
+
 console.log(`\n──── ${pass} passed, ${failures.length} failed ────`);
 if (failures.length) { for (const f of failures) console.log("  FAIL " + f); process.exit(1); }

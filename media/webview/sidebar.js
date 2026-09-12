@@ -66,6 +66,12 @@ function _sbRun() {
     '<symbol id="i-plus" viewBox="0 0 24 24"><path d="M6 12h12M12 6v12" ' + S6 + ' stroke-width="2"/></symbol>' +
     '<symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9.5V4h5.5M14.5 20H20v-5.5" ' + S6 +
       ' stroke-width="1.8"/><path d="M4 4l6.5 6.5M20 20l-6.5-6.5" ' + S6 + ' stroke-width="1.8"/></symbol>' +
+    // Opens outside the panel. This was a `↗` glyph, which is NOT in the
+    // bundled Latin subset - so it was the one mark on the settings sheet that
+    // fell back to a system font. As an SVG it renders from the extension like
+    // every other icon, identical on every OS. A box with the arrow leaving it.
+    '<symbol id="i-external" viewBox="0 0 24 24"><path d="M13 4h7v7M20 4l-9 9" ' + S6 +
+      ' stroke-width="1.7"/><path d="M18 14v4.5A1.5 1.5 0 0116.5 20h-11A1.5 1.5 0 014 18.5v-11A1.5 1.5 0 015.5 6H10" ' + S6 + ' stroke-width="1.7"/></symbol>' +
     '<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" ' + S6 + ' stroke-width="2"/></symbol>' +
     '<symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 3l9.5 17H2.5z" ' + S6 + ' stroke-width="1.5"/><path d="M12 9.5v5M12 17v.5" ' + S6 + ' stroke-width="1.6"/></symbol>' +
     '<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" ' + S6 + ' stroke-width="1.5"/><path d="M12 11v5.5M12 7.5v.5" ' + S6 + ' stroke-width="1.7"/></symbol>' +
@@ -2622,7 +2628,7 @@ function _sbRun() {
       row("bundle", "i-copy", "Offline bundle", "", down) +
       '<div class="set-div"></div>' +
       row("docs", "i-book", "Documentation", ver ? "Genesis v" + ver : "",
-        '<span class="set-chev">↗</span>');
+        '<span class="set-chev set-chev-ic">' + icon("i-external", "ic-13") + "</span>");
   }
 
   function settingsAction(a) {

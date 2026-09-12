@@ -47,6 +47,36 @@ body {
   line-height: 1.45;
   color: var(--kx-fg);
   overflow: hidden;
+  /* ── ONE RENDERING, ON EVERY PLATFORM ────────────────────────────────────
+   * The bundled woff2 faces make the letterFORMS identical everywhere; these
+   * make the way they are PAINTED identical too, which is the other half of
+   * "looks the same wherever it is installed".
+   *
+   *   font-smoothing. The panel is light text on a near-black ground, and that
+   *   is the exact case macOS renders worst by default: sub-pixel antialiasing
+   *   adds colour fringes and visual weight, so the same text that is crisp on
+   *   Windows and Linux (which grayscale-smooth in Chromium already) comes out
+   *   heavier and slightly fuzzy on a Mac. `antialiased` / `grayscale` force the
+   *   grayscale path on macOS too, so one weight of one face reads the same on
+   *   all three. It is a no-op on Windows and Linux, so it costs them nothing.
+   *
+   *   text-rendering: optimizeLegibility turns on kerning and the sans face's
+   *   standard fi/fl ligatures for prose. It does NOT bring coding ligatures
+   *   back to code: those surfaces set `font-variant-ligatures: none`, which is
+   *   the authoritative control and outranks this hint.
+   *
+   *   optical-sizing: auto lets a variable face that carries an optical axis use
+   *   it; harmless on one that does not.
+   *
+   *   synthesis: real weights come from the variable axis, so bold is never
+   *   faked. Style is left synthesizable on purpose - there is no italic file,
+   *   so `emphasis` slants rather than turning upright, which is the lesser of
+   *   the two losses until a true italic is bundled. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-optical-sizing: auto;
+  font-synthesis: weight style;
 }
 body.vscode-light, body.vscode-high-contrast-light { background: var(--kx-bg); }
 /* ...and on a dark theme it paints BLACK, which is the one deliberate break
@@ -4039,6 +4069,9 @@ ul.md-l li.md-task, ol.md-l li.md-task {
 .set-right { flex: none; display: flex; align-items: center; }
 .set-v { font-family: var(--kx-mono); font-size: 12px; color: var(--kx-fg-2); }
 .set-chev { font-family: var(--kx-mono); font-size: 15px; color: var(--kx-fg-4); line-height: 1; }
+/* When the chevron is an SVG (the external-link mark) rather than a glyph, keep
+   it on the row's centre line and let it take the same fg-4 via currentColor. */
+.set-chev-ic { display: inline-flex; align-items: center; }
 .set-div { height: 1px; margin: 5px 16px; background: var(--kx-line); }
 
 .perm-row {

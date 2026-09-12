@@ -476,7 +476,7 @@ function _run() {
     var list = (S.config && S.config.alwaysAllowedCommands) || [];
     if (!list.length) {
       return '<div class="hint muted" style="font-size:11px">' +
-        "None. Pressing “Always allow ⟨command⟩” on a permission request adds that " +
+        "None. Pressing “Always allow ‹command›” on a permission request adds that " +
         "exact command here, for this workspace, until you remove it. Commands that " +
         "can discard your work are never added, whatever the approval mode.</div>";
     }
@@ -708,9 +708,9 @@ function _run() {
     }
 
     var bands = [
-      ["fast", "≤ " + FAST + "ms", "warm connection, nothing to do"],
-      ["ok", "≤ " + OK + "ms", "normal for a first call or a distant region"],
-      ["slow", "> " + OK + "ms", "reachable but sluggish, worth checking the proxy or region"],
+      ["fast", "under " + FAST + "ms", "warm connection, nothing to do"],
+      ["ok", "under " + OK + "ms", "normal for a first call or a distant region"],
+      ["slow", "over " + OK + "ms", "reachable but sluggish, worth checking the proxy or region"],
       ["down", "down", "no answer at all; hover the row for the exact error"]
     ];
     var key = "";
