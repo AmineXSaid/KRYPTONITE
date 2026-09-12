@@ -1436,6 +1436,21 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   color: inherit; background: none; padding: 0; border-radius: 0; font-size: inherit;
 }
 
+/* CODE IS SHOWN EXACTLY AS TYPED. JetBrains Mono ships coding ligatures on by
+   default, so `!==` renders as a not-identical glyph, `>=` as `≥`, `=>` as a
+   double arrow - the operators in rendered code become maths symbols that no
+   longer match the characters a reader would copy or type. VS Code's own editor
+   defaults `editor.fontLigatures` OFF for exactly this reason, so turning them
+   off here keeps the panel's code consistent with the editor beside it. Every
+   surface that shows tokenised code is listed - fenced blocks and inline code
+   in an answer, diffs and file dumps in a tool card, the shell command a card
+   echoes, and the composer's own syntax mirror. Prose is untouched: it is set
+   in the sans, which has no coding ligatures, so its standard fi/fl pairs stay. */
+pre, code, .term-cmd-text, .draft-mirror, .code-block {
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
+}
+
 /* â”€â”€ markdown blocks â”€â”€
    The renderer emits these; every one of them used to arrive as literal
    punctuation in the transcript. */
