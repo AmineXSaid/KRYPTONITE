@@ -810,10 +810,13 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
  *
  * `.boot` overrides the centred greeting `.welcome` is by default. The boot
  * screen is a column read down its left edge - a log, a prompt, a list of
- * cards - so it is left-aligned and top-anchored, and it clips the oversized
- * background mark that bleeds off its bottom-left corner. */
+ * cards - so it is left-aligned, and it clips the oversized background mark
+ * that bleeds off its bottom-left corner. It is CENTRED down the long axis:
+ * the panel is tall and the boot block is short, so top-anchoring left it
+ * marooned against the header with the whole lower half empty. Centred, the
+ * block sits where the eye lands. */
 .welcome.boot {
-  justify-content: flex-start; align-items: stretch; text-align: left;
+  justify-content: center; align-items: stretch; text-align: left;
   padding: 26px 8px 34px; position: relative; overflow: hidden;
 }
 /* Everything real sits above the watermark. */

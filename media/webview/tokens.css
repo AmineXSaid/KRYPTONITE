@@ -320,9 +320,11 @@
    *
    * Circles (`50%`) and true pills (`999px`) are shapes rather than softening
    * and keep their own values; the terminal's inner rows stay a literal `0`. */
-  --kx-r-xs: 5px;
-  --kx-r:    8px;   /* the default control corner */
-  --kx-r-lg: 14px;  /* the surface / card / popover corner */
+  --kx-r-xs: 4px;
+  --kx-r:    7px;   /* the default control corner */
+  --kx-r-lg: 10px;  /* the surface / card / popover corner - eased back from 14,
+                       which read as too rounded; 10 keeps the soft register
+                       without the bubble. */
 
   /* ── type ──
    * TWO families, split by role, and both ship; see src/ui/shell.ts and
