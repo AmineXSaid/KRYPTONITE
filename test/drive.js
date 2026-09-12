@@ -74,21 +74,19 @@ const STATE = (over = {}) => ({ type: "stateSync", state: {
   ok("and the header spends no width on the wordmark",
     !d.querySelector(".kx-header .kx-wordmark"));
   ok("the tabs moved up into the same bar", !!d.querySelector(".kx-header .kx-tabs"));
-  /* THE WELCOME NAMES THE PRODUCT IN THE COMMAND NOW.
+  /* THE WELCOME NAMES THE PRODUCT IN ITS MASTHEAD.
    *
-   * This looked for a `.w-mark` wordmark on the welcome screen, and the
-   * welcome screen is a terminal: it opens `$ genesis init` and reports what
-   * came up. Between the tab strip above, that command, and the report's own
-   * `workspace` row, a wordmark was the product's name said a fourth time on
-   * one screen - so it went, and the transcript does the naming.
+   * The welcome is a boot screen: it opens with the mark and GENESIS in tracked
+   * mono, above a framed terminal that reports what came up. The name lives in
+   * that masthead wordmark now, said once.
    *
    * The claim being pinned is unchanged: the screen says WHICH assistant this
    * is rather than opening with an interchangeable greeting. Only the element
    * carrying it moved. */
-  const named = d.querySelector(".welcome .boot-line.echo");
-  ok("the welcome names the product, in the command it ran",
+  const named = d.querySelector(".welcome .boot-word");
+  ok("the welcome names the product, in its masthead",
     !!named && /genesis/i.test(named.textContent),
-    named ? named.textContent : "no .boot-line.echo");
+    named ? named.textContent : "no .boot-word");
 }
 
 /* ── 2. aura while waiting ──────────────────────────────────────────── */

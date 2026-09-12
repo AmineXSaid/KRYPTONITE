@@ -741,21 +741,20 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 }
 .w-all:hover { color: var(--kx-fg); }
 /* ── RECENT ───────────────────────────────────────────────────────────────
-   Filled rows, which is what the tiles' grid paid for. As bare text on black
-   these were three titles floating with nothing holding them; each sits on its
-   own surface now, so the list has edges without needing rules between them.
-
-   Still no borders: the surface IS the separation, and five hairlines under a
-   terminal that draws none was the loudest thing on the old screen. */
-.w-list { width: 100%; display: flex; flex-direction: column; gap: 4px; border-top: 0; }
+   Hairline rows, the same rhythm as Start here directly above - so the two
+   sections read as one column with two captions rather than as a list of
+   filled cards beside a list of bare rows. The filled surfaces the tiles' grid
+   once paid for are gone with the tiles; what holds a row now is the hairline
+   under it and a quiet surface wash on hover, exactly like an opener. */
+.w-list { width: 100%; display: flex; flex-direction: column; gap: 0; border-top: 0; }
 .w-row {
   display: flex; align-items: center; gap: 11px; width: 100%;
-  padding: 10px 11px; text-align: left;
-  background: var(--kx-surface); border: 0; border-radius: var(--kx-r);
+  padding: 11px 6px; text-align: left;
+  background: none; border: 0; border-radius: 0;
   color: var(--kx-fg-3);
   transition: background .14s ease;
 }
-.w-row:hover { background: var(--kx-surface-2); }
+.w-row:hover { background: var(--kx-surface); }
 .w-row .t {
   min-width: 0; flex: 1; font-size: 12.5px; line-height: 1.45; color: var(--kx-fg-2);
 }
@@ -771,20 +770,20 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 
    Hidden until the row is hovered or the bin itself is focused, so the list
    reads as titles rather than as a column of bins - but reachable by keyboard
-   at all times, which `:focus-visible` is what guarantees. The border-bottom
-   moves from the row to the wrapper so the rule still spans the full width
-   with the bin sitting on it. */
+   at all times, which `:focus-visible` is what guarantees. The hairline sits on
+   the wrapper so the rule spans the full width with the bin resting on it. */
 .w-item {
   display: flex; align-items: stretch; width: 100%; position: relative;
-  background: var(--kx-surface); border-radius: var(--kx-r); overflow: hidden;
+  background: none; border-radius: 0; overflow: hidden;
+  border-bottom: 1px solid var(--kx-hairline);
 }
-/* The row paints the wrapper's surface, so the bin beside it sits on the same
-   plate rather than on a gap of black. */
+.w-item:first-child { border-top: 1px solid var(--kx-hairline); }
+/* The row and the bin share the wrapper's hover wash. */
 .w-item .w-row { background: none; border-bottom: none; border-radius: 0; }
-.w-item:hover { background: var(--kx-surface-2); }
+.w-item:hover { background: var(--kx-surface); }
 .w-del {
-  flex: none; width: 26px; display: grid; place-items: center;
-  color: var(--kx-fg-3); opacity: 0;
+  flex: none; width: 30px; display: grid; place-items: center;
+  color: var(--kx-fg-4); opacity: 0;
 }
 .w-item:hover .w-del, .w-del:focus-visible { opacity: 1; }
 .w-del:hover { color: var(--kx-error); background: var(--kx-hover); }
@@ -816,9 +815,20 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
  * marooned against the header with the whole lower half empty. Centred, the
  * block sits where the eye lands. */
 .welcome.boot {
-  justify-content: center; align-items: stretch; text-align: left;
-  padding: 26px 8px 34px; position: relative; overflow: hidden;
+  /* `safe center` centres the block while it fits and falls back to the top
+     the moment it does not - without it, a tall boot screen (many rows, a
+     Recent list) is centred past the top of the panel and the masthead is
+     clipped behind the sticky header. */
+  justify-content: safe center; align-items: center; text-align: left;
+  padding: 28px 12px 36px; position: relative; overflow: hidden;
 }
+/* ONE MEASURE, CENTRED. The panel runs from ~280px to whatever a dragged dock
+   gives it, and a masthead, a frame and a list stretched edge to edge across a
+   wide dock read as three loose bands rather than one composed column. Capped
+   and centred, the screen keeps its proportions at every width - and the
+   travelling watermark is unaffected, because it lives on #viewSession, not in
+   here. */
+.welcome.boot > * { width: 100%; max-width: 384px; }
 /* Everything real sits above the watermark. */
 .welcome.boot > *:not(.boot-bg) { position: relative; z-index: 1; }
 
@@ -966,24 +976,62 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
  * BLUE LEADS, GREEN REPORTS. That is the whole difference from the first
  * pass: green stops being the theme and goes back to meaning "this succeeded",
  * which is the only thing it should ever mean. */
+/* ── THE MASTHEAD ─────────────────────────────────────────────────────────
+   The mark, the wordmark, the version, and one true line - a signature above
+   the frame, the way a real terminal names its host once in the title bar. */
+.boot-id {
+  display: flex; align-items: center; gap: 13px;
+  margin-bottom: 24px;
+}
+/* The small identity mark. `.crystal` gives it the arrival spin and the base
+   opacity; this zeroes the centred greeting's 18px bottom margin, because here
+   the mark sits in a row, not above a stack. */
+.boot-id .crystal { margin-bottom: 0; flex: none; }
+.boot-id-txt { min-width: 0; }
+.boot-word {
+  display: flex; align-items: baseline; gap: 9px;
+  font-family: var(--kx-brand); font-weight: 700; font-size: 15px;
+  letter-spacing: .2em; text-transform: uppercase; color: var(--kx-fg);
+}
+/* The version rides beside the wordmark in ansiBrightBlack - a build stamp,
+   not a headline. */
+.boot-ver {
+  flex: none; font-weight: 400; font-size: 9.5px;
+  letter-spacing: .06em; text-transform: none; color: var(--kx-fg-4);
+}
+/* The one line of prose on the screen, in the sans a person reads. It is the
+   product's claim about itself: three verbs, the shape of every session. */
+.boot-say {
+  font-family: var(--kx-prose); font-size: 11.5px; line-height: 1.45;
+  color: var(--kx-fg-3); margin-top: 4px; text-wrap: pretty;
+}
+
 .boot-term {
   /* NEVER SHRINK. `.welcome` is a column flex container, so this is a flex
      item with `flex-shrink: 1` by default - and combined with the
      `overflow: hidden` below, a panel too short for the log did not scroll it,
-     it CROPPED it: at 280px the box was cut mid-report and the prompt button,
-     the one control on the screen, was gone entirely. The log scrolls; the
-     terminal keeps its height. */
+     it CROPPED it: at 280px the box was cut mid-report and the prompt, the one
+     control on the screen, was gone entirely. The log scrolls; the terminal
+     keeps its height. */
   flex: none;
   width: 100%; box-sizing: border-box;
   /* ansiBlack. The one surface in the panel that is a colour rather than a
      translucent step, because a terminal has a ground of its own. */
   background: var(--kx-bg-deep);
-  border: 1px solid var(--kx-line);
+  /* A HAIRLINE, NOT A WIRE. `--kx-line` at .22 drew a visible grey rectangle
+     around the box; a terminal that reads as premium is defined by its ground
+     and its type, not by a frame you notice. The border is barely there, and
+     the depth comes from a soft, low shadow rather than a hard edge. */
+  border: 1px solid var(--kx-hairline);
   border-radius: var(--kx-r-lg);
-  margin-bottom: 22px;
+  /* Small, because the "Start here" label below carries its own 26px of top
+     margin - the section break between status and actions is one gap, not two
+     stacked. */
+  margin-bottom: 2px;
   overflow: hidden;
   position: relative;
-  box-shadow: 0 18px 44px rgba(0, 0, 0, .55);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .02) inset,
+              0 16px 38px -20px rgba(0, 0, 0, .8);
 }
 /* One hairline of light along the top edge, which is how every real window
    catches its environment. This replaced the scanlines: same job - saying the
@@ -991,75 +1039,60 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
 .boot-term::after {
   content: ""; position: absolute; inset: 0; z-index: 2;
   pointer-events: none; border-radius: inherit;
-  border-top: 1px solid rgba(255, 255, 255, .055);
+  border-top: 1px solid rgba(255, 255, 255, .045);
   border-radius: var(--kx-r) var(--kx-r) 0 0;
   height: 1px;
 }
-/* The chrome. A step above the ground, the way a title bar always is. */
+/* The chrome: a lit dot and the shell host. Barely a step off the ground, the
+   way a quiet title bar is - a filled surface here would box the box twice. */
 .boot-bar {
-  display: flex; align-items: center; gap: 7px;
-  height: 30px; padding: 0 11px;
-  border-bottom: 1px solid var(--kx-divider);
-  background: var(--kx-surface);
-  font-family: var(--kx-mono); font-size: 10.5px;
+  display: flex; align-items: center; gap: 8px;
+  height: 32px; padding: 0 13px;
+  border-bottom: 1px solid var(--kx-hairline);
+  background: rgba(255, 255, 255, .014);
+  font-family: var(--kx-mono); font-size: 10px;
 }
 /* The health dot, and the only green in the chrome. No glow: a lit LED is a
    CRT idea, and this is a status dot - the same one the endpoint wears
    everywhere else in the panel, saying the same thing. */
 .boot-led {
-  flex: none; width: 7px; height: 7px; border-radius: 50%;
+  flex: none; width: 6px; height: 6px; border-radius: 50%;
   background: var(--kx-accent);
 }
-.boot-ver { margin-left: auto; flex: none; color: var(--kx-fg-5); }
+/* The host, in ansiBrightBlack - where a terminal names the machine, so no
+   row below has to spend a line repeating the workspace. */
+.boot-host {
+  min-width: 0; color: var(--kx-fg-4); letter-spacing: .05em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
 .boot-body {
-  padding: 12px 12px 10px;
+  padding: 13px 14px 11px;
   font-family: var(--kx-mono); font-size: 11.5px;
   position: relative; z-index: 1;
 }
-.boot-line { display: flex; align-items: baseline; gap: 8px; padding: 2.5px 0; }
-.boot-line.echo { gap: 7px; margin-bottom: 7px; }
+.boot-line { display: flex; align-items: baseline; gap: 10px; padding: 3.5px 0; }
 /* ansiMagenta for the sigil. A shell's prompt character is conventionally a
    hue of its own, distinct from both the command and the output, and purple is
    the note in this palette that appears nowhere else on this screen. */
 .boot-sh { flex: none; color: var(--kx-agent); font-weight: 700; }
-/* ansiBrightWhite. The command you typed is the brightest thing in the log,
-   because everything under it is a consequence of it. */
-.boot-cmd { color: var(--kx-fg); }
-/* ── the status column ────────────────────────────────────────────────────
-   Bracketed and fixed-width, so the labels start on one x and the brackets
-   form a solid edge down the left. This is the single most recognisable thing
-   about a boot log and it costs four characters. */
-.boot-st {
-  /* Sized for the LONGEST word in the column, not the commonest: at 46px the
-     brackets fitted `[ OK ]` and pushed `]` onto a second line on every WARN,
-     which is the one row you least want looking broken. `nowrap` is the belt
-     to that braces - a fixed-width flex item still wraps its own text. */
-  flex: none; width: 54px; text-align: center; white-space: nowrap;
-  font-size: 9.5px; font-weight: 700; letter-spacing: .06em;
-}
-/* The brackets are punctuation, so they take the punctuation colour rather
-   than the status colour - which leaves OK and WARN as the only things in the
-   column carrying hue, and makes a WARN findable down a list of OKs. */
-.boot-st::before { content: "["; color: var(--kx-fg-5); margin-right: 3px; }
-.boot-st::after  { content: "]"; color: var(--kx-fg-5); margin-left: 3px; }
-.boot-st[data-st="ok"] { color: var(--kx-accent); }      /* ansiGreen  */
-.boot-st[data-st="warn"] { color: var(--kx-warn); }      /* ansiYellow */
-/* ansiWhite: labels are the quiet half of the line. */
-.boot-what { flex: none; color: var(--kx-fg-3); }
-/* The leader, in ansiBrightBlack. A boot log's answer to a table: it carries
-   the eye across the gap without drawing a grid, which is why eight lines of
-   wildly different lengths still line up. */
+/* ── the report, as a spec sheet ──────────────────────────────────────────
+   A label and a value on one baseline, a thin leader across the gap. There is
+   no status column and no bracketed word: the SUCCESS state is the value in
+   plain fg, and the only colour on any row is a value that turned amber
+   because it needs a look. Colour means attention, so an OK row spends none. */
+/* ansiWhite: the label is the quiet half of the line. */
+.boot-what { flex: none; color: var(--kx-fg-3); letter-spacing: .02em; }
+/* The leader: a boot log's answer to a table, carrying the eye across the gap
+   without drawing a grid. A single faint hairline now, not a dotted rule -
+   the dots were the loudest, most invoice-like thing in the frame. */
 .boot-lead {
-  /* 8px, not 12: the leader is the one element on the line with nothing to
-     say, so it is the one that should give its width up first when a long
-     value needs it. */
-  flex: 1; min-width: 8px; align-self: center;
-  border-bottom: 1px dotted var(--kx-fg-5);
-  margin: 0 1px;
+  flex: 1; min-width: 10px; align-self: center;
+  border-bottom: 1px solid var(--kx-hairline);
+  margin: 0 3px;
 }
 /* Shrinks before it truncates: `flex: 0 1 auto` lets the leader give up its
-   space first, so a long value eats the dots rather than losing its own tail. */
+   space first, so a long value eats the gap rather than losing its own tail. */
 .boot-meta {
   flex: 0 1 auto; min-width: 0; color: var(--kx-fg);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -1068,6 +1101,12 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
    its output differently from the names beside them, and it is the one thing
    that makes a column of values scan as data rather than as prose. */
 .boot-meta .n { color: var(--kx-link); }
+/* ansiYellow, and the whole of the warning: the value itself, and its number,
+   turn amber. No badge, no second element - the fact that needs attention is
+   the thing that carries the colour. Two rules, not one selector list, so the
+   value slot is findable on its own the way the palette suite reads it. */
+.boot-meta[data-st="warn"] { color: var(--kx-warn); }
+.boot-meta[data-st="warn"] .n { color: var(--kx-warn); }
 
 /* ── IT PRINTS, IT DOES NOT APPEAR ────────────────────────────────────────
  * The lines arrive in sequence off their own index rather than all on one
@@ -1107,14 +1146,18 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
  * paints exactly that, full-bleed, the way dragging across a line of output
  * would. It is the affordance the medium comes with. */
 .boot-go {
-  display: flex; align-items: center; gap: 7px;
-  margin-top: 12px;
+  display: flex; align-items: center; gap: 8px;
+  /* A hairline separates the report from the prompt - the frame's output above,
+     your turn below - without a heavy rule. Full-bleed, so the divider and the
+     hover wash both span the frame edge to edge. */
+  margin-top: 10px; padding: 9px 14px 3px;
   /* Full-bleed to the terminal's edges, so the wash reads as a selected LINE
-     rather than as a highlighted control with 12px of dead ground either
-     side. The body's padding is given back as negative margin. */
-  padding: 4px 12px; margin-left: -12px; margin-right: -12px;
-  width: calc(100% + 24px);
-  border: 0; border-radius: 0; background: none;
+     rather than as a highlighted control with dead ground either side. The
+     body's 14px padding is given back as negative margin. */
+  margin-left: -14px; margin-right: -14px; margin-bottom: -1px;
+  width: calc(100% + 28px);
+  border: 0; border-top: 1px solid var(--kx-hairline);
+  border-radius: 0; background: none;
   font-family: var(--kx-mono); font-size: 11.5px;
   transition: background .14s ease;
 }
@@ -1161,147 +1204,88 @@ code { font-family: var(--kx-mono); font-size: 11.5px; }
   .welcome .boot-line, .welcome .boot-go { animation: none; }
 }
 /* ── THE NARROW DOCK ──────────────────────────────────────────────────────
-   Below ~340px the status column, the label and a value like
-   `claude-sonnet-4-6 · 200k ctx` cannot share one line, and squeezing them
-   truncated the two values that matter most - the workspace name and the
-   model id. So the value wraps to its own row, indented under the label.
-
-   That is what a real terminal does with a line too long for the window, and
-   it is the one treatment here that loses NOTHING. */
+   Below ~340px a label and a value like `claude-sonnet-4-6 · 200k` cannot
+   share one line without truncating the model id - the one value that matters
+   most. So the value wraps to its own row under the label, which is what a
+   real terminal does with a line too long for the window and loses nothing. */
 @media (max-width: 340px) {
   .boot-line.rep { flex-wrap: wrap; row-gap: 0; }
   .boot-lead { display: none; }
-  /* PADDING, NOT MARGIN. `flex-basis: 100%` is 100% of the line and a margin
-     is added ON TOP of it, so the row came out 62px wider than the box and a
-     model id ran off the right edge instead of wrapping. */
+  /* Flush under the label, not indented: with the bracketed status column
+     gone there is no fixed gutter to align to, so the wrapped value simply
+     starts at the frame's left edge. */
   .boot-meta {
-    flex: 1 0 100%; box-sizing: border-box; padding-left: 62px; margin-left: 0;
+    flex: 1 0 100%; box-sizing: border-box; margin-left: 0;
     white-space: normal; overflow: hidden; text-overflow: clip;
     overflow-wrap: anywhere;
   }
-  /* The prompt says the host a second time, and at this width it does it by
-     eating the hint - the half that tells you what to do. */
-  .boot-go .boot-g { display: none; }
-}
-
-/* A shell comment, heading the two lists below it. Same device as the
-   prompt's hint, same slot (ansiBrightBlack), because it is the same thing:
-   a note to the reader rather than output. */
-.boot-cmt {
-  font-family: var(--kx-mono); font-size: 11px; line-height: 1.5;
-  color: var(--kx-fg-4); margin: 0 0 16px;
 }
 
 /* ── THE OPENERS ──────────────────────────────────────────────────────────
  *
- * Two-up tiles. They were bordered cards once, then flat monospace rows, and
- * the rows were worse: under a terminal that is itself a dense block of mono,
- * three more lines of mono had nothing to distinguish them and the screen read
- * as unfinished text on black.
+ * A quiet list, not a grid of filled tiles. The tiles were bordered cards,
+ * each with a tinted icon plate and a surface of its own - three raised boxes
+ * competing with the framed terminal above them and reading, at three equal
+ * weights, as a toy's idea of "pick one". A premium screen does not shout its
+ * suggestions.
  *
- * So the register changes at the terminal's bottom edge. Sans for the
- * description, a real surface, and a tinted icon plate - the tile is the thing
- * that says "this is something you can DO", against a box above it that says
- * "this is what happened".
- *
- * The grid buys the vertical room that pays for Recent's filled rows below.
- */
-.boot-cards {
-  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px; width: 100%;
+ * So the openers become rows the way a spec sheet is rows: the command in the
+ * mono (the command IS the icon - `/explain` needs no picture to say what it
+ * does), the description in the sans a person reads, hairline separators, and
+ * a chevron that surfaces on hover to say the row is a door. It echoes the
+ * report's own label/value rhythm, so the screen reads as one column top to
+ * bottom rather than a log with a widget stapled beneath it. */
+.w-starts { display: flex; flex-direction: column; width: 100%; }
+.w-start {
+  display: flex; align-items: baseline; gap: 12px; width: 100%;
+  padding: 11px 6px; text-align: left;
+  background: none; border: 0;
+  border-bottom: 1px solid var(--kx-hairline);
+  cursor: pointer;
+  transition: background .14s ease;
 }
-.boot-card {
-  display: flex; flex-direction: column; gap: 9px; width: 100%;
-  padding: 13px 12px; text-align: left;
-  background: var(--kx-surface);
-  border: 1px solid var(--kx-hairline); border-radius: var(--kx-r-lg);
-  transition: background .14s ease, border-color .14s ease;
+.w-start:first-child { border-top: 1px solid var(--kx-hairline); }
+/* The command, in the mono, sized to a column so three descriptions start on
+   one x. `/explain` is the widest at eight characters. */
+.w-start-cmd {
+  flex: none; min-width: 82px;
+  font-family: var(--kx-mono); font-size: 11.5px; font-weight: 600;
+  letter-spacing: .01em; color: var(--kx-fg-2);
+  transition: color .14s ease;
 }
-/* NO HOLE IN AN ODD ROW. Three tiles in two columns leaves the last one in a
-   half-empty row, which reads as a missing fourth. It spans instead - same
-   anatomy, wider - so the grid ends on a full edge. Written as a rule rather
-   than a count so a fourth opener would simply fill the row. */
-/* The two text lines, as one column - so the tile can turn on its side
-   without them turning with it. */
-.boot-card-txt { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-/* AND THE ODD ONE TURNS ON ITS SIDE. Spanning the row in the stacked layout
-   gave a full-width box 100px tall holding one line of text and a lot of
-   nothing. Laid out horizontally it is the same parts at a third of the
-   height, and the change of axis reads as deliberate rather than as a tile
-   that failed to find a partner. */
-.boot-card:last-child:nth-child(odd) {
-  grid-column: 1 / -1;
-  flex-direction: row; align-items: center; gap: 12px;
-  padding: 11px 12px;
-}
-.boot-card:last-child:nth-child(odd) .boot-card-ic { flex: none; }
-.boot-card:last-child:nth-child(odd) .boot-card-txt { flex: 1; }
-/* One line beside the plate when it fits, which for a single short
-   description it does - and two when it does not, because the wrapper is a
-   column either way. */
-.boot-card:last-child:nth-child(odd) .boot-card-txt {
-  flex-direction: row; align-items: baseline; gap: 12px;
-}
-.boot-card:last-child:nth-child(odd) .boot-card-cmd { flex: none; }
-.boot-card:last-child:nth-child(odd) .boot-card-desc { flex: 1; min-width: 0; }
-.boot-card-ic {
-  width: 28px; height: 28px; border-radius: var(--kx-r);
-  display: grid; place-items: center;
-  background: var(--kx-surface-3);
-  color: var(--kx-fg-2);
-}
-.boot-card-ic svg { display: block; }
-.boot-card-cmd {
-  font-family: var(--kx-mono); font-size: 11px; font-weight: 700;
-  letter-spacing: .02em; color: var(--kx-fg);
+.w-start-desc {
+  flex: 1; min-width: 0;
+  font-family: var(--kx-prose); font-size: 12px; line-height: 1.4;
+  color: var(--kx-fg-3);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: color .14s ease;
 }
-.boot-card-desc {
-  font-size: 12px; line-height: 1.35; color: var(--kx-fg-3);
-  text-wrap: pretty;
+/* The chevron: held back until the row is under the pointer or the keyboard,
+   then it slides in - the same "you are here / go here" grammar the door uses,
+   in ansiBrightBlack so it never competes with the command. */
+.w-start-go {
+  flex: none; font-family: var(--kx-mono); font-size: 14px; line-height: 1;
+  color: var(--kx-fg-4);
+  opacity: 0; transform: translateX(-4px);
+  transition: opacity .14s ease, transform .14s ease;
 }
-/* NO HUE PER TILE. Three cards of identical shape used to be told apart by
-   three saturated hues - blue/amber/purple on the plate and the command - and
-   three decorative colours at equal weight is exactly what reads as a toy. The
-   cards are chrome, not state, so they carry no colour: the command name in
-   cream mono is the emphasis, the plate a neutral step, and the icon and label
-   already tell one tile from another. Colour is kept for what it means -
-   OK/WARN in the boot log, the phase, a diff, syntax - not for decoration.
-   `--h` stays defined as one neutral so the hover edge is a quiet lift. */
-.boot-card { --h: var(--kx-fg-3); }
-.boot-card:hover, .boot-card:focus-visible {
-  background: var(--kx-surface-2);
-  border-color: var(--kx-edge);
-  outline: none;
+.w-start:hover, .w-start:focus-visible { background: var(--kx-surface); outline: none; }
+.w-start:hover .w-start-cmd, .w-start:focus-visible .w-start-cmd { color: var(--kx-fg); }
+.w-start:hover .w-start-desc, .w-start:focus-visible .w-start-desc { color: var(--kx-fg-2); }
+.w-start:hover .w-start-go, .w-start:focus-visible .w-start-go {
+  opacity: 1; transform: none;
 }
-.boot-card:hover .boot-card-desc, .boot-card:focus-visible .boot-card-desc {
-  color: var(--kx-fg-2);
+@media (prefers-reduced-motion: reduce) {
+  .w-start, .w-start-cmd, .w-start-desc, .w-start-go { transition: none; }
+  .w-start-go { transform: none; }
 }
-@media (prefers-reduced-motion: reduce) { .boot-card { transition: none; } }
 /* ── THE NARROW DOCK ──────────────────────────────────────────────────────
-   One column, because two tiles at 130px each would truncate every description
-   to a word and a half. But stacked tiles in one column are ~120px tall each
-   and three of them push Recent off the screen entirely - so at this width
-   EVERY tile takes the side-on layout the odd one already uses. Same parts, a
-   third of the height, and the plate gives the row a left edge to align on. */
+   Below ~340px the command column and a full description cannot share a line,
+   so the command sits over its description and the row stacks. */
 @media (max-width: 340px) {
-  .boot-cards { grid-template-columns: minmax(0, 1fr); }
-  .boot-card {
-    flex-direction: row; align-items: center; gap: 12px; padding: 11px 12px;
-  }
-  .boot-card .boot-card-ic { flex: none; }
-  .boot-card .boot-card-txt { flex: 1; flex-direction: column; align-items: stretch; gap: 3px; }
-  .boot-card .boot-card-desc { flex: none; }
-  /* THE ODD TILE STOPS BEING ODD HERE. In one column every tile is already
-     side-on, so its command-beside-description layout is no longer the thing
-     that distinguishes it - it is just the one tile whose text reads
-     differently from the other two. Restated at the same specificity as the
-     rule above, because `:last-child:nth-child(odd)` outranks a bare
-     descendant selector wherever it is written. */
-  .boot-card:last-child:nth-child(odd) .boot-card-txt {
-    flex-direction: column; align-items: stretch; gap: 3px;
-  }
-  .boot-card:last-child:nth-child(odd) .boot-card-desc { flex: none; }
+  .w-start { flex-direction: column; align-items: stretch; gap: 3px; }
+  .w-start-desc { white-space: normal; }
+  .w-start-go { display: none; }
 }
 
 /* â”€â”€ the two voices â”€â”€

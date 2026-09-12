@@ -2816,17 +2816,27 @@ function _sbRun() {
        `.void-mark`), because it has to outlive this screen. */
 
     // ── the terminal ──────────────────────────────────────────────────────
-    // A REAL TERMINAL, WITH A REAL REPORT. The old boot log printed four
-    // lines; on a black ground a four-line card is a small grey box in a lot
-    // of nothing. It now prints everything the panel already holds - the
-    // folder, the model and its context window, the skills, the agents, the
-    // MCP servers, the approval mode, the uncommitted work - because that is
-    // the answer to "what am I about to be talking to", and it is the one
-    // moment the user is actually reading rather than working.
+    // A REAL TERMINAL, WITH A REAL REPORT. It prints everything the panel
+    // already holds - the folder, the model and its context window, the
+    // skills, the agents, the MCP servers, the approval mode, the uncommitted
+    // work - because that is the answer to "what am I about to be talking to",
+    // and it is the one moment the user is actually reading rather than
+    // working.
     //
     // Every line is READ, never invented. A fact the panel does not have is
     // not printed - see the `mcp` and `changes` lines, which are absent rather
     // than zeroed when there is nothing to say.
+    //
+    // WHAT PREMIUM MEANT HERE. The first pass drew this as a boot log putting
+    // on a costume: a `[ OK ]` / `[WARN]` status column, dotted leaders, a
+    // green dot, a green cursor, a blue number and an amber word all on one
+    // small screen. That is a novelty's idea of a terminal - a lot of theatre
+    // and four colours to say "this came up". The quiet version keeps the
+    // terminal's SOUL - the ground, the mono, the `$` sigil, the caret, the
+    // palette read straight from palette.ts - and drops the theatre: a spec
+    // sheet of hairline key/value rows where colour appears ONLY where
+    // something needs attention. Absence of a warning is the success state; it
+    // does not need a green stamp to prove it happened.
     var ap = activeProfile();
     var model = ap && ap.model ? ap.model : "";
     var ctxWin = ap && ap.capabilities && ap.capabilities.contextWindow;
@@ -2838,40 +2848,32 @@ function _sbRun() {
     var mcpUp = servers.filter(function (x) { return x.state === "ready"; }).length;
     var mode = (S.config && S.config.approvalMode) || "ask";
 
-    /* ── THE CHROME ───────────────────────────────────────────────────────
-       A lit dot and a version, and nothing else. This carried
-       `genesis@workspace:~` - the shell host string - and it was the product's
-       name said a third time on one screen: the tab strip above says it, the
-       `$ genesis init` line below says it, and the report's own first row
-       names the workspace. A title bar repeating what the transcript already
-       states is chrome for its own sake. */
-    var body = '<div class="boot-term">' +
+    /* THE IDENTITY LINE. The mark, the wordmark, the version, and one true
+       line about what this is - a signature above the frame, the way a real
+       terminal names its host once in the title bar. The travelling watermark
+       (`.void-mark`) is texture behind the screen; this small mark is the
+       masthead's own, and it is what spins on arrival. */
+    var body = '<div class="boot-id">' +
+      crystal(30, "crystal boot-mark" + spin) +
+      '<div class="boot-id-txt">' +
+        '<div class="boot-word">genesis' +
+          (ver ? '<span class="boot-ver">v' + esc(ver) + "</span>" : "") +
+        "</div>" +
+        '<div class="boot-say">Reads the repo. Writes the change. Runs the tests.</div>' +
+      "</div></div>";
+
+    /* THE FRAME. A hairline window, not a boxed widget. Its chrome is one lit
+       dot and the shell host - the workspace name, said where a terminal says
+       it, so no row below has to repeat it. */
+    body += '<div class="boot-term">' +
       '<div class="boot-bar">' +
         '<span class="boot-led"></span>' +
-        (ver ? '<span class="boot-ver">v' + esc(ver) + "</span>" : "") +
+        '<span class="boot-host">' + esc(S.workspace.name || "workspace") + "</span>" +
       "</div>" +
       '<div class="boot-body">';
 
-    /* The command that produced everything below it. A boot log with no
-       command at the top is a list; with one it is a transcript of something
-       that ran, which is the whole difference. */
     var li = 0;
-    body += '<div class="boot-line echo" style="--i:' + (li++) + '">' +
-      '<span class="boot-sh">$</span>' +
-      '<span class="boot-cmd">genesis init</span></div>';
 
-    /* ── THE REPORT ───────────────────────────────────────────────────────
-       A bracketed status column, a label, a dotted leader, a value. The
-       leader is what a boot log has instead of a table: it carries the eye
-       across the gap without drawing a grid, and it is the reason eight lines
-       of wildly different lengths still line up.
-
-       NOTHING HERE IS TIMED, and that is deliberate. A real boot log prints
-       `+12ms` beside each line and it is the single strongest tell that you
-       are looking at one - but the panel does not measure any of these, so a
-       number here would be decoration wearing the costume of a fact. The
-       terminal reads as a terminal because of its shape, not because it is
-       lying about latency. */
     /* The numbers come out of the value and take the theme's blue, the way a
        shell colours the numeric fields of `ls -l` differently from the names
        beside them. It is the one thing that makes a column of values scan as
@@ -2886,25 +2888,31 @@ function _sbRun() {
       return esc(v).replace(/(^|[\s\u00B7/])(\d[\d.,]*k?)/g,
         '$1<span class="n">$2</span>');
     }
+    /* THE REPORT, AS A SPEC SHEET. A label and a value on one baseline, a thin
+       leader carrying the eye across the gap. `st` ("ok"/"warn") colours the
+       VALUE, not a stamp beside it: a warning is the value itself turning
+       amber, so attention lands on the fact rather than on a badge announcing
+       there is one. An "ok" row carries no colour at all - nothing being wrong
+       is not news and does not earn ink.
+
+       NOTHING HERE IS TIMED. A real boot log's `+12ms` is the strongest tell
+       you are looking at one, and the panel measures none of these; a number
+       here would be decoration wearing the costume of a fact. */
     function line(st, label, meta) {
       return '<div class="boot-line rep" style="--i:' + (li++) + '">' +
-        '<span class="boot-st" data-st="' + st + '">' +
-          (st === "warn" ? "WARN" : "OK") + "</span>" +
-        '<span class="boot-what">' + esc(label) + "</span>" +
+        '<span class="boot-what" data-st="' + st + '">' + esc(label) + "</span>" +
         '<span class="boot-lead"></span>' +
-        '<span class="boot-meta">' + num(meta) + "</span></div>";
+        '<span class="boot-meta" data-st="' + st + '">' + num(meta) + "</span></div>";
     }
-    body += line("ok", "workspace", S.workspace.name || "workspace");
     if (model) {
       /* `fmtK` gives "200.0k", and the ".0" is two characters of nothing on the
-         longest value in the report - it was the difference between the line
-         fitting and losing "ctx" off the end. Whole thousands print whole. */
+         longest value in the report. Whole thousands print whole. */
       var ctxTxt = ctxWin >= 1000 && ctxWin % 1000 === 0
         ? (ctxWin / 1000) + "k" : fmtK(ctxWin);
-      body += line("ok", "endpoint", model + (ctxWin ? " \u00B7 " + ctxTxt + " ctx" : ""));
+      body += line("ok", "model", model + (ctxWin ? " \u00B7 " + ctxTxt : ""));
     }
-    /* Skills is the one line that can legitimately report nothing, and a green
-       OK against zero reads as a success where nothing happened. */
+    /* Skills is the one line that can legitimately report nothing, and a value
+       that quietly says "none" in amber is the whole of the warning. */
     body += line(skillN ? "ok" : "warn", "skills", skillN ? skillN + " loaded" : "none found");
     if (agentN) body += line("ok", "agents", agentN + " defined");
     if (servers.length) {
@@ -2920,15 +2928,11 @@ function _sbRun() {
       body += line("warn", "changes", changeN + " uncommitted");
     }
 
-    /* THE PROMPT IS THE DOOR, so it is a button rather than a decorated line.
-       It was a blinking cursor that did nothing, on a screen whose entire job
-       is to get you typing. Clicking it hands off to the composer. */
-    /* ── THE SECOND PROMPT ────────────────────────────────────────────────
-       The first `$` ran and produced everything above it. This one is empty
-       and waiting, which is the most literal statement a terminal can make of
-       "your turn" - and it is the door: clicking it hands off to the composer.
-       Same sigil, same column, so the two read as one session rather than as a
-       log with a control bolted underneath.
+    /* THE DOOR. A waiting prompt, and the whole point of the screen: empty and
+       blinking, the most literal statement a terminal can make of "your turn".
+       Clicking it hands off to the composer - the same `$` becoming the box you
+       type into. Same sigil, same column as the rows above, so the frame reads
+       as one live session rather than a log with a control bolted underneath.
 
        THE HINT IS HELD BACK UNTIL YOU ARE ON IT. A waiting prompt with a
        blinking cursor already says "type here" to anyone who has used a
@@ -2939,35 +2943,24 @@ function _sbRun() {
       'aria-label="Start typing - opens the message box">' +
       '<span class="boot-sh">$</span>' +
       '<span class="boot-cursor"></span>' +
-      '<span class="boot-go-hint"># click to start</span>' +
+      '<span class="boot-go-hint">type a message to begin</span>' +
       "</button>";
 
     body += "</div></div>";
 
-    // The design's "Pick up where you left off" copy earns its place only when
-    // there is a thread to come back to; the Recent list below is what it
-    // points at.
-    /* The greeting is gone with the terminal styling it wore. It said "pick up
-       where you left off, or start something new" above two sections captioned
-       exactly that - `recent` is the picking up and `start here` is the
-       something new - so it was a sentence introducing two labels that already
-       said it. The captions do the work. */
-
+    /* START HERE. The openers, as a quiet list rather than a grid of filled
+       tiles. Each is led by its command in the mono - the command IS the icon
+       here, so a row that starts with `/explain` needs no picture beside it to
+       say what it does. A chevron surfaces on hover to say the row is a door. */
     body += '<div class="w-label"><span class="t">Start here</span><span class="sp"></span></div>' +
-      '<div class="boot-cards">';
+      '<div class="w-starts">';
     for (var si = 0; si < STARTERS.length; si++) {
       var st0 = STARTERS[si];
-      body += '<button class="boot-card" data-hue="' + esc(st0.hue) + '" data-starter="' +
-        esc(st0.run) + '">' +
-        '<span class="boot-card-ic">' + icon(st0.icon, "ic-14") + "</span>" +
-        /* The two text lines are wrapped so the tile can turn on its side
-           without them turning with it: in the row layouts - the spanning
-           tile, and every tile at 280px - this wrapper is the second column
-           and keeps the command stacked over its description. */
-        '<span class="boot-card-txt">' +
-          '<span class="boot-card-cmd">' + esc(st0.run) + "</span>" +
-          '<span class="boot-card-desc">' + esc(st0.text) + "</span>" +
-        "</span></button>";
+      body += '<button class="w-start" data-starter="' + esc(st0.run) + '">' +
+        '<span class="w-start-cmd">' + esc(st0.run) + "</span>" +
+        '<span class="w-start-desc">' + esc(st0.text) + "</span>" +
+        '<span class="w-start-go" aria-hidden="true">›</span>' +
+        "</button>";
     }
     body += "</div>";
 

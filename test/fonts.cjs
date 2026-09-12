@@ -134,8 +134,12 @@ console.log("\n──── the wordmark keeps its own token ────");
     .replace(/\/\*[\s\S]*?\*\//g, "");
   const rules = [...side.matchAll(/([^{}]+)\{([^}]*var\(--kx-brand\)[^}]*)\}/g)];
   const users = rules.map((m) => m[1].trim());
+  // Three wordmark elements now: the generic .kx-wordmark, the centred greeting
+  // screens' .w-mark, and the boot masthead's .boot-word. All three are the
+  // product's name set as a picture of a word - which is exactly what the token
+  // is for - so the rule is that nothing BUT a wordmark reaches for it.
   ok("and only the wordmarks use it",
-    users.length <= 2 && users.every((u) => /wordmark|w-mark/.test(u)), users.join(" / "));
+    users.length <= 3 && users.every((u) => /wordmark|w-mark|boot-word/.test(u)), users.join(" / "));
 
   // The old rule here was "nothing asks it for a weight it does not have",
   // because Michroma shipped one weight and a synthesised bold is a smear. The

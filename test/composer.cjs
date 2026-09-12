@@ -519,31 +519,31 @@ function boot() {
     const w = b.d.querySelector(".welcome");
     /* The screen NAMES THE PRODUCT rather than opening with a sentence - "How
        can I help?" is what every assistant says, and this has to say which one
-       it is. That used to be a wordmark above the log; it is the terminal's
-       own title bar now, which says it once instead of twice and says it the
-       way a terminal identifies itself. */
-    /* It names the product in the COMMAND, which is where a terminal says it.
-       The title bar carried `genesis@workspace:~` and that was the third time
-       on one screen - the tab strip says it, this line says it, and the
-       report's first row names the workspace - so the bar is a lit dot and a
-       version now, and the transcript does the naming. */
+       it is. It is the masthead wordmark now: the mark, GENESIS in tracked
+       mono, and one line of what it does - a signature above the frame, said
+       once, the way a real terminal names its host at the top. */
     ok("a first run still welcomes",
-      !!w.querySelector(".boot-line.echo") && /genesis init/.test(w.textContent));
+      !!w.querySelector(".boot-word") &&
+      /genesis/i.test(w.querySelector(".boot-word").textContent));
 
     ok("and offers nothing to resume", w.querySelectorAll("[data-session]").length === 0);
-    // The welcome is a boot sequence now: the copy that once introduced the tool
-    // in a sentence is the boot log reporting the workspace came up. "Pick up
-    // where you left off" is withheld until there is a thread to resume (see the
-    // recent-sessions case below), so a first run shows the log and the openers.
-    /* It says so as a TRANSCRIPT, not as a sentence: a command that ran, then
-       a bracketed status line per thing that came up. `initializing workspace`
-       was the prose version of the same claim - this asserts the shape the
-       terminal actually has, which is the part that must not regress. */
-    ok("saying so as a command that ran",
-      !!w.querySelector(".boot-line.echo") && /genesis init/.test(w.textContent));
-    ok("and a status line per thing that came up",
-      w.querySelectorAll(".boot-line.rep .boot-st").length >= 3 &&
-      /workspace/.test(w.textContent),
+    // The welcome is a boot screen: a framed terminal that reads the panel and
+    // reports it as a spec sheet. The old bracketed [OK]/[WARN] boot log was a
+    // novelty's costume; this is the same facts, quiet. "Pick up where you left
+    // off" is withheld until there is a thread to resume (see the recent case
+    // below), so a first run shows the report and the openers.
+    /* The frame names its host where a terminal does - the title bar - so no
+       report row has to spend a line repeating the workspace. */
+    ok("naming its host the way a terminal does",
+      !!w.querySelector(".boot-term .boot-host") &&
+      w.querySelector(".boot-host").textContent.trim().length > 0);
+    /* A report row per thing that came up, each a label and a value on one
+       baseline. `initializing workspace` was the prose version of the same
+       claim - this asserts the shape the spec sheet actually has, which is the
+       part that must not regress. */
+    ok("and a report row per thing that came up",
+      w.querySelectorAll(".boot-line.rep .boot-meta").length >= 3 &&
+      /skills/.test(w.textContent),
       String(w.querySelectorAll(".boot-line.rep").length) + " report lines");
     /* Nothing in the column is timed. A boot log's `+12ms` is the strongest
        tell that you are looking at one, and the panel measures none of these -
@@ -564,8 +564,8 @@ function boot() {
       };
       const SLOTS = [
         ["ansiBlack  → the ground", ".boot-term", "--kx-bg-deep"],
-        ["ansiGreen  → [ OK ]", '.boot-st[data-st="ok"]', "--kx-accent"],
-        ["ansiYellow → [WARN]", '.boot-st[data-st="warn"]', "--kx-warn"],
+        ["ansiGreen  → the health dot", ".boot-led", "--kx-accent"],
+        ["ansiYellow → a value that needs a look", '.boot-meta[data-st="warn"]', "--kx-warn"],
         ["ansiBlue   → the numbers", ".boot-meta .n", "--kx-link"],
         ["ansiMagenta→ the sigil", ".boot-sh", "--kx-agent"],
         ["ansiWhite  → the labels", ".boot-what", "--kx-fg-3"],
@@ -584,13 +584,16 @@ function boot() {
         !/\.boot-term::after[^}]*repeating-linear-gradient/.test(CSS) &&
         !/\.boot-cursor\s*\{[^}]*box-shadow/.test(CSS) &&
         !/\.boot-led\s*\{[^}]*box-shadow/.test(CSS));
-      /* Green is a status, not a theme. If it starts painting the host or the
-         command as well, it has stopped meaning "this succeeded". */
-      /* Green is a status, not a theme. If it starts painting the command or
-         the labels as well, it has stopped meaning "this succeeded". */
-      ok("green means succeeded, and only that",
-        rule(".boot-cmd").indexOf("--kx-accent") < 0 &&
-        rule(".boot-what").indexOf("--kx-accent") < 0);
+      /* COLOUR LANDS ONLY ON WHAT NEEDS A LOOK. The label is quiet and an "ok"
+         value is plain fg; nothing on a healthy row carries accent or amber,
+         because absence of a warning is not news. If the label or the base
+         value starts painting itself, the "colour means attention" rule the
+         whole spec sheet rests on has broken. */
+      ok("colour lands only on what needs a look",
+        rule(".boot-what").indexOf("--kx-accent") < 0 &&
+        rule(".boot-what").indexOf("--kx-warn") < 0 &&
+        rule(".boot-meta").indexOf("--kx-warn") < 0 &&
+        rule(".boot-meta").indexOf("--kx-accent") < 0);
       /* ── TWO PROMPTS, ONE SESSION ────────────────────────────────────
          The first `$` ran and produced the report; the second is empty and
          waiting, which is the most literal statement a terminal can make of
