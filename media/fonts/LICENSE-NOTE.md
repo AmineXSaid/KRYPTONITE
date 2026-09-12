@@ -10,9 +10,21 @@ own and the licence travels with them.
 | --- | --- | --- | --- | --- |
 | `JetBrainsMono-Variable.woff2` | JetBrains Mono | code, columns, the wordmark | OFL 1.1 | github.com/JetBrains/JetBrainsMono |
 | `IBMPlexSans-Variable.woff2` | IBM Plex Sans | prose and the interface | OFL 1.1 | github.com/IBM/plex |
+| `JetBrainsMono-Italic-Variable.woff2` | JetBrains Mono | italic — code comments | OFL 1.1 | github.com/JetBrains/JetBrainsMono |
+| `IBMPlexSans-Italic-Variable.woff2` | IBM Plex Sans | italic — emphasis in prose | OFL 1.1 | github.com/IBM/plex |
 
-Both are the **latin subset** as served by Google Fonts, in the variable cut, so
-one file per family covers every weight the design uses. 85 KB together.
+All four are the **latin subset** as served by Google Fonts, in the variable
+cut, so a family's upright file covers every weight the design uses and its
+italic file covers every weight in italic. ~178 KB together.
+
+The italics are not a flourish. Without them, an `<em>` in an answer and a
+comment in a code block were FAUX italic — the browser shearing the upright — and
+each platform's engine slants slightly differently, so emphasis did not read the
+same on every OS. A drawn italic (Plex's single-story `a`, JetBrains' true
+cursive) is both finer and identical everywhere. They are declared
+`font-style: italic` in `src/ui/shell.ts` and, unlike the upright faces, are not
+preloaded: no first-paint surface is italic, so they load block-style the moment
+the first emphasis or comment needs them.
 
 The split is by ROLE, not by taste, and the line moved once. JetBrains Mono
 began by carrying the entire interface as well as code; it now carries what the

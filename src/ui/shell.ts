@@ -99,6 +99,17 @@ function fontFaces(extensionUri: vscode.Uri, webview: vscode.Webview): string {
     // place the trade was not worth it.
     { file: "JetBrainsMono-Variable.woff2", family: "JetBrains Mono", weight: "100 800" },
     { file: "IBMPlexSans-Variable.woff2", family: "IBM Plex Sans", weight: "100 700" },
+    // The ITALIC cut of each, same family, same latin subset, same weight axis.
+    // Without these, an `<em>` in an answer and a comment in a code block were
+    // FAUX italic - the browser shearing the upright, which every platform's
+    // engine slants slightly differently and which is never as refined as a
+    // drawn italic (Plex's single-story `a`, JetBrains' true cursive). Declaring
+    // the real face means `font-style: italic` resolves to a shipped glyph, not
+    // a synthesised one, so emphasis reads the same on every OS too. Not
+    // preloaded (see below): no first-paint surface is italic, so they load
+    // block-style the moment the first emphasis or comment needs them.
+    { file: "JetBrainsMono-Italic-Variable.woff2", family: "JetBrains Mono", weight: "100 800", italic: true },
+    { file: "IBMPlexSans-Italic-Variable.woff2", family: "IBM Plex Sans", weight: "100 700", italic: true },
   ];
 
   const rules: string[] = [];
@@ -108,13 +119,18 @@ function fontFaces(extensionUri: vscode.Uri, webview: vscode.Webview): string {
     const uri = webview.asWebviewUri(
       vscode.Uri.joinPath(extensionUri, "media", "fonts", f.file)
     );
-    /* PRELOAD, so the face starts loading with the document rather than after
-       the stylesheet has been parsed and something has asked for it. Both files
-       are always needed - there is no surface in this panel that uses neither -
-       so there is nothing speculative about fetching them first. */
-    preloads.push(
-      `<link rel="preload" as="font" type="font/woff2" href="${uri}" crossorigin>`
-    );
+    /* PRELOAD THE UPRIGHT FACES, so they start loading with the document rather
+       than after the stylesheet has been parsed and something has asked for
+       them. Both are needed on the very first paint - there is no surface that
+       uses neither. The italic cuts are NOT preloaded: no first-paint surface
+       is italic, so fetching them ahead of the document would only delay the
+       faces that are. They still load block-style the instant the first
+       emphasis or code comment references them. */
+    if (!f.italic) {
+      preloads.push(
+        `<link rel="preload" as="font" type="font/woff2" href="${uri}" crossorigin>`
+      );
+    }
     /* `block`, NOT `swap`.
      *
      * `swap` paints a fallback immediately and exchanges it when the real face
